@@ -697,7 +697,8 @@ nothing beyond what that needs.
     watch history is; then Seerr support goes.
 - **Title valuation**, computed by Overfin, which knows the titles and the
   people. *Done*: the valuation and the Library → Valuation page, as
-  below, Wishes aside; next, the apps endpoint and the favorites count. Every title is valued the same way, on the server or not, and
+  below, preferences aside, and the apps endpoint (next item); the
+  favorites count may follow. Every title is valued the same way, on the server or not, and
   without regard to its files or size: storage isn't Overfin's concern.
   Films are valued as a whole, series season by season.
   - **The operator's weights.** A Library → Valuation page in the panel
@@ -710,11 +711,20 @@ nothing beyond what that needs.
     recently it arrived in the libraries, a season with its latest
     episode, fading over two months: what just came isn't the least
     valuable for not being watched yet, so Overtide needs no grace period
-    of its own) and **popularity** (TMDB's). **Wishes** join when people can say what they'd like on the
-    server (asked at onboarding, changeable any time; the account's own
-    data, in its export, gone with it). Below the sliders, the most and
+    of its own) and **popularity** (TMDB's). **Preferences** join when
+    people can say what they like (next). Below the sliders, the most and
     least valuable titles update as they move; any title shows why it has
     its value, criterion by criterion; one button resets the defaults.
+  - **People's preferences**, without sliders of their own: each account
+    says what it likes, asked at onboarding and changeable any time.
+    "What do you prefer: Series, Movies, or Both", preferred genres, and
+    kids' content (an account with a kids profile wants it, without being
+    asked). A title gains value the more active accounts' preferences it
+    matches, one voice each; "Both" changes nothing. A specific title isn't
+    a preference: it's requested, and Requested counts it. Preferences are
+    the account's own data (in its export, gone with it), never shown to
+    anyone; apps only ever see the score. Languages or periods may come
+    later. The weights need testing on real servers over time.
   - **Watch time** is counted in full views: one person watching all of a
     film is 1, two watching half each is 1, watching twice is 2. A season
     counts against the whole season (its ten episodes watched once each
@@ -739,7 +749,7 @@ nothing beyond what that needs.
     100 per title (per season for series). With little data behind it, the
     score is pulled toward 50: an uncertain title is neither protected nor
     first to go.
-- **One general apps endpoint**, `GET /apps/v1/titles`, instead of one per
+- ~~**One general apps endpoint**~~ Done, `GET /apps/v1/titles`, instead of one per
   use: a row per title (or per season), with every ID known (TMDB, IMDb,
   TVDB), and field groups each tied to the app key's scopes: `score`,
   `stats` (plays, viewers, favourites, last played: today's
