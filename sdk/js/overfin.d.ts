@@ -243,6 +243,9 @@ export interface Title extends TitleSummary {
   seasons?: TitleSummary[];
   /** A season's episodes, each with what it's about. */
   episodes?: (TitleSummary & { overview?: string })[];
+  /** A film's or a series': how many profiles on the server marked it a
+   * favorite, the caller's included; absent unless two others did. */
+  favoriteCount?: number;
 }
 
 /** A person, from TMDB, and the titles they're in. */

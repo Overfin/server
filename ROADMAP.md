@@ -697,8 +697,8 @@ nothing beyond what that needs.
     watch history is; then Seerr support goes.
 - **Title valuation**, computed by Overfin, which knows the titles and the
   people. *Done*: the valuation and the Library → Valuation page, as
-  below, Tastes included (web 0.44), and the apps endpoint (next item);
-  the favorites count may follow. Every title is valued the same way, on the server or not, and
+  below, Tastes included (web 0.44), the apps endpoint and the favorites
+  count (next items). Every title is valued the same way, on the server or not, and
   without regard to its files or size: storage isn't Overfin's concern.
   Films are valued as a whole, series season by season.
   - **The operator's weights.** A Library → Valuation page in the panel
@@ -770,7 +770,7 @@ nothing beyond what that needs.
   collection makers and *arr import lists (the best-valued missing
   titles) use the same endpoint. One privacy rule for every field: counts
   below 2 are given as 0.
-- **Favourites count on the site.** A title's page shows how many profiles
+- ~~**Favorites count on the site.**~~ Done. A title's page shows how many profiles
   marked it a favourite, from 2 up, so a count never points at one person.
 - **Overtide**, when the operator plugs requests into it, is the one that
   cares about storage. It reads the requests (by an anonymous account ID,

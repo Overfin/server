@@ -52,6 +52,10 @@ type titleDetail struct {
 	Cast     []titleCast            `json:"cast,omitempty"`
 	Seasons  []library.TitleSummary `json:"seasons,omitempty"`
 	Episodes []episodeJSON          `json:"episodes,omitempty"`
+	// FavoriteCount is how many profiles on the server marked a film or a
+	// series a favorite, the caller's included; absent unless at least
+	// two others did, so it never points at one person.
+	FavoriteCount int `json:"favoriteCount,omitempty"`
 }
 
 // episodeJSON is an episode in its season's list: with what it's about.
@@ -350,6 +354,16 @@ func (l Library) title(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := titleDetail{TitleSummary: sums[0], Overview: t.Overview, Tagline: t.Details.Tagline, Genres: t.Details.Genres}
+	if ref.Kind == "movie" || ref.Kind == "series" {
+		total, others, err := st.FavoriteCount(ctx, key, p.ID)
+		if err != nil {
+			l.storeError(w, err)
+			return
+		}
+		if others >= 2 {
+			out.FavoriteCount = total
+		}
+	}
 	for _, c := range t.Details.Cast {
 		tc := titleCast{Name: c.Name, Character: c.Character}
 		if c.TMDB != "" {

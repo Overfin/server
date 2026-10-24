@@ -3371,6 +3371,12 @@ components:
               type: string
             tagline:
               type: string
+            favoriteCount:
+              type: integer
+              description: A film's or a series', how many profiles on the
+                server marked it a favorite, the caller's included. Absent
+                unless at least two others did, so it never points at one
+                person.
             genres:
               type: array
               items:

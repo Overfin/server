@@ -242,6 +242,14 @@ func (s *Store) SetPlayed(ctx context.Context, profileID string, titles map[stri
 	return tx.Commit()
 }
 
+// FavoriteCount is how many profiles marked title a favorite, and how many
+// of them aren't profileID.
+func (s *Store) FavoriteCount(ctx context.Context, title, profileID string) (total, others int, err error) {
+	err = s.db.QueryRowContext(ctx, `SELECT count(*), count(*) FILTER (WHERE profile_id != ?) FROM profile_titles
+		WHERE title = ? AND favorite = 1`, profileID, title).Scan(&total, &others)
+	return total, others, err
+}
+
 // SetFavorite marks a title a favorite of the profile, or not.
 func (s *Store) SetFavorite(ctx context.Context, profileID, title, itemID string, favorite bool, at time.Time) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO profile_titles (profile_id, title, item_id, favorite, updated_at)
