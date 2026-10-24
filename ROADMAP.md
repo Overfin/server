@@ -728,6 +728,10 @@ nothing beyond what that needs.
     active accounts' tastes it matches, one voice each; so a title no one
     has watched yet still has value when it fits what people here like. A
     specific title isn't a taste: it's requested, and Requested counts it.
+    Asking people is the operator's choice (a switch in Features & limits):
+    off, there's no question at onboarding and no page to change it, and
+    Tastes come from what people watch alone; what accounts said before
+    stays theirs, unused, until it's on again.
     What an account said is its own data (in its export, gone with it),
     never shown to anyone; apps only ever see the score. Languages or
     periods may come later; the rule's balance needs testing on real
