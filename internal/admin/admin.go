@@ -159,9 +159,14 @@ type Panel struct {
 	People People
 	// Mail, with managed sign-in, shows and changes the SMTP server.
 	Mail Mail
+	// Interests, when set, lists what profiles keep for later (the
+	// watchlist), for the title valuation.
+	Interests func(ctx context.Context) ([]store.ProfileTitle, error)
 	// Group is the identity provider group whose members are admins.
 	Group  string
 	Logger *slog.Logger
+
+	valued measurement
 
 	mu       sync.Mutex
 	sessions map[string]*session // by token hash
@@ -271,6 +276,9 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("DELETE /admin/api/apps/{id}", p.signedIn(p.deleteAppKey))
 	// What apps read with their keys (no admin sign-in: the key says who).
 	mux.HandleFunc("GET /apps/v1/watch-stats", p.watchStats)
+	mux.HandleFunc("GET /admin/api/valuation", p.signedIn(p.valuationSettings))
+	mux.HandleFunc("PUT /admin/api/valuation", p.signedIn(p.setValuation))
+	mux.HandleFunc("POST /admin/api/valuation/preview", p.signedIn(p.valuationPreview))
 	mux.HandleFunc("GET /admin/api/identification", p.signedIn(p.identification))
 	mux.HandleFunc("POST /admin/api/identification/search", p.signedIn(p.identificationSearch))
 	mux.HandleFunc("PUT /admin/api/identification/{id}", p.signedIn(p.identify))

@@ -26,6 +26,9 @@ type Full struct {
 	// no one rated it.
 	Rating float64
 	Votes  int
+	// Popularity is TMDB's measure of how much people look the title up
+	// these days; 0 when unknown.
+	Popularity float64
 	// Release is its certifications and release dates.
 	Release *Release
 	Artwork Artwork
@@ -63,6 +66,7 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 		Tagline        string  `json:"tagline"`
 		VoteAverage    float64 `json:"vote_average"`
 		VoteCount      int     `json:"vote_count"`
+		Popularity     float64 `json:"popularity"`
 		// A series' cast over all its seasons (credits has its latest
 		// season's only).
 		AggregateCredits struct {
@@ -137,6 +141,9 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 	}
 	if raw.VoteAverage > 0 && raw.VoteAverage <= 10 && raw.VoteCount > 0 {
 		out.Rating, out.Votes = raw.VoteAverage, raw.VoteCount
+	}
+	if raw.Popularity > 0 && raw.Popularity < 1e7 {
+		out.Popularity = raw.Popularity
 	}
 	runtime := raw.Runtime
 	if kind == "series" && len(raw.EpisodeRunTime) > 0 {

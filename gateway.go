@@ -22,12 +22,14 @@ import (
 	"github.com/overfin/server/internal/config"
 	"github.com/overfin/server/internal/connector"
 	"github.com/overfin/server/internal/emails"
+	"github.com/overfin/server/internal/feature"
 	"github.com/overfin/server/internal/gpu"
 	"github.com/overfin/server/internal/identity"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/jfsettings"
 	"github.com/overfin/server/internal/keys"
+	"github.com/overfin/server/internal/library"
 	"github.com/overfin/server/internal/mail"
 	"github.com/overfin/server/internal/oidc"
 	"github.com/overfin/server/internal/pin"
@@ -146,6 +148,8 @@ type built struct {
 	handler http.Handler
 	admin   *http.ServeMux
 	tabs    []admin.Tab
+	// on are the modules switched on, by name.
+	on map[string]bool
 	// managed is the managed sign-in, when that's the identity mode.
 	managed *api.Managed
 	// playback serves playbacks; its janitor ends the idle ones.
@@ -228,11 +232,12 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 		RefuseOverLimit: cfg.Limits.OnLimit == "refuse", Logger: logger}
 	// The modules the operator switched on, with their control panel routes
 	// and tabs.
-	b := &built{admin: http.NewServeMux(), playback: pb}
+	b := &built{admin: http.NewServeMux(), playback: pb, on: map[string]bool{}}
 	var mounts []api.Mount
 	for _, m := range modules {
 		info := m.Info()
 		if cfg.Plugins.Enabled(info.Name) {
+			b.on[info.Name] = true
 			mounts = append(mounts, api.Mount{Module: m, Library: lib, DB: sh.moduleDBs[info.Name], Logger: logger, Admin: b.admin,
 				Settings: cfg.Modules[info.Name], SiteURL: siteURL(cfg), SignUp: signUp(cfg)})
 			b.tabs = append(b.tabs, admin.Tab{Name: info.Name, Description: info.Description, UI: info.AdminUI})
@@ -486,6 +491,33 @@ func (g *gateway) SendInvitation(ctx context.Context, to, link string) error {
 func (g *gateway) AdminRoutes() http.Handler { return g.current.Load().admin }
 
 // Tabs lists the switched-on modules, for the control panel.
+// Interests lists what profiles keep for later in the modules switched
+// on (the watchlist), by title key, for the title valuation.
+func (g *gateway) Interests(ctx context.Context) ([]store.ProfileTitle, error) {
+	on := g.current.Load().on
+	var out []store.ProfileTitle
+	for _, m := range modules {
+		mi, ok := m.(feature.Interested)
+		if !ok || !on[m.Info().Name] {
+			continue
+		}
+		list, err := mi.Interests(ctx, g.sh.moduleDBs[m.Info().Name])
+		if err != nil {
+			return nil, err
+		}
+		for _, i := range list {
+			rest, ok := strings.CutPrefix(i.TitleID, library.TitlePrefix)
+			if !ok {
+				continue
+			}
+			if r, ok := store.ParseTitleKey(strings.ReplaceAll(rest, "_", "/")); ok && r.Kind != "item" {
+				out = append(out, store.ProfileTitle{ProfileID: i.ProfileID, Title: r.Key()})
+			}
+		}
+	}
+	return out, nil
+}
+
 func (g *gateway) Tabs() []admin.Tab {
 	return g.current.Load().tabs
 }

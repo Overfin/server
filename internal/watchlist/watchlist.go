@@ -54,6 +54,25 @@ func (Feature) Setup(h feature.Host) error {
 	return nil
 }
 
+// Interests lists every profile's watchlist titles, for the title
+// valuation; entries not yet turned into titles are left out.
+func (Feature) Interests(ctx context.Context, db *sql.DB) ([]feature.Interest, error) {
+	rows, err := db.QueryContext(ctx, `SELECT profile_id, item_id FROM watchlist WHERE item_id LIKE 'title\_%' ESCAPE '\'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []feature.Interest
+	for rows.Next() {
+		var i feature.Interest
+		if err := rows.Scan(&i.ProfileID, &i.TitleID); err != nil {
+			return nil, err
+		}
+		out = append(out, i)
+	}
+	return out, rows.Err()
+}
+
 // ForgetProfiles deletes deleted profiles' watchlists.
 func (Feature) ForgetProfiles(ctx context.Context, db *sql.DB, profileIDs []string) error {
 	for _, id := range profileIDs {

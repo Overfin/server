@@ -696,7 +696,8 @@ nothing beyond what that needs.
   - **Leaving Seerr:** its requests are copied into Overfin once, as the
     watch history is; then Seerr support goes.
 - **Title valuation**, computed by Overfin, which knows the titles and the
-  people. Every title is valued the same way, on the server or not, and
+  people. *Done*: the valuation and the Library → Valuation page, as
+  below, Wishes aside; next, the apps endpoint and the favorites count. Every title is valued the same way, on the server or not, and
   without regard to its files or size: storage isn't Overfin's concern.
   Films are valued as a whole, series season by season.
   - **The operator's weights.** A Library → Valuation page in the panel

@@ -25,11 +25,13 @@ type Title struct {
 	// ItemID is the library item, when the index has the title; empty
 	// otherwise.
 	ItemID string
-	// ReleaseDate (YYYY-MM-DD) and Rating (TMDB's users', 0 to 10, from
-	// Votes of them) come with a title's page; "" and 0 until then.
+	// ReleaseDate (YYYY-MM-DD), Rating (TMDB's users', 0 to 10, from Votes
+	// of them) and Popularity (TMDB's) come with a title's page; "" and 0
+	// until then.
 	ReleaseDate string
 	Rating      float64
 	Votes       int
+	Popularity  float64
 }
 
 // PutTitles adds or refreshes titles seen at at, keeping their details.
@@ -65,13 +67,16 @@ func (s *Store) SetTitleDetails(ctx context.Context, t Title, details []byte, at
 	if err := s.PutTitles(ctx, []Title{t}, at); err != nil {
 		return err
 	}
-	var rating, votes any
+	var rating, votes, popularity any
 	if t.Rating > 0 {
 		rating, votes = t.Rating, t.Votes
 	}
+	if t.Popularity > 0 {
+		popularity = t.Popularity
+	}
 	_, err := s.db.ExecContext(ctx, `UPDATE catalog_titles SET details = ?, details_at = ?, release_date = ?, rating = ?,
-		rating_votes = ? WHERE kind = ? AND tmdb = ?`, string(details), at.Unix(), nullString(t.ReleaseDate), rating, votes,
-		t.Kind, t.TMDB)
+		rating_votes = ?, popularity = ? WHERE kind = ? AND tmdb = ?`, string(details), at.Unix(), nullString(t.ReleaseDate),
+		rating, votes, popularity, t.Kind, t.TMDB)
 	return err
 }
 

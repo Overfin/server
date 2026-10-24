@@ -54,6 +54,7 @@ const icons = {
   check: ['M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z', 'M20 20l-4-4'],
   key: ['M15 7a4 4 0 1 1-3.87 5H4v3h3v3h3v-3h1.13', 'M15.5 8.5h.01'],
   puzzle: ['M10 4h4v3a2 2 0 1 0 4 0V4h2v6h-3a2 2 0 1 0 0 4h3v6h-6v-3a2 2 0 1 0-4 0v3H4v-6h3a2 2 0 1 0 0-4H4V4h6z'],
+  scale: ['M12 4v16', 'M7 20h10', 'M5 8h14', 'M5 8l-3 6a3 3 0 0 0 6 0z', 'M19 8l-3 6a3 3 0 0 0 6 0z'],
   folder: ['M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'],
   palette: ['M12 3a9 9 0 1 0 0 18c.9 0 1.5-.7 1.5-1.5 0-.4-.2-.8-.4-1.1-.3-.3-.4-.6-.4-1.1 0-.8.7-1.5 1.5-1.5H16a5 5 0 0 0 5-5c0-4.3-4-7.8-9-7.8z',
     'M7.5 10.5h.01', 'M12 7.5h.01', 'M16.5 10.5h.01'],
@@ -1279,6 +1280,129 @@ async function identificationView(selected = '') {
   draw();
 }
 
+// ---- Valuation ------------------------------------------------------------------
+
+const criteria = {
+  watchTime: ['Watch time', 'How much it\'s watched, in full views: two people watching half count as one watching all. Recent viewing counts more, and one account counts for three views at most.'],
+  audience: ['Audience', 'How many accounts watched it, even a little.'],
+  followed: ['Followed', 'For series: the season people are on and those after it, while they keep watching.'],
+  favorites: ['Favorites', 'How many accounts marked it a favorite.'],
+  watchlist: ['Watchlist', 'How many accounts keep it to watch later.'],
+  requested: ['Requested', 'How many accounts asked for it.'],
+  rating: ['Rating', 'TMDB\'s rating. One from a few votes counts for little.'],
+  newRelease: ['New release', 'How recent the film or the season is.'],
+  popularity: ['Popularity', 'TMDB\'s popularity: how much people look it up these days.'],
+};
+const criterionName = (c) => (criteria[c] || [c])[0];
+const valuedName = (t) => {
+  const name = t.name || 'Untitled';
+  return /_s\d+$/.test(t.id) ? `${name} · ${t.season ? `Season ${t.season}` : 'Specials'}` : name;
+};
+
+// valuationView sets how much each criterion counts in the titles' values,
+// with the most and least valuable titles updated as the sliders move.
+async function valuationView() {
+  const data = await api('GET', '/admin/api/valuation');
+  $('#main').classList.add('wide');
+  const weights = Object.fromEntries(data.criteria.map((c) => [c.name, c.weight]));
+  const saved = { ...weights };
+  const changed = () => data.criteria.some((c) => weights[c.name] !== saved[c.name]);
+  const save = h('button', { class: 'primary', disabled: true }, 'Save');
+  const reset = h('button', {}, 'Reset to defaults');
+  const state = status('');
+  const most = h('tbody', {});
+  const least = h('tbody', {});
+  const found = h('tbody', {});
+  const search = h('input', { type: 'search', placeholder: 'Find a title', 'aria-label': 'Find a title' });
+  const detail = h('aside', { class: 'detail' }, h('div', { class: 'placeholder' }, 'Select a title to see why it has its value.'));
+  let selected = '';
+
+  const why = (t) => {
+    selected = t.id;
+    for (const tb of [most, least, found]) for (const tr of tb.children) tr.classList.toggle('selected', tr.dataset.id === t.id);
+    const rows = data.criteria.filter((c) => c.name in t.parts).map((c) => h('tr', {},
+      h('td', {}, criterionName(c.name)),
+      h('td', { class: 'num' }, t.parts[c.name] > 0 ? `${Math.round(t.parts[c.name] * 100)} / 100` : 'none'),
+      h('td', { class: 'num' }, weights[c.name] ? `× ${weights[c.name]}` : h('span', { class: 'hint' }, 'left out'))));
+    fill(detail,
+      h('div', { class: 'detail-head' }, h('div', {}, h('h2', {}, valuedName(t)),
+        h('div', { class: 'hint' }, t.inLibrary ? 'In the libraries' : 'Not in the libraries'))),
+      h('p', {}, h('strong', {}, `Value ${t.score.toFixed(1)}`), ' out of 100.'),
+      h('p', { class: 'hint' }, 'Each criterion ranks the title among all the others, from 0 (no sign of it, or the lowest) to 100 (the highest); the value is their average, weighted by the sliders.'),
+      h('div', { class: 'table-wrap' }, h('table', {},
+        h('thead', {}, h('tr', {}, h('th', {}, 'Criterion'), h('th', {}, 'Rank'), h('th', {}, 'Weight'))),
+        h('tbody', {}, rows))),
+      data.accounts < 10 && h('p', { class: 'hint' }, `With ${data.accounts} account${data.accounts === 1 ? '' : 's'} counted, what people do is pulled toward the middle, so one person's habits don't decide.`));
+  };
+  const rows = (tbody, list, empty) => {
+    fill(tbody, list.map((t) => h('tr', { 'data-id': t.id, class: t.id === selected ? 'selected' : '', onclick: () => why(t) },
+      h('td', {}, h('div', { class: 'name' }, valuedName(t)), !t.inLibrary && h('div', { class: 'hint' }, 'Not in the libraries')),
+      h('td', { class: 'num' }, t.score.toFixed(1)))));
+    if (!list.length) tbody.append(h('tr', {}, h('td', { colspan: '2', class: 'empty' }, empty)));
+  };
+  let timer = 0;
+  let asked = 0;
+  const preview = () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const n = ++asked;
+      const res = await busy(null, () => api('POST', '/admin/api/valuation/preview', { weights, query: search.value.trim() }));
+      if (!res || n !== asked) return; // a newer one is on its way
+      rows(most, res.most, 'No titles in the libraries yet.');
+      rows(least, res.least, 'No titles in the libraries yet.');
+      rows(found, res.found, search.value.trim() ? 'Nothing matches.' : 'Search any title, in the libraries or not.');
+      const all = [...res.most, ...res.least, ...res.found];
+      const current = all.find((t) => t.id === selected);
+      if (current) why(current);
+    }, 150);
+  };
+  const sliders = data.criteria.map((c) => {
+    const out = h('output', {}, String(c.weight));
+    const input = h('input', { type: 'range', min: '0', max: String(data.max), step: '1', value: String(c.weight), 'aria-label': criterionName(c.name) });
+    input.addEventListener('input', () => {
+      weights[c.name] = Number(input.value);
+      out.textContent = input.value;
+      save.disabled = !changed();
+      state.set(changed() ? 'Not saved yet.' : '');
+      preview();
+    });
+    input.set = (v) => { input.value = String(v); out.textContent = String(v); };
+    return { c, input, row: setting(criterionName(c.name), (criteria[c.name] || [])[1], h('div', { class: 'weight' }, input, out)) };
+  });
+  save.addEventListener('click', () => busy(save, async () => {
+    await api('PUT', '/admin/api/valuation', { weights });
+    Object.assign(saved, weights);
+    save.disabled = true;
+    state.set('Saved.', 'ok');
+  }));
+  reset.addEventListener('click', () => busy(reset, async () => {
+    const res = await api('PUT', '/admin/api/valuation', { reset: true });
+    for (const { c, input } of sliders) {
+      const w = res.criteria.find((x) => x.name === c.name).weight;
+      weights[c.name] = saved[c.name] = w;
+      input.set(w);
+    }
+    save.disabled = true;
+    state.set('Back to the defaults.', 'ok');
+    preview();
+  }));
+  search.addEventListener('input', preview);
+  const list = (title, tbody) => h('div', { class: 'table-wrap' }, h('table', {},
+    h('thead', {}, h('tr', {}, h('th', {}, title), h('th', {}, 'Value'))), tbody));
+  show(
+    pageHead('Valuation', 'How much each film and each season is worth to the people here, from 0 to 100: what they watch, mark, keep for later and ask for, and what TMDB says of it. Values never depend on files or their size, and say nothing of who did what. Apps you give a key, like Overtide, read them.'),
+    h('div', { class: 'split' },
+      h('div', {},
+        card({ title: 'Criteria', description: `From 0 (left out) to ${data.max} (counts the most). ${data.accounts} account${data.accounts === 1 ? '' : 's'} used in the last six months count${data.accounts === 1 ? 's' : ''}; ${data.titles} films and seasons are valued.` },
+          h('div', {}, sliders.map((x) => x.row)), [state, reset, save]),
+        h('div', { class: 'columns' },
+          h('section', {}, h('h2', {}, 'Most valuable'), list('In the libraries', most)),
+          h('section', {}, h('h2', {}, 'Least valuable'), list('In the libraries', least))),
+        h('section', {}, h('div', { class: 'toolbar' }, search), list('Title', found))),
+      detail));
+  preview();
+}
+
 const reasonNames = { 'no-tmdb': 'No TMDB title', 'tmdb-tag': 'Tagged', name: 'Name differs', year: 'Year differs', seasons: 'Seasons differ', runtime: 'Length differs' };
 const reasonName = (code) => reasonNames[code] || code;
 
@@ -1438,6 +1562,7 @@ const views = {
   templates: { label: 'Templates', icon: icons.layers, view: () => templatesView() },
   libraries: { label: 'Libraries', icon: icons.folder, view: () => librariesView() },
   identification: { label: 'Identification', icon: icons.check, view: () => identificationView() },
+  valuation: { label: 'Valuation', icon: icons.scale, view: () => valuationView() },
   apps: { label: 'Apps', icon: icons.key, view: () => appsView() },
 };
 // Older addresses still lead somewhere.
@@ -1481,6 +1606,7 @@ async function start() {
     h('div', { class: 'group' }, 'Library'),
     link('libraries', views.libraries.label, views.libraries.icon),
     link('identification', views.identification.label, views.identification.icon),
+    link('valuation', views.valuation.label, views.valuation.icon),
     link('apps', views.apps.label, views.apps.icon));
   $('nav').hidden = false;
   $('.me').hidden = false;

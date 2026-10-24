@@ -158,6 +158,19 @@ type Forgetter interface {
 	ForgetAccount(ctx context.Context, db *sql.DB, accountID string) error
 }
 
+// Interested is implemented by a module that keeps titles people want to
+// watch later, so the title valuation counts them. It lists each profile
+// and title ID ("title_…"), nothing more; db is the module's own database.
+type Interested interface {
+	Interests(ctx context.Context, db *sql.DB) ([]Interest, error)
+}
+
+// Interest is a title a profile wants to watch later.
+type Interest struct {
+	ProfileID string
+	TitleID   string
+}
+
 // Exporter is implemented by a module that holds data about a profile, so
 // "Download my data" includes it. Export returns something that encodes to
 // JSON; it must never include secrets.
