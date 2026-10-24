@@ -697,7 +697,7 @@ nothing beyond what that needs.
     watch history is; then Seerr support goes.
 - **Title valuation**, computed by Overfin, which knows the titles and the
   people. *Done*: the valuation and the Library → Valuation page, as
-  below, preferences aside, and the apps endpoint (next item); the
+  below, tastes aside, and the apps endpoint (next item); the
   favorites count may follow. Every title is valued the same way, on the server or not, and
   without regard to its files or size: storage isn't Overfin's concern.
   Films are valued as a whole, series season by season.
@@ -711,20 +711,27 @@ nothing beyond what that needs.
     recently it arrived in the libraries, a season with its latest
     episode, fading over two months: what just came isn't the least
     valuable for not being watched yet, so Overtide needs no grace period
-    of its own) and **popularity** (TMDB's). **Preferences** join when
+    of its own) and **popularity** (TMDB's). **Tastes** join when
     people can say what they like (next). Below the sliders, the most and
     least valuable titles update as they move; any title shows why it has
     its value, criterion by criterion; one button resets the defaults.
-  - **People's preferences**, without sliders of their own: each account
-    says what it likes, asked at onboarding and changeable any time.
-    "What do you prefer: Series, Movies, or Both", preferred genres, and
-    kids' content (an account with a kids profile wants it, without being
-    asked). A title gains value the more active accounts' preferences it
-    matches, one voice each; "Both" changes nothing. A specific title isn't
-    a preference: it's requested, and Requested counts it. Preferences are
-    the account's own data (in its export, gone with it), never shown to
-    anyone; apps only ever see the score. Languages or periods may come
-    later. The weights need testing on real servers over time.
+  - **Tastes**, one criterion and one slider, from what people say and
+    what they watch. What they say, without sliders of their own: each
+    account answers at onboarding, and may change it any time, "What do
+    you prefer: Series, Movies, or Both", preferred genres, and kids'
+    content (an account with a kids profile wants it, without being
+    asked). What they watch: each account's share of watch time per genre,
+    and series against films, recent viewing counting more. The two mix
+    per account, by a fixed rule: a new account is mostly what it said,
+    and what it watches takes over as its viewing grows (someone who says
+    "Movies" but watches series gets series). A title gains value the more
+    active accounts' tastes it matches, one voice each; so a title no one
+    has watched yet still has value when it fits what people here like. A
+    specific title isn't a taste: it's requested, and Requested counts it.
+    What an account said is its own data (in its export, gone with it),
+    never shown to anyone; apps only ever see the score. Languages or
+    periods may come later; the rule's balance needs testing on real
+    servers over time.
   - **Watch time** is counted in full views: one person watching all of a
     film is 1, two watching half each is 1, watching twice is 2. A season
     counts against the whole season (its ten episodes watched once each
