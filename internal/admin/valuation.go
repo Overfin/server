@@ -24,30 +24,37 @@ type measurement struct {
 	mu sync.Mutex
 	at time.Time
 	m  *valuation.Measured
+	f  *store.ValuationFacts
 }
 
 // measured is every title ranked on every criterion, at most measuredFor
 // old.
 func (p *Panel) measured(ctx context.Context) (*valuation.Measured, error) {
+	m, _, err := p.measuredFacts(ctx)
+	return m, err
+}
+
+// measuredFacts is measured, with the facts it was measured from.
+func (p *Panel) measuredFacts(ctx context.Context) (*valuation.Measured, *store.ValuationFacts, error) {
 	p.valued.mu.Lock()
 	defer p.valued.mu.Unlock()
 	now := p.clock()
 	if p.valued.m != nil && now.Sub(p.valued.at) < measuredFor {
-		return p.valued.m, nil
+		return p.valued.m, p.valued.f, nil
 	}
 	var interests []store.ProfileTitle
 	if p.Interests != nil {
 		var err error
 		if interests, err = p.Interests(ctx); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	f, err := p.Store.ValuationFacts(ctx, now, interests)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	p.valued.m, p.valued.at = valuation.Measure(f, now), now
-	return p.valued.m, nil
+	p.valued.m, p.valued.f, p.valued.at = valuation.Measure(f, now), f, now
+	return p.valued.m, f, nil
 }
 
 type criterionJSON struct {

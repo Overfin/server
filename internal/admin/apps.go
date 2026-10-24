@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -17,8 +18,20 @@ import (
 // read with them, on this private listener (SECURITY.md rule 58): totals
 // per title, never anything per person (rule 40).
 
-// appScopes are what a key may be for.
-var appScopes = map[string]bool{"watch-stats": true}
+// appScopes are what a key may be for: watch-stats (the older endpoint),
+// and on /apps/v1/titles, score, stats and availability.
+var appScopes = map[string]bool{"watch-stats": true, "score": true, "stats": true, "availability": true}
+
+// allows reports whether a key's scopes include scope. Watch statistics
+// are the same on either endpoint, so watch-stats and stats go together.
+func allows(k *store.AppKey, scope string) bool {
+	for _, s := range strings.Fields(k.Scope) {
+		if s == scope || (s == "watch-stats" && scope == "stats") || (s == "stats" && scope == "watch-stats") {
+			return true
+		}
+	}
+	return false
+}
 
 type appKeyJSON struct {
 	ID        string `json:"id"`
@@ -53,16 +66,29 @@ func (p *Panel) appKeys(w http.ResponseWriter, r *http.Request, _ *session) {
 
 func (p *Panel) createAppKey(w http.ResponseWriter, r *http.Request, s *session) {
 	var req struct {
-		Name  string `json:"name"`
-		Scope string `json:"scope"`
+		Name   string   `json:"name"`
+		Scope  string   `json:"scope"`
+		Scopes []string `json:"scopes"`
 	}
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil || !appScopes[req.Scope] || strings.TrimSpace(req.Name) == "" ||
-		utf8.RuneCountInString(req.Name) > 64 {
+	err := dec.Decode(&req)
+	if req.Scope != "" {
+		req.Scopes = append(req.Scopes, req.Scope)
+	}
+	var scopes []string
+	for _, s := range req.Scopes {
+		if !appScopes[s] {
+			err = errors.New("unknown scope")
+		} else if !slices.Contains(scopes, s) {
+			scopes = append(scopes, s)
+		}
+	}
+	if err != nil || len(scopes) == 0 || strings.TrimSpace(req.Name) == "" || utf8.RuneCountInString(req.Name) > 64 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": "an app needs a name and what it's for"})
 		return
 	}
+	req.Scope = strings.Join(scopes, " ")
 	b := make([]byte, 32)
 	rand.Read(b)
 	key := "ofapp_" + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b))
@@ -92,7 +118,8 @@ func (p *Panel) deleteAppKey(w http.ResponseWriter, r *http.Request, s *session)
 }
 
 // appKey is the key a request presents (Authorization: Bearer …), when it
-// may do scope; otherwise it answers 401 and returns nil.
+// may do scope (any scope, for ""); otherwise it answers 401 and returns
+// nil.
 func (p *Panel) appKey(w http.ResponseWriter, r *http.Request, scope string) *store.AppKey {
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || !strings.HasPrefix(token, "ofapp_") || len(token) > 100 {
@@ -100,7 +127,7 @@ func (p *Panel) appKey(w http.ResponseWriter, r *http.Request, scope string) *st
 		return nil
 	}
 	k, err := p.Store.AppKeyFor(r.Context(), token, p.clock())
-	if errors.Is(err, store.ErrNotFound) || (err == nil && k.Scope != scope) {
+	if errors.Is(err, store.ErrNotFound) || (err == nil && scope != "" && !allows(k, scope)) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"type": "not-authenticated"})
 		return nil
 	}

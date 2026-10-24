@@ -354,8 +354,9 @@ comes from the internet, and media files can be written by anyone.
     every token. Other apps
     (Stewarr…) read what Overfin shares with them on the same listener,
     with the same guards, under /apps/: each with a key an admin made for
-    it in the panel, for one purpose ("watch-stats"), shown once, kept only
-    as a hash, revocable.
+    it in the panel, for what the admin ticked (values, watch statistics,
+    in the libraries or not), shown once, kept only as a hash, revocable.
+    What they read are totals per title, counts below 2 given as 0.
 
 ### Code supply
 59. No code copied or ported from other projects. Dependencies are few, chosen

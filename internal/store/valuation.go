@@ -64,10 +64,13 @@ type AccountTitle struct {
 
 // ValuedTitle is a film or a season, as the valuation sees it.
 type ValuedTitle struct {
-	Key       string
-	Name      string // the film's or the series' name
-	Season    int    // seasons only
-	InLibrary bool
+	Key  string
+	Name string // the film's or the series' name
+	// IMDb and TVDB are the other IDs the libraries know the film or the
+	// series by; "" when none has it.
+	IMDb, TVDB string
+	Season     int // seasons only
+	InLibrary  bool
 	// Rating, Votes and Popularity are TMDB's, the series' for a season.
 	Rating     float64
 	Votes      int
@@ -306,6 +309,17 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 		if r.Source != "tmdb" {
 			continue
 		}
+		top := r // the film, or the season's series
+		if r.Kind == "season" {
+			top = r.Series()
+		}
+		var imdb, tvdb sql.NullString
+		err := s.db.QueryRowContext(ctx, `SELECT max(imdb), max(tvdb) FROM catalog_items WHERE kind = ? AND title_key = ?`,
+			top.Kind, top.Key()).Scan(&imdb, &tvdb)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		t.IMDb, t.TVDB = imdb.String, tvdb.String
 		if r.Kind == "movie" {
 			d, err := read("movie", r.ID)
 			if err != nil {

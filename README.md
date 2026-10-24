@@ -416,11 +416,36 @@ by Overfin and you only.
 ## Other apps
 
 Other apps can read some of what Overfin knows, with a key you make for
-each in the control panel's **Apps** tab (shown once, revocable). For now,
-how much each film and series is watched, for apps that weigh what to
-keep (such as Stewarr): totals per title only, never anything per person.
-They ask the control panel's address (the site's, or its own private
-listener when you gave it one):
+each in the control panel's **Apps** tab (shown once, revocable), for what
+you tick: each title's **value** (the Valuation tab's score, 0 to 100),
+its **watch statistics**, and whether the libraries have it (**in the
+libraries**). Totals per title only, never anything per person; counts
+below 2 are given as 0, so none points at one person. Apps ask the control
+panel's address (the site's, or its own private listener when you gave it
+one):
+
+```
+GET /apps/v1/titles?inLibrary=true&sort=score&order=asc&limit=100
+Authorization: Bearer ofapp_…
+```
+
+```json
+{"titles": [{"kind": "season", "tmdbId": "1399", "tvdbId": "121361", "imdbId": "tt0944947",
+  "season": 2, "score": 41.5, "inLibrary": true,
+  "stats": {"plays": 12, "viewers": 3, "favorites": 2, "lastPlayed": "2026-10-20"}}],
+ "next": "100", "generatedAt": "…"}
+```
+
+One row per film and per season (a season carries its series' IDs), with
+the groups the key may read, or those named in `fields` (`score`, `stats`,
+`availability`). Filters: `inLibrary`, `kind` (`movie` or `season`).
+Sorting: `sort=score` (keys with the value only) or `name`, `order=asc` or
+`desc`. Pages of `limit` rows (100 by default, at most 1000); the next one
+at `cursor=` what `next` says. An app that frees space (such as Overtide)
+asks for the least valuable titles the libraries have, as above.
+
+The older endpoint, for keys made for watch statistics before, still
+answers:
 
 ```
 GET /apps/v1/watch-stats[?since=2026-10-22T00:00:00Z]

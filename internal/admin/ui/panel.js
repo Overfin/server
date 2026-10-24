@@ -1193,20 +1193,25 @@ async function templatesView() {
 
 // ---- Apps ----------------------------------------------------------------------
 
-// appsView lists the keys other apps (Stewarr…) read Overfin's statistics
-// with: made here, shown once, revoked here.
+const appScopeNames = { score: 'Values', stats: 'Watch statistics', availability: 'In the libraries', 'watch-stats': 'Watch statistics' };
+
+// appsView lists the keys other apps (Overtide…) read Overfin's values and
+// statistics with: made here, for what the operator ticks, shown once,
+// revoked here.
 async function appsView() {
   const { items } = await api('GET', '/admin/api/apps');
-  const name = h('input', { type: 'text', placeholder: 'e.g. Stewarr', maxlength: '64' });
+  const name = h('input', { type: 'text', placeholder: 'e.g. Overtide', maxlength: '64' });
+  const scopes = Object.fromEntries(['score', 'stats', 'availability'].map((s) => [s, h('input', { type: 'checkbox', checked: true })]));
   const made = h('div', {});
   const make = h('button', { type: 'submit', class: 'primary' }, 'Make a key');
   const create = (e) => {
     e.preventDefault();
     busy(make, async () => {
-      const k = await api('POST', '/admin/api/apps', { name: name.value, scope: 'watch-stats' });
+      const picked = Object.keys(scopes).filter((s) => scopes[s].checked);
+      const k = await api('POST', '/admin/api/apps', { name: name.value, scopes: picked });
       await appsView();
       fill($('#made-key'), secret(`The key for ${k.name}. Copy it now: it won't be shown again.`, k.key,
-        'The app sends it as "Authorization: Bearer <key>" to GET /apps/v1/watch-stats on this address.'));
+        'The app sends it as "Authorization: Bearer <key>" to GET /apps/v1/titles on this address.'));
     });
   };
   const rows = items.map((k) => {
@@ -1215,19 +1220,21 @@ async function appsView() {
       busy(revoke, async () => { await api('DELETE', `/admin/api/apps/${k.id}`); toast('Key revoked.'); appsView(); });
     } }, 'Revoke');
     return h('tr', {},
-      h('td', {}, h('div', { class: 'name' }, k.name), h('div', { class: 'hint' }, 'Watch statistics')),
+      h('td', {}, h('div', { class: 'name' }, k.name),
+        h('div', { class: 'hint' }, [...new Set(k.scope.split(' ').map((s) => appScopeNames[s] || s))].join(', '))),
       h('td', { class: 'hint' }, day(k.createdAt)),
       h('td', { class: 'hint' }, k.lastUsedAt ? ago(k.lastUsedAt) : 'never'),
       h('td', { class: 'actions' }, revoke));
   });
   made.id = 'made-key';
-  show(pageHead('Apps', 'Other apps (Stewarr…) can read how much each film and series is watched: plays, viewers, favorites, the day last played. Totals per title only, never anything about a person.'),
+  show(pageHead('Apps', 'Other apps (Overtide…) can read each film\'s and season\'s value, how much it\'s watched (plays, viewers, favorites, the day last played) and whether the libraries have it, as each key allows. Totals per title only, never anything about a person; counts below 2 are given as 0.'),
     made,
     card({ title: 'Keys' },
       h('div', { class: 'table-wrap' }, h('table', {},
         h('thead', {}, h('tr', {}, h('th', {}, 'App'), h('th', {}, 'Made'), h('th', {}, 'Last used'), h('th', {}))),
         h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { colspan: '4', class: 'empty' }, 'No app has a key yet.'))))),
-      h('form', { class: 'toolbar spaced', onsubmit: create }, field('A new key, for', name), make)));
+      h('form', { class: 'toolbar spaced', onsubmit: create }, field('A new key, for', name),
+        h('div', { class: 'checks' }, Object.entries(scopes).map(([s, box]) => h('label', { class: 'inline' }, box, appScopeNames[s]))), make)));
 }
 
 // ---- Identification ------------------------------------------------------------
