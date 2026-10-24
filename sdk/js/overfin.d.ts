@@ -78,6 +78,27 @@ export interface Me {
   /** How the operator set the home page: missingTitles shows titles no
    * library has among what's trending and in the slideshow. */
   home: { missingTitles: boolean };
+  /** Whether the operator asks accounts what they like, and whether this
+   * one answered (or chose to say nothing). */
+  tastes: { asked: boolean; answered: boolean };
+}
+
+/** What an account says it likes, for what the server keeps and gets. */
+export interface Tastes {
+  /** Absent when it didn't say. */
+  prefer?: 'series' | 'movies' | 'both';
+  /** TMDB genre IDs. */
+  genres: number[];
+  kids: boolean;
+  updatedAt?: string;
+}
+
+export interface TastesPage extends Tastes {
+  answered: boolean;
+  /** The genres to choose among, named in the server's language. */
+  choices: { id: number; name: string }[];
+  /** The account has a kids profile: it gets kids' content without saying so. */
+  kidsProfile: boolean;
 }
 
 export interface Session {
@@ -357,6 +378,9 @@ export class Overfin {
   claimAccount(username: string, password: string): Promise<Me>;
   /** Owner profile only: the account's language, among those offered. */
   setLanguage(language: string): Promise<Me>;
+  /** Owner profile only, when the operator asks accounts what they like. */
+  tastes(): Promise<TastesPage>;
+  setTastes(tastes: { prefer?: 'series' | 'movies' | 'both'; genres?: number[]; kids?: boolean }): Promise<Tastes>;
   /** Migration only: whether the active profile may bring its history. */
   historyCopy(): Promise<{ available: boolean }>;
   copyHistory(username: string, password: string): Promise<void>;

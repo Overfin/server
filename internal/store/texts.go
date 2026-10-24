@@ -12,12 +12,27 @@ import (
 // offered besides the default): its name, overview and details, as TMDB
 // gives them in it.
 func (s *Store) SetTitleTexts(ctx context.Context, language string, t Title, details []byte, at time.Time) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO catalog_title_texts (kind, tmdb, language, name, overview, details, fetched_at)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_title_texts (kind, tmdb, language, name, overview, details, fetched_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (kind, tmdb, language) DO UPDATE SET name = excluded.name, overview = excluded.overview,
 			details = excluded.details, fetched_at = excluded.fetched_at`,
-		t.Kind, t.TMDB, language, t.Name, t.Overview, string(details), at.Unix())
-	return err
+		t.Kind, t.TMDB, language, t.Name, t.Overview, string(details), at.Unix()); err != nil {
+		return err
+	}
+	// Its genres' names in that language, for choosing tastes in it.
+	for _, g := range t.Genres {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO tmdb_genre_names (genre, language, name, fetched_at) VALUES (?, ?, ?, ?)
+			ON CONFLICT (genre, language) DO UPDATE SET name = excluded.name, fetched_at = excluded.fetched_at`,
+			g.ID, language, g.Name, at.Unix()); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // SetSeasonTexts keeps a season's texts in language, its episodes'

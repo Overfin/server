@@ -29,21 +29,24 @@ const (
 	// what just came isn't the least valuable for not being watched yet.
 	RecentlyAdded = "recentlyAdded"
 	Popularity    = "popularity"
+	// Tastes is how well a title fits what people here like: what they
+	// said, when asked, and what they watch.
+	Tastes = "tastes"
 )
 
 // Criteria are every criterion, in the order the control panel shows them.
-var Criteria = []string{WatchTime, Audience, Followed, Favorites, Watchlist, Requested, Rating, NewRelease, RecentlyAdded, Popularity}
+var Criteria = []string{WatchTime, Audience, Followed, Favorites, Watchlist, Requested, Tastes, Rating, NewRelease, RecentlyAdded, Popularity}
 
 // people are the criteria that come from what people do; the others come
 // from TMDB.
-var people = map[string]bool{WatchTime: true, Audience: true, Followed: true, Favorites: true, Watchlist: true, Requested: true}
+var people = map[string]bool{WatchTime: true, Audience: true, Followed: true, Favorites: true, Watchlist: true, Requested: true, Tastes: true}
 
 // MaxWeight is the highest weight; 0 leaves a criterion out.
 const MaxWeight = 10
 
 // Defaults are the weights until the operator sets theirs.
 func Defaults() map[string]int {
-	return map[string]int{WatchTime: 8, Audience: 6, Followed: 6, Favorites: 5, Watchlist: 6, Requested: 6,
+	return map[string]int{WatchTime: 8, Audience: 6, Followed: 6, Favorites: 5, Watchlist: 6, Requested: 6, Tastes: 5,
 		Rating: 5, NewRelease: 3, RecentlyAdded: 5, Popularity: 2}
 }
 
@@ -76,6 +79,10 @@ const (
 	// addedFor is how long a title counts as recently added, less and
 	// less.
 	addedFor = 60 * 24 * time.Hour
+	// saidFor is how many full views it takes for what an account watches
+	// to count as much as what it said it likes; it counts more and more
+	// past that.
+	saidFor = 2.0
 	// thinAccounts is how many active accounts it takes for what people do
 	// to count half: with fewer, the people's part of every score is
 	// pulled toward the middle.
@@ -199,6 +206,7 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 			raw[WatchTime][key] += math.Min(n, maxViews)
 		}
 	}
+	tastes(f, views, active, raw[Tastes])
 	sum(raw[Audience], audience)
 	followed := counted()
 	for series, byAccount := range follows {
@@ -307,6 +315,103 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 	}
 	sort.Slice(out.Titles, func(i, j int) bool { return out.Titles[i].Key < out.Titles[j].Key })
 	return out
+}
+
+// TMDB's genres for children: Family (films and series), Kids (series).
+var kidsGenres = []int{10751, 10762}
+
+// tastes measures how well each title fits what the active accounts like,
+// one voice each: what each said (when asked), and what it watches, the
+// latter counting more as its viewing grows. A title fits an account by
+// its kind (series or film) and by its genres; wanting kids' content (or
+// having a kids profile) adds the children's genres to those it likes.
+func tastes(f *store.ValuationFacts, views map[string]map[string]float64, active map[string]float64, dst map[string]float64) {
+	type taste struct {
+		watched float64         // full views, as counted for watch time
+		series  float64         // of which seasons
+		genres  map[int]float64 // of which each genre
+	}
+	watched := map[string]*taste{}
+	for key, byAccount := range views {
+		t := f.Titles[key]
+		for account, n := range byAccount {
+			n = math.Min(n, maxViews)
+			w := watched[account]
+			if w == nil {
+				w = &taste{genres: map[int]float64{}}
+				watched[account] = w
+			}
+			w.watched += n
+			if t.Episodes != nil {
+				w.series += n
+			}
+			for _, g := range t.Genres {
+				w.genres[g] += n
+			}
+		}
+	}
+	kidsProfile := map[string]bool{}
+	for _, p := range f.Profiles {
+		if p.Active && p.Kids {
+			kidsProfile[p.AccountID] = true
+		}
+	}
+	for account, weight := range active {
+		if weight == 0 {
+			continue
+		}
+		said, asked := f.Tastes[account]
+		w := watched[account]
+		if !asked && w == nil && !kidsProfile[account] {
+			continue // nothing known of its tastes
+		}
+		// How much what it watches counts against what it said.
+		trust := 1.0
+		if asked || kidsProfile[account] {
+			trust = 0
+			if w != nil {
+				trust = w.watched / (w.watched + saidFor)
+			}
+		}
+		liked := map[int]bool{}
+		for _, g := range said.Genres {
+			liked[g] = true
+		}
+		if said.Kids || kidsProfile[account] {
+			for _, g := range kidsGenres {
+				liked[g] = true
+			}
+		}
+		for key, t := range f.Titles {
+			isSeries := t.Episodes != nil
+			// By kind: what it said it prefers, and its share of each.
+			kindSaid := 0.5
+			switch {
+			case said.Prefer == "series" && isSeries, said.Prefer == "movies" && !isSeries:
+				kindSaid = 1
+			case said.Prefer == "series", said.Prefer == "movies":
+				kindSaid = 0
+			}
+			var kindWatched, genreWatched float64
+			if w != nil && w.watched > 0 {
+				kindWatched = w.series / w.watched
+				if !isSeries {
+					kindWatched = 1 - kindWatched
+				}
+				for _, g := range t.Genres {
+					genreWatched = math.Max(genreWatched, w.genres[g]/w.watched)
+				}
+			}
+			genreSaid := 0.0
+			for _, g := range t.Genres {
+				if liked[g] {
+					genreSaid = 1
+				}
+			}
+			fit := trust*(kindWatched+genreWatched)/2 + (1-trust)*(kindSaid+genreSaid)/2
+			dst[key] += weight * fit
+		}
+	}
 }
 
 // share is what a profile's doings count for.

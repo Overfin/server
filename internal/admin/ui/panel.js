@@ -1296,6 +1296,7 @@ const criteria = {
   favorites: ['Favorites', 'How many accounts marked it a favorite.'],
   watchlist: ['Watchlist', 'How many accounts keep it to watch later.'],
   requested: ['Requested', 'How many accounts asked for it.'],
+  tastes: ['Tastes', 'How well it fits what people here like: what they watch (genres, series or films), and what they said when asked. What someone watches counts more and more over what they said.'],
   rating: ['Rating', 'TMDB\'s rating. One from a few votes counts for little.'],
   newRelease: ['New release', 'How recent the film or the season is: its release, or its first air date.'],
   recentlyAdded: ['Recently added', 'How recently it arrived here (a season: its latest episode), for about two months: what just came isn\'t the least valuable for not being watched yet.'],
@@ -1317,6 +1318,12 @@ async function valuationView() {
   const changed = () => data.criteria.some((c) => weights[c.name] !== saved[c.name]);
   const save = h('button', { class: 'primary', disabled: true }, 'Save');
   const reset = h('button', {}, 'Reset to defaults');
+  const ask = h('input', { type: 'checkbox', checked: data.askTastes, 'aria-label': 'Ask people what they like' });
+  ask.addEventListener('change', () => busy(null, async () => {
+    await api('PUT', '/admin/api/valuation', { askTastes: ask.checked });
+    toast(ask.checked ? 'People will be asked what they like.' : 'People won\'t be asked any more; what they watch still counts.');
+    preview();
+  }, (err) => { ask.checked = !ask.checked; toast(err.message, true); }));
   const state = status('');
   const most = h('tbody', {});
   const least = h('tbody', {});
@@ -1402,7 +1409,9 @@ async function valuationView() {
     h('div', { class: 'split' },
       h('div', {},
         card({ title: 'Criteria', description: `From 0 (left out) to ${data.max} (counts the most). ${data.accounts} account${data.accounts === 1 ? '' : 's'} used in the last six months count${data.accounts === 1 ? 's' : ''}; ${data.titles} films and seasons are valued.` },
-          h('div', {}, sliders.map((x) => x.row)), [state, reset, save]),
+          h('div', {}, sliders.map((x) => x.row),
+            setting('Ask people what they like', 'When they set up their account, and on their account page: series or films, genres, kids\' content. Off, Tastes come from what they watch alone.', ask)),
+          [state, reset, save]),
         h('div', { class: 'columns' },
           h('section', {}, h('h2', {}, 'Most valuable'), list('In the libraries', most)),
           h('section', {}, h('h2', {}, 'Least valuable'), list('In the libraries', least))),

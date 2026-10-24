@@ -74,6 +74,8 @@ type exportAccountJSON struct {
 	Label     string           `json:"label,omitempty"`
 	ExpiresAt string           `json:"expiresAt,omitempty"`
 	Limits    exportLimitsJSON `json:"limits"`
+	// Tastes are what the account said it likes, when it was asked.
+	Tastes *tastesJSON `json:"tastes,omitempty"`
 }
 
 type exportLimitsJSON struct {
@@ -190,6 +192,15 @@ func (a Account) export(w http.ResponseWriter, r *http.Request) {
 			Limits: exportLimitsJSON{Template: acct.Template.Name, MaxStreams: acct.Template.MaxStreams, MaxProfiles: acct.Template.MaxProfiles}}
 		if !acct.Expires.IsZero() {
 			out.Account.ExpiresAt = acct.Expires.UTC().Format(time.RFC3339)
+		}
+		switch t, err := a.Sessions.Store.AccountTastes(ctx, acct.ID); {
+		case err != nil:
+			a.Logger.Error("reading the account's tastes for an export failed", "err", err)
+			problem.Send(w, problem.Internal, "")
+			return
+		case t != nil:
+			tj := tastesOf(t)
+			out.Account.Tastes = &tj
 		}
 		switch u, err := a.Sessions.Store.UserBySubject(ctx, acct.Subject); {
 		case err == nil:

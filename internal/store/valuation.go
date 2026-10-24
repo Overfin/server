@@ -28,6 +28,9 @@ type ValuationFacts struct {
 	// Titles are the films and seasons the libraries have, and those
 	// anyone watched, marked or asked for, by key.
 	Titles map[string]*ValuedTitle
+	// Tastes are what accounts said they like, by account ID, when the
+	// operator has people asked; empty otherwise.
+	Tastes map[string]Tastes
 }
 
 // ValuationProfile is who a profile is, for the valuation.
@@ -86,6 +89,8 @@ type ValuedTitle struct {
 	// Episodes are a season's aired episodes and those the libraries
 	// have, with their length (0 when unknown).
 	Episodes map[int]int64
+	// Genres are TMDB's genre IDs, the series' for a season.
+	Genres []int
 }
 
 // activeFor is how long an account counts after it was last used.
@@ -243,6 +248,16 @@ func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []P
 	if err := s.describeValued(ctx, f, now); err != nil {
 		return nil, err
 	}
+	asked, err := s.TastesAsked(ctx)
+	if err != nil {
+		return nil, err
+	}
+	f.Tastes = map[string]Tastes{}
+	if asked {
+		if f.Tastes, err = s.AllTastes(ctx); err != nil {
+			return nil, err
+		}
+	}
 	return f, nil
 }
 
@@ -320,6 +335,23 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 			return err
 		}
 		t.IMDb, t.TVDB = imdb.String, tvdb.String
+		genres, err := s.db.QueryContext(ctx, `SELECT genre FROM catalog_title_genres WHERE kind = ? AND tmdb = ? ORDER BY genre`,
+			top.Kind, r.ID)
+		if err != nil {
+			return err
+		}
+		for genres.Next() {
+			var g int
+			if err := genres.Scan(&g); err != nil {
+				genres.Close()
+				return err
+			}
+			t.Genres = append(t.Genres, g)
+		}
+		genres.Close()
+		if err := genres.Err(); err != nil {
+			return err
+		}
 		if r.Kind == "movie" {
 			d, err := read("movie", r.ID)
 			if err != nil {

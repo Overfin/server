@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -32,6 +33,15 @@ type Title struct {
 	Rating      float64
 	Votes       int
 	Popularity  float64
+	// Genres are TMDB's, by ID, with their names in TMDB's language; they
+	// come with a title's page.
+	Genres []TitleGenre
+}
+
+// TitleGenre is one of TMDB's genres.
+type TitleGenre struct {
+	ID   int
+	Name string
 }
 
 // PutTitles adds or refreshes titles seen at at, keeping their details.
@@ -74,10 +84,75 @@ func (s *Store) SetTitleDetails(ctx context.Context, t Title, details []byte, at
 	if t.Popularity > 0 {
 		popularity = t.Popularity
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE catalog_titles SET details = ?, details_at = ?, release_date = ?, rating = ?,
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE catalog_titles SET details = ?, details_at = ?, release_date = ?, rating = ?,
 		rating_votes = ?, popularity = ? WHERE kind = ? AND tmdb = ?`, string(details), at.Unix(), nullString(t.ReleaseDate),
-		rating, votes, popularity, t.Kind, t.TMDB)
-	return err
+		rating, votes, popularity, t.Kind, t.TMDB); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM catalog_title_genres WHERE kind = ? AND tmdb = ?`, t.Kind, t.TMDB); err != nil {
+		return err
+	}
+	for _, g := range t.Genres {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO catalog_title_genres (kind, tmdb, genre, name) VALUES (?, ?, ?, ?)`,
+			t.Kind, t.TMDB, g.ID, g.Name); err != nil {
+			return err
+		}
+	}
+	if err := genreNamesFromTexts(ctx, tx, t); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// genreNamesFromTexts names t's genres in the other languages its texts
+// were kept in: TMDB lists a title's genres in the same order in every
+// language, so the names in a text's details match t.Genres one by one.
+func genreNamesFromTexts(ctx context.Context, tx *sql.Tx, t Title) error {
+	if len(t.Genres) == 0 {
+		return nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT language, details, fetched_at FROM catalog_title_texts WHERE kind = ? AND tmdb = ?`,
+		t.Kind, t.TMDB)
+	if err != nil {
+		return err
+	}
+	type named struct {
+		language string
+		names    []string
+		at       int64
+	}
+	var found []named
+	for rows.Next() {
+		var n named
+		var details string
+		if err := rows.Scan(&n.language, &details, &n.at); err != nil {
+			rows.Close()
+			return err
+		}
+		var d struct{ Genres []string }
+		if json.Unmarshal([]byte(details), &d) == nil && len(d.Genres) == len(t.Genres) {
+			n.names = d.Genres
+			found = append(found, n)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, n := range found {
+		for i, g := range t.Genres {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO tmdb_genre_names (genre, language, name, fetched_at) VALUES (?, ?, ?, ?)
+				ON CONFLICT (genre, language) DO NOTHING`, g.ID, n.language, n.names[i], n.at); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 const titleColumns = `t.kind, t.tmdb, t.name, coalesce(t.year, 0), t.overview, coalesce(t.poster, ''),
@@ -180,6 +255,7 @@ func (s *Store) PurgeTitles(ctx context.Context, before time.Time) (int64, error
 	for _, q := range []string{
 		`DELETE FROM catalog_title_texts WHERE fetched_at < ?`,
 		`DELETE FROM tmdb_found WHERE fetched_at < ?`,
+		`DELETE FROM tmdb_genre_names WHERE fetched_at < ?`,
 	} {
 		if _, err := s.db.ExecContext(ctx, q, before.Unix()); err != nil {
 			return 0, err
@@ -205,7 +281,8 @@ func (s *Store) ForgetTMDB(ctx context.Context) error {
 	for _, q := range []string{`DELETE FROM catalog_lists`, `DELETE FROM catalog_titles`,
 		`DELETE FROM rating_scales`, `DELETE FROM title_ratings`, `DELETE FROM title_ratings_fetched`,
 		`DELETE FROM artwork`, `DELETE FROM artwork_fetched`, `DELETE FROM catalog_episodes`, `DELETE FROM catalog_seasons`, `DELETE FROM tmdb_people`,
-		`DELETE FROM catalog_title_texts`, `DELETE FROM catalog_season_texts`, `DELETE FROM catalog_episode_texts`, `DELETE FROM tmdb_found`} {
+		`DELETE FROM catalog_title_texts`, `DELETE FROM catalog_season_texts`, `DELETE FROM catalog_episode_texts`, `DELETE FROM tmdb_found`,
+		`DELETE FROM tmdb_genre_names`} {
 		if _, err := tx.ExecContext(ctx, q); err != nil {
 			return err
 		}

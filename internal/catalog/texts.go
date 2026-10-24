@@ -197,6 +197,9 @@ func (x *Texts) fetch(ctx context.Context, w want) error {
 	}
 	// The title's own texts last: kept, they say the whole is.
 	title := store.Title{Kind: w.kind, TMDB: w.tmdb, Name: full.Name, Overview: full.Overview}
+	for _, g := range full.GenreIDs {
+		title.Genres = append(title.Genres, store.TitleGenre{ID: g.ID, Name: g.Name})
+	}
 	if err := x.Store.SetTitleTexts(ctx, w.language, title, raw, time.Now()); err != nil {
 		return err
 	}

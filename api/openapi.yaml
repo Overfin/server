@@ -595,6 +595,79 @@ paths:
         "400":
           description: Not a language Overfin knows (`invalid-request`).
 
+  /me/tastes:
+    get:
+      operationId: getTastes
+      summary: What the account said it likes
+      description: Series, films or both, genres (TMDB's IDs, named in the
+        server's language among `choices`), kids' content. The server's
+        title valuation mixes it with what the account watches, which
+        counts more and more as it watches. Never shown to anyone else.
+        Owner profile only (`owner-only`); `not-found` when the operator
+        doesn't ask.
+      tags: [account]
+      responses:
+        "200":
+          description: What it said, and the choices.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [genres, kids, answered, choices, kidsProfile]
+                properties:
+                  prefer:
+                    type: string
+                    enum: [series, movies, both]
+                  genres:
+                    type: array
+                    items: { type: integer }
+                  kids:
+                    type: boolean
+                  updatedAt:
+                    type: string
+                    format: date-time
+                  answered:
+                    type: boolean
+                  choices:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name]
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+                  kidsProfile:
+                    type: boolean
+                    description: The account has a kids profile, so it gets
+                      kids' content without saying so.
+    put:
+      operationId: setTastes
+      summary: Keep what the account likes
+      description: Saying nothing (no preference, no genre) records that it
+        was asked. At most 40 genres, among the choices. Owner profile only.
+      tags: [account]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prefer:
+                  type: string
+                  enum: [series, movies, both]
+                genres:
+                  type: array
+                  maxItems: 40
+                  items: { type: integer }
+                kids:
+                  type: boolean
+      responses:
+        "200":
+          description: Kept.
+        "400":
+          description: Not a preference, or not a genre to choose (`invalid-request`).
+
   /me/export:
     post:
       operationId: exportMyData
@@ -2817,7 +2890,7 @@ components:
 
     Me:
       type: object
-      required: [accountId, language, languages, limits, home]
+      required: [accountId, language, languages, limits, home, tastes]
       properties:
         accountId:
           type: string
@@ -2863,6 +2936,18 @@ components:
               type: boolean
               description: Titles no library has are shown among what's
                 trending and in the slideshow, to be requested.
+        tastes:
+          type: object
+          description: Whether the operator asks accounts what they like (for
+            what the server keeps and gets), and whether this one answered
+            or chose to say nothing. The site asks once, on the owner
+            profile.
+          required: [asked, answered]
+          properties:
+            asked:
+              type: boolean
+            answered:
+              type: boolean
         activeProfile:
           description: Absent while this session has no profile chosen; the
             site then shows the profile list.

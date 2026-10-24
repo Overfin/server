@@ -225,3 +225,52 @@ func TestRecentlyAdded(t *testing.T) {
 		t.Error("a title not in the libraries counted as added")
 	}
 }
+
+// Tastes: what an account says it prefers raises the titles that fit it;
+// a kids profile wants children's genres without saying so; what it
+// watches takes over from what it said as its viewing grows.
+func TestTastes(t *testing.T) {
+	drama, comedy, family := film("1"), film("2"), film("3")
+	drama.Genres, comedy.Genres, family.Genres = []int{18}, []int{35}, []int{10751}
+	show := season("4", 1, 10)
+	show.Genres = []int{18}
+
+	// Said: series, and comedies.
+	f := facts(1, drama, comedy, family, show)
+	f.Tastes = map[string]store.Tastes{"a1": {Prefer: "series", Genres: []int{35}}}
+	m := Measure(f, now)
+	if !(parts(t, m, show.Key)[Tastes] > parts(t, m, drama.Key)[Tastes]) ||
+		!(parts(t, m, comedy.Key)[Tastes] > parts(t, m, drama.Key)[Tastes]) {
+		t.Errorf("said series and comedies: %v", m.Titles)
+	}
+
+	// Nothing said, nothing watched, not asked: no taste at all.
+	f = facts(1, drama, comedy, family, show)
+	m = Measure(f, now)
+	for _, v := range m.Titles {
+		if v.Parts[Tastes] != 0 {
+			t.Errorf("no taste known, yet %s: %v", v.Key, v.Parts[Tastes])
+		}
+	}
+
+	// A kids profile: children's genres, without being asked.
+	f = facts(1, drama, comedy, family, show)
+	f.Profiles["k1"] = store.ValuationProfile{AccountID: "a1", Kids: true, Active: true}
+	m = Measure(f, now)
+	if !(parts(t, m, family.Key)[Tastes] > parts(t, m, comedy.Key)[Tastes]) {
+		t.Errorf("a kids profile: %v", m.Titles)
+	}
+
+	// Said films, but watches dramas, as series: what it watches wins.
+	other := season("5", 1, 2)
+	other.Genres = []int{18}
+	f = facts(1, drama, comedy, family, show, other)
+	f.Tastes = map[string]store.Tastes{"a1": {Prefer: "movies", Genres: []int{35}}}
+	for e := 1; e <= 10; e++ {
+		watched(f, "p1", "series/tmdb/4/s1/e"+strconv.Itoa(e), 3, 0)
+	}
+	m = Measure(f, now)
+	if !(parts(t, m, other.Key)[Tastes] > parts(t, m, comedy.Key)[Tastes]) {
+		t.Errorf("said films and comedies, watches drama series: %v", m.Titles)
+	}
+}

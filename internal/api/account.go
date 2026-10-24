@@ -57,6 +57,12 @@ func (a Account) Register(r *plugin.Registrar) error {
 	if err := r.HandleFunc("DELETE /api/v1/me", a.deleteAccount); err != nil {
 		return err
 	}
+	if err := r.HandleFunc("GET /api/v1/me/tastes", a.tastes); err != nil {
+		return err
+	}
+	if err := r.HandleFunc("PUT /api/v1/me/tastes", a.setTastes); err != nil {
+		return err
+	}
 	return r.HandleFunc("POST /api/v1/me/export", a.export)
 }
 
@@ -93,6 +99,14 @@ type meJSON struct {
 	Limits meLimitsJSON `json:"limits"`
 	// Home is how the operator set the site's home page.
 	Home meHomeJSON `json:"home"`
+	// Tastes says whether the account is asked what it likes, and whether
+	// it answered (or chose not to).
+	Tastes meTastesJSON `json:"tastes"`
+}
+
+type meTastesJSON struct {
+	Asked    bool `json:"asked"`
+	Answered bool `json:"answered"`
 }
 
 type meHomeJSON struct {
@@ -253,6 +267,16 @@ func (s *Sessions) me(r *http.Request, acct *store.Account, prof *store.Profile)
 	}
 	if out.Home.MissingTitles, err = s.Store.HomeMissing(ctx); err != nil {
 		return meJSON{}, err
+	}
+	if out.Tastes.Asked, err = s.Store.TastesAsked(ctx); err != nil {
+		return meJSON{}, err
+	}
+	if out.Tastes.Asked {
+		t, err := s.Store.AccountTastes(ctx, acct.ID)
+		if err != nil {
+			return meJSON{}, err
+		}
+		out.Tastes.Answered = t != nil
 	}
 	for _, c := range lang.Choices {
 		if slices.Contains(offered, c.Tag) {

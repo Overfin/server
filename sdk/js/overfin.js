@@ -104,6 +104,10 @@ export class Overfin {
   createAccount() { return this.request('POST', '/me', {}); }
   /** Changes the account's language, among those offered. Owner profile only. */
   setLanguage(language) { return this.request('PATCH', '/me', { language }); }
+  /** What the account said it likes, and the genres to choose among. Owner profile only, when the operator asks. */
+  tastes() { return this.request('GET', '/me/tastes'); }
+  /** Keeps what the account likes; nothing said still records it was asked. Owner profile only. */
+  setTastes(tastes) { return this.request('PUT', '/me/tastes', tastes); }
   /** Starts a new account with the history of one on the server this site replaces. The password is used once. */
   claimAccount(username, password) { return this.request('POST', '/me/claim', { username, password }); }
   /**

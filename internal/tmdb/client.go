@@ -267,6 +267,7 @@ func (c *Client) Discover(ctx context.Context, list, kind string, page int) (*Pa
 type rawDetails struct {
 	rawTitle
 	Genres []struct {
+		ID   int    `json:"id"`
 		Name string `json:"name"`
 	} `json:"genres"`
 	Credits struct {

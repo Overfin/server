@@ -66,6 +66,20 @@ func TestValuation(t *testing.T) {
 		t.Errorf("preview with a bad weight: %d", rec.Code)
 	}
 
+	// Asking accounts what they like: off by default, switched alone.
+	if got.AskTastes {
+		t.Error("asking tastes is on by default")
+	}
+	if rec := b.do("PUT", "/admin/api/valuation", `{"askTastes":true}`, nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"askTastes":true`) {
+		t.Errorf("ask tastes: %d %s", rec.Code, rec.Body)
+	}
+	if on, _ := db.TastesAsked(ctx); !on {
+		t.Error("asking tastes wasn't kept")
+	}
+	if w, _ := db.ValuationWeights(ctx); w["watchTime"] != 10 {
+		t.Errorf("switching asking changed the weights: %v", w)
+	}
+
 	if rec := b.do("PUT", "/admin/api/valuation", `{"reset":true}`, nil); rec.Code != http.StatusOK {
 		t.Fatalf("reset: %d", rec.Code)
 	}

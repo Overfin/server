@@ -82,3 +82,56 @@ func TestValuationWeights(t *testing.T) {
 		t.Errorf("reset: %v", w)
 	}
 }
+
+// Genres come with a title's page and go with the title; the valuation
+// reads them, and the accounts' tastes only while the operator asks.
+func TestValuationTastes(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	now := time.Now()
+	acct, _, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
+	id := strings.Repeat("0", 31) + "a"
+	s.PutCatalog(ctx, []CatalogItem{{ID: id, Kind: "movie", Name: "Film", SortName: "film", TMDB: "7"}}, 1)
+	s.RefreshTitleKeys(ctx)
+	s.PutTitles(ctx, []Title{{Kind: "movie", TMDB: "7", Name: "Film"}}, now)
+	if err := s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "7", Name: "Film", Genres: []TitleGenre{{18, "Drama"}}}, []byte(`{}`), now); err != nil {
+		t.Fatal(err)
+	}
+	s.SetAccountTastes(ctx, acct.ID, Tastes{Prefer: "movies", Genres: []int{18}}, now)
+	f, err := s.ValuationFacts(ctx, now, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := f.Titles["movie/tmdb/7"].Genres; len(g) != 1 || g[0] != 18 {
+		t.Errorf("genres: %v", g)
+	}
+	if len(f.Tastes) != 0 {
+		t.Errorf("tastes read while not asked: %v", f.Tastes)
+	}
+	s.SetTastesAsked(ctx, true)
+	if f, _ = s.ValuationFacts(ctx, now, nil); f.Tastes[acct.ID].Prefer != "movies" {
+		t.Errorf("tastes: %v", f.Tastes)
+	}
+	if g, _ := s.TasteGenres(ctx, "fr-CA"); len(g) != 1 || g[0].Name != "Drama" {
+		t.Errorf("choices: %v", g)
+	}
+	// Named in another language once the title's texts in it come.
+	s.SetTitleTexts(ctx, "fr-CA", Title{Kind: "movie", TMDB: "7", Name: "Film", Genres: []TitleGenre{{18, "Drame"}}}, []byte(`{"genres":["Drame"]}`), now)
+	if g, _ := s.TasteGenres(ctx, "fr-CA"); len(g) != 1 || g[0].Name != "Drame" {
+		t.Errorf("in French: %v", g)
+	}
+	// And from texts kept before genres were: a German text, then the
+	// title's page fetched again.
+	s.SetTitleTexts(ctx, "de-DE", Title{Kind: "movie", TMDB: "7", Name: "Film"}, []byte(`{"genres":["Drama (de)"]}`), now)
+	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "7", Name: "Film", Genres: []TitleGenre{{18, "Drama"}}}, []byte(`{}`), now)
+	if g, _ := s.TasteGenres(ctx, "de-DE"); len(g) != 1 || g[0].Name != "Drama (de)" {
+		t.Errorf("from earlier texts: %v", g)
+	}
+	// The title gone, its genres go too.
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM catalog_titles`); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := s.TasteGenres(ctx, "fr-CA"); len(g) != 0 {
+		t.Errorf("genres outlived their title: %v", g)
+	}
+}

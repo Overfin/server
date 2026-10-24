@@ -697,8 +697,8 @@ nothing beyond what that needs.
     watch history is; then Seerr support goes.
 - **Title valuation**, computed by Overfin, which knows the titles and the
   people. *Done*: the valuation and the Library → Valuation page, as
-  below, tastes aside, and the apps endpoint (next item); the
-  favorites count may follow. Every title is valued the same way, on the server or not, and
+  below, Tastes included (web 0.44), and the apps endpoint (next item);
+  the favorites count may follow. Every title is valued the same way, on the server or not, and
   without regard to its files or size: storage isn't Overfin's concern.
   Films are valued as a whole, series season by season.
   - **The operator's weights.** A Library → Valuation page in the panel
@@ -711,8 +711,7 @@ nothing beyond what that needs.
     recently it arrived in the libraries, a season with its latest
     episode, fading over two months: what just came isn't the least
     valuable for not being watched yet, so Overtide needs no grace period
-    of its own) and **popularity** (TMDB's). **Tastes** join when
-    people can say what they like (next). Below the sliders, the most and
+    of its own) and **popularity** (TMDB's), and **tastes** (next). Below the sliders, the most and
     least valuable titles update as they move; any title shows why it has
     its value, criterion by criterion; one button resets the defaults.
   - **Tastes**, one criterion and one slider, from what people say and
@@ -728,7 +727,7 @@ nothing beyond what that needs.
     active accounts' tastes it matches, one voice each; so a title no one
     has watched yet still has value when it fits what people here like. A
     specific title isn't a taste: it's requested, and Requested counts it.
-    Asking people is the operator's choice (a switch in Features & limits):
+    Asking people is the operator's choice (a switch on the Valuation page):
     off, there's no question at onboarding and no page to change it, and
     Tastes come from what people watch alone; what accounts said before
     stays theirs, unused, until it's on again.

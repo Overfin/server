@@ -11,6 +11,12 @@ import (
 	"github.com/overfin/server/internal/textclean"
 )
 
+// Genre is one of TMDB's genres.
+type Genre struct {
+	ID   int
+	Name string
+}
+
 // Full is everything Overfin keeps about a film or a series, from one call:
 // its page, its runtime and tagline, and its images.
 type Full struct {
@@ -29,6 +35,9 @@ type Full struct {
 	// Popularity is TMDB's measure of how much people look the title up
 	// these days; 0 when unknown.
 	Popularity float64
+	// GenreIDs are its genres, as TMDB numbers them (the same in every
+	// language), with their names in the language asked for.
+	GenreIDs []Genre
 	// Release is its certifications and release dates.
 	Release *Release
 	Artwork Artwork
@@ -115,8 +124,12 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 		return nil, ErrNotFound
 	}
 	var genres []string
+	var genreIDs []Genre
 	for _, g := range raw.Genres {
 		genres = append(genres, g.Name)
+		if g.ID > 0 {
+			genreIDs = append(genreIDs, Genre{ID: g.ID, Name: textclean.Plain(g.Name, 64)})
+		}
 	}
 	var cast []Person
 	for _, p := range raw.Credits.Cast {
@@ -145,6 +158,7 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 	if raw.Popularity > 0 && raw.Popularity < 1e7 {
 		out.Popularity = raw.Popularity
 	}
+	out.GenreIDs = genreIDs
 	runtime := raw.Runtime
 	if kind == "series" && len(raw.EpisodeRunTime) > 0 {
 		runtime = raw.EpisodeRunTime[0]

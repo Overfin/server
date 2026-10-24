@@ -227,6 +227,9 @@ func (a *Titles) page(ctx context.Context, src TitleSource, kind string, id int,
 	title := store.Title{Kind: kind, TMDB: strconv.Itoa(id), Name: full.Name, Year: full.Year, Overview: full.Overview,
 		Poster: full.Artwork.Poster, Backdrop: full.Artwork.Backdrop, ReleaseDate: full.ReleaseDate, Rating: full.Rating, Votes: full.Votes,
 		Popularity: full.Popularity}
+	for _, g := range full.GenreIDs {
+		title.Genres = append(title.Genres, store.TitleGenre{ID: g.ID, Name: g.Name})
+	}
 	if err := a.Store.SetTitleDetails(ctx, title, raw, a.clock()); err != nil {
 		return nil, err
 	}

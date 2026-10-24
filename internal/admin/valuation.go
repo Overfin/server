@@ -70,6 +70,9 @@ type valuationJSON struct {
 	// Titles, how many films and seasons are valued.
 	Accounts int `json:"accounts"`
 	Titles   int `json:"titles"`
+	// AskTastes: accounts are asked what they like (Tastes then mixes
+	// what they said with what they watch; otherwise only the latter).
+	AskTastes bool `json:"askTastes"`
 }
 
 // valuationSettings (GET /admin/api/valuation) answers the weights, the
@@ -90,8 +93,13 @@ func (p *Panel) writeValuation(w http.ResponseWriter, r *http.Request) {
 		p.fail(w, "measuring the titles", err)
 		return
 	}
+	asked, err := p.Store.TastesAsked(ctx)
+	if err != nil {
+		p.fail(w, "reading whether tastes are asked", err)
+		return
+	}
 	weights, defaults := valuation.Weights(saved), valuation.Defaults()
-	out := valuationJSON{Max: valuation.MaxWeight, Accounts: m.Accounts, Titles: len(m.Titles)}
+	out := valuationJSON{Max: valuation.MaxWeight, Accounts: m.Accounts, Titles: len(m.Titles), AskTastes: asked}
 	for _, c := range valuation.Criteria {
 		out.Criteria = append(out.Criteria, criterionJSON{Name: c, Weight: weights[c], Default: defaults[c]})
 	}
@@ -111,14 +119,30 @@ func weightsOf(w http.ResponseWriter, sent map[string]int) (map[string]int, bool
 }
 
 // setValuation (PUT /admin/api/valuation) keeps new weights, or with
-// reset, goes back to the defaults.
+// reset, goes back to the defaults; with askTastes alone, it only switches
+// asking accounts what they like.
 func (p *Panel) setValuation(w http.ResponseWriter, r *http.Request, s *session) {
 	var req struct {
-		Weights map[string]int `json:"weights"`
-		Reset   bool           `json:"reset"`
+		Weights   map[string]int `json:"weights"`
+		Reset     bool           `json:"reset"`
+		AskTastes *bool          `json:"askTastes"`
 	}
 	if !decode(w, r, &req) {
 		return
+	}
+	if req.AskTastes != nil {
+		if err := p.Store.SetTastesAsked(r.Context(), *req.AskTastes); err != nil {
+			p.fail(w, "switching asking tastes", err)
+			return
+		}
+		p.valued.mu.Lock()
+		p.valued.m = nil // measured again, with or without what accounts said
+		p.valued.mu.Unlock()
+		p.Logger.Info("asking accounts what they like switched in the control panel", "on", *req.AskTastes, "by", s.name)
+		if req.Weights == nil && !req.Reset {
+			p.writeValuation(w, r)
+			return
+		}
 	}
 	var weights map[string]int
 	if !req.Reset {
