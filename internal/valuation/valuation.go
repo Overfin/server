@@ -25,11 +25,14 @@ const (
 	Requested  = "requested"
 	Rating     = "rating"
 	NewRelease = "newRelease"
-	Popularity = "popularity"
+	// RecentlyAdded is how recently a title arrived in the libraries, so
+	// what just came isn't the least valuable for not being watched yet.
+	RecentlyAdded = "recentlyAdded"
+	Popularity    = "popularity"
 )
 
 // Criteria are every criterion, in the order the control panel shows them.
-var Criteria = []string{WatchTime, Audience, Followed, Favorites, Watchlist, Requested, Rating, NewRelease, Popularity}
+var Criteria = []string{WatchTime, Audience, Followed, Favorites, Watchlist, Requested, Rating, NewRelease, RecentlyAdded, Popularity}
 
 // people are the criteria that come from what people do; the others come
 // from TMDB.
@@ -41,7 +44,7 @@ const MaxWeight = 10
 // Defaults are the weights until the operator sets theirs.
 func Defaults() map[string]int {
 	return map[string]int{WatchTime: 8, Audience: 6, Followed: 6, Favorites: 5, Watchlist: 6, Requested: 6,
-		Rating: 5, NewRelease: 3, Popularity: 2}
+		Rating: 5, NewRelease: 3, RecentlyAdded: 5, Popularity: 2}
 }
 
 // Weights are saved weights checked and completed: a criterion missing or
@@ -70,6 +73,9 @@ const (
 	// ratingPrior is how many votes a rating needs to count for as much as
 	// the average of all titles.
 	ratingPrior = 50
+	// addedFor is how long a title counts as recently added, less and
+	// less.
+	addedFor = 60 * 24 * time.Hour
 	// thinAccounts is how many active accounts it takes for what people do
 	// to count half: with fewer, the people's part of every score is
 	// pulled toward the middle.
@@ -271,6 +277,9 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 			raw[NewRelease][t.Key] = float64(t.Released.Unix())/86400 + 1e6 // in days, above 0 for any date
 		}
 		raw[Popularity][t.Key] = t.Popularity
+		if !t.Added.IsZero() {
+			raw[RecentlyAdded][t.Key] = math.Max(1-math.Max(now.Sub(t.Added).Hours(), 0)/addedFor.Hours(), 0)
+		}
 	}
 
 	out := &Measured{Titles: make([]Title, 0, len(f.Titles))}
@@ -288,6 +297,9 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 		for _, c := range Criteria {
 			if c == Followed && t.Episodes == nil {
 				continue // films aren't followed
+			}
+			if c == RecentlyAdded && !t.InLibrary {
+				continue // what isn't here hasn't arrived
 			}
 			v.Parts[c] = ranks[c][t.Key]
 		}

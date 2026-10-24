@@ -22,9 +22,9 @@ func TestValuationFacts(t *testing.T) {
 	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
 	n := func(i int) *int { return &i }
 	s.PutCatalog(ctx, []CatalogItem{
-		{ID: id(0), Kind: "movie", Name: "Film", SortName: "film", TMDB: "7", RuntimeMs: 6_000_000},
+		{ID: id(0), Kind: "movie", Name: "Film", SortName: "film", TMDB: "7", RuntimeMs: 6_000_000, AddedAt: now},
 		{ID: id(1), Kind: "series", Name: "Show", SortName: "show", TMDB: "8"},
-		{ID: id(2), Kind: "episode", Name: "E1", SortName: "e1", SeriesID: id(1), SeasonNumber: n(1), EpisodeNumber: n(1), RuntimeMs: 1_200_000},
+		{ID: id(2), Kind: "episode", Name: "E1", SortName: "e1", SeriesID: id(1), SeasonNumber: n(1), EpisodeNumber: n(1), RuntimeMs: 1_200_000, AddedAt: now},
 	}, 1)
 	s.RefreshTitleKeys(ctx)
 	s.RecordPlay(ctx, prof.ID, "movie/tmdb/7", id(0), 3_000_000, false, now)
@@ -47,6 +47,9 @@ func TestValuationFacts(t *testing.T) {
 	}
 	if s1 == nil || !s1.InLibrary || s1.Season != 1 || s1.Episodes[1] != 1_200_000 || s1.Name != "Show" {
 		t.Errorf("season 1: %+v", s1)
+	}
+	if film.Added.IsZero() || s1.Added.IsZero() {
+		t.Errorf("arrival: the film %v, season 1 %v", film.Added, s1.Added)
 	}
 	if s2 == nil || s2.InLibrary {
 		t.Errorf("season 2, asked for: %+v", s2)

@@ -75,6 +75,9 @@ type ValuedTitle struct {
 	// Released is the film's release, or the season's first air date;
 	// zero when unknown.
 	Released time.Time
+	// Added is when it arrived in the libraries: a film's first copy, a
+	// season's latest episode; zero when it isn't there.
+	Added time.Time
 	// RuntimeMs is a film's length; 0 when unknown.
 	RuntimeMs int64
 	// Episodes are a season's aired episodes and those the libraries
@@ -182,15 +185,16 @@ func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []P
 	}
 
 	// The films and seasons the libraries have.
-	rows, err = s.db.QueryContext(ctx, `SELECT title_key, max(coalesce(runtime_ms, 0)) FROM catalog_items
+	rows, err = s.db.QueryContext(ctx, `SELECT title_key, max(coalesce(runtime_ms, 0)), coalesce(min(added_at), 0)
+		FROM catalog_items
 		WHERE kind IN ('movie', 'episode') AND title_key IS NOT NULL AND title_key NOT LIKE 'item/%' GROUP BY title_key`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var key string
-		var runtime int64
-		if err := rows.Scan(&key, &runtime); err != nil {
+		var runtime, added int64
+		if err := rows.Scan(&key, &runtime, &added); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -200,6 +204,11 @@ func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []P
 				t.Episodes[r.Episode] = runtime
 			} else {
 				t.RuntimeMs = runtime
+			}
+			// A film arrived with its first copy; a season, with its
+			// latest episode.
+			if at := time.Unix(added, 0); added > 0 && at.After(t.Added) {
+				t.Added = at
 			}
 		}
 	}

@@ -1290,7 +1290,8 @@ const criteria = {
   watchlist: ['Watchlist', 'How many accounts keep it to watch later.'],
   requested: ['Requested', 'How many accounts asked for it.'],
   rating: ['Rating', 'TMDB\'s rating. One from a few votes counts for little.'],
-  newRelease: ['New release', 'How recent the film or the season is.'],
+  newRelease: ['New release', 'How recent the film or the season is: its release, or its first air date.'],
+  recentlyAdded: ['Recently added', 'How recently it arrived here (a season: its latest episode), for about two months: what just came isn\'t the least valuable for not being watched yet.'],
   popularity: ['Popularity', 'TMDB\'s popularity: how much people look it up these days.'],
 };
 const criterionName = (c) => (criteria[c] || [c])[0];

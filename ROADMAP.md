@@ -706,8 +706,11 @@ nothing beyond what that needs.
     against it. The criteria: **watch time**, **audience** (how many
     accounts watched at all), **followed** (series people keep up with),
     **favourites**, **watchlist**, **requested**, **rating**, **new
-    release** (how recent the film or season is) and **popularity**
-    (TMDB's). **Wishes** join when people can say what they'd like on the
+    release** (how recent the film or season is), **recently added** (how
+    recently it arrived in the libraries, a season with its latest
+    episode, fading over two months: what just came isn't the least
+    valuable for not being watched yet, so Overtide needs no grace period
+    of its own) and **popularity** (TMDB's). **Wishes** join when people can say what they'd like on the
     server (asked at onboarding, changeable any time; the account's own
     data, in its export, gone with it). Below the sliders, the most and
     least valuable titles update as they move; any title shows why it has

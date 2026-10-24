@@ -208,3 +208,20 @@ func TestEpisodeShare(t *testing.T) {
 		t.Errorf("one of unknown length: %v", p)
 	}
 }
+
+// Recently added: what just arrived ranks highest, less and less for two
+// months, then not at all; what isn't in the libraries is left out.
+func TestRecentlyAdded(t *testing.T) {
+	fresh, month, old, away := film("1"), film("2"), film("3"), film("4")
+	fresh.Added, month.Added, old.Added = now.Add(-24*time.Hour), now.Add(-30*24*time.Hour), now.Add(-90*24*time.Hour)
+	f := facts(1, fresh, month, old)
+	f.Titles[away.Key] = away
+	m := Measure(f, now)
+	a, b, c := parts(t, m, fresh.Key)[RecentlyAdded], parts(t, m, month.Key)[RecentlyAdded], parts(t, m, old.Key)[RecentlyAdded]
+	if !(a > b && b > 0 && c == 0) {
+		t.Errorf("a day %v, a month %v, three months %v", a, b, c)
+	}
+	if _, ok := parts(t, m, away.Key)[RecentlyAdded]; ok {
+		t.Error("a title not in the libraries counted as added")
+	}
+}
