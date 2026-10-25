@@ -83,6 +83,7 @@ type Season struct {
 	Number       int
 	Name         string
 	EpisodeCount int
+	AirDate      string // YYYY-MM-DD, or ""
 }
 
 // Page is one page of a discovery list.
@@ -164,7 +165,8 @@ func MakeDetails(t Title, genres []string, cast []Person, seasons []Season) *Det
 		if s.Number < 0 || s.Number > 1000 || s.EpisodeCount < 0 || s.EpisodeCount > 10_000 {
 			continue
 		}
-		d.Seasons = append(d.Seasons, Season{Number: s.Number, Name: textclean.Plain(s.Name, 120), EpisodeCount: s.EpisodeCount})
+		d.Seasons = append(d.Seasons, Season{Number: s.Number, Name: textclean.Plain(s.Name, 120), EpisodeCount: s.EpisodeCount,
+			AirDate: date(s.AirDate)})
 	}
 	return d
 }

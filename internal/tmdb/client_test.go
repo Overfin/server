@@ -29,6 +29,15 @@ func fakeTMDB(t *testing.T) *Client {
 				{"id":949,"media_type":"movie","title":"Heat <b>!</b>","release_date":"1995-12-15","poster_path":"/abcdefgh1.jpg"},
 				{"id":100,"media_type":"movie","title":"Bad","poster_path":"../../etc/passwd"},
 				{"id":1399,"media_type":"tv","name":"A series"}]}`)
+		case "/3/movie/949/recommendations":
+			io.WriteString(w, `{"page":1,"total_pages":3,"results":[{"id":680,"title":"Pulp Fiction"},{"id":1399,"media_type":"tv","name":"A series"}]}`)
+		case "/3/discover/tv":
+			q := r.URL.Query()
+			if q.Get("with_genres") != "18" || q.Get("sort_by") != "popularity.desc" || q.Get("vote_count.gte") != "50" || q.Get("page") != "2" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			io.WriteString(w, `{"page":2,"total_pages":2,"results":[{"id":1399,"name":"Thrones"}]}`)
 		case "/3/tv/on_the_air":
 			io.WriteString(w, `{"page":2,"total_pages":2,"results":[{"id":1399,"name":"Thrones","first_air_date":"2011-04-17"}]}`)
 		case "/3/movie/949":
@@ -50,7 +59,7 @@ func fakeTMDB(t *testing.T) *Client {
 					"season/2":{"season_number":2,"name":"Saison 2","episodes":[{"episode_number":1,"name":"Le Nord"},{"episode_number":2,"name":"La nuit"}]}}`)
 				return
 			}
-			io.WriteString(w, `{"id":1399,"name":"Thrones","first_air_date":"2011-04-17","seasons":[{"season_number":1,"name":"Season 1","episode_count":10}],
+			io.WriteString(w, `{"id":1399,"name":"Thrones","first_air_date":"2011-04-17","seasons":[{"season_number":1,"name":"Season 1","episode_count":10,"air_date":"2011-04-17"}],
 				"content_ratings":{"results":[{"iso_3166_1":"US","rating":"TV-MA"}]}}`)
 		case "/3/movie/550":
 			if r.URL.Query().Get("append_to_response") != "credits,images,alternative_titles,translations,release_dates" || r.URL.Query().Get("language") != "fr" ||
@@ -142,7 +151,7 @@ func TestClient(t *testing.T) {
 	if err != nil || d.Name != "Heat" || !slices.Equal(d.Genres, []string{"Crime"}) || len(d.Cast) != 1 {
 		t.Errorf("details: %+v %v", d, err)
 	}
-	if d, err := c.Details(ctx, "series", 1399); err != nil || len(d.Seasons) != 1 || d.Seasons[0].EpisodeCount != 10 {
+	if d, err := c.Details(ctx, "series", 1399); err != nil || len(d.Seasons) != 1 || d.Seasons[0].EpisodeCount != 10 || d.Seasons[0].AirDate != "2011-04-17" {
 		t.Errorf("series details: %+v %v", d, err)
 	}
 	rel, err := c.Release(ctx, "movie", 949)
@@ -310,5 +319,26 @@ func TestTokens(t *testing.T) {
 		if _, err := New(srv.URL, bad); err == nil {
 			t.Errorf("%q taken as a token", bad)
 		}
+	}
+}
+
+// Titles like another, and a kind's titles in a genre, come as discovery
+// pages do: those of another kind left out.
+func TestRecommendationsAndByGenre(t *testing.T) {
+	c := fakeTMDB(t)
+	ctx := context.Background()
+	p, err := c.Recommendations(ctx, "movie", 949)
+	if err != nil || len(p.Titles) != 1 || p.Titles[0].TMDBID != 680 || p.TotalPages != 3 {
+		t.Fatalf("recommendations: %+v %v", p, err)
+	}
+	p, err = c.ByGenre(ctx, "series", 18, 2)
+	if err != nil || len(p.Titles) != 1 || p.Titles[0].TMDBID != 1399 || p.Titles[0].Kind != "series" {
+		t.Fatalf("by genre: %+v %v", p, err)
+	}
+	if _, err := c.ByGenre(ctx, "series", 0, 1); err == nil {
+		t.Error("genre 0 asked for")
+	}
+	if _, err := c.Recommendations(ctx, "person", 1); err == nil {
+		t.Error("a person's look-alikes asked for")
 	}
 }

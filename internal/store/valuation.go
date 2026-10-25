@@ -25,12 +25,16 @@ type ValuationFacts struct {
 	// Interests are what profiles keep for later (the watchlist): films,
 	// series, seasons, episodes.
 	Interests []ProfileTitle
-	// Titles are the films and seasons the libraries have, and those
-	// anyone watched, marked or asked for, by key.
+	// Titles are the films and seasons the libraries have, those anyone
+	// watched, marked or asked for, and Overfin's picks, by key.
 	Titles map[string]*ValuedTitle
 	// Tastes are what accounts said they like, by account ID, when the
 	// operator has people asked; empty otherwise.
 	Tastes map[string]Tastes
+
+	// seasonAired are the picks' seasons' first air dates, from their
+	// series' page, by key: for seasons not fetched on their own.
+	seasonAired map[string]string
 }
 
 // ValuationProfile is who a profile is, for the valuation.
@@ -245,6 +249,10 @@ func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []P
 	for _, p := range f.Interests {
 		f.title(p.Title)
 	}
+	// And Overfin's picks, which the libraries lack.
+	if err := s.picks(ctx, f, now); err != nil {
+		return nil, err
+	}
 	if err := s.describeValued(ctx, f, now); err != nil {
 		return nil, err
 	}
@@ -371,6 +379,9 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 			r.ID, r.Season).Scan(&air)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
+		}
+		if air == "" {
+			air = f.seasonAired[t.Key]
 		}
 		t.Released, _ = time.Parse(time.DateOnly, air)
 		rows, err := s.db.QueryContext(ctx, `SELECT episode, coalesce(runtime, 0) FROM catalog_episodes

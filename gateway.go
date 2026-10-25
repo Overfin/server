@@ -748,6 +748,17 @@ func (g *gateway) titleSource() catalog.TitleSource {
 	return nil
 }
 
+// pickSource is where the picks' lists come from: TMDB itself; nil
+// without it.
+func (g *gateway) pickSource() catalog.PickSource {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.sh.tmdb != nil {
+		return g.sh.tmdb
+	}
+	return nil
+}
+
 // ratingSource is where certifications come from.
 func (g *gateway) ratingSource() ratings.Source {
 	if src := g.tmdbSource(); src != nil {

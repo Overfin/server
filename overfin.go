@@ -471,6 +471,8 @@ func run(logger *slog.Logger) error {
 	// The library's titles from TMDB: looked for every 10 minutes, a tenth
 	// of a second between requests.
 	go sh.titles.Run(ctx)
+	// The picks' own lists, from TMDB: once a day.
+	go catalog.NewPicks(gw.pickSource, db, logger, 24*time.Hour, 100*time.Millisecond).Run(ctx)
 	go sh.texts.Run(ctx)
 	go unrestrictKids(ctx, db, gw.Provisioner, logger)
 	// Each profile's data, brought over from Jellyfin once.

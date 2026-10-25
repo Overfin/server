@@ -39,6 +39,7 @@ type SeasonInfo struct {
 	Number       int    `json:"number"`
 	Name         string `json:"name"`
 	EpisodeCount int    `json:"episodeCount"`
+	AirDate      string `json:"airDate,omitempty"` // YYYY-MM-DD, or ""
 }
 
 // Season is a season of a series, with its episodes, from TMDB.

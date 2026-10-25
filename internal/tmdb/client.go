@@ -242,12 +242,39 @@ func (c *Client) Discover(ctx context.Context, list, kind string, page int) (*Pa
 	default:
 		return nil, errors.New("tmdb: invalid discovery list")
 	}
+	return c.page(ctx, path, kind, url.Values{"page": {strconv.Itoa(page)}})
+}
+
+// Recommendations returns the first page of TMDB's titles like a film or
+// a series, of the same kind.
+func (c *Client) Recommendations(ctx context.Context, kind string, tmdbID int) (*Page, error) {
+	k := tv(kind)
+	if k == "" || !ValidID(tmdbID) {
+		return nil, errors.New("tmdb: invalid recommendations query")
+	}
+	return c.page(ctx, "/"+k+"/"+strconv.Itoa(tmdbID)+"/recommendations", kind, url.Values{"page": {"1"}})
+}
+
+// ByGenre returns one page (from 1) of a kind's titles in one of TMDB's
+// genres, the most popular first, among those enough people rated.
+func (c *Client) ByGenre(ctx context.Context, kind string, genre, page int) (*Page, error) {
+	k := tv(kind)
+	if k == "" || genre < 1 || genre > 1_000_000 || page < 1 || page > 500 {
+		return nil, errors.New("tmdb: invalid genre query")
+	}
+	return c.page(ctx, "/discover/"+k, kind, url.Values{"page": {strconv.Itoa(page)}, "with_genres": {strconv.Itoa(genre)},
+		"sort_by": {"popularity.desc"}, "vote_count.gte": {"50"}})
+}
+
+// page reads one page of titles of a kind at path.
+func (c *Client) page(ctx context.Context, path, kind string, q url.Values) (*Page, error) {
+	k := tv(kind)
 	var raw struct {
 		Page       int        `json:"page"`
 		TotalPages int        `json:"total_pages"`
 		Results    []rawTitle `json:"results"`
 	}
-	if err := c.get(ctx, path, c.withLanguage(url.Values{"page": {strconv.Itoa(page)}}), &raw); err != nil {
+	if err := c.get(ctx, path, c.withLanguage(q), &raw); err != nil {
 		return nil, err
 	}
 	out := &Page{Page: raw.Page, TotalPages: min(raw.TotalPages, 500)}
@@ -282,6 +309,7 @@ type rawDetails struct {
 		SeasonNumber int    `json:"season_number"`
 		Name         string `json:"name"`
 		EpisodeCount int    `json:"episode_count"`
+		AirDate      string `json:"air_date"`
 	} `json:"seasons"`
 	ReleaseDates struct {
 		Results []struct {
@@ -339,7 +367,7 @@ func (c *Client) Details(ctx context.Context, kind string, tmdbID int) (*Details
 	}
 	var seasons []Season
 	for _, s := range raw.Seasons {
-		seasons = append(seasons, Season{Number: s.SeasonNumber, Name: s.Name, EpisodeCount: s.EpisodeCount})
+		seasons = append(seasons, Season{Number: s.SeasonNumber, Name: s.Name, EpisodeCount: s.EpisodeCount, AirDate: date(s.AirDate)})
 	}
 	return MakeDetails(t, genres, cast, seasons), nil
 }

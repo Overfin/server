@@ -772,16 +772,20 @@ nothing beyond what that needs.
   below 2 are given as 0.
 - ~~**Favorites count on the site.**~~ Done. A title's page shows how many profiles
   marked it a favourite, from 2 up, so a count never points at one person.
-- **Picks: missing titles worth having.** Today Overfin values only the
-  missing titles someone already watched, kept or asked for, so it has
+- **Picks: missing titles worth having.** *Built*, first version, to
+  adjust once we see what it picks. Before, Overfin valued only the
+  missing titles someone already watched, kept or asked for, so it had
   almost nothing to suggest. Overfin gathers candidates from what it
-  knows, and values them like every other title. First version, to adjust
-  once we see what it picks:
+  knows, and values them like every other title (it needs TMDB: each
+  pick's page has its rating, genres and seasons; a series is valued as
+  its aired seasons):
   - **Sources** only bring titles into view: TMDB's trending and popular
     films and series, TMDB's recommendations for what people here watch
     and mark as favourites, and the genres accounts said they like
-    (Tastes). Later, maybe: actors and directors people watch a lot,
-    collections (a film's sequels).
+    (Tastes). Recommendations come from the 25 titles the most accounts
+    watched or liked in six months, the genres from the 5 most liked;
+    both lists are made once a day. Later, maybe: actors and directors
+    people watch a lot, collections (a film's sequels).
   - **One score.** No source counts for itself: a candidate's value is the
     valuation's, from the same criteria and the operator's weights
     (popularity already lifts what's trending; Tastes, what fits people

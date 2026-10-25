@@ -144,7 +144,7 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 	}
 	var seasons []Season
 	for _, s := range raw.Seasons {
-		seasons = append(seasons, Season{Number: s.SeasonNumber, Name: s.Name, EpisodeCount: s.EpisodeCount})
+		seasons = append(seasons, Season{Number: s.SeasonNumber, Name: s.Name, EpisodeCount: s.EpisodeCount, AirDate: date(s.AirDate)})
 	}
 	out := &Full{Details: *MakeDetails(t, genres, cast, seasons), Tagline: textclean.Plain(raw.Tagline, 300),
 		Release: raw.release(kind)}
