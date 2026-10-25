@@ -95,8 +95,8 @@ func (s *Store) PicksToDescribe(ctx context.Context, before time.Time, limit int
 }
 
 // picks adds to f the picks the libraries lack and TMDB described: a film
-// as itself, a series as each of its seasons that has aired. Seasons TMDB
-// hasn't dated yet are left out (nothing to add).
+// as itself, a series as each of its seasons that has aired or airs within
+// ReleaseSoon. Seasons TMDB hasn't dated yet are left out (nothing to add).
 func (s *Store) picks(ctx context.Context, f *ValuationFacts, now time.Time) error {
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT t.kind, t.tmdb, t.details FROM catalog_lists l
 		JOIN catalog_titles t ON t.kind = l.kind AND t.tmdb = l.tmdb
@@ -106,7 +106,7 @@ func (s *Store) picks(ctx context.Context, f *ValuationFacts, now time.Time) err
 		return err
 	}
 	defer rows.Close()
-	today := now.UTC().Format(time.DateOnly)
+	soon := now.UTC().Add(ReleaseSoon).Format(time.DateOnly)
 	for rows.Next() {
 		var kind, tmdb, details string
 		if err := rows.Scan(&kind, &tmdb, &details); err != nil {
@@ -125,7 +125,7 @@ func (s *Store) picks(ctx context.Context, f *ValuationFacts, now time.Time) err
 		}
 		f.pickTVDB[tmdb] = d.TVDB
 		for _, se := range d.Seasons {
-			if se.Number < 1 || se.EpisodeCount < 1 || se.AirDate == "" || se.AirDate > today {
+			if se.Number < 1 || se.EpisodeCount < 1 || se.AirDate == "" || se.AirDate > soon {
 				continue
 			}
 			t := f.title(TitleRef{Kind: "season", Source: "tmdb", ID: tmdb, Season: se.Number}.Key())
@@ -154,6 +154,55 @@ func (s *Store) ListPositions(ctx context.Context, list string) (map[string]int,
 			return nil, err
 		}
 		out[kind+"/"+tmdb] = n
+	}
+	return out, rows.Err()
+}
+
+// ReleaseSoon is how close to its release a title the libraries lack may
+// be suggested: an app adding it then has it ready for the release.
+const ReleaseSoon = 2 * 24 * time.Hour
+
+// HomeRelease is when a film can be watched at home, as far as Overfin
+// knows: AtHome (digital, disc or TV), Released (its first release, in
+// cinemas), Year; "" or 0 when unknown.
+type HomeRelease struct {
+	AtHome, Released string
+	Year             int
+}
+
+// OutBy reports whether the film is out at home by day (YYYY-MM-DD): its
+// home release, or 90 days after cinemas when that's all that's known, or,
+// without any date, a year before day's.
+func (r HomeRelease) OutBy(day time.Time) bool {
+	d := day.UTC().Format(time.DateOnly)
+	switch {
+	case r.AtHome != "":
+		return r.AtHome <= d
+	case r.Released != "":
+		cinemas, err := time.Parse(time.DateOnly, r.Released)
+		return err == nil && !cinemas.AddDate(0, 0, 90).After(day.UTC())
+	}
+	return r.Year > 0 && r.Year < day.UTC().Year()
+}
+
+// FilmReleases are the films the catalog knows, by TMDB ID, with what's
+// known of their release.
+func (s *Store) FilmReleases(ctx context.Context) (map[string]HomeRelease, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT t.tmdb, coalesce(t.year, 0), coalesce(r.released, ''), coalesce(r.at_home, '')
+		FROM catalog_titles t LEFT JOIN title_ratings_fetched r ON r.kind = t.kind AND r.tmdb = t.tmdb
+		WHERE t.kind = 'movie'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]HomeRelease{}
+	for rows.Next() {
+		var tmdb string
+		var r HomeRelease
+		if err := rows.Scan(&tmdb, &r.Year, &r.Released, &r.AtHome); err != nil {
+			return nil, err
+		}
+		out[tmdb] = r
 	}
 	return out, rows.Err()
 }
