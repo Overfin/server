@@ -146,6 +146,7 @@ label.inline { display: inline-flex; align-items: center; gap: .5rem; min-height
 .setting .weight { display: flex; align-items: center; gap: .6rem; width: 13rem; flex: none; }
 .setting .weight input[type=range] { width: auto; flex: 1; accent-color: var(--accent); }
 .setting .weight output { width: 1.5rem; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.setting .weight input[type=number] { width: 5rem; flex: none; }
 .columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; }
 @media (max-width: 800px) { .columns { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 600px) {

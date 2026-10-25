@@ -50,7 +50,9 @@ const (
 // values, one row each with every ID known, and the field groups asked
 // for (fields=score,stats,availability; all the key may read when left
 // out). Filters: inLibrary, kind (movie or season), list (trending or
-// popular: the titles in TMDB's list, in its order unless sort is given).
+// popular: the titles in TMDB's list, in its order unless sort is given;
+// suggestions: what the libraries lack, mixed by the discovery share, see
+// suggestionOrder, never sorted otherwise).
 // Sorting: by score (needs the score scope) or name, order asc or desc.
 // Pages of limit rows
 // (100, at most 1000), the next one at the cursor given.
@@ -92,8 +94,12 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 	}
 	sortBy, order := q.Get("sort"), q.Get("order")
 	list := q.Get("list")
-	if list != "" && list != "trending" && list != "popular" {
-		invalid(w, "list: trending or popular")
+	if list != "" && list != "trending" && list != "popular" && list != "suggestions" {
+		invalid(w, "list: trending, popular or suggestions")
+		return
+	}
+	if list == "suggestions" && (q.Get("sort") != "" || q.Get("inLibrary") == "true") {
+		invalid(w, "list=suggestions has its own order, of titles the libraries lack")
 		return
 	}
 	if sortBy == "" && list != "" {
@@ -167,11 +173,15 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 	}
 	// position is where a film or a season's series stands in the list.
 	var positions map[string]int
-	if list != "" {
+	if list == "trending" || list == "popular" {
 		if positions, err = p.Store.ListPositions(ctx, list); err != nil {
 			p.fail(w, "reading the list", err)
 			return
 		}
+	}
+	if list == "suggestions" {
+		missing := false
+		inLibrary = &missing
 	}
 	position := func(key string) (int, bool) {
 		r, _ := store.ParseTitleKey(key)
@@ -188,10 +198,27 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		if (inLibrary != nil && v.InLibrary != *inLibrary) || (kind != "" && r.Kind != kind) {
 			continue
 		}
-		if _, ok := position(v.Key); list != "" && !ok {
+		if _, ok := position(v.Key); positions != nil && !ok {
 			continue
 		}
 		rows = append(rows, v)
+	}
+	if list == "suggestions" {
+		var lists []map[string]int
+		for _, name := range []string{"trending", "popular"} {
+			positions, err := p.Store.ListPositions(ctx, name)
+			if err != nil {
+				p.fail(w, "reading the list", err)
+				return
+			}
+			lists = append(lists, positions)
+		}
+		share, err := p.Store.DiscoveryShare(ctx)
+		if err != nil {
+			p.fail(w, "reading the discovery share", err)
+			return
+		}
+		rows = suggestionOrder(rows, lists, share)
 	}
 	less := func(i, j int) bool {
 		if sortBy == "list" {
@@ -215,6 +242,9 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		return rows[i].Key < rows[j].Key
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
+		if list == "suggestions" {
+			return false // already in order
+		}
 		if order == "desc" {
 			return less(j, i)
 		}

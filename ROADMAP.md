@@ -790,14 +790,18 @@ nothing beyond what that needs.
     valuation's, from the same criteria and the operator's weights
     (popularity already lifts what's trending; Tastes, what fits people
     here). So a pick and a title on the server compare directly.
-  - **No new setting:** the Valuation sliders shape the picks too.
-  - They come out of `GET /apps/v1/titles?inLibrary=false`, best first:
-    Overtide reads them as "Overfin's picks", after requests and before
-    the import lists.
+  - The Valuation sliders shape the picks too.
+  - They come out of `GET /apps/v1/titles?inLibrary=false`, best first.
   - **Discovery** (built): `list=trending` and `list=popular` on the
     same endpoint give the missing titles of TMDB's lists in TMDB's order,
-    not by score, so Overtide can bring in what people hear about, whether
-    or not it fits the server's tastes (its Discovery share).
+    not by score.
+  - **Suggestions** (built 2026-10-25): `list=suggestions` is what an app
+    like Overtide adds, in order: the picks by value, with trending and
+    popular titles mixed in by the **Discovery share** (Valuation page,
+    default 50%), so people get what they hear about whether or not it
+    fits the server's tastes. Overtide reads it every hour and adds in
+    that order, after requests; import lists are the operator's business,
+    neither Overfin nor Overtide reads them.
 - **Overtide**, when the operator plugs requests into it, is the one that
   cares about storage. It reads the requests (by an anonymous account ID,
   for nothing but counting) and the values through Overfin's apps API, so

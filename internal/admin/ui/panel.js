@@ -1324,6 +1324,15 @@ async function valuationView() {
     toast(ask.checked ? 'People will be asked what they like.' : 'People won\'t be asked any more; what they watch still counts.');
     preview();
   }, (err) => { ask.checked = !ask.checked; toast(err.message, true); }));
+  const share = h('input', { type: 'number', min: '0', max: '100', step: '1', value: String(data.discoveryShare), 'aria-label': 'Discovery share, in percent' });
+  share.addEventListener('change', () => busy(null, async () => {
+    const n = Math.round(Number(share.value));
+    if (!(n >= 0 && n <= 100)) throw new Error('The discovery share goes from 0 to 100.');
+    await api('PUT', '/admin/api/valuation', { discoveryShare: n });
+    share.value = String(n);
+    data.discoveryShare = n;
+    toast(n ? `${n}% of the suggestions will come from trending and popular titles.` : 'Suggestions come from the picks alone.');
+  }, (err) => { share.value = String(data.discoveryShare); toast(err.message, true); }));
   const state = status('');
   const most = h('tbody', {});
   const least = h('tbody', {});
@@ -1412,6 +1421,8 @@ async function valuationView() {
           h('div', {}, sliders.map((x) => x.row),
             setting('Ask people what they like', 'When they set up their account, and on their account page: series or films, genres, kids\' content. Off, Tastes come from what they watch alone.', ask)),
           [state, reset, save]),
+        card({ title: 'Suggestions', description: 'What apps you give a key, like Overtide, are told to add: the titles the libraries lack, the most valuable first.' },
+          h('div', {}, setting('Discovery share', 'The part of the suggestions taken from TMDB\'s trending and popular titles whatever their value, so people find new things and the titles they hear about. 0 turns it off.', h('div', { class: 'weight' }, share, h('span', {}, '%'))))),
         h('div', { class: 'columns' },
           h('section', {}, h('h2', {}, 'Most valuable'), list('In the libraries', most)),
           h('section', {}, h('h2', {}, 'Least valuable'), list('In the libraries', least))),

@@ -447,3 +447,31 @@ func (s *Store) SetValuationWeights(ctx context.Context, w map[string]int) error
 		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, raw)
 	return err
 }
+
+// DefaultDiscoveryShare is the discovery share until the operator sets one.
+const DefaultDiscoveryShare = 50
+
+// DiscoveryShare is the part, in percent, of the suggestions taken from
+// TMDB's trending and popular titles whatever their value.
+func (s *Store) DiscoveryShare(ctx context.Context) (int, error) {
+	var v []byte
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'discovery-share'`).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DefaultDiscoveryShare, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.Atoi(string(v))
+	if err != nil || n < 0 || n > 100 {
+		return DefaultDiscoveryShare, nil
+	}
+	return n, nil
+}
+
+// SetDiscoveryShare keeps the discovery share, 0 to 100.
+func (s *Store) SetDiscoveryShare(ctx context.Context, share int) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO meta (name, value) VALUES ('discovery-share', ?)
+		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, []byte(strconv.Itoa(share)))
+	return err
+}
