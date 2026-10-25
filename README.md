@@ -430,7 +430,7 @@ Authorization: Bearer ofapp_…
 ```
 
 ```json
-{"titles": [{"kind": "season", "tmdbId": "1399", "tvdbId": "121361", "imdbId": "tt0944947",
+{"titles": [{"kind": "season", "name": "Game of Thrones", "tmdbId": "1399", "tvdbId": "121361", "imdbId": "tt0944947",
   "season": 2, "score": 41.5, "inLibrary": true,
   "stats": {"plays": 12, "viewers": 3, "favorites": 2, "lastPlayed": "2026-10-20"}}],
  "next": "100", "generatedAt": "…"}

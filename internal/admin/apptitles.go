@@ -17,7 +17,9 @@ var titleGroups = []string{"score", "stats", "availability"}
 
 type appTitleJSON struct {
 	// Kind is movie or season; a season carries its series' IDs.
-	Kind   string `json:"kind"`
+	Kind string `json:"kind"`
+	// Name is the film's or the series' name.
+	Name   string `json:"name,omitempty"`
 	TMDB   string `json:"tmdbId,omitempty"`
 	IMDb   string `json:"imdbId,omitempty"`
 	TVDB   string `json:"tvdbId,omitempty"`
@@ -227,7 +229,7 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		v := rows[i]
 		t := f.Titles[v.Key]
 		ref, _ := store.ParseTitleKey(v.Key)
-		j := appTitleJSON{Kind: ref.Kind, TMDB: ref.TMDB(), IMDb: t.IMDb, TVDB: t.TVDB}
+		j := appTitleJSON{Kind: ref.Kind, Name: t.Name, TMDB: ref.TMDB(), IMDb: t.IMDb, TVDB: t.TVDB}
 		if ref.Kind == "season" {
 			j.Season = &ref.Season
 		}
