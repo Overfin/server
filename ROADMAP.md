@@ -834,6 +834,12 @@ nothing beyond what that needs.
 - **Jellyfin companion plugin**, only where the Jellyfin API falls short.
 - **Example clients**, beside overfin-web: small sites in common
   frameworks, showing how to build on the API and the SDK.
+- **Custom categories.** The operator makes categories (Anime,
+  Documentaries, Québécois…) from what the catalog already knows: genres,
+  kind (film or series), language, origin. Each appears as a section of
+  the site and can be a row on the home page; the operator changes them at
+  will. Nothing moves on disk: one library can hold everything, and kids
+  stay covered by their profiles' rating ceilings.
 - **A home page of one's own.** Each profile's home follows its tastes and
   habits. First step: the slideshow shows the titles that fit that profile
   (from Tastes and what it watches), instead of the same ones for everyone.
