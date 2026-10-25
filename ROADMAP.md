@@ -834,6 +834,9 @@ nothing beyond what that needs.
 - **Jellyfin companion plugin**, only where the Jellyfin API falls short.
 - **Example clients**, beside overfin-web: small sites in common
   frameworks, showing how to build on the API and the SDK.
+- **A home page of one's own.** Each profile's home follows its tastes and
+  habits. First step: the slideshow shows the titles that fit that profile
+  (from Tastes and what it watches), instead of the same ones for everyone.
 - **Media in several places.** The bundle gives Jellyfin one `MEDIA_DIR`,
   mounted at `/media`: everything must sit under one directory of one
   machine. Overfin's libraries already take several folders, but an
