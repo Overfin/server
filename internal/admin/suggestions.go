@@ -2,6 +2,7 @@ package admin
 
 import (
 	"sort"
+	"time"
 
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/valuation"
@@ -94,4 +95,19 @@ func suggestionOrder(rows []valuation.Value, lists []map[string]int, share int) 
 		}
 	}
 	return out
+}
+
+// outSoon keeps the titles out at home, or out within store.ReleaseSoon:
+// nothing to add before. Seasons come only once aired or about to
+// (store's picks); a film by its release (store.HomeRelease.OutBy).
+func outSoon(rows []valuation.Value, releases map[string]store.HomeRelease, now time.Time) []valuation.Value {
+	by := now.Add(store.ReleaseSoon)
+	kept := rows[:0:0]
+	for _, v := range rows {
+		if r, _ := store.ParseTitleKey(v.Key); r.Kind == "movie" && !releases[r.TMDB()].OutBy(by) {
+			continue
+		}
+		kept = append(kept, v)
+	}
+	return kept
 }

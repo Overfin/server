@@ -798,7 +798,9 @@ nothing beyond what that needs.
   - **Suggestions** (built 2026-10-25): `list=suggestions` is what an app
     like Overtide adds, in order: the picks by value, with trending and
     popular titles mixed in by the **Discovery share** (Valuation page,
-    default 50%), so people get what they hear about whether or not it
+    default 50%), only titles out at home or out within 2 days (a film by
+    its digital, disc or TV release, else 90 days after cinemas; a season
+    by its air date), so people get what they hear about whether or not it
     fits the server's tastes. Overtide reads it every hour and adds in
     that order, after requests; import lists are the operator's business,
     neither Overfin nor Overtide reads them.

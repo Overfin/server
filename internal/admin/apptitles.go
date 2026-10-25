@@ -218,7 +218,12 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 			p.fail(w, "reading the discovery share", err)
 			return
 		}
-		rows = suggestionOrder(rows, lists, share)
+		releases, err := p.Store.FilmReleases(ctx)
+		if err != nil {
+			p.fail(w, "reading the films' releases", err)
+			return
+		}
+		rows = suggestionOrder(outSoon(rows, releases, p.clock()), lists, share)
 	}
 	less := func(i, j int) bool {
 		if sortBy == "list" {
