@@ -794,6 +794,10 @@ nothing beyond what that needs.
   - They come out of `GET /apps/v1/titles?inLibrary=false`, best first:
     Overtide reads them as "Overfin's picks", after requests and before
     the import lists.
+  - **Discovery** (planned): `list=trending` and `list=popular` on the
+    same endpoint give the missing titles of TMDB's lists in TMDB's order,
+    not by score, so Overtide can bring in what people hear about, whether
+    or not it fits the server's tastes (its Discovery share).
 - **Overtide**, when the operator plugs requests into it, is the one that
   cares about storage. It reads the requests (by an anonymous account ID,
   for nothing but counting) and the values through Overfin's apps API, so
