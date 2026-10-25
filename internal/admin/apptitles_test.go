@@ -12,7 +12,7 @@ import (
 
 type appTitlesPage struct {
 	Titles []struct {
-		Kind, TmdbId, ImdbId string
+		Kind, Name, TmdbId, ImdbId string
 		Season               *int
 		Score                *float64
 		InLibrary            *bool
@@ -123,7 +123,7 @@ func TestAppTitles(t *testing.T) {
 	stats := key(`{"name":"Dashboard","scopes":["stats","availability"]}`)
 	get(stats, "?sort=score", 403)
 	page = get(stats, "?kind=movie", 200)
-	if len(page.Titles) != 2 || page.Titles[0].TmdbId != "1" || page.Titles[0].ImdbId != "tt1" || page.Titles[0].Score != nil {
+	if len(page.Titles) != 2 || page.Titles[0].TmdbId != "1" || page.Titles[0].Name != "Alpha" || page.Titles[0].ImdbId != "tt1" || page.Titles[0].Score != nil {
 		t.Fatalf("by name: %+v", page.Titles)
 	}
 	alpha, beta := page.Titles[0].Stats, page.Titles[1].Stats
