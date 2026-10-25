@@ -772,6 +772,24 @@ nothing beyond what that needs.
   below 2 are given as 0.
 - ~~**Favorites count on the site.**~~ Done. A title's page shows how many profiles
   marked it a favourite, from 2 up, so a count never points at one person.
+- **Picks: missing titles worth having.** Today Overfin values only the
+  missing titles someone already watched, kept or asked for, so it has
+  almost nothing to suggest. Overfin gathers candidates from what it
+  knows, and values them like every other title. First version, to adjust
+  once we see what it picks:
+  - **Sources** only bring titles into view: TMDB's trending and popular
+    films and series, TMDB's recommendations for what people here watch
+    and mark as favourites, and the genres accounts said they like
+    (Tastes). Later, maybe: actors and directors people watch a lot,
+    collections (a film's sequels).
+  - **One score.** No source counts for itself: a candidate's value is the
+    valuation's, from the same criteria and the operator's weights
+    (popularity already lifts what's trending; Tastes, what fits people
+    here). So a pick and a title on the server compare directly.
+  - **No new setting:** the Valuation sliders shape the picks too.
+  - They come out of `GET /apps/v1/titles?inLibrary=false`, best first:
+    Overtide reads them as "Overfin's picks", after requests and before
+    the import lists.
 - **Overtide**, when the operator plugs requests into it, is the one that
   cares about storage. It reads the requests (by an anonymous account ID,
   for nothing but counting) and the values through Overfin's apps API, so
