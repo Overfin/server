@@ -13,10 +13,10 @@ import (
 type appTitlesPage struct {
 	Titles []struct {
 		Kind, Name, TmdbId, ImdbId string
-		Season               *int
-		Score                *float64
-		InLibrary            *bool
-		Stats                *struct {
+		Season                     *int
+		Score                      *float64
+		InLibrary                  *bool
+		Stats                      *struct {
 			Plays, Viewers, Favorites int
 			LastPlayed                string
 		}
