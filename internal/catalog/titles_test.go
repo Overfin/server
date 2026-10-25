@@ -28,10 +28,11 @@ func (f *fakeTitles) Title(_ context.Context, kind string, id int) (*tmdb.Full, 
 	}
 	return &tmdb.Full{
 		Details: tmdb.Details{
-			Title:   tmdb.Title{TMDBID: 1399, Kind: "series", Name: "Le Trône de fer", Year: 2011, Overview: "Neuf familles…", Poster: "/poster1234.jpg"},
-			Genres:  []string{"Drame"},
-			Cast:    []tmdb.Person{{Name: "Emilia Clarke", Character: "Daenerys", Profile: "/emilia1234.jpg"}},
-			Seasons: []tmdb.Season{{Number: 1, Name: "Saison 1", EpisodeCount: 2}, {Number: 2, Name: "Saison 2", EpisodeCount: 1}},
+			Title:  tmdb.Title{TMDBID: 1399, Kind: "series", Name: "Le Trône de fer", Year: 2011, Overview: "Neuf familles…", Poster: "/poster1234.jpg"},
+			Genres: []string{"Drame"},
+			Cast:   []tmdb.Person{{Name: "Emilia Clarke", Character: "Daenerys", Profile: "/emilia1234.jpg"}},
+			Seasons: []tmdb.Season{{Number: 1, Name: "Saison 1", EpisodeCount: 2, AirDate: "2011-04-17"},
+				{Number: 2, Name: "Saison 2", EpisodeCount: 1, AirDate: "2099-01-01"}},
 		},
 		Runtime: 60,
 		Artwork: tmdb.Artwork{Poster: "/poster1234.jpg", Logo: "/logo12345.png"},

@@ -152,7 +152,56 @@ func (a *Titles) Once(ctx context.Context) error {
 			fetched++
 		}
 		if !progress {
-			return nil
+			break
+		}
+	}
+	n, err := a.describePicks(ctx, src)
+	fetched += n
+	return err
+}
+
+// describePicks fetches the pages of the picks the libraries lack (their
+// seasons come with a series' page, without their episodes), and says how
+// many it fetched. A title TMDB fails on is left for the next pass.
+func (a *Titles) describePicks(ctx context.Context, src TitleSource) (int, error) {
+	fetched, streak := 0, 0
+	failed := map[string]bool{}
+	for {
+		todo, err := a.Store.PicksToDescribe(ctx, a.clock().Add(-TitlesFresh), 100+len(failed))
+		if err != nil {
+			return fetched, err
+		}
+		progress := false
+		for _, t := range todo {
+			if failed[t.Key()] {
+				continue
+			}
+			if a.Source() == nil {
+				return fetched, nil
+			}
+			progress = true
+			id, err := strconv.Atoi(t.TMDB)
+			if err == nil {
+				_, err = a.page(ctx, src, t.Kind, id, map[string]map[string]string{})
+			}
+			switch {
+			case errors.Is(err, tmdb.ErrUnauthorized), ctx.Err() != nil:
+				return fetched, err
+			case err != nil:
+				failed[t.Key()] = true
+				if streak++; streak == 10 {
+					return fetched, err
+				}
+			default:
+				streak = 0
+				fetched++
+			}
+			if err := a.pause(ctx); err != nil {
+				return fetched, err
+			}
+		}
+		if !progress {
+			return fetched, nil
 		}
 	}
 }
@@ -217,7 +266,8 @@ func (a *Titles) page(ctx context.Context, src TitleSource, kind string, id int,
 	}
 	var seasons []int
 	for _, se := range full.Seasons {
-		det.Seasons = append(det.Seasons, store.SeasonInfo{Number: se.Number, Name: se.Name, EpisodeCount: se.EpisodeCount})
+		det.Seasons = append(det.Seasons, store.SeasonInfo{Number: se.Number, Name: se.Name, EpisodeCount: se.EpisodeCount,
+			AirDate: se.AirDate})
 		seasons = append(seasons, se.Number)
 	}
 	raw, err := json.Marshal(det)
