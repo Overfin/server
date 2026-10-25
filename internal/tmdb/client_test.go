@@ -100,13 +100,13 @@ func fakeTMDB(t *testing.T) *Client {
 			}
 			io.WriteString(w, `{"movie_results":[],"tv_results":[{"id":1399}]}`)
 		case "/3/tv/1400":
-			if r.URL.Query().Get("append_to_response") != "aggregate_credits,images,alternative_titles,translations,content_ratings" {
+			if r.URL.Query().Get("append_to_response") != "aggregate_credits,images,alternative_titles,translations,content_ratings,external_ids" {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 			io.WriteString(w, `{"id":1400,"name":"Seinfeld","first_air_date":"1989-07-05","original_name":"Seinfeld","original_language":"english",
 				"alternative_titles":{"results":[{"title":"Les Seinfeld"}]},"translations":{"translations":[{"data":{"name":"Seinfeld"}}]},
-				"credits":{"cast":[]},
+				"credits":{"cast":[]},"external_ids":{"tvdb_id":79169},
 				"aggregate_credits":{"cast":[{"name":"Jerry Seinfeld","profile_path":"/jerry12345.jpg","roles":[{"character":"Jerry"}]},
 					{"name":"Guest","roles":[]}]}}`)
 		case "/3/tv/1399/season/1":
@@ -204,7 +204,7 @@ func TestClient(t *testing.T) {
 	// A series' cast is the one over all its seasons.
 	if s, err := c.Title(ctx, "series", 1400); err != nil || len(s.Cast) != 2 || s.Cast[0].Character != "Jerry" ||
 		s.Cast[0].Profile != "/jerry12345.jpg" || s.Cast[1].Character != "" || s.Language != "" ||
-		!slices.Equal(s.Names, []string{"Les Seinfeld"}) {
+		!slices.Equal(s.Names, []string{"Les Seinfeld"}) || s.TVDB != 79169 {
 		t.Errorf("series cast: %+v %v", s, err)
 	}
 	person, err := c.Person(ctx, 1245)

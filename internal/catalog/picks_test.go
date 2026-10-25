@@ -90,7 +90,7 @@ func TestPicks(t *testing.T) {
 		t.Fatal(err)
 	}
 	s1 := f.Titles["series/tmdb/1399/s1"]
-	if s1 == nil || s1.InLibrary || s1.Released.Format(time.DateOnly) != "2011-04-17" || s1.Name != "Le Trône de fer" {
+	if s1 == nil || s1.InLibrary || s1.Released.Format(time.DateOnly) != "2011-04-17" || s1.Name != "Le Trône de fer" || s1.TVDB != "121361" {
 		t.Errorf("season 1: %+v", s1)
 	}
 	if f.Titles["series/tmdb/1399/s2"] != nil || f.Titles["movie/tmdb/100"] != nil {

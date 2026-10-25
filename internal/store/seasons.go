@@ -23,6 +23,8 @@ type TitleDetails struct {
 	Language     string `json:"language,omitempty"`
 	// Names are its other names (alternative titles, translations).
 	Names []string `json:"names,omitempty"`
+	// TVDB is a series' TheTVDB ID, from TMDB; "" when it doesn't say.
+	TVDB string `json:"tvdb,omitempty"`
 }
 
 // CastMember is someone in a title's cast.
