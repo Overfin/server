@@ -839,7 +839,9 @@ nothing beyond what that needs.
   kind (film or series), language, origin. Each appears as a section of
   the site and can be a row on the home page; the operator changes them at
   will. An account's owner can also limit a profile to some categories
-  (a kids profile to Kids, say), beside its rating ceilings. Nothing moves
+  (a kids profile to Kids, say), beside its rating ceilings, and account
+  templates can carry category limits too, so accounts made from them
+  start with them. Nothing moves
   on disk: one library can hold everything.
 - **A home page of one's own.** Each profile's home follows its tastes and
   habits. First step: the slideshow shows the titles that fit that profile
