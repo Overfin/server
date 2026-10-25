@@ -101,6 +101,23 @@ func TestAppTitles(t *testing.T) {
 		t.Errorf("second page: %+v", rest)
 	}
 
+	// A discovery list: its titles only, in its order (films and series
+	// side by side, by place); a season by its series' place.
+	db.SetList(ctx, "trending", "movie", []string{"2", "9", "1"})
+	db.SetList(ctx, "trending", "series", []string{"3"})
+	trending := get(scoreOnly, "?list=trending", 200)
+	if len(trending.Titles) != 3 || trending.Titles[0].TmdbId != "2" || trending.Titles[1].Season == nil ||
+		trending.Titles[2].TmdbId != "1" {
+		t.Errorf("trending: %+v", trending.Titles)
+	}
+	if p := get(scoreOnly, "?list=trending&kind=movie&sort=score&order=asc", 200); len(p.Titles) != 2 || *p.Titles[0].Score > *p.Titles[1].Score {
+		t.Errorf("trending by score: %+v", p.Titles)
+	}
+	if p := get(scoreOnly, "?list=popular", 200); len(p.Titles) != 0 {
+		t.Errorf("an empty list: %+v", p.Titles)
+	}
+	get(scoreOnly, "?list=upcoming", 400)
+
 	// Statistics: totals, counts below 2 as 0; a stats key can't sort by
 	// score.
 	stats := key(`{"name":"Dashboard","scopes":["stats","availability"]}`)

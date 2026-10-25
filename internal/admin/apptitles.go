@@ -47,8 +47,10 @@ const (
 // appTitles (GET /apps/v1/titles) lists the films and seasons Overfin
 // values, one row each with every ID known, and the field groups asked
 // for (fields=score,stats,availability; all the key may read when left
-// out). Filters: inLibrary, kind (movie or season). Sorting: by score
-// (needs the score scope) or name, order asc or desc. Pages of limit rows
+// out). Filters: inLibrary, kind (movie or season), list (trending or
+// popular: the titles in TMDB's list, in its order unless sort is given).
+// Sorting: by score (needs the score scope) or name, order asc or desc.
+// Pages of limit rows
 // (100, at most 1000), the next one at the cursor given.
 func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 	k := p.appKey(w, r, "")
@@ -57,7 +59,7 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	for name := range q {
-		if !strings.Contains(" fields inLibrary kind sort order limit cursor ", " "+name+" ") {
+		if !strings.Contains(" fields inLibrary kind list sort order limit cursor ", " "+name+" ") {
 			invalid(w, "unknown parameter: "+name)
 			return
 		}
@@ -87,6 +89,14 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sortBy, order := q.Get("sort"), q.Get("order")
+	list := q.Get("list")
+	if list != "" && list != "trending" && list != "popular" {
+		invalid(w, "list: trending or popular")
+		return
+	}
+	if sortBy == "" && list != "" {
+		sortBy = "list"
+	}
 	if sortBy == "" {
 		sortBy = "name"
 		if allows(k, "score") {
@@ -94,7 +104,10 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	switch {
-	case sortBy != "score" && sortBy != "name":
+	case sortBy == "list" && q.Get("sort") != "":
+		invalid(w, "sort: score or name")
+		return
+	case sortBy != "score" && sortBy != "name" && sortBy != "list":
 		invalid(w, "sort: score or name")
 		return
 	case sortBy == "score" && !allows(k, "score"):
@@ -105,7 +118,7 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if order == "" {
-		order = map[string]string{"score": "desc", "name": "asc"}[sortBy]
+		order = map[string]string{"score": "desc", "name": "asc", "list": "asc"}[sortBy]
 	}
 	limit, start := appTitlesLimit, 0
 	if s := q.Get("limit"); s != "" {
@@ -150,15 +163,47 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		p.fail(w, "reading the valuation's weights", err)
 		return
 	}
+	// position is where a film or a season's series stands in the list.
+	var positions map[string]int
+	if list != "" {
+		if positions, err = p.Store.ListPositions(ctx, list); err != nil {
+			p.fail(w, "reading the list", err)
+			return
+		}
+	}
+	position := func(key string) (int, bool) {
+		r, _ := store.ParseTitleKey(key)
+		top := "movie/"
+		if r.Kind != "movie" {
+			top = "series/"
+		}
+		n, ok := positions[top+r.TMDB()]
+		return n, ok
+	}
 	var rows []valuation.Value
 	for _, v := range m.Scored(valuation.Weights(saved)) {
 		r, _ := store.ParseTitleKey(v.Key)
 		if (inLibrary != nil && v.InLibrary != *inLibrary) || (kind != "" && r.Kind != kind) {
 			continue
 		}
+		if _, ok := position(v.Key); list != "" && !ok {
+			continue
+		}
 		rows = append(rows, v)
 	}
 	less := func(i, j int) bool {
+		if sortBy == "list" {
+			a, _ := position(rows[i].Key)
+			b, _ := position(rows[j].Key)
+			if a != b {
+				return a < b
+			}
+			ri, _ := store.ParseTitleKey(rows[i].Key)
+			rj, _ := store.ParseTitleKey(rows[j].Key)
+			if ri.Season != rj.Season {
+				return ri.Season < rj.Season
+			}
+		}
 		if sortBy == "score" && rows[i].Score != rows[j].Score {
 			return rows[i].Score < rows[j].Score
 		}

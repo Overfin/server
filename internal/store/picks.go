@@ -133,3 +133,23 @@ func (s *Store) picks(ctx context.Context, f *ValuationFacts, now time.Time) err
 	}
 	return rows.Err()
 }
+
+// ListPositions are where each title stands in one of discovery's lists,
+// from 0, by kind and TMDB ID ("movie/550", "series/1399").
+func (s *Store) ListPositions(ctx context.Context, list string) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT kind, tmdb, position FROM catalog_lists WHERE list = ?`, list)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var kind, tmdb string
+		var n int
+		if err := rows.Scan(&kind, &tmdb, &n); err != nil {
+			return nil, err
+		}
+		out[kind+"/"+tmdb] = n
+	}
+	return out, rows.Err()
+}
