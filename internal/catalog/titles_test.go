@@ -35,6 +35,7 @@ func (f *fakeTitles) Title(_ context.Context, kind string, id int) (*tmdb.Full, 
 				{Number: 2, Name: "Saison 2", EpisodeCount: 1, AirDate: "2099-01-01"}},
 		},
 		Runtime: 60,
+		TVDB:    121361,
 		Artwork: tmdb.Artwork{Poster: "/poster1234.jpg", Logo: "/logo12345.png"},
 		Release: &tmdb.Release{Ratings: tmdb.Ratings{}, Released: "2011-04-17", AtHome: "2011-04-17"},
 	}, nil

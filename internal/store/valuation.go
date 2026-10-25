@@ -35,6 +35,9 @@ type ValuationFacts struct {
 	// seasonAired are the picks' seasons' first air dates, from their
 	// series' page, by key: for seasons not fetched on their own.
 	seasonAired map[string]string
+	// pickTVDB are the picked series' TheTVDB IDs, from their page, by
+	// TMDB ID: the libraries don't have them to say.
+	pickTVDB map[string]string
 }
 
 // ValuationProfile is who a profile is, for the valuation.
@@ -343,6 +346,9 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 			return err
 		}
 		t.IMDb, t.TVDB = imdb.String, tvdb.String
+		if t.TVDB == "" && top.Kind == "series" {
+			t.TVDB = f.pickTVDB[r.ID]
+		}
 		genres, err := s.db.QueryContext(ctx, `SELECT genre FROM catalog_title_genres WHERE kind = ? AND tmdb = ? ORDER BY genre`,
 			top.Kind, r.ID)
 		if err != nil {

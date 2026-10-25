@@ -44,6 +44,9 @@ type Full struct {
 	// Names are its other names: alternative titles and translations,
 	// each once, for telling whether a file is this title.
 	Names []string
+	// TVDB is a series' TheTVDB ID, which Sonarr knows it by; 0 when TMDB
+	// doesn't say.
+	TVDB int
 }
 
 // maxNames caps how many other names a title keeps.
@@ -98,6 +101,9 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 			Titles  []struct{ Title string } `json:"titles"`
 			Results []struct{ Title string } `json:"results"`
 		} `json:"alternative_titles"`
+		ExternalIDs struct {
+			TVDB int `json:"tvdb_id"`
+		} `json:"external_ids"`
 		Translations struct {
 			Translations []struct {
 				Data struct {
@@ -110,7 +116,7 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 	// The certifications and release dates come along: one request.
 	extra := "credits,images,alternative_titles,translations,release_dates"
 	if kind == "series" {
-		extra = "aggregate_credits,images,alternative_titles,translations,content_ratings"
+		extra = "aggregate_credits,images,alternative_titles,translations,content_ratings,external_ids"
 	}
 	q := c.withLanguage(url.Values{"append_to_response": {extra}, "include_image_language": {imageLanguages(lang)}})
 	if err := c.get(ctx, "/"+k+"/"+strconv.Itoa(tmdbID), q, &raw); err != nil {
@@ -159,6 +165,9 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 		out.Popularity = raw.Popularity
 	}
 	out.GenreIDs = genreIDs
+	if kind == "series" && raw.ExternalIDs.TVDB > 0 && raw.ExternalIDs.TVDB < 1e9 {
+		out.TVDB = raw.ExternalIDs.TVDB
+	}
 	runtime := raw.Runtime
 	if kind == "series" && len(raw.EpisodeRunTime) > 0 {
 		runtime = raw.EpisodeRunTime[0]

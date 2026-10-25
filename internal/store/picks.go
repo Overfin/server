@@ -120,6 +120,10 @@ func (s *Store) picks(ctx context.Context, f *ValuationFacts, now time.Time) err
 		if json.Unmarshal([]byte(details), &d) != nil {
 			continue
 		}
+		if f.pickTVDB == nil {
+			f.pickTVDB = map[string]string{}
+		}
+		f.pickTVDB[tmdb] = d.TVDB
 		for _, se := range d.Seasons {
 			if se.Number < 1 || se.EpisodeCount < 1 || se.AirDate == "" || se.AirDate > today {
 				continue
