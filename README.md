@@ -438,7 +438,10 @@ Authorization: Bearer ofapp_…
 
 One row per film and per season (a season carries its series' IDs), with
 the groups the key may read, or those named in `fields` (`score`, `stats`,
-`availability`). Filters: `inLibrary`, `kind` (`movie` or `season`).
+`availability`). Filters: `inLibrary`, `kind` (`movie` or `season`),
+`list` (`trending` or `popular`: the titles in TMDB's list, in its order
+unless `sort` is given, films and series side by side by their place; a
+season by its series' place).
 Sorting: `sort=score` (keys with the value only) or `name`, `order=asc` or
 `desc`. Pages of `limit` rows (100 by default, at most 1000); the next one
 at `cursor=` what `next` says. An app that frees space (such as Overtide)

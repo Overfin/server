@@ -794,7 +794,7 @@ nothing beyond what that needs.
   - They come out of `GET /apps/v1/titles?inLibrary=false`, best first:
     Overtide reads them as "Overfin's picks", after requests and before
     the import lists.
-  - **Discovery** (planned): `list=trending` and `list=popular` on the
+  - **Discovery** (built): `list=trending` and `list=popular` on the
     same endpoint give the missing titles of TMDB's lists in TMDB's order,
     not by score, so Overtide can bring in what people hear about, whether
     or not it fits the server's tastes (its Discovery share).
