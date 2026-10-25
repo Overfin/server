@@ -441,11 +441,15 @@ the groups the key may read, or those named in `fields` (`score`, `stats`,
 `availability`). Filters: `inLibrary`, `kind` (`movie` or `season`),
 `list` (`trending` or `popular`: the titles in TMDB's list, in its order
 unless `sort` is given, films and series side by side by their place; a
-season by its series' place).
+season by its series' place; or `suggestions`: the titles the libraries
+lack, in the order an app should add them, the most valuable first with
+trending and popular titles mixed in by the **Discovery share** set on the
+Valuation tab; never sorted otherwise).
 Sorting: `sort=score` (keys with the value only) or `name`, `order=asc` or
 `desc`. Pages of `limit` rows (100 by default, at most 1000); the next one
 at `cursor=` what `next` says. An app that frees space (such as Overtide)
-asks for the least valuable titles the libraries have, as above.
+asks for the least valuable titles the libraries have, as above, and
+for `list=suggestions` to know what to add.
 
 The older endpoint, for keys made for watch statistics before, still
 answers:

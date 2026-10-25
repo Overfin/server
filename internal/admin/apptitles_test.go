@@ -117,6 +117,13 @@ func TestAppTitles(t *testing.T) {
 		t.Errorf("an empty list: %+v", p.Titles)
 	}
 	get(scoreOnly, "?list=upcoming", 400)
+	// Suggestions: only what the libraries lack (here, nothing), in their
+	// own order.
+	if p := get(scoreOnly, "?list=suggestions", 200); len(p.Titles) != 0 {
+		t.Errorf("suggestions of titles all in the libraries: %+v", p.Titles)
+	}
+	get(scoreOnly, "?list=suggestions&sort=score", 400)
+	get(scoreOnly, "?list=suggestions&inLibrary=true", 400)
 
 	// Statistics: totals, counts below 2 as 0; a stats key can't sort by
 	// score.
