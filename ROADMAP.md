@@ -834,6 +834,13 @@ nothing beyond what that needs.
 - **Jellyfin companion plugin**, only where the Jellyfin API falls short.
 - **Example clients**, beside overfin-web: small sites in common
   frameworks, showing how to build on the API and the SDK.
+- **Media in several places.** The bundle gives Jellyfin one `MEDIA_DIR`,
+  mounted at `/media`: everything must sit under one directory of one
+  machine. Overfin's libraries already take several folders, but an
+  operator with several disks, or shares on NAS boxes or other machines,
+  has to edit the Compose file or gather the mounts under one parent first.
+  Needed: several media folders without editing anything (and help for
+  network shares), kept as simple as the single one.
 
 ## Companion projects
 
