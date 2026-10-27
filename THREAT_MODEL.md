@@ -1,7 +1,7 @@
 # Threat model
 
-Overfin sits between the internet and a Jellyfin server (plus optional TMDB and
-Seerr plugins). It protects Jellyfin from strangers, and users from strangers and from
+Overfin sits between the internet and a Jellyfin server of its own (plus
+TMDB and Seerr, both optional). It protects Jellyfin from strangers, and users from strangers and from
 each other. Numbers in brackets refer to the rules in
 [SECURITY.md](SECURITY.md).
 
@@ -9,8 +9,9 @@ each other. Numbers in brackets refer to the rules in
 
 ```
 internet ──▶ reverse proxy ──▶ Overfin ──▶ Jellyfin / Seerr / TMDB
- untrusted     operator's         the        trusted code,
-               (TLS, identity)    boundary   untrusted data
+ untrusted     operator's,        the        trusted code,
+               optional           boundary   untrusted data
+               (TLS, identity)
 ```
 
 | Party | Trusted? |
@@ -35,6 +36,7 @@ internet ──▶ reverse proxy ──▶ Overfin ──▶ Jellyfin / Seerr / 
 | Another server, weak or compromised | Reach into servers that share with it | Peers untrusted, authenticated, limited to what was shared [65] |
 | Attacker-controlled media or metadata | Run code in the browser, reach the internal network, exhaust memory | Untrusted-data rules [5–12] |
 | Network observer | See who watches what, catch passwords or links | TLS (a secure default: without HTTPS, everything travels in clear), nothing personal in URLs [48] |
+| An app the operator gave a key | Per-person activity | Totals only, for the scopes an admin ticked; keys kept as hashes, revocable [40, 58] |
 | Thief of a database or backup | Tokens, identities, PINs | Encryption and keyed PIN hashes [20], pseudonyms [47], minimal data [40] |
 
 ## Case 1: a compromised website
@@ -59,7 +61,7 @@ logged-in user's browser on that site.
   never SVG or HTML [10], text is plain [9], and every response carries a
   restrictive CSP and `nosniff` [34].
 - **It can't use Overfin to send users elsewhere.** After a login or step-up,
-  users only return to the same origin or an origin the operator allows, so
+  users only return to a path on the same origin, so
   Overfin's domain can't be used as a springboard to a phishing page [19].
 
 ## Case 2: a malicious logged-in user
@@ -88,8 +90,8 @@ Nothing is enforced by the UI.
 - **Smuggling through cursors or counts:** cursors are signed and bound to
   their query [38], and counts never include hidden items, so they can't
   reveal them [56].
-- **Brute force and link sharing:** short-lived, session-bound stream
-  tickets [30]; emailed links are long and work once [66]. Tickets are not bound to IP
+- **Brute force and link sharing:** stream tickets work only in the session
+  and for the profile that started them, and end with their playback [30]; emailed links are long and work once [66]. Tickets are not bound to IP
   addresses: phones change networks mid-stream, and storing IPs would break
   [42].
 - **Spying through upstream data:** Overfin's data model has no fields for
@@ -147,20 +149,23 @@ subtitles and attachments) from anywhere.
 ## Known limitations
 
 - **Stream tickets appear in the reverse proxy's access logs,** because media
-  players request them by URL. Their short lifetime keeps this harmless [30],
-  but operators should know.
+  players request them by URL. They work only in the session and for the
+  profile that started them, and end with the playback (24 hours at most),
+  which keeps this harmless [30], but operators should know.
 - **Kids profiles are only as strong as the PINs on the adult profiles.** PINs
   are optional; without them, a child can switch to an adult profile.
-- **Deleting an account doesn't necessarily delete its Jellyfin history.** The
-  operator chooses whether its Jellyfin and Seerr users are deleted or only
-  disabled [45].
+- **Deleting an account doesn't necessarily delete everything elsewhere.**
+  What Overfin holds goes, but the operator chooses whether the account's
+  Seerr user, and the Jellyfin users of profiles from before Overfin's one
+  account, are deleted or only disabled [45].
 - **Catalog searches reach TMDB.** With the TMDB catalog enabled, what users
   search for in the catalog is sent from the server to TMDB. Browsers never
   contact TMDB, but the operator's server does [43, 57].
-- **Step-up trusts the identity provider's login time.** Overfin asks for a
-  new login over OpenID Connect and accepts it only if the signed ID token is
+- **Step-up trusts the identity provider's login time.** With an identity
+  provider, Overfin asks for a new login over OpenID Connect and accepts it only if the signed ID token is
   for the same user and says the login happened after the step-up began. A
-  provider that reports a wrong login time would defeat that check. Without
+  provider that reports a wrong login time would defeat that check (with
+  Overfin's own sign-in, step-up is the password again). Without
   step-up configured, the actions that need it are refused, and PIN locks end
   after 15 minutes instead of waiting for the owner [21, 22].
 
