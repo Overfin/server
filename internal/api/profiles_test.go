@@ -72,7 +72,7 @@ func TestProfilesAndSwitching(t *testing.T) {
 	if code, _ := post(t, srv, "/api/v1/profiles", `{"name":"Partner"}`); code != http.StatusConflict {
 		t.Errorf("same name twice: %d", code)
 	}
-	for _, bad := range []string{`{"name":""}`, `{"name":"<b>x</b>"}`, `{"name":"x","kind":"kids"}`, `{"name":"x","pin":"1234"}`, `{"name":"` + strings.Repeat("a", 40) + `"}`} {
+	for _, bad := range []string{`{"name":""}`, `{"name":"<b>x</b>"}`, `{"name":"x","kind":"kids"}`, `{"name":"x","pin":"1234"}`, `{"name":"` + strings.Repeat("a", 40) + `"}`, `{"name":"x","theme":"blue"}`} {
 		if code, _ := post(t, srv, "/api/v1/profiles", bad); code != http.StatusBadRequest {
 			t.Errorf("%s: %d", bad, code)
 		}
@@ -375,5 +375,22 @@ func TestProfileTheme(t *testing.T) {
 	// Back to the device's.
 	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+partner.ID, `{"theme":""}`); code != 200 || strings.Contains(body, `"theme"`) {
 		t.Errorf("device: %d %s", code, body)
+	}
+}
+
+// A profile made with a look keeps it.
+func TestNewProfileKeepsItsTheme(t *testing.T) {
+	srv, _ := newServer(t)
+	code, body := post(t, srv, "/api/v1/profiles", `{"name":"Night","theme":"dark"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("create: %d %s", code, body)
+	}
+	var made struct{ ID string }
+	json.Unmarshal([]byte(body), &made)
+	if code, body := post(t, srv, "/api/v1/profiles/"+made.ID+"/activate", `{}`); code != 200 {
+		t.Fatalf("activate: %d %s", code, body)
+	}
+	if _, body := getAs(t, srv, subject, "/api/v1/me"); !strings.Contains(body, `"theme":"dark"`) {
+		t.Errorf("its look: %s", body)
 	}
 }

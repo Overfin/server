@@ -3608,6 +3608,11 @@ components:
             type: string
             minLength: 1
             maxLength: 128
+        theme:
+          type: string
+          description: The profile's look; empty or absent, it follows the
+            device.
+          enum: [light, dark, ""]
 
     ProfileUpdate:
       description: Only the fields sent are changed; `pin` alone changes
