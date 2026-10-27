@@ -132,8 +132,9 @@ func summaryOf(t *store.TitleInfo) library.TitleSummary {
 
 // visibleTitles says, for each title, whether the profile may see it: one
 // a library has, when it may see one of its copies (libraries, hidden
-// tags, kids limits); one no library has, when it's out as the panel asks
-// (titles shown) and, for a kids profile, rated within its limits. A file
+// tags, kids limits); one no library has, never for a profile limited to
+// some libraries (rule 28), else when it's out as the panel asks (titles
+// shown) and, for a kids profile, rated within its limits. A file
 // no one identified, only through its copies. Specials a library doesn't
 // have, and seasons without a single episode, never show.
 func (l Library) visibleTitles(ctx context.Context, p *store.Profile, titles []*store.TitleInfo) ([]bool, error) {
@@ -175,6 +176,8 @@ func (l Library) visibleTitles(ctx context.Context, p *store.Profile, titles []*
 				out[i] = out[i] || allowed[id]
 			}
 			continue
+		case a != nil && a.Libraries != nil:
+			continue // limited to some libraries: only what they have
 		case t.Ref.Kind == "item" || t.Ref.TMDB() == "":
 			continue // nothing to show but its copies, and it has none
 		case part && t.Ref.Season == 0 && (t.Ref.Kind == "episode" || t.Have == 0):

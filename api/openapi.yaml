@@ -1994,7 +1994,8 @@ paths:
         What Overfin doesn't describe yet is asked of TMDB when it's
         opened. Hidden from a profile that may see none of its copies, and,
         for a kids profile, when its rating isn't within its limits. A
-        title no library has shows only once it's out, as the operator
+        title no library has is hidden from a profile limited to some
+        libraries; to others, it shows only once it's out, as the operator
         sets (released, or watchable at home); specials no library has, and
         seasons without a single episode, never show.
       tags: [titles]
@@ -3538,7 +3539,8 @@ components:
         libraries:
           type: array
           description: The only libraries the profile gets, by ID; absent,
-            every library.
+            every library. A profile limited to some sees no title that no
+            library has (nor can it request one).
           items:
             type: string
             examples: [lib_0123456789abcdef0123456789abcdef]
