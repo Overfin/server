@@ -41,6 +41,9 @@ var Criteria = []string{WatchTime, Audience, Followed, Favorites, Watchlist, Req
 // from TMDB.
 var people = map[string]bool{WatchTime: true, Audience: true, Followed: true, Favorites: true, Watchlist: true, Requested: true, Tastes: true}
 
+// FromPeople says whether criterion c comes from what people do.
+func FromPeople(c string) bool { return people[c] }
+
 // MaxWeight is the highest weight; 0 leaves a criterion out.
 const MaxWeight = 10
 

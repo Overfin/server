@@ -62,6 +62,20 @@ func TestValuation(t *testing.T) {
 	if len(preview["found"]) != 1 || preview["found"][0].Name != "Watched" {
 		t.Errorf("found: %+v", preview["found"])
 	}
+	// Only the score says what people did; no title shows its activity
+	// criteria one by one.
+	for _, list := range preview {
+		for _, v := range list {
+			for c := range v.Parts {
+				if valuation.FromPeople(c) {
+					t.Errorf("%s shows %s: %v", v.Name, c, v.Parts)
+				}
+			}
+		}
+	}
+	if !strings.Contains(rec.Body.String(), `"rating"`) || strings.Contains(rec.Body.String(), `"watchTime"`) {
+		t.Errorf("preview parts: %s", rec.Body)
+	}
 	if rec := b.do("POST", "/admin/api/valuation/preview", `{"weights":{"rating":42}}`, nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("preview with a bad weight: %d", rec.Code)
 	}
