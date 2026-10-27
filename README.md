@@ -67,14 +67,16 @@ identity provider: see [Running it](#running-it).
   (how many streams and profiles an account gets, and whether each profile
   keeps a stream of its own), limits, languages,
   libraries, the GPU that converts videos (tested on your own files),
-  email, Seerr, fixing titles Jellyfin matched wrong.
+  email, Seerr, fixing titles Jellyfin matched wrong, what each title is
+  worth to your server (Valuation).
 - **Bringing people over** from another Jellyfin, their watch history
   included, with their old username and password, once. Nothing changes on
   that server.
 - **Your own identity provider** instead of Overfin's sign-in, if you have
   one: OpenID Connect (Authentik, Pocket ID…) or a proxy's forward auth.
 - **An API** for your own apps, and a key-protected one for tools such as
-  Stewarr.
+  Overtide: each title's value, from the weights you set (Valuation), its
+  watch totals, and what to add next.
 
 ```
 browser ──▶ the site (overfin-web, or your own)
@@ -133,7 +135,8 @@ from then on. A Jellyfin you already use stays yours and untouched: see
 
 **1. Start it** with the commands at the top. [.env](deploy/.env.example)
 has two settings: `MEDIA_DIR`, your films and series (Jellyfin only reads
-them), and `OVERFIN_DOMAIN`, optional (see below). On Fedora, RHEL and
+them), and `OVERFIN_DOMAIN`, optional (see below). Your TMDB token can go
+there too, as `OVERFIN_TMDB_TOKEN`, or in the wizard. On Fedora, RHEL and
 other SELinux systems, add `,z` after `:ro` on the media line of
 `compose.yaml`, so Jellyfin may read the folder.
 
@@ -352,7 +355,8 @@ Overfin's are the place to start, at the release you run:
   French only; `reset.fr-CA.html`, in Canadian French only. Your own
   templates' languages are yours to cover.
 - Templates are Go templates, with `.Site`, `.Lang`, `.Subject`, `.Link`,
-  `.Custom` (your brand is on), `.Banner` (`cid:banner`), `.Light` and
+  `.Custom` (your brand is on), `.Banner` (`cid:banner`), `.Overfin`
+  (Overfin's small logo, `cid:overfin`, with your brand on), `.Light` and
   `.Dark` (the theme's colors, such as `index .Light "accent"`), and `t`
   for Overfin's sentences in the reader's language (`{{t "reset.intro"}}`).
 - They're read for every email: no restart. One that fails is reported in
@@ -510,7 +514,8 @@ go run ./cmd/overfin -config overfin.toml
 
 Go with the standard library and three dependencies (a TOML parser, a
 pure-Go SQLite, and the Go team's golang.org/x/crypto for getting
-certificates from Let's Encrypt). CI runs formatting, vet, staticcheck, govulncheck, the tests
+certificates from Let's Encrypt), besides overfin-web, which the official
+build bundles. CI runs formatting, vet, staticcheck, govulncheck, the tests
 with the race detector, and a check that the API specification matches the
 routes.
 
@@ -533,7 +538,7 @@ password. `-recover-tokens` prints these steps too.
 Said plainly: most of Overfin's code and documentation is written by Claude
 (Anthropic's AI), and commits it wrote carry a `Co-Authored-By: Claude`
 trailer. The maintainer decides what gets built and how it should behave,
-and runs every change on a real server with a real library. Each change
+and runs Overfin, day to day, on a real server with a real library. Each change
 passes the tests, vet, staticcheck and govulncheck before it's pushed.
 
 That isn't the same as an independent security review, and Overfin hasn't
