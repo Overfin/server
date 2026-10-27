@@ -141,13 +141,14 @@ func (t *Tickets) live(s *Stream, now time.Time) bool {
 	return now.Sub(s.started) < t.MaxAge
 }
 
-// ByTicket finds a live stream by its ticket. A request for the stream
-// counts as activity.
-func (t *Tickets) ByTicket(ticket string, now time.Time) (*Stream, bool) {
+// ByTicket finds a live stream by its ticket, for the session and profile
+// that started it only (rule 30). Only such a request counts as activity:
+// a ticket used anywhere else keeps nothing alive (rule 33).
+func (t *Tickets) ByTicket(ticket, sessionID, profileID string, now time.Time) (*Stream, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	s, ok := t.byTicket[ticket]
-	if !ok || !t.live(s, now) {
+	if !ok || !t.live(s, now) || s.SessionID != sessionID || s.ProfileID != profileID {
 		return nil, false
 	}
 	s.lastSeen = now

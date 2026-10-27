@@ -48,3 +48,32 @@ func TestDevices(t *testing.T) {
 		t.Errorf("next: %s", d)
 	}
 }
+
+// A ticket used from another session or by another profile finds nothing
+// and keeps nothing alive: a leaked stream URL can't hold a transcode
+// (rules 30 and 33).
+func TestTicketElsewhere(t *testing.T) {
+	tk := NewTickets(24 * time.Hour)
+	now := time.Now()
+	s := &Stream{AccountID: "acct_a", ProfileID: "prof_a", SessionID: "sess_a"}
+	tk.Add(s, 0, now)
+	for i := 1; i <= 10; i++ {
+		at := now.Add(time.Duration(i) * time.Minute)
+		if _, ok := tk.ByTicket(s.Ticket, "sess_b", "prof_a", at); ok {
+			t.Fatal("found from another session")
+		}
+		if _, ok := tk.ByTicket(s.Ticket, "sess_a", "prof_b", at); ok {
+			t.Fatal("found by another profile")
+		}
+	}
+	if idle := tk.Idle(now.Add(10*time.Minute), 2*time.Minute); len(idle) != 1 || idle[0] != s {
+		t.Errorf("uses elsewhere kept the playback alive: idle %v", idle)
+	}
+	// Its own session's use counts.
+	if got, ok := tk.ByTicket(s.Ticket, "sess_a", "prof_a", now.Add(10*time.Minute)); !ok || got != s {
+		t.Fatal("not found from its own session")
+	}
+	if idle := tk.Idle(now.Add(11*time.Minute), 2*time.Minute); len(idle) != 0 {
+		t.Errorf("its own use didn't count: idle %v", idle)
+	}
+}

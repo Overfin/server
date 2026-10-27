@@ -231,7 +231,7 @@ func TestTranscodesCountsOnlyReencoding(t *testing.T) {
 func TestRegistry(t *testing.T) {
 	tk := NewTickets(24 * time.Hour)
 	now := time.Now()
-	old := &Stream{AccountID: "acct_a", ProfileID: "prof_a", ItemID: item}
+	old := &Stream{AccountID: "acct_a", ProfileID: "prof_a", SessionID: "sess_a", ItemID: item}
 	tk.Add(old, 0, now)
 	newer := &Stream{AccountID: "acct_a", ProfileID: "prof_b", ItemID: item, Decision: Decision{Method: "transcode", Protocol: "hls"}}
 	tk.Add(newer, 0, now.Add(time.Second))
@@ -239,7 +239,7 @@ func TestRegistry(t *testing.T) {
 	if len(old.Ticket) < 32 || !strings.HasPrefix(old.ID, "play_") {
 		t.Errorf("ticket %q, id %q", old.Ticket, old.ID)
 	}
-	if got, ok := tk.ByTicket(old.Ticket, now); !ok || got != old {
+	if got, ok := tk.ByTicket(old.Ticket, "sess_a", "prof_a", now); !ok || got != old {
 		t.Error("ticket not found")
 	}
 	if _, _, ok := tk.ByID(old.ID, "prof_b", now); ok {
@@ -259,7 +259,7 @@ func TestRegistry(t *testing.T) {
 	if tk.Remove(old, "stopped", "", now) {
 		t.Error("a playback was removed twice")
 	}
-	if _, ok := tk.ByTicket(old.Ticket, now); ok {
+	if _, ok := tk.ByTicket(old.Ticket, "sess_a", "prof_a", now); ok {
 		t.Error("an ended playback's ticket still works")
 	}
 	if _, e, ok := tk.ByID(old.ID, "prof_a", now); !ok || e == nil || e.Reason != "taken-over" || e.By != "Living room TV" {

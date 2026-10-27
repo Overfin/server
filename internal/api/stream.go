@@ -56,9 +56,10 @@ func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream
 	}
 	p := c.Profile
 	// The ticket works only in the session that started the playback
-	// (rule 30): a copied stream URL is useless anywhere else.
-	st, ok := s.Playback.Tickets.ByTicket(ticket, time.Now())
-	if !ok || st.SessionID != c.Session.ID || st.ProfileID != p.ID {
+	// (rule 30): a copied stream URL is useless anywhere else, and doesn't
+	// keep the playback alive either (rule 33).
+	st, ok := s.Playback.Tickets.ByTicket(ticket, c.Session.ID, p.ID, time.Now())
+	if !ok {
 		problem.Send(w, problem.NotFound, "")
 		return nil, nil
 	}
