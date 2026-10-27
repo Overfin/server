@@ -296,7 +296,7 @@ func ownSettings(ctx context.Context, db *store.Store, url, key string, logger *
 	changes, err := jfsettings.Apply(ctx, jf, jellyfin.Auth{Token: key, DeviceID: "overfin-admin"},
 		jfsettings.Choices{Transcoding: transcodingSettings(family, device), Previews: previews})
 	for _, c := range changes {
-		logger.Info("a Jellyfin setting was set back to Overfin's", "change", c.String())
+		logger.Info("a Jellyfin setting was set to Overfin's", "change", c.String())
 	}
 	if err != nil {
 		logger.Warn("setting Jellyfin's settings back failed; Overfin tries again at its next start", "err", err)

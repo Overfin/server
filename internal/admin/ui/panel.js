@@ -70,7 +70,8 @@ async function api(method, path, body) {
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) {
-    location.href = '/admin/login?return=/admin/';
+    // Back to this page once signed in.
+    location.href = `/admin/login?return=${encodeURIComponent(`/admin/${location.hash}`)}`;
     throw new Error('signing in');
   }
   if (!res.ok) {
@@ -280,8 +281,9 @@ function folderPicker(pick, close) {
           h('button', { type: 'button', class: 'ghost', onclick: close }, 'Cancel')),
         h('ul', { class: 'list' },
           d.parent !== '' && h('li', {}, h('a', { href: '#', onclick: (e) => { e.preventDefault(); open(d.parent); } }, '↑ Up')),
+          // At the top, Jellyfin's drives and mounts ("/", "/media"): whole paths.
           d.folders.map((f) => h('li', {}, icon(icons.folder),
-            h('a', { href: '#', class: 'mono', onclick: (e) => { e.preventDefault(); open(f); } }, f.split('/').pop() || f))),
+            h('a', { href: '#', class: 'mono', onclick: (e) => { e.preventDefault(); open(f); } }, d.path ? f.split('/').pop() : f))),
           !d.folders.length && h('li', {}, h('div', { class: 'hint' }, 'No folders in here.'))));
     } catch (err) {
       toast(err.message, true);
@@ -1449,7 +1451,7 @@ async function valuationView() {
     pageHead('Valuation', 'How much each film and each season is worth to the people here, from 0 to 100: what they watch, mark, keep for later and ask for, and what TMDB says of it. Values never depend on files or their size, and say nothing of who did what. Apps you give a key, like Overtide, read them.'),
     h('div', { class: 'split' },
       h('div', {},
-        card({ title: 'Criteria', description: `From 0 (left out) to ${data.max} (counts the most). ${data.accounts} account${data.accounts === 1 ? '' : 's'} used in the last six months count${data.accounts === 1 ? 's' : ''}; ${data.titles} films and seasons are valued.` },
+        card({ title: 'Criteria', description: `From 0 (left out) to ${data.max} (counts the most). ${plural(data.accounts, 'account')} used in the last six months count${data.accounts === 1 ? 's' : ''}; ${data.titles === 1 ? '1 film or season is' : `${data.titles} films and seasons are`} valued.` },
           h('div', {}, sliders.map((x) => x.row),
             setting('Ask people what they like', 'When they set up their account, and on their account page: series or films, genres, kids\' content. Off, Tastes come from what they watch alone.', ask)),
           [state, reset, save]),
