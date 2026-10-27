@@ -778,8 +778,9 @@ nothing beyond what that needs.
   collection makers and *arr import lists (the best-valued missing
   titles) use the same endpoint. One privacy rule for every field: counts
   below 2 are given as 0.
-- ~~**Favorites count on the site.**~~ Done. A title's page shows how many profiles
-  marked it a favourite, from 2 up, so a count never points at one person.
+- ~~**Favorites count on the site.**~~ Removed. A title's page showed how many
+  profiles marked it a favourite, from 2 up; it went, since a public
+  response never reveals other users' activity (SECURITY.md rule 44).
 - **Picks: missing titles worth having.** *Built*, first version, to
   adjust once we see what it picks. Before, Overfin valued only the
   missing titles someone already watched, kept or asked for, so it had
