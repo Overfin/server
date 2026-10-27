@@ -19,13 +19,15 @@ type templateJSON struct {
 	Name        string `json:"name"`
 	MaxStreams  int    `json:"maxStreams"`
 	MaxProfiles int    `json:"maxProfiles"`
-	Accounts    int    `json:"accounts"`
-	Default     bool   `json:"default"`
+	// ReserveStreams: each profile owns one of the account's streams.
+	ReserveStreams bool `json:"reserveStreams"`
+	Accounts       int  `json:"accounts"`
+	Default        bool `json:"default"`
 }
 
 func toTemplateJSON(t *store.Template) templateJSON {
 	return templateJSON{ID: t.ID, Name: t.Name, MaxStreams: t.MaxStreams, MaxProfiles: t.MaxProfiles,
-		Accounts: t.Accounts, Default: t.ID == store.DefaultTemplate}
+		ReserveStreams: t.ReserveStreams, Accounts: t.Accounts, Default: t.ID == store.DefaultTemplate}
 }
 
 func (p *Panel) templates(w http.ResponseWriter, r *http.Request, _ *session) {
@@ -45,6 +47,8 @@ type templateInput struct {
 	Name        string `json:"name"`
 	MaxStreams  int    `json:"maxStreams"`
 	MaxProfiles int    `json:"maxProfiles"`
+	// ReserveStreams is off when absent.
+	ReserveStreams bool `json:"reserveStreams"`
 }
 
 // readTemplate decodes and checks a template; it writes the problem and
@@ -62,6 +66,8 @@ func readTemplate(w http.ResponseWriter, r *http.Request) (templateInput, bool) 
 		invalid(w, "streams at once: 1 to 100")
 	case in.MaxProfiles < 1 || in.MaxProfiles > 20:
 		invalid(w, "profiles: 1 to 20, the owner's included")
+	case in.ReserveStreams && in.MaxProfiles > in.MaxStreams:
+		invalid(w, "with a stream reserved for each profile, no more profiles than streams")
 	default:
 		return in, true
 	}
@@ -73,7 +79,7 @@ func (p *Panel) createTemplate(w http.ResponseWriter, r *http.Request, _ *sessio
 	if !ok {
 		return
 	}
-	t, err := p.Store.CreateTemplate(r.Context(), in.Name, in.MaxStreams, in.MaxProfiles)
+	t, err := p.Store.CreateTemplate(r.Context(), in.Name, in.MaxStreams, in.MaxProfiles, in.ReserveStreams)
 	if errors.Is(err, store.ErrTemplateNameTaken) {
 		invalid(w, "another template has that name")
 		return
@@ -89,7 +95,7 @@ func (p *Panel) updateTemplate(w http.ResponseWriter, r *http.Request, _ *sessio
 	if !ok {
 		return
 	}
-	switch err := p.Store.UpdateTemplate(r.Context(), r.PathValue("id"), in.Name, in.MaxStreams, in.MaxProfiles); {
+	switch err := p.Store.UpdateTemplate(r.Context(), r.PathValue("id"), in.Name, in.MaxStreams, in.MaxProfiles, in.ReserveStreams); {
 	case errors.Is(err, store.ErrTemplateNameTaken):
 		invalid(w, "another template has that name")
 	case errors.Is(err, store.ErrNotFound):

@@ -71,7 +71,7 @@ func TestAccounts(t *testing.T) {
 		t.Errorf("a token in the list: %s", body)
 	}
 
-	family, _ := db.CreateTemplate(ctx, "Family", 3, 5)
+	family, _ := db.CreateTemplate(ctx, "Family", 3, 5, false)
 	change := `{"label":"Bob","templateId":"` + family.ID + `","expiresAt":"2020-01-01T00:00:00Z"}`
 	rec = b.do("PATCH", "/admin/api/accounts/"+acct.ID, change, nil)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"label":"Bob"`) || !strings.Contains(rec.Body.String(), `"status":"expired"`) ||
@@ -165,7 +165,7 @@ func TestTemplates(t *testing.T) {
 	acct, _, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", JellyfinUsername: "of-1", JellyfinToken: "t"})
 
 	body := b.do("GET", "/admin/api/templates", "", nil).Body.String()
-	if !strings.Contains(body, `"name":"Default","maxStreams":1,"maxProfiles":1,"accounts":1,"default":true`) {
+	if !strings.Contains(body, `"name":"Default","maxStreams":1,"maxProfiles":1,"reserveStreams":false,"accounts":1,"default":true`) {
 		t.Fatalf("templates: %s", body)
 	}
 	rec := b.do("POST", "/admin/api/templates", `{"name":"Family","maxStreams":3,"maxProfiles":5}`, nil)
@@ -199,6 +199,37 @@ func TestTemplates(t *testing.T) {
 	}
 	if ts, _ := db.Templates(ctx); ts[0].ID != "tmpl_default" || ts[0].Name != "Everyone" || ts[0].MaxProfiles != 3 {
 		t.Errorf("Default after the edit: %+v", ts[0])
+	}
+}
+
+// A stream reserved for each profile: off unless asked for, and refused
+// with more profiles than streams.
+func TestTemplateReservedStreams(t *testing.T) {
+	ctx := context.Background()
+	_, b, db, _ := signedInPanel(t)
+	rec := b.do("POST", "/admin/api/templates", `{"name":"Family","maxStreams":3,"maxProfiles":3}`, nil)
+	if rec.Code != 201 || !strings.Contains(rec.Body.String(), `"reserveStreams":false`) {
+		t.Fatalf("off by default: %d %s", rec.Code, rec.Body)
+	}
+	id := between(rec.Body.String(), `"id":"`, `"`)
+	if rec := b.do("PUT", "/admin/api/templates/"+id, `{"name":"Family","maxStreams":3,"maxProfiles":4,"reserveStreams":true}`, nil); rec.Code != 400 {
+		t.Errorf("4 profiles, 3 streams: %d", rec.Code)
+	}
+	if rec := b.do("POST", "/admin/api/templates", `{"name":"Big","maxStreams":2,"maxProfiles":5,"reserveStreams":true}`, nil); rec.Code != 400 {
+		t.Errorf("5 profiles, 2 streams: %d", rec.Code)
+	}
+	if rec := b.do("PUT", "/admin/api/templates/"+id, `{"name":"Family","maxStreams":3,"maxProfiles":3,"reserveStreams":true}`, nil); rec.Code != 204 {
+		t.Fatalf("as many profiles as streams: %d %s", rec.Code, rec.Body)
+	}
+	ts, _ := db.Templates(ctx)
+	for _, tm := range ts {
+		if tm.ReserveStreams != (tm.ID == id) {
+			t.Errorf("%s: reserve %v", tm.Name, tm.ReserveStreams)
+		}
+	}
+	// Turned off again, the limits are free again.
+	if rec := b.do("PUT", "/admin/api/templates/"+id, `{"name":"Family","maxStreams":3,"maxProfiles":5}`, nil); rec.Code != 204 {
+		t.Errorf("off: %d %s", rec.Code, rec.Body)
 	}
 }
 

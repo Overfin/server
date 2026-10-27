@@ -1077,7 +1077,7 @@ function accountDetail(a, templates, reload, people) {
   const label = h('input', { value: a.label || '', maxlength: '64', placeholder: 'e.g. Bob' });
   const expires = h('input', { type: 'datetime-local', value: toLocalInput(a.expiresAt) });
   const template = h('select', {}, templates.map((t) => h('option', { value: t.id, selected: t.id === a.template.id },
-    `${t.name} · ${plural(t.maxStreams, 'stream')}, ${plural(t.maxProfiles, 'profile')}`)));
+    `${t.name} · ${plural(t.maxStreams, 'stream')}, ${plural(t.maxProfiles, 'profile')}${t.reserveStreams ? ', one each' : ''}`)));
   const save = h('button', { class: 'primary', type: 'button', onclick: () => patch(save, {
     ...(a.person ? {} : { label: label.value }),
     expiresAt: expires.value ? new Date(expires.value).toISOString() : '',
@@ -1168,7 +1168,9 @@ async function templatesView() {
     const name = h('input', { value: t?.name || '', maxlength: '40', placeholder: 'e.g. Family, Friends' });
     const streams = h('input', { type: 'number', min: '1', max: '100', value: String(t?.maxStreams ?? 1) });
     const profiles = h('input', { type: 'number', min: '1', max: '20', value: String(t?.maxProfiles ?? 1) });
-    const body = () => ({ name: name.value, maxStreams: Number(streams.value), maxProfiles: Number(profiles.value) });
+    const reserve = h('input', { type: 'checkbox', checked: !!t?.reserveStreams, 'aria-label': 'A stream for each profile' });
+    const body = () => ({ name: name.value, maxStreams: Number(streams.value), maxProfiles: Number(profiles.value),
+      reserveStreams: reserve.checked });
     const save = h('button', { class: 'primary', type: 'button', onclick: () => busy(save, async () => {
       await (t ? api('PUT', `/admin/api/templates/${t.id}`, body()) : api('POST', '/admin/api/templates', body()));
       toast(t ? 'Template saved.' : 'Template made.');
@@ -1184,7 +1186,8 @@ async function templatesView() {
       badge: t?.default ? badge('Default', 'info') : null,
       description: t ? `${plural(t.accounts, 'account')} on it${t.accounts ? '; changes apply to them at once' : ''}.` : 'For a group of accounts that may do more, or less.',
     },
-    h('div', { class: 'fields' }, field('Name', name, null, true), field('Streams at once', streams), field('Profiles', profiles, 'The owner\'s included.')),
+    [h('div', { class: 'fields' }, field('Name', name, null, true), field('Streams at once', streams), field('Profiles', profiles, 'The owner\'s included.')),
+      setting('A stream for each profile', 'Each profile keeps one of the streams for itself; the rest are shared. Nobody is cut off to make room. No more profiles than streams.', reserve)],
     [h('span', { class: 'grow' }), remove, save]);
   };
   show(pageHead('Templates', 'What accounts may do. Every account follows one: Default, unless you choose another for it in People.'),
