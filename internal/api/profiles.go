@@ -57,13 +57,15 @@ func (p Profiles) Register(r *plugin.Registrar) error {
 		"GET /api/v1/sessions":                p.sessions,
 		"DELETE /api/v1/sessions":             p.endOtherSessions,
 		"DELETE /api/v1/sessions/{id}":        p.endSession,
-		"POST /api/v1/logout":                 p.logout,
 	} {
 		if err := r.HandleFunc(pattern, h); err != nil {
 			return err
 		}
 	}
-	return nil
+	// Signing out needs no identity: it ends only what this browser's own
+	// cookies hold, and someone signed in who must still choose a password
+	// has none yet.
+	return r.HandlePublic("POST /api/v1/logout", http.HandlerFunc(p.logout))
 }
 
 func (p Profiles) list(w http.ResponseWriter, r *http.Request) {
