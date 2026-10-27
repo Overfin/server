@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/internal/watchlist"
 )
 
 // watchlistTitles gives the test store two films: 1 in the library (item
@@ -71,6 +72,20 @@ func TestWatchlistModule(t *testing.T) {
 	if code, _ := put(t, srv, "PUT", "/api/v1/me/watchlist/garbage", ""); code != 404 {
 		t.Errorf("a malformed ID: %d", code)
 	}
+	// Full: a title already on it may be added again, a new one may not.
+	put(t, srv, "DELETE", "/api/v1/me/watchlist/"+movie1, "")
+	var n int
+	dbs["watchlist"].QueryRow(`SELECT count(*) FROM watchlist WHERE profile_id = ?`, ownerID(t, srv)).Scan(&n)
+	for i := n; i < watchlist.Max; i++ {
+		dbs["watchlist"].Exec(`INSERT INTO watchlist (profile_id, item_id, added_at) VALUES (?, ?, 1)`, ownerID(t, srv), fmt.Sprintf("title_movie_tmdb_%d", 1000+i))
+	}
+	if code, body := put(t, srv, "PUT", "/api/v1/me/watchlist/"+movie3, ""); code != 204 {
+		t.Errorf("one already on a full list: %d %s", code, body)
+	}
+	if code, _ := put(t, srv, "PUT", "/api/v1/me/watchlist/"+movie1, ""); code != 400 {
+		t.Errorf("a new one on a full list: %d", code)
+	}
+	dbs["watchlist"].Exec(`DELETE FROM watchlist WHERE item_id LIKE 'title_movie_tmdb_1___'`)
 	// Private to the profile.
 	_, body = post(t, srv, "/api/v1/profiles", `{"name":"Partner"}`)
 	partner := between(body, `"id":"`, `"`)
