@@ -241,6 +241,8 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("PUT /admin/api/seerr", p.signedIn(p.setSeerr))
 	mux.HandleFunc("GET /admin/api/ratings", p.signedIn(p.ratings))
 	mux.HandleFunc("PUT /admin/api/ratings", p.signedIn(p.setRatings))
+	mux.HandleFunc("GET /admin/api/home", p.signedIn(p.home))
+	mux.HandleFunc("PUT /admin/api/home", p.signedIn(p.setHome))
 	mux.HandleFunc("PUT /admin/api/jellyfin", p.signedIn(p.setJellyfin))
 	mux.HandleFunc("PUT /admin/api/jellyfin/access", p.signedIn(p.setJellyfinAccess))
 	mux.HandleFunc("PUT /admin/api/tmdb-token", p.signedIn(p.setTMDBToken))
@@ -743,12 +745,10 @@ type ratingsJSON struct {
 	Countries []string `json:"countries"`
 	// Shown is which titles no library has are shown: all, released,
 	// home (see store.TitlesShown).
-	Shown string `json:"shown"`
-	// HomeMissing is whether the home page shows them too.
-	HomeMissing bool `json:"homeMissing"`
-	Fetched     int  `json:"fetched"`
-	Total       int  `json:"total"`
-	Source      bool `json:"source"`
+	Shown   string `json:"shown"`
+	Fetched int    `json:"fetched"`
+	Total   int    `json:"total"`
+	Source  bool   `json:"source"`
 	// Token is whether the operator gave TMDB's token, and whether the
 	// environment sets it.
 	Token struct {
@@ -775,9 +775,6 @@ func (p *Panel) ratingsState(ctx context.Context) (ratingsJSON, error) {
 	if out.Shown, err = p.Store.TitlesShown(ctx); err != nil {
 		return out, err
 	}
-	if out.HomeMissing, err = p.Store.HomeMissing(ctx); err != nil {
-		return out, err
-	}
 	out.Fetched, out.Total, err = p.Store.RatingProgress(ctx)
 	return out, err
 }
@@ -796,13 +793,12 @@ func (p *Panel) ratings(w http.ResponseWriter, r *http.Request, s *session) {
 var titlesShown = []string{"all", "released", "home"}
 
 // setRatings changes the ratings country, to one TMDB has scales for
-// (kids profiles' ceilings are cleared with it), which titles no library
-// has are shown, and whether the home page shows them.
+// (kids profiles' ceilings are cleared with it), and which titles no
+// library has are shown.
 func (p *Panel) setRatings(w http.ResponseWriter, r *http.Request, s *session) {
 	var req struct {
-		Country     string `json:"country"`
-		Shown       string `json:"shown"`
-		HomeMissing *bool  `json:"homeMissing"`
+		Country string `json:"country"`
+		Shown   string `json:"shown"`
 	}
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
@@ -834,19 +830,6 @@ func (p *Panel) setRatings(w http.ResponseWriter, r *http.Request, s *session) {
 			return
 		}
 	}
-	if req.HomeMissing != nil {
-		old, err := p.Store.HomeMissing(ctx)
-		if err == nil && old != *req.HomeMissing {
-			if err = p.Store.SetHomeMissing(ctx, *req.HomeMissing); err == nil {
-				p.Logger.Info("titles no library has on the home page changed in the control panel", "on", *req.HomeMissing, "by", s.name)
-			}
-		}
-		if err != nil {
-			p.Logger.Error("changing the home page's titles failed", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"type": "internal", "detail": "Overfin's log says why"})
-			return
-		}
-	}
 	if err == nil {
 		err = p.Store.SetRatingsCountry(ctx, req.Country)
 	}
@@ -861,6 +844,46 @@ func (p *Panel) setRatings(w http.ResponseWriter, r *http.Request, s *session) {
 	}
 	p.Logger.Info("ratings country changed in the control panel", "country", req.Country, "by", s.name)
 	writeJSON(w, http.StatusOK, out)
+}
+
+// homeJSON is what the site's home page shows besides the libraries.
+type homeJSON struct {
+	// MissingTitles is whether titles no library has show there too, among
+	// what's trending and in the slideshow, to be requested.
+	MissingTitles bool `json:"missingTitles"`
+}
+
+func (p *Panel) home(w http.ResponseWriter, r *http.Request, s *session) {
+	on, err := p.Store.HomeMissing(r.Context())
+	if err != nil {
+		p.Logger.Error("reading the home page's settings failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"type": "internal", "detail": "Overfin's log says why"})
+		return
+	}
+	writeJSON(w, http.StatusOK, homeJSON{MissingTitles: on})
+}
+
+func (p *Panel) setHome(w http.ResponseWriter, r *http.Request, s *session) {
+	var req homeJSON
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": "not a valid request"})
+		return
+	}
+	ctx := r.Context()
+	old, err := p.Store.HomeMissing(ctx)
+	if err == nil && old != req.MissingTitles {
+		if err = p.Store.SetHomeMissing(ctx, req.MissingTitles); err == nil {
+			p.Logger.Info("titles no library has on the home page changed in the control panel", "on", req.MissingTitles, "by", s.name)
+		}
+	}
+	if err != nil {
+		p.Logger.Error("changing the home page's titles failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"type": "internal", "detail": "Overfin's log says why"})
+		return
+	}
+	writeJSON(w, http.StatusOK, req)
 }
 
 func (p *Panel) setJellyfin(w http.ResponseWriter, r *http.Request, s *session) {
