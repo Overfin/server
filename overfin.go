@@ -670,10 +670,10 @@ func recoverTokensWith(ctx context.Context, logger *slog.Logger, db *store.Store
 		}
 		if err != nil {
 			failed++
-			logger.Error("recovery: profile not recovered", "profile", u.ProfileID, "err", err)
+			logger.Error("recovery: profile not recovered", "profile", prov.LogID(u.ProfileID), "err", err)
 			continue
 		}
-		logger.Info("recovery: profile recovered", "profile", u.ProfileID)
+		logger.Info("recovery: profile recovered", "profile", prov.LogID(u.ProfileID))
 	}
 	if failed > 0 {
 		return fmt.Errorf("recovery: %d profiles not recovered; the key stays unaccepted, fix and run again", failed)
@@ -746,8 +746,8 @@ func setUpPocketID(ctx context.Context, cfg *config.Config, logger *slog.Logger)
 				if made, err := p.FirstAdmin(ctx, email, groups); err != nil {
 					logger.Error("making Pocket ID's first admin failed", "err", err)
 				} else if made {
-					logger.Info("Pocket ID's first admin is made; Pocket ID's own command gives them a sign-in link", "email", email,
-						"command", "pocket-id one-time-access-token "+email)
+					logger.Info("Pocket ID's first admin is made (connector.first_admin); " +
+						"Pocket ID's own command, pocket-id one-time-access-token followed by their email, gives them a sign-in link")
 				}
 			}
 			if s, err := p.Signups(ctx); err == nil && s == "disabled" {

@@ -90,6 +90,6 @@ func (l Library) clearHistory(w http.ResponseWriter, r *http.Request) {
 		l.storeError(w, err)
 		return
 	}
-	l.Logger.Info("a profile cleared its history", "profile", p.ID)
+	l.Logger.Info("a profile cleared its history", "profile", l.Provisioner.LogID(p.ID))
 	w.WriteHeader(http.StatusNoContent)
 }

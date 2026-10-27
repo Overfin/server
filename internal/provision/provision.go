@@ -162,7 +162,7 @@ func (p *Provisioner) Create(ctx context.Context, id identity.Identity, hooks *H
 	if err := hooks.after(ctx, acct, owner); err != nil {
 		// Undone whole: the account and its Jellyfin users go.
 		if _, derr := p.DeleteAccount(ctx, acct.ID, false); derr != nil {
-			p.Logger.Error("undoing an account failed", "account", acct.ID, "err", derr)
+			p.Logger.Error("undoing an account failed", "account", p.logID(acct.ID), "err", derr)
 		}
 		return nil, nil, err
 	}
@@ -265,7 +265,7 @@ func (p *Provisioner) CopyInto(ctx context.Context, subject, accountID string, p
 		return err
 	}
 	p.attempts.reset(subject)
-	p.Logger.Info("a history was copied into an account", "user", p.logID(subject), "account", accountID,
+	p.Logger.Info("a history was copied into an account", "user", p.logID(subject),
 		"titles", len(got.states), "left out", got.skipped)
 	return nil
 }
@@ -331,12 +331,12 @@ func (p *Provisioner) CopyIn(ctx context.Context, id identity.Identity, from *je
 	if err != nil {
 		// Undone whole: the account and what was copied go.
 		if _, derr := p.DeleteAccount(ctx, acct.ID, false); derr != nil {
-			p.Logger.Error("undoing an account failed", "account", acct.ID, "err", derr)
+			p.Logger.Error("undoing an account failed", "account", p.logID(acct.ID), "err", derr)
 		}
 		return nil, nil, err
 	}
 	p.attempts.reset(id.Subject)
-	p.Logger.Info("account made with a copied history", "user", p.logID(id.Subject), "account", acct.ID,
+	p.Logger.Info("account made with a copied history", "user", p.logID(id.Subject),
 		"titles", len(states), "left out", skipped)
 	return acct, owner, nil
 }
@@ -369,7 +369,7 @@ func (p *Provisioner) create(ctx context.Context, subject string) (*store.Accoun
 	if err != nil {
 		return nil, nil, err
 	}
-	p.Logger.Info("account provisioned", "user", p.logID(subject), "account", acct.ID)
+	p.Logger.Info("account provisioned", "user", p.logID(subject))
 	return acct, prof, nil
 }
 
@@ -449,7 +449,7 @@ func (p *Provisioner) DeleteAccount(ctx context.Context, accountID string, keepH
 	if err := p.Store.DeleteAccount(ctx, accountID); err != nil {
 		return nil, err
 	}
-	p.Logger.Info("account deleted", "account", accountID)
+	p.Logger.Info("account deleted", "account", p.logID(accountID))
 	return profiles, nil
 }
 
@@ -501,14 +501,14 @@ func (p *Provisioner) rollback(userID string) {
 	}
 }
 
-// logID is a keyed hash of a subject, so logs can correlate events without
-// naming anyone (SECURITY.md rule 54).
-// LogID is how logs name a user: a keyed hash of their subject (rule 54).
-func (p *Provisioner) LogID(subject string) string { return p.logID(subject) }
+// LogID is how logs name a user, an account or a profile: a keyed hash of
+// their subject or ID, so logs can correlate events without naming anyone
+// (SECURITY.md rule 54).
+func (p *Provisioner) LogID(id string) string { return p.logID(id) }
 
-func (p *Provisioner) logID(subject string) string {
+func (p *Provisioner) logID(id string) string {
 	h := hmac.New(sha256.New, p.LogKey)
-	h.Write([]byte(subject))
+	h.Write([]byte(id))
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
