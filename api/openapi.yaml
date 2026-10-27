@@ -1313,7 +1313,12 @@ paths:
     post:
       operationId: createProfile
       summary: Create a profile
-      description: Owner profile only.
+      description: |
+        Owner profile only. A kids profile needs both ceilings; any other
+        profile can't have any. The account may have up to
+        `limits.maxProfiles` (GET /me) profiles, which, while each profile
+        has a stream reserved (`limits.reservedStreams`), is never more than
+        its streams.
       tags: [profiles]
       requestBody:
         required: true
@@ -1328,10 +1333,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Profile"
+        "400":
+          description: |
+            A field is invalid, `pin` is sent, a library is unknown, a tag is
+            invalid, or a ceiling isn't one of GET /ratings' names
+            (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "403":
           $ref: "#/components/responses/OwnerOnly"
         "409":
-          $ref: "#/components/responses/Conflict"
+          description: |
+            The name is already used in this account (`name-taken`), or the
+            account already has `limits.maxProfiles` profiles
+            (`profile-limit-reached`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 
   /step-up:
     get:
@@ -1529,9 +1550,12 @@ paths:
     patch:
       operationId: updateProfile
       summary: Change some of a profile's settings
-      description: Owner profile only. Changing a kids profile's
-        ceilings, or turning it into a standard profile with `kind`,
-        needs the PIN when the owner profile has one.
+      description: |
+        Changing a profile's own `theme` (alone) is open to that profile;
+        everything else is owner profile only. Changing its limits (`kind`,
+        either way, the ceilings, `libraries` or `blockedTags`) needs the
+        owner profile's PIN in `pin` when it has one; the owner profile
+        itself has no limits.
       tags: [profiles]
       requestBody:
         required: true
@@ -1546,8 +1570,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Profile"
+        "400":
+          description: |
+            No field to change, a field is invalid, ceilings for a standard
+            profile, a ceiling not on GET /ratings' scales, an unknown library
+            or invalid tag, or limits for the owner profile
+            (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "403":
-          $ref: "#/components/responses/StepUpOrOwnerOnly"
+          description: |
+            Only the owner profile may change this (`owner-only`), or the
+            owner's PIN is missing (`pin-required`), wrong (`pin-incorrect`)
+            or locked (`pin-locked`, with `retryAfter`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -1563,6 +1604,12 @@ paths:
       responses:
         "204":
           description: The profile is deleted.
+        "400":
+          description: The owner profile goes with the account (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "403":
           $ref: "#/components/responses/StepUpOrOwnerOnly"
         "404":
@@ -1629,6 +1676,8 @@ paths:
           $ref: "#/components/responses/StepUpOrOwnerOnly"
         "404":
           $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     delete:
       operationId: removeProfilePin
       summary: Remove a profile's PIN
@@ -1765,7 +1814,7 @@ paths:
       tags: [account]
       responses:
         "200":
-          description: The sessions, current one first.
+          description: The sessions, most recently active first.
           content:
             application/json:
               schema:
@@ -1798,8 +1847,10 @@ paths:
     delete:
       operationId: endSession
       summary: End one session
-      description: The owner profile can end any of the account's sessions;
-        other profiles only their own.
+      description: |
+        The owner profile can end any of the account's sessions; other
+        profiles only those using their own profile. Ending the current
+        session signs this browser out.
       tags: [account]
       responses:
         "204":
@@ -3342,7 +3393,9 @@ components:
       type: string
       minLength: 1
       maxLength: 32
-      description: Unique within the account.
+      description: |
+        Unique within the account. At most 32 bytes of UTF-8, plain text
+        without markup, control characters or repeated spaces.
 
     Pin:
       type: string
@@ -3367,6 +3420,8 @@ components:
         hasPin:
           type: boolean
         avatar:
+          x-status: planned
+          description: Not sent yet (avatars are planned).
           $ref: "#/components/schemas/ImageRef"
         language:
           type: string
@@ -3390,18 +3445,16 @@ components:
             picked, or the ratings country changed). It sees nothing until
             the owner picks them.
         libraries:
-          type: [array, "null"]
-          description: The only libraries the profile gets, by ID; absent or
-            null, every library. Owner only; changing it needs the owner's
-            PIN when there is one.
+          type: array
+          description: The only libraries the profile gets, by ID; absent,
+            every library.
           items:
             type: string
             examples: [lib_0123456789abcdef0123456789abcdef]
         blockedTags:
-          type: [array, "null"]
+          type: array
           description: Tags hidden from the profile (a title's own, or its
-            series' or season's), matched regardless of case; null, none.
-            Owner only, like `libraries`.
+            series' or season's), matched regardless of case; absent, none.
           items:
             type: string
         theme:
@@ -3423,6 +3476,7 @@ components:
     ProfileCreate:
       type: object
       required: [name]
+      additionalProperties: false
       properties:
         name:
           $ref: "#/components/schemas/ProfileName"
@@ -3432,6 +3486,7 @@ components:
           default: standard
         language:
           type: string
+          pattern: "^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$"
         movieCeiling:
           type: string
           description: Required for a kids profile, refused for any other;
@@ -3445,6 +3500,7 @@ components:
             one of the series' names from `GET /ratings`.
         libraries:
           type: [array, "null"]
+          maxItems: 100
           description: The only libraries the profile gets, by ID; absent or
             null, every library. Owner only; changing it needs the owner's
             PIN when there is one.
@@ -3453,15 +3509,20 @@ components:
             examples: [lib_0123456789abcdef0123456789abcdef]
         blockedTags:
           type: [array, "null"]
+          maxItems: 50
           description: Tags hidden from the profile (a title's own, or its
             series' or season's), matched regardless of case; null, none.
             Owner only, like `libraries`.
           items:
             type: string
+            minLength: 1
+            maxLength: 128
 
     ProfileUpdate:
-      description: Only the fields sent are changed.
+      description: Only the fields sent are changed; `pin` alone changes
+        nothing and is refused.
       type: object
+      additionalProperties: false
       minProperties: 1
       properties:
         name:
@@ -3474,12 +3535,15 @@ components:
           enum: [standard, kids]
         language:
           type: string
+          description: '"" clears it.'
+          pattern: "^$|^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$"
         movieCeiling:
           type: string
         seriesCeiling:
           type: string
         libraries:
           type: [array, "null"]
+          maxItems: 100
           description: The only libraries the profile gets, by ID; absent or
             null, every library. Owner only; changing it needs the owner's
             PIN when there is one.
@@ -3488,11 +3552,14 @@ components:
             examples: [lib_0123456789abcdef0123456789abcdef]
         blockedTags:
           type: [array, "null"]
+          maxItems: 50
           description: Tags hidden from the profile (a title's own, or its
             series' or season's), matched regardless of case; null, none.
             Owner only, like `libraries`.
           items:
             type: string
+            minLength: 1
+            maxLength: 128
         theme:
           type: string
           description: The profile's look; "" follows the device. Each profile
@@ -3516,7 +3583,7 @@ components:
     Session:
       description: One of the account's own sessions.
       type: object
-      required: [id, current, createdAt]
+      required: [id, current, createdAt, lastActiveAt]
       properties:
         id:
           type: string
