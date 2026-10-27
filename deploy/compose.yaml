@@ -49,8 +49,14 @@ services:
       - jellyfin-config:/config
       - jellyfin-cache:/cache
       # Your films and series, read only: in Overfin's control panel, add
-      # libraries with folders under /media.
-      - ${MEDIA_DIR:?set MEDIA_DIR in .env (see .env.example)}:/media:ro
+      # libraries with folders under /media (MEDIA_DIR_1), and /media2,
+      # /media3, /media4 for the other folders set in .env. One not set
+      # mounts an empty folder (no-media, next to this file). MEDIA_DIR, its
+      # name before 0.5, still works.
+      - ${MEDIA_DIR_1:-${MEDIA_DIR:?set MEDIA_DIR_1 in .env (see .env.example)}}:/media:ro
+      - ${MEDIA_DIR_2:-./no-media}:/media2:ro
+      - ${MEDIA_DIR_3:-./no-media}:/media3:ro
+      - ${MEDIA_DIR_4:-./no-media}:/media4:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8096/health"]
       interval: 10s

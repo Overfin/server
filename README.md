@@ -15,7 +15,7 @@ for the rest.
 mkdir overfin && cd overfin
 curl -fsSLO https://raw.githubusercontent.com/overfin/server/v0.4.0/deploy/compose.yaml
 curl -fsSL -o .env https://raw.githubusercontent.com/overfin/server/v0.4.0/deploy/.env.example
-# set MEDIA_DIR in .env to your films and series, then:
+# set MEDIA_DIR_1 in .env to your films and series, then:
 docker compose up -d
 ```
 
@@ -134,11 +134,14 @@ from then on. A Jellyfin you already use stays yours and untouched: see
 [Your own Jellyfin](#your-own-jellyfin).
 
 **1. Start it** with the commands at the top. [.env](deploy/.env.example)
-has two settings: `MEDIA_DIR`, your films and series (Jellyfin only reads
-them), and `OVERFIN_DOMAIN`, optional (see below). Your TMDB token can go
+has two settings: `MEDIA_DIR_1`, your films and series (Jellyfin only
+reads them), and `OVERFIN_DOMAIN`, optional (see below). Films on several
+disks or shares: `MEDIA_DIR_2` to `MEDIA_DIR_4` take up to three more
+folders (a network share is mounted on the machine first, then named
+there). Your TMDB token can go
 there too, as `OVERFIN_TMDB_TOKEN`, or in the wizard. On Fedora, RHEL and
-other SELinux systems, add `,z` after `:ro` on the media line of
-`compose.yaml`, so Jellyfin may read the folder.
+other SELinux systems, add `,z` after `:ro` on the media lines of
+`compose.yaml`, so Jellyfin may read the folders.
 
 **2. Set it up in your browser.** Open `http://<the machine>`. The setup
 wizard first asks for a one-time code, so nobody else can set up your
@@ -153,7 +156,8 @@ wizard says how to get one, or skip it), Intro Skipper (optional), Seerr
 (optional), and your email and a password, for you, its first admin.
 
 **3. Add your libraries** in the control panel (`/admin/`, Libraries), with
-folders under `/media`, where the compose file puts `MEDIA_DIR`.
+folders under `/media`, where the compose file puts `MEDIA_DIR_1` (and
+`/media2` to `/media4` for the others).
 
 That's all. People sign in with their email and a password. In the
 control panel: add people (People: an email and a first password, which
