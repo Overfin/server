@@ -272,8 +272,8 @@ export interface TitlePage {
 
 export interface Playback {
   id: string;
-  /** What plays. */
-  title: TitleSummary;
+  /** What plays; absent when the server has no title for the item yet. */
+  title?: TitleSummary;
   method: 'direct' | 'remux' | 'transcode' | string;
   stream: { url: string; protocol: 'file' | 'hls'; mimeType?: string };
   positionMs: number;
