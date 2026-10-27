@@ -21,6 +21,10 @@ type Transcoding interface {
 	TranscodingTest() *GPUTest
 	// SetTranscoding saves the family chosen and applies it.
 	SetTranscoding(ctx context.Context, family, device string) error
+	// Previews is whether Jellyfin makes seek-bar previews (off unless
+	// turned on); SetPreviews saves it and applies it.
+	Previews(ctx context.Context) (bool, error)
+	SetPreviews(ctx context.Context, on bool) error
 }
 
 // GPUTest is a GPU test, running or done.
@@ -116,4 +120,39 @@ func (p *Panel) setTranscoding(w http.ResponseWriter, r *http.Request, s *sessio
 	}
 	p.Logger.Info("a GPU was chosen in the control panel", "gpu", f.ID, "by", s.name)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// previewsJSON is whether Overfin's Jellyfin makes seek-bar previews.
+type previewsJSON struct {
+	On bool `json:"on"`
+}
+
+func (p *Panel) previews(w http.ResponseWriter, r *http.Request, s *session) {
+	if p.Transcoding == nil {
+		http.NotFound(w, r)
+		return
+	}
+	on, err := p.Transcoding.Previews(r.Context())
+	if err != nil {
+		p.upstreamProblem(w, err, "reading whether previews are made")
+		return
+	}
+	writeJSON(w, http.StatusOK, previewsJSON{On: on})
+}
+
+func (p *Panel) setPreviews(w http.ResponseWriter, r *http.Request, s *session) {
+	if p.Transcoding == nil {
+		http.NotFound(w, r)
+		return
+	}
+	var req previewsJSON
+	if !decode(w, r, &req) {
+		return
+	}
+	if err := p.Transcoding.SetPreviews(r.Context(), req.On); err != nil {
+		p.upstreamProblem(w, err, "turning previews on or off")
+		return
+	}
+	p.Logger.Info("seek-bar previews set in the control panel", "on", req.On)
+	writeJSON(w, http.StatusOK, req)
 }
