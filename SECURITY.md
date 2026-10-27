@@ -138,10 +138,14 @@ comes from the internet, and media files can be written by anyone.
     exceptions are top-level GET navigations to the pages people arrive at
     from elsewhere (sign-in, an invitation, a forgotten password, an
     identity provider's return), which act on nothing but their own code
-    and query, and the gate a reverse proxy asks (rule 13). State-changing
-    requests must be JSON, except image uploads, which must carry an image
-    content type (plain HTML forms can send neither). There is no CORS unless
-    the operator lists allowed origins, and those use token auth, not cookies.
+    and query, and the gate a reverse proxy asks (rule 13). A request
+    without `Sec-Fetch-Site` (older browsers, some TVs' and apps' web views,
+    apps) is let through this check; for those, the JSON rule is what rules
+    out cross-site writes. State-changing requests must be JSON, except
+    the control panel's image uploads, which must carry an image content
+    type (plain HTML forms can send neither), and there is no CORS at all:
+    a cross-site page can't send JSON without a preflight Overfin never
+    answers.
 19. After a login or step-up, users are sent back only to a path on the same
     origin, never to an address taken unchecked from the request.
 20. Upstream tokens are encrypted at rest, with the key kept outside the
@@ -326,10 +330,12 @@ comes from the internet, and media files can be written by anyone.
     tags, to hide some from a profile).
     Embedded metadata is still stripped from image files (rule 10).
     Security-sensitive data (file paths, server internals, permission flags) is
-    never exposed, whatever the configuration. The one exception is the
-    control panel's Identification (rule 58): admins see a film's or a
-    series' folder and file names (never the whole path), to tell a title
-    Jellyfin matched wrong. The index keeps only those names.
+    never exposed, whatever the configuration. Two exceptions, both in the
+    control panel, for admins only: Identification (rule 58), where admins
+    see a film's or a series' folder and file names (never the whole path),
+    to tell a title Jellyfin matched wrong (the index keeps only those
+    names); and Libraries, where admins see each library's folders and
+    browse the folders Jellyfin can read, to choose them.
 56. Counts (`totalCount`) only include what the active profile may see, so
     hidden items never show up as a number.
 57. What's trending, popular or upcoming, titles' details and their
