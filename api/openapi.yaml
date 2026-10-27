@@ -2479,8 +2479,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
         "503":
-          description: The server is busy and no cheaper way to play exists
-            (`server-busy`). Try again later.
+          description: |
+            The server is busy and no cheaper way to play exists, or the
+            media server can't be reached (`server-busy`). Try again later.
           content:
             application/problem+json:
               schema:
@@ -2489,7 +2490,7 @@ paths:
   /playback/current:
     get:
       operationId: getCurrentPlayback
-      summary: This session's active playback, to restore it after a reload
+      summary: This session's active playback by the active profile, to restore it after a reload
       tags: [playback]
       responses:
         "200":
@@ -2577,10 +2578,13 @@ paths:
     post:
       operationId: reportProgress
       summary: Report the position, every few seconds while playing
-      description: Keeps the playback alive and saves progress. Report at
-        least every 30 seconds, also while paused. A playback with neither
-        progress reports nor stream requests for two minutes is ended
-        (`playback-expired`) and its transcode stopped.
+      description: |
+        Keeps the playback alive and saves progress. Report at least every
+        30 seconds, also while paused. A playback with neither progress
+        reports nor stream requests for two minutes is ended
+        (`playback-expired`) and its transcode stopped; so is any playback
+        24 hours after it started. Why a playback ended is answered for an
+        hour; after that its ID answers `not-found`.
       tags: [playback]
       requestBody:
         required: true
@@ -2602,8 +2606,9 @@ paths:
     post:
       operationId: stopPlayback
       summary: Stop playing; saves the final position and ends any transcode
-      description: Safe to call more than once; stopping a playback that has
-        already ended still answers 204.
+      description: |
+        Safe to call more than once. Stopping a playback that has already
+        ended, or one this profile doesn't have, still answers 204.
       tags: [playback]
       requestBody:
         required: true
@@ -2613,9 +2618,15 @@ paths:
               $ref: "#/components/schemas/ProgressReport"
       responses:
         "204":
-          description: Stopped.
-        "404":
-          $ref: "#/components/responses/NotFound"
+          description: Stopped (or already ended).
+        "400":
+          description: |
+            Not a playback ID, or the body isn't a progress report
+            (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 
   /playback/{playbackId}/trickplay/{sheet}:
     parameters:
@@ -2636,9 +2647,14 @@ paths:
         "200":
           description: The sheet.
           content:
-            image/jpeg: {}
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
         "404":
           $ref: "#/components/responses/NotFound"
+        "410":
+          $ref: "#/components/responses/PlaybackEnded"
 
   /playback/{playbackId}/queue:
     parameters:
@@ -2740,13 +2756,18 @@ paths:
           in Overfin's playlists or in `stream.url`.
         schema:
           type: string
-          maxLength: 128
-          pattern: "^[A-Za-z0-9._-]+$"
+          maxLength: 64
+          pattern: "^[A-Za-z0-9._-]{1,64}$"
     get:
       operationId: getStream
       summary: Playlists, segments or the media file
-      description: Supports `Range` requests for seeking. The ticket is
-        short-lived, bound to the session and renewed by progress reports.
+      description: |
+        `Range` requests are supported on the media file, for seeking. The
+        ticket comes with the playback and stays the same until the
+        playback ends (24 hours at most); it works only in the session and
+        for the profile that started it, so a copied URL is useless
+        elsewhere. Any query string, and a playback that ended, answer
+        `not-found`; `GET /playback/{id}` says why it ended.
       tags: [playback]
       responses:
         "200":
@@ -2763,12 +2784,29 @@ paths:
               schema:
                 type: string
                 format: binary
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
         "206":
           description: Part of the media, for a `Range` request.
         "404":
           $ref: "#/components/responses/NotFound"
-        "410":
-          $ref: "#/components/responses/PlaybackEnded"
+        "409":
+          description: The media server's playlist was refused
+            (`not-playable`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "416":
+          description: A `Range` header that can't be served; no body.
+        "503":
+          description: The media server can't be reached (`server-busy`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 
   /stream/{ticket}/subtitles/{trackId}:
     parameters:
@@ -2776,9 +2814,11 @@ paths:
       - name: trackId
         in: path
         required: true
+        description: A text track's `id` from `subtitleTracks`.
         schema:
           type: string
-          maxLength: 64
+          maxLength: 4
+          pattern: "^s[0-9]{1,3}$"
     get:
       operationId: getSubtitles
       summary: A subtitle track as sanitized WebVTT
@@ -2792,8 +2832,12 @@ paths:
                 type: string
         "404":
           $ref: "#/components/responses/NotFound"
-        "410":
-          $ref: "#/components/responses/PlaybackEnded"
+        "503":
+          description: The media server can't be reached (`server-busy`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 
   # ---- Catalog (TMDB plugin) -------------------------------------------------
   #
@@ -3214,7 +3258,8 @@ components:
       schema:
         type: string
         maxLength: 64
-        examples: [play_9m2k7w4q1x8c]
+        pattern: "^play_[a-z2-7]{26}$"
+        examples: [play_k3m7q2w5x4c6v2b7n3d5f4gahj]
     Ticket:
       name: ticket
       in: path
@@ -4219,8 +4264,10 @@ components:
       description: |
         What the playing device can handle. The JavaScript SDK fills this in
         from the browser. Unknown values are ignored, so clients can declare
-        new codecs or formats without breaking anything.
+        new codecs or formats without breaking anything; unknown fields are
+        refused (`invalid-request`).
       type: object
+      additionalProperties: false
       properties:
         containers:
           type: array
@@ -4261,13 +4308,14 @@ components:
 
     PlaybackStart:
       type: object
+      additionalProperties: false
       required: [capabilities]
       description: Name what to play with `titleId` (Overfin picks the copy) or, for a
-        particular copy, `itemId`; one of the two.
+        particular copy, `itemId`; one of the two, never both.
       properties:
         titleId:
           type: string
-          maxLength: 128
+          maxLength: 126
         itemId:
           type: string
           maxLength: 64
@@ -4281,7 +4329,9 @@ components:
           maxLength: 64
         audioTrack:
           type: string
+          description: An `id` from the session's `audioTracks`.
           maxLength: 64
+          pattern: "^a[0-9]{1,3}$"
         audioLanguage:
           type: string
           description: The language to start in (the app's, BCP 47 or ISO
@@ -4294,9 +4344,13 @@ components:
             active profile's subtitle language (`PUT /me/subtitles`) is
             turned on when the video has it; none otherwise.
           maxLength: 64
+          pattern: "^(off|s[0-9]{1,3})$"
         maxBitrateKbps:
           type: integer
-          minimum: 64
+          minimum: 0
+          description: |
+            The client's cap; 0 or absent means none. The lowest of this,
+            `capabilities.maxBitrateKbps` and the operator's cap applies.
         queue:
           type: array
           x-status: planned
@@ -4310,9 +4364,12 @@ components:
             maxLength: 64
         device:
           type: string
-          description: A readable name for this device, shown when another
-            device takes over.
+          description: |
+            A readable name for this device, shown when another device takes
+            over. Printable ASCII only; anything else is refused
+            (`invalid-request`).
           maxLength: 64
+          pattern: '^[\x20-\x7E]{1,64}$'
 
     PlaybackChange:
       type: object
@@ -4333,6 +4390,7 @@ components:
 
     ProgressReport:
       type: object
+      additionalProperties: false
       required: [positionMs]
       properties:
         positionMs:
@@ -4388,13 +4446,16 @@ components:
 
     PlaybackSession:
       type: object
-      required: [id, title, method, stream, positionMs]
+      required: [id, method, stream, positionMs]
       properties:
         id:
           type: string
-          examples: [play_9m2k7w4q1x8c]
+          examples: [play_k3m7q2w5x4c6v2b7n3d5f4gahj]
         title:
-          $ref: "#/components/schemas/TitleSummary"
+          description: What plays; absent when Overfin has no title for the
+            item yet.
+          allOf:
+            - $ref: "#/components/schemas/TitleSummary"
         method:
           type: string
           description: >-
