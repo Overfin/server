@@ -537,17 +537,17 @@ password. `-recover-tokens` prints these steps too.
 
 ## AI-assisted development
 
-Said plainly: most of Overfin's code and documentation is written by Claude
-(Anthropic's AI), and commits it wrote carry a `Co-Authored-By: Claude`
-trailer. The maintainer decides what gets built and how it should behave,
-and runs Overfin, day to day, on a real server with a real library. Each change
-passes the tests, vet, staticcheck and govulncheck before it's pushed.
+Said plainly: Overfin is written by Claude (Anthropic's AI): its code, its
+tests and its documentation. The maintainer gives directions (what to build,
+how it should behave, what to change) and uses Overfin day to day, on a real
+server with a real library, but doesn't write the code or review it line by
+line. Commits Claude wrote carry a `Co-Authored-By: Claude` trailer.
 
-That isn't the same as an independent security review, and Overfin hasn't
-had one yet. The security-sensitive parts (sign-in, sessions, who may play
-what) are written down in [SECURITY.md](SECURITY.md) and
-[THREAT_MODEL.md](THREAT_MODEL.md) so they can be checked; reviews and
-reports are very welcome.
+What checks the code is what runs before every push: the tests, vet,
+staticcheck and govulncheck; and the rules in [SECURITY.md](SECURITY.md)
+and [THREAT_MODEL.md](THREAT_MODEL.md), written down so the code can be
+checked against them. That isn't an independent security review, and
+Overfin hasn't had one yet: reviews and reports are very welcome.
 
 ## License
 
