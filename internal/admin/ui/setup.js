@@ -2,8 +2,9 @@
 // done, with Back and Next. The steps come from the server: those with
 // something to ask, in order. A Jellyfin someone else set up takes two
 // more rounds on its step: its administrator's login, then a confirmation
-// once the page shows what it holds. Text from the server is only ever set
-// with textContent.
+// once the page shows what it holds. The server remembers the steps done:
+// reloaded, the page asks for the code again, then goes on from the first
+// step not done. Text from the server is only ever set with textContent.
 
 const $ = (sel) => document.querySelector(sel);
 const command = `docker logs overfin | grep -o '"code":"[^"]*' | tail -1 | cut -d'"' -f4`;
@@ -64,12 +65,20 @@ function show(i) {
   $('#next').textContent = s.id === 'done' ? 'Finish' : s.id === 'introskipper' && !s.done ? 'Install' : 'Next';
   if (s.id === 'done') {
     const names = { tmdb: 'TMDB', introskipper: 'Intro Skipper', seerr: 'Seerr' };
-    const later = [...skipped].map((id) => names[id]);
-    $('#skipped').replaceChildren(...later.map((name) => {
+    $('#skipped').replaceChildren(...[...skipped].map((id) => {
       const li = document.createElement('li');
-      li.textContent = `${name}: skipped, you can set it up later in the control panel.`;
+      li.textContent = id === 'tmdb'
+        ? 'TMDB: skipped. The site can\'t be used until you add a token in the control panel (Server, TMDB).'
+        : `${names[id]}: skipped, you can set it up later in the control panel.`;
       return li;
     }));
+  }
+  // Done before a reload: kept as it is, Next moves on.
+  const section = document.querySelector(`section[data-step="${s.id}"]`);
+  if (s.done && s.id !== 'done') {
+    for (const el of section.querySelectorAll('input, select')) el.disabled = true;
+    const saved = section.querySelector('p.notice[id]');
+    if (saved && saved.hidden) note(`#${saved.id}`, 'Saved earlier.');
   }
   say('');
   updateButtons();
@@ -246,6 +255,9 @@ async function next() {
       if (result === 'stay') {
         // Its answer is worth reading: Next moves on.
         show(at);
+      } else if (s.id === 'code') {
+        // On from the first step not done: after a reload, where it was.
+        show(setup.steps.findIndex((st, i) => i > 0 && !st.done));
       } else {
         show(at + 1);
       }

@@ -1,7 +1,7 @@
 # Overfin
 
 Overfin is a platform: this Go server over a Jellyfin of its own
-(required; TMDB, with the operator's own token, and Seerr optional) and
+(required; TMDB, with the operator's own token, needed for now; Seerr optional) and
 Overfin's own apps (overfin-web first, its own repository). The server holds everything that matters (people, rules,
 limits); apps, official or not, use only its public API. MIT, public.
 

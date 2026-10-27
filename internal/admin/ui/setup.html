@@ -27,7 +27,7 @@
       <input id="command" readonly spellcheck="false" aria-label="Command">
       <button id="copy" type="button">Copy</button>
     </div>
-    <p class="hint">If your container isn't named <code>overfin</code>, change that word. The code changes each time Overfin restarts: use the latest.</p>
+    <p class="hint">If your container isn't named <code>overfin</code>, change that word. "Permission denied": put <code>sudo</code> in front. The code changes each time Overfin restarts: use the latest.</p>
     <div class="fields">
       <label class="field full"><span>Setup code</span><input id="code" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX"></label>
     </div>
@@ -71,7 +71,7 @@
 
   <section data-step="tmdb" hidden>
     <div class="card-head"><div>
-      <h2>TMDB <span class="badge plain info">Optional</span></h2>
+      <h2>TMDB <span class="badge plain warn">Needed for now</span></h2>
       <p>TMDB is where Overfin gets titles' names, synopses, artwork and ratings, in your languages, and what to discover. It's free; you need a token of your own, once.</p>
     </div></div>
     <ol class="how">
@@ -82,7 +82,7 @@
     <div class="fields">
       <label class="field full"><span>TMDB's token</span><input id="tmdb-token" type="password" autocomplete="off" spellcheck="false"></label>
     </div>
-    <p class="hint">Skipped, Overfin runs on what Jellyfin knows: fewer details, no ratings for kids profiles, no discovery. You can add a token later in the control panel.</p>
+    <p class="hint">For now, Overfin can't do without it: skipped, titles show with no name or picture, Home stays empty, and kids profiles see nothing. You can add a token later in the control panel (Server, TMDB).</p>
     <p class="notice" id="tmdb-done" hidden></p>
   </section>
 

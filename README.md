@@ -159,9 +159,13 @@ server before you do; this prints it:
 docker logs overfin | grep -o '"code":"[^"]*' | tail -1 | cut -d'"' -f4
 ```
 
+("permission denied": put `sudo` in front of `docker`, as for any Docker
+command when your user isn't in the `docker` group.)
+
 Then, one step at a time: the default language, a TMDB token (free; the
-wizard says how to get one, or skip it), Intro Skipper (optional), Seerr
-(optional), and your email and a password, for you, its first admin.
+wizard says how to get one; for now the site can't be used without it),
+Intro Skipper (optional), Seerr (optional), and your email and a password,
+for you, its first admin.
 
 **3. Add your libraries** in the control panel (`/admin/`, Libraries), with
 folders under `/media`, where the compose file puts `MEDIA_DIR`.
@@ -411,9 +415,10 @@ TMDB, in each account's language. For that, Overfin needs **your own TMDB
 token** (TMDB's "API Read Access Token": free, and the setup wizard says
 how to get one), given in the wizard, the control panel (Server, TMDB) or
 `OVERFIN_TMDB_TOKEN`. No token is shipped with Overfin: each server uses
-its own. Without one, Overfin runs on what Jellyfin knows: fewer details,
-no discovery, and kids profiles see nothing, since their limits need
-TMDB's age ratings.
+its own. For now, Overfin can't do without one: titles show with no name
+or picture, Home stays empty, there's no discovery, and kids profiles see
+nothing, since their limits need TMDB's age ratings. Running on what
+Jellyfin knows alone is planned.
 
 Overfin asks TMDB by itself, by title, never saying who's asking; browsers
 never contact TMDB. It keeps TMDB's data as its terms allow (five months at

@@ -750,7 +750,7 @@ function tmdbCard(rt) {
     setKey(testKey, key.value, (state) => { Object.assign(rt, state); redraw(); });
   } }, 'Test and save');
   const removeKey = rt.token.set && !rt.token.inEnv && h('button', { type: 'button', class: 'danger', onclick: () => {
-    if (!confirm('Without a token, titles, artwork and ratings come from Jellyfin only, and TMDB\'s data kept so far is removed unless Seerr gives it. Remove the token?')) return;
+    if (!confirm('Without a token, the site can\'t be used for now: titles lose their names and pictures, and TMDB\'s data kept so far is removed unless Seerr gives it. Remove the token?')) return;
     setKey(removeKey, '', (state) => { Object.assign(rt, state); redraw(); });
   } }, 'Remove');
   const keyHint = rt.token.inEnv
@@ -790,7 +790,7 @@ function tmdbCard(rt) {
     toast('TMDB settings saved.');
   }, (err) => st.set(err.message, 'error')) }, 'Save');
   return card({ title: 'TMDB', badge: rt.source ? badge('Reachable', 'ok') : badge(rt.token.set ? 'Unreachable' : 'No token', 'err'),
-    description: 'Where titles, artwork and ratings come from. Without it, they come from Jellyfin only.' },
+    description: 'Where titles, artwork and ratings come from. For now, the site can\'t be used without it.' },
   [
     setting('Token', rt.token.inEnv ? keyHint : 'TMDB\'s API Read Access Token.', h('div', { class: 'row' }, key, testKey, removeKey)),
     !rt.token.inEnv && !rt.token.set && h('p', { class: 'hint' }, keyHint),

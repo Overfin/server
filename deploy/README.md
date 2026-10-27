@@ -40,9 +40,11 @@ before you do. This prints it:
 docker logs overfin | grep -o '"code":"[^"]*' | tail -1 | cut -d'"' -f4
 ```
 
-The code changes each time Overfin restarts. Then the wizard asks, one step
+("permission denied": put `sudo` in front of `docker`, as for any Docker
+command when your user isn't in the `docker` group.) The code changes each
+time Overfin restarts. Then the wizard asks, one step
 at a time: the default language, a TMDB token (it says how to get one;
-skippable), Intro Skipper (skippable), Seerr (skippable), and your email
+for now the site can't be used without it), Intro Skipper (skippable), Seerr (skippable), and your email
 and a password, as the first admin.
 
 Then, in the control panel (`/admin/`):
