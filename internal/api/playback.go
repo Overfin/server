@@ -87,9 +87,14 @@ func (pb Playback) EndIdle(now time.Time) {
 // end stops a playback once: it is forgotten at once, and Jellyfin is told
 // in the background, its transcode included.
 func (pb Playback) end(s *playback.Stream, reason, by string) {
-	if !pb.Tickets.Remove(s, reason, by, time.Now()) {
-		return
+	if pb.Tickets.Remove(s, reason, by, time.Now()) {
+		pb.stopped(s)
 	}
+}
+
+// stopped tells Jellyfin a playback, just removed, has ended: where the
+// profile stopped, and its transcode stopped.
+func (pb Playback) stopped(s *playback.Stream) {
 	snap := pb.Tickets.Snapshot(s)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -553,51 +558,21 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 	// is then told who took over, or refuse (rule 32). Another account's
 	// playback is never touched. With a stream reserved for each profile,
 	// only the profile's own are ever replaced, never another profile's.
+	// When every transcode is taken, refused before anything stops.
 	device := req.Device
 	if device == "" {
 		device = "another device"
 	}
-	limit := caller.Account.Template.MaxStreams
-	var replaced []*playback.Stream
-	if limit > 0 && caller.Account.Template.ReserveStreams {
+	lim := playback.Limits{MaxStreams: caller.Account.Template.MaxStreams, RefuseOverLimit: pb.RefuseOverLimit,
+		MaxTranscodes: pb.MaxTranscodes}
+	if lim.MaxStreams > 0 && caller.Account.Template.ReserveStreams {
 		profiles, err := l.Provisioner.Store.Profiles(ctx, p.AccountID)
 		if err != nil {
 			pb.Logger.Error("listing the account's profiles failed", "err", err)
 			problem.Send(w, problem.Internal, "")
 			return
 		}
-		var ok bool
-		replaced, ok = playback.Reserved(pb.Tickets.ForAccount(p.AccountID), p.ID, len(profiles), limit)
-		if !ok || (len(replaced) > 0 && pb.RefuseOverLimit) {
-			problem.Send(w, problem.StreamLimitReached, "")
-			return
-		}
-	} else if limit > 0 {
-		active := pb.Tickets.ForAccount(p.AccountID)
-		if len(active) >= limit {
-			if pb.RefuseOverLimit {
-				problem.Send(w, problem.StreamLimitReached, "")
-				return
-			}
-			replaced = active[:len(active)-limit+1]
-		}
-	}
-	// Every transcode taken: refused before anything stops, counting those
-	// the playbacks it replaces would free.
-	if dec.Method == "transcode" && pb.MaxTranscodes > 0 {
-		busy := pb.Tickets.Transcodes()
-		for _, old := range replaced {
-			if pb.Tickets.Method(old) == "transcode" {
-				busy--
-			}
-		}
-		if busy >= pb.MaxTranscodes {
-			problem.Send(w, problem.ServerBusy, "")
-			return
-		}
-	}
-	for _, old := range replaced {
-		pb.end(old, "taken-over", device)
+		lim.Reserve, lim.Profiles = true, len(profiles)
 	}
 
 	sourceID, _ := jellyfin.NormalizeID(dec.Source.Id)
@@ -606,7 +581,19 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 		ItemID: jfItem, SourceID: sourceID, PlaySessionID: info.PlaySessionId, Decision: *dec,
 		Auth: play, AudioIndex: pr.AudioStreamIndex, SubtitleIndex: pr.SubtitleStreamIndex,
 	}
-	pb.Tickets.Add(s, pr.StartTimeTicks, time.Now())
+	// Checked and registered at once, so two starts can't both pass.
+	replaced, err := pb.Tickets.Admit(s, pr.StartTimeTicks, time.Now(), lim, device)
+	switch {
+	case errors.Is(err, playback.ErrStreamLimit):
+		problem.Send(w, problem.StreamLimitReached, "")
+		return
+	case errors.Is(err, playback.ErrServerBusy):
+		problem.Send(w, problem.ServerBusy, "")
+		return
+	}
+	for _, old := range replaced {
+		pb.stopped(old)
+	}
 	started = true // the device is the playback's now, freed when it ends
 
 	out := sessionJSON{
