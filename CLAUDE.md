@@ -18,6 +18,10 @@ limits); apps, official or not, use only its public API. MIT, public.
 - AI assistance is always disclosed: keep the README's "AI-assisted
   development" section accurate, and end commits Claude contributed to with a
   `Co-Authored-By: Claude ...` trailer.
+- Nobody reviews your code after you: the maintainer gives directions and
+  uses the result, but doesn't read the code line by line. So check your
+  own work: a test that fails without your change, read what you touch and
+  what calls it, and say plainly what you didn't check.
 
 ## Style
 - Plain, idiomatic Go. Clear code over clever code: code that is easy to read
