@@ -184,6 +184,15 @@ func TestRequests(t *testing.T) {
 	if fake.users[1]["username"] != "Alice Roy" || len(fake.users) != 1 {
 		t.Errorf("renamed: %v", fake.users)
 	}
+	// A provider whose name and username are emails: neither goes to
+	// Seerr; the next name along does.
+	dir.people[subject] = connector.Person{Username: "alice@example.org", Name: "Alice <alice@example.org>"}
+	post(t, srv, "/api/v1/requests", `{"titleId":"title_series_tmdb_1399_s1"}`)
+	if name, _ := fake.users[1]["username"].(string); name == "" || strings.Contains(name, "@") || name == "Alice Roy" {
+		t.Errorf("named after an email: %v", fake.users[1])
+	}
+	dir.people[subject] = connector.Person{Username: "alice", Name: "Alice Roy"}
+	post(t, srv, "/api/v1/requests", `{"titleId":"title_series_tmdb_1399_s1"}`)
 
 	// Seerr approves the season: the list says so.
 	fake.mu.Lock()

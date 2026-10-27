@@ -307,7 +307,8 @@ comes from the internet, and media files can be written by anyone.
     never real names or emails. Seerr users get the account's name as the
     control panel shows it (the identity provider's, else the operator's
     label, else the owner profile's), so Seerr's own pages say who asked
-    for what; never an email (theirs is a placeholder on `.invalid`), and
+    for what; never an email, nor any name with an @ (the next one along
+    is taken instead; their address is a placeholder on `.invalid`), and
     no one can sign in to Seerr as them. Seerr therefore holds names: keep
     it private, reachable by Overfin and the operator only.
 48. Search terms and other personal input travel in request bodies, never in
