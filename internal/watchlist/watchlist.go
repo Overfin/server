@@ -3,8 +3,8 @@
 // person chooses. A show on it is the show itself, so its new episodes come
 // along.
 //
-// It's built only on Overfin's public module contract, and is the example
-// to follow when writing one.
+// It's written on the internal feature contract (internal/feature), with
+// its own database.
 package watchlist
 
 import (

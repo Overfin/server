@@ -353,8 +353,9 @@ func (h HTTPS) Enabled() bool { return h.Domain != "" }
 // hyphens.
 var domainPattern = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$`)
 
-// Mail is the SMTP server Overfin sends its emails through (sign-in
-// codes). Off unless Host is set: people then sign in with a password.
+// Mail is the SMTP server Overfin sends its emails through (invitations,
+// address confirmations, password resets). Off unless Host is set, here or
+// in the control panel; a Host here wins.
 type Mail struct {
 	Host string `toml:"host" json:"host"`
 	// Port defaults to 587 (465 with TLS = "tls", 25 with "none").
@@ -423,7 +424,8 @@ type Site struct {
 	// always gets it.
 	SPAFallback bool `toml:"spa_fallback"`
 	// URL is the site's public address, e.g. "https://media.example.org".
-	// Optional: with it, sign-in emails carry a link besides the code.
+	// Emails' links (invitations, confirmations, resets) point to it; with
+	// [https], it's https://<domain> unless set.
 	URL string `toml:"url"`
 }
 
