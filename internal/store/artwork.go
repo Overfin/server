@@ -219,9 +219,10 @@ func (s *Store) SetTMDBLanguage(ctx context.Context, lang string) error {
 		return err
 	}
 	// Fetched again: a library title's data at the keeper's next pass,
-	// another title's page and seasons the next time they're opened.
-	for _, q := range []string{`DELETE FROM artwork_fetched`, `UPDATE catalog_titles SET details_at = 0`,
-		`UPDATE catalog_seasons SET fetched_at = 0`} {
+	// another title's page the next time it's opened. Seasons keep their
+	// time: an old one is deleted, not fetched again (PurgeSeasons), and
+	// the library's come with their series anyway.
+	for _, q := range []string{`DELETE FROM artwork_fetched`, `UPDATE catalog_titles SET details_at = 0`} {
 		if _, err := tx.ExecContext(ctx, q); err != nil {
 			return err
 		}
