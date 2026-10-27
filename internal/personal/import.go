@@ -76,7 +76,7 @@ func (im *Importer) Once(ctx context.Context) error {
 		if err := im.Store.MarkImported(ctx, p.ID, time.Now()); err != nil {
 			return err
 		}
-		im.Logger.Info("personal: a profile's data was brought over from Jellyfin", "profile", p.ID, "titles", n)
+		im.Logger.Info("personal: a profile's data was brought over from Jellyfin", "titles", n)
 	}
 	return nil
 }
