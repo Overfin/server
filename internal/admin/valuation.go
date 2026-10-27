@@ -184,12 +184,15 @@ func (p *Panel) setValuation(w http.ResponseWriter, r *http.Request, s *session)
 }
 
 type valuedJSON struct {
-	ID        string             `json:"id"`
-	Name      string             `json:"name"`
-	Season    int                `json:"season,omitempty"`
-	InLibrary bool               `json:"inLibrary"`
-	Score     float64            `json:"score"`
-	Parts     map[string]float64 `json:"parts"`
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	Season    int     `json:"season,omitempty"`
+	InLibrary bool    `json:"inLibrary"`
+	Score     float64 `json:"score"`
+	// Parts are the title's ranks on the criteria that don't come from
+	// what people do (TMDB's, the libraries'); those that do are only in
+	// the score, so the panel never shows anyone's activity per title.
+	Parts map[string]float64 `json:"parts"`
 }
 
 // previewSize is how many titles each end of the preview shows, and the
@@ -244,6 +247,12 @@ func (p *Panel) valuationPreview(w http.ResponseWriter, r *http.Request, _ *sess
 }
 
 func valuedOf(v valuation.Value) valuedJSON {
+	parts := map[string]float64{}
+	for c, part := range v.Parts {
+		if !valuation.FromPeople(c) {
+			parts[c] = part
+		}
+	}
 	return valuedJSON{ID: "title_" + strings.ReplaceAll(v.Key, "/", "_"), Name: v.Name, Season: v.Season,
-		InLibrary: v.InLibrary, Score: v.Score, Parts: v.Parts}
+		InLibrary: v.InLibrary, Score: v.Score, Parts: parts}
 }

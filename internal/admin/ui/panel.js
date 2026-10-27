@@ -1384,7 +1384,7 @@ async function valuationView() {
       h('div', { class: 'detail-head' }, h('div', {}, h('h2', {}, valuedName(t)),
         h('div', { class: 'hint' }, t.inLibrary ? 'In the libraries' : 'Not in the libraries'))),
       h('p', {}, h('strong', {}, `Value ${t.score.toFixed(1)}`), ' out of 100.'),
-      h('p', { class: 'hint' }, 'Each criterion ranks the title among all the others, from 0 (no sign of it, or the lowest) to 100 (the highest); the value is their average, weighted by the sliders.'),
+      h('p', { class: 'hint' }, 'Each criterion ranks the title among all the others, from 0 (no sign of it, or the lowest) to 100 (the highest); the value is their average, weighted by the sliders. What people do (watching, favorites, lists, requests, tastes) counts in the value but isn\'t shown title by title.'),
       h('div', { class: 'table-wrap' }, h('table', {},
         h('thead', {}, h('tr', {}, h('th', {}, 'Criterion'), h('th', {}, 'Rank'), h('th', {}, 'Weight'))),
         h('tbody', {}, rows))),
