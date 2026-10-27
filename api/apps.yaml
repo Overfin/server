@@ -1,0 +1,347 @@
+openapi: 3.1.0
+info:
+  title: Overfin apps API
+  version: 1.0.0-draft
+  license:
+    name: MIT
+    identifier: MIT
+  description: |
+    What an Overfin server shares with other apps the operator chooses
+    (a storage manager, say): totals and values per title, never anything
+    per person. Each app has a key an admin made for it in the control
+    panel, for the scopes the admin ticked. This API is apart from the
+    public API (`openapi.yaml`): its own keys, its own address, and plain
+    JSON errors instead of problem details.
+
+servers:
+  - url: /
+
+security:
+  - appKey: []
+
+paths:
+  /apps/v1/titles:
+    get:
+      operationId: appListTitles
+      summary: Films and seasons Overfin values, for other apps
+      description: |
+        One row per film and per season Overfin values, with every ID known
+        and the field groups asked for. `score` is Overfin's value (0 to
+        100), `stats` what all profiles did with it in total, `availability`
+        whether a library has it; each needs the key scope of the same name.
+        Never anything per person.
+
+        Served where the control panel is (its own listener, or `/apps/` on
+        the site when the panel is at `/admin/` there), and like the panel
+        only to private addresses unless the operator opened it on the site;
+        elsewhere a plain-text 404. Errors are plain JSON (`AppError`), not
+        problem details.
+      tags: [apps]
+      security:
+        - appKey: []
+      parameters:
+        - name: fields
+          in: query
+          description: |
+            Comma-separated groups among `score`, `stats` and
+            `availability`; by default, every group the key may read. A group
+            the key may not read answers `not-allowed`.
+          schema:
+            type: string
+            examples: ["score,availability"]
+        - name: inLibrary
+          in: query
+          description: Only titles a library has (`true`) or lacks (`false`).
+            Needs no scope.
+          schema:
+            type: boolean
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [movie, season]
+        - name: list
+          in: query
+          description: |
+            `trending` or `popular` keeps the titles in that TMDB list (a
+            season when its series is in it), in the list's order (then by
+            season) unless `sort` is given. `suggestions` gives titles the
+            libraries lack and that are out or about to be, in their own
+            order (a share from trending and popular, set by the operator's
+            discovery share, the rest by value); it takes neither `sort` nor
+            `inLibrary=true`, and ignores `order`.
+          schema:
+            type: string
+            enum: [trending, popular, suggestions]
+        - name: sort
+          in: query
+          description: |
+            `score` (needs the `score` scope, else `not-allowed`) or `name`.
+            By default `score` when the key has that scope, else `name`;
+            with `list=trending` or `popular`, the list's order. Ties go by
+            name.
+          schema:
+            type: string
+            enum: [score, name]
+        - name: order
+          in: query
+          description: By default `desc` for score, `asc` for name and list
+            order.
+          schema:
+            type: string
+            enum: [asc, desc]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+        - name: cursor
+          in: query
+          description: The `next` of the previous page, unchanged.
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+      responses:
+        "200":
+          description: A page of titles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [titles, generatedAt]
+                properties:
+                  titles:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AppTitle"
+                  generatedAt:
+                    $ref: "#/components/schemas/Timestamp"
+                  next:
+                    type: string
+                    description: The cursor of the next page; absent on the last.
+        "400":
+          description: An unknown parameter or a value it doesn't take
+            (`invalid-request`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+        "401":
+          description: No key, or not a valid one (`not-authenticated`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+        "403":
+          description: The key may not read a group asked for, sort by
+            score, or read titles at all (`not-allowed`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+        "404":
+          description: Not from a private address (plain text).
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: A failure of the server itself (`internal-error`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+
+  /apps/v1/watch-stats:
+    get:
+      operationId: appWatchStats
+      summary: Watch totals per film and series, for other apps
+      description: |
+        For each film and series anyone watched or keeps as a favorite, what
+        the profiles did with it in total; never anything per person. All in
+        one answer, not paged, in no set order. Needs the `watch-stats` (or
+        `stats`) scope; a key without it answers `not-authenticated`.
+        Reached like `/apps/v1/titles`, with the same plain-JSON errors.
+      tags: [apps]
+      security:
+        - appKey: []
+      parameters:
+        - name: since
+          in: query
+          description: Only titles whose totals changed at or after this time.
+          schema:
+            $ref: "#/components/schemas/Timestamp"
+      responses:
+        "200":
+          description: The totals.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [titles, generatedAt]
+                properties:
+                  titles:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AppWatchStats"
+                  generatedAt:
+                    $ref: "#/components/schemas/Timestamp"
+        "400":
+          description: "`since` isn't an RFC 3339 time (`invalid-request`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+        "401":
+          description: No key, not a valid one, or one without the scope
+            (`not-authenticated`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+        "404":
+          description: Not from a private address (plain text).
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: A failure of the server itself (`internal-error`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+
+components:
+  securitySchemes:
+    appKey:
+      type: http
+      scheme: bearer
+      description: |
+        For the apps API only. An app key, sent as
+        `Authorization: Bearer ofapp_…` (at most 100 characters). The
+        operator makes one per app in the control panel's Apps section,
+        with a name and its scopes among `watch-stats`, `score`, `stats` and
+        `availability`; the key is shown once, kept only as a hash, and
+        revoked by deleting it there. A key with `watch-stats` also reads
+        `stats`, and the reverse.
+
+  schemas:
+    AppError:
+      description: |
+        An error from the apps API. Plain JSON, not problem details; branch
+        on `type`.
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          examples: [not-authenticated, invalid-request, not-allowed, internal-error]
+        detail:
+          type: string
+          description: For people; never parse it.
+
+    AppTitleStats:
+      description: |
+        What every profile did with the title, in total. Counts below 2 are
+        given as 0, so none points at one person.
+      type: object
+      required: [plays, viewers, favorites]
+      properties:
+        plays:
+          type: integer
+          minimum: 0
+          description: Times played to the end (a season counts its episodes).
+        viewers:
+          type: integer
+          minimum: 0
+          description: Accounts that watched some of it.
+        favorites:
+          type: integer
+          minimum: 0
+          description: Profiles keeping it as a favorite (for a season, its
+            series).
+        lastPlayed:
+          type: string
+          format: date
+          description: The day it was last played; only with at least two
+            viewers.
+
+    AppTitle:
+      description: |
+        A film or a season. A season carries its series' name and IDs plus
+        its number. `score`, `stats` and `inLibrary` are present only when
+        their field group is given.
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [movie, season]
+        name:
+          type: string
+          description: The film's or the series' name.
+        tmdbId:
+          type: string
+          description: Absent when the title isn't known by a TMDB ID.
+        imdbId:
+          type: string
+        tvdbId:
+          type: string
+        season:
+          type: integer
+          minimum: 0
+          description: For a season, its number (0 for specials).
+        score:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Overfin's value of the title (`score`).
+        stats:
+          $ref: "#/components/schemas/AppTitleStats"
+        inLibrary:
+          type: boolean
+          description: Whether a library has it (`availability`).
+
+    AppWatchStats:
+      description: |
+        What the profiles did with a film or a series, in total (a series
+        counts its seasons and episodes). Unlike `/apps/v1/titles`, small
+        counts are not rounded to 0.
+      type: object
+      required: [kind, plays, viewers, favorites, changedAt]
+      properties:
+        kind:
+          type: string
+          enum: [movie, series]
+        tmdbId:
+          type: string
+        imdbId:
+          type: string
+        tvdbId:
+          type: string
+        plays:
+          type: integer
+          minimum: 0
+          description: Times played to the end.
+        viewers:
+          type: integer
+          minimum: 0
+          description: Accounts that watched some of it.
+        favorites:
+          type: integer
+          minimum: 0
+          description: Profiles keeping the film or series itself as a
+            favorite.
+        lastPlayed:
+          type: string
+          format: date
+        changedAt:
+          $ref: "#/components/schemas/Timestamp"
+
+    Timestamp:
+      type: string
+      format: date-time
+      description: RFC 3339, in UTC.
