@@ -180,3 +180,65 @@ func TestDiscover(t *testing.T) {
 		t.Errorf("kids playback of item 4: %d %s", code, body)
 	}
 }
+
+// A profile limited to some libraries sees only what they have: titles no
+// library has are hidden from it everywhere (rule 28), not only titles of
+// other libraries.
+func TestLibraryLimitedSeesNoMissingTitles(t *testing.T) {
+	var st *store.Store
+	s := fakeSeerr(t)
+	srv, fake := newServerWith(t, options{seerr: s, store: &st})
+	fake.partnerSeesAll = true // the second profile below
+	ctx := context.Background()
+	films := fmt.Sprintf("%032x", 0xf1)
+	if err := st.PutCatalog(ctx, []store.CatalogItem{
+		{ID: fmt.Sprintf("%032x", 3), Kind: "movie", Name: "Heat", SortName: "Heat", TMDB: "949", LibraryID: films},
+	}, 1); err != nil {
+		t.Fatal(err)
+	}
+	st.RefreshTitleKeys(ctx)
+	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
+	st.SetTitlesShown(ctx, "all")
+	lists := catalog.NewLists(func() tmdb.Source { return s }, st, slog.New(slog.NewTextHandler(io.Discard, nil)), time.Hour, 1)
+	if err := lists.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	discover := func() []string {
+		t.Helper()
+		var out struct{ Items []struct{ ID string } }
+		if code := get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie", &out); code != 200 {
+			t.Fatalf("discover: %d", code)
+		}
+		var ids []string
+		for _, it := range out.Items {
+			ids = append(ids, it.ID)
+		}
+		return ids
+	}
+	// Every library: the missing film too.
+	if got := strings.Join(discover(), ","); got != "title_movie_tmdb_949,title_movie_tmdb_100" {
+		t.Fatalf("owner: %s", got)
+	}
+
+	code, body := post(t, srv, "/api/v1/profiles", `{"name":"Partner"}`)
+	var partner struct{ ID string }
+	json.Unmarshal([]byte(body), &partner)
+	if code != 201 {
+		t.Fatalf("create: %d %s", code, body)
+	}
+	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+partner.ID, `{"libraries":["lib_`+films+`"]}`); code != 200 {
+		t.Fatalf("limit: %d %s", code, body)
+	}
+	if code, body := post(t, srv, "/api/v1/profiles/"+partner.ID+"/activate", `{}`); code != 200 {
+		t.Fatalf("activate: %d %s", code, body)
+	}
+	if got := strings.Join(discover(), ","); got != "title_movie_tmdb_949" {
+		t.Errorf("limited, discover: %s", got)
+	}
+	if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_100", nil); code != 404 {
+		t.Errorf("limited, the missing film's page: %d", code)
+	}
+	if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_949", nil); code != 200 {
+		t.Errorf("limited, its library's film: %d", code)
+	}
+}

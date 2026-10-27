@@ -204,7 +204,8 @@ comes from the internet, and media files can be written by anyone.
     title details, images, playback), titles above the ceiling are hidden.
     The same holds for the libraries a profile gets and the tags hidden from
     it, for any profile: Overfin applies them, not Jellyfin, and what it
-    can't place in a library is hidden from a profile limited to some.
+    can't place in a library, like every title no library has, is hidden
+    from a profile limited to some (so it can't request them either).
 29. Play queues aren't accepted yet; when they are, every entry is checked
     against the active profile, when the queue is set and again when it
     advances.
