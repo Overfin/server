@@ -199,6 +199,8 @@ func (w handlers) list(c *feature.Caller, rw http.ResponseWriter, r *http.Reques
 	feature.JSON(rw, map[string]any{"items": out})
 }
 
+// has answers whether a title is on the list: off it is an answer too, not
+// "not found".
 func (w handlers) has(c *feature.Caller, rw http.ResponseWriter, r *http.Request) {
 	id, ok := feature.TitleID(r.PathValue("id"))
 	if !ok {
@@ -207,14 +209,11 @@ func (w handlers) has(c *feature.Caller, rw http.ResponseWriter, r *http.Request
 	}
 	var one int
 	err := w.db.QueryRowContext(r.Context(), `SELECT 1 FROM watchlist WHERE profile_id = ? AND item_id = ?`, c.ProfileID, id).Scan(&one)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		feature.Problem(rw, feature.NotFound, "")
-	case err != nil:
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		feature.Problem(rw, feature.Internal, "")
-	default:
-		feature.NoContent(rw)
+		return
 	}
+	feature.JSON(rw, map[string]bool{"on": err == nil})
 }
 
 func (w handlers) add(c *feature.Caller, rw http.ResponseWriter, r *http.Request) {

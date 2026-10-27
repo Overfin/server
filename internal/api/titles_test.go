@@ -301,3 +301,23 @@ func TestHomeMissing(t *testing.T) {
 		t.Errorf("switched on: %d %+v", code, me)
 	}
 }
+
+// /me says what the server offers, so clients don't ask and get "not
+// found": discovery and requests come with Seerr here.
+func TestMeOffers(t *testing.T) {
+	var me struct {
+		Offers struct {
+			Discovery bool `json:"discovery"`
+			Requests  bool `json:"requests"`
+		} `json:"offers"`
+	}
+	srv, _ := newServerWith(t, options{})
+	if code := get(t, srv, "/api/v1/me", &me); code != 200 || me.Offers.Discovery || me.Offers.Requests {
+		t.Errorf("without Seerr: %d %+v", code, me)
+	}
+	var st *store.Store
+	srv, _ = newServerWith(t, options{seerr: fakeSeerr(t), store: &st})
+	if code := get(t, srv, "/api/v1/me", &me); code != 200 || !me.Offers.Discovery || !me.Offers.Requests {
+		t.Errorf("with Seerr: %d %+v", code, me)
+	}
+}

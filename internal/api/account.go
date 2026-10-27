@@ -43,6 +43,14 @@ type Account struct {
 	AskFirst bool
 }
 
+// Offers says what the server offers that depends on its setup: discovery
+// (with TMDB or Seerr) and requests (with Seerr). Clients show only those,
+// without asking and getting "not found".
+type Offers struct {
+	Discovery bool `json:"discovery"`
+	Requests  bool `json:"requests"`
+}
+
 func (Account) Name() string { return "account" }
 
 func (a Account) Register(r *plugin.Registrar) error {
@@ -103,6 +111,7 @@ type meJSON struct {
 	// Tastes says whether the account is asked what it likes, and whether
 	// it answered (or chose not to).
 	Tastes meTastesJSON `json:"tastes"`
+	Offers Offers       `json:"offers"`
 }
 
 type meTastesJSON struct {
@@ -266,7 +275,7 @@ func (s *Sessions) me(r *http.Request, acct *store.Account, prof *store.Profile)
 		}
 		acct.Language = tag
 	}
-	out := meJSON{AccountID: acct.ID, Language: def, Languages: []lang.Choice{},
+	out := meJSON{AccountID: acct.ID, Language: def, Languages: []lang.Choice{}, Offers: s.Offers,
 		Limits: meLimitsJSON{MaxProfiles: acct.Template.ProfileLimit(), MaxStreams: acct.Template.MaxStreams,
 			ReservedStreams: acct.Template.ReserveStreams, SharedStreams: acct.Template.MaxStreams}}
 	if acct.Template.ReserveStreams {

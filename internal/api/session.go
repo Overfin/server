@@ -27,6 +27,8 @@ const CookieName = "overfin"
 // its own session. The identity provider says who the visitor is; the
 // session remembers which profile this device is using.
 type Sessions struct {
+	// Offers is what the server offers beyond the library, for /me.
+	Offers      Offers
 	Provisioner *provision.Provisioner
 	Store       *store.Store
 	Logger      *slog.Logger

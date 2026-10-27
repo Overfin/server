@@ -466,6 +466,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		mounts[i].Peers = mounts
 		extra = append(extra, mounts[i])
 	}
+	sessions.Offers = api.Offers{Discovery: o.seerr != nil, Requests: o.seerr != nil}
 	if sessions.SetupOffers, err = api.SetupOffers(mounts); err != nil {
 		t.Fatal(err)
 	}
