@@ -58,16 +58,31 @@ info:
     (`application/problem+json`). The `type` is a short, stable name such as
     `stream-limit-reached`; clients should branch on `type`, never on `detail`.
     Anything the caller may not see is reported as `not-found`. Every
-    endpoint except the public ones (`/health`, `/info`) answers
-    `not-authenticated` (401) without a valid session. Actions reserved for
+    endpoint marked `security: []` (the gateway's health, theme and
+    branding, the sign-in steps and their pages' files, `/login`, `/gate`)
+    answers without a login; every other one answers `not-authenticated`
+    (401) without one. Actions reserved for
     the account's owner profile answer `owner-only` (403) to other profiles.
     An account the operator disabled answers `account-not-allowed` (403),
     and one whose access has ended `account-expired` (403), to every request.
     Any endpoint answers `invalid-request` (400) to a request it can't take,
-    and `rate-limited` (429) over its limits; requests from another site
-    get `cross-site-request` (403), changes not sent as JSON
-    `unsupported-media-type` (415), and a failure of the server itself
-    `internal-error` (500).
+    and `rate-limited` (429) over its limits. Requests from another site
+    (`Sec-Fetch-Site` other than `same-origin` or `none`) get
+    `cross-site-request` (403), except a page navigation to `/login`,
+    `/auth/callback` or Overfin's own pages, and the reverse proxy's
+    `/gate`. Every `POST`, `PUT` and `PATCH` must carry
+    `Content-Type: application/json`, even without a body, or gets
+    `unsupported-media-type` (415). Bodies over 64 KiB are refused
+    (`invalid-request`), and so are unknown fields in a JSON body. A
+    failure of the server itself gives `internal-error` (500), and an
+    identity provider or media server that can't be reached `server-busy`
+    (503).
+
+    **Pages and the control panel.** Overfin also serves a few pages of its
+    own at the site's root, outside this API: `/signin` and `/reset` (with
+    its own sign-in) and `/invite/{code}` (an invitation's link). The
+    operator's control panel (`/admin/`) is not part of this API; the apps
+    API (`/apps/v1/…`, below) is, with its own keys.
 
     **Language.** Metadata comes in the account's language (`PATCH /me`),
     among those the operator offers; a new account starts with the
@@ -82,14 +97,15 @@ info:
     **Profiles.** Most requests act as the session's active profile. When
     the owner profile has a PIN, a new session has none until one is chosen
     with `POST /profiles/{id}/activate`; until then, everything except the
-    account, the profile list and switching profile answers
+    account, the profile list, switching profile, step-up and logging out answers
     `profile-required` (403), and the site shows the profile list.
 
     **Step-up.** Some actions need a fresh login. Overfin then answers
     with a `step-up-required` error naming what is needed (`login`)
     and a `stepUpUrl` to send the user to: navigate the whole page to
-    `stepUpUrl?return=/path/of/this/page`. The user logs in again at the
-    identity provider and comes back to that path, then the client retries the
+    `stepUpUrl?return=/path/of/this/page`. The user confirms it's them (at
+    the identity provider, or with their password on Overfin's own sign-in
+    page) and comes back to that path, then the client retries the
     same request. A confirmed login stays fresh for a few minutes (5 by
     default). Without a `stepUpUrl`, the instance offers no step-up and the
     action can't be done. After a login or step-up, users are only ever sent back to the
@@ -722,6 +738,12 @@ paths:
         "303":
           description: Off to the identity provider, or straight to `return`
             when already logged in.
+        "503":
+          description: The identity provider can't be reached (`server-busy`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 
   /signin:
     post:
@@ -943,6 +965,52 @@ paths:
                   bits:
                     type: integer
 
+  /pages/page.js:
+    get:
+      operationId: pagesScript
+      summary: The sign-in pages' script
+      description: Served for Overfin's own pages (sign-in, invitation,
+        forgotten password), whatever the sign-in. Revalidated on every use.
+      tags: [account]
+      security: []
+      responses:
+        "200":
+          description: The script.
+          content:
+            text/javascript:
+              schema:
+                type: string
+
+  /pages/page.css:
+    get:
+      operationId: pagesStylesheet
+      summary: The sign-in pages' stylesheet
+      tags: [account]
+      security: []
+      responses:
+        "200":
+          description: The stylesheet.
+          content:
+            text/css:
+              schema:
+                type: string
+
+  /pages/logo.svg:
+    get:
+      operationId: pagesLogo
+      summary: Overfin's logo, for the sign-in pages
+      description: The pages use the operator's logo instead when their
+        branding is on.
+      tags: [account]
+      security: []
+      responses:
+        "200":
+          description: The logo.
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+
   /me/signin:
     get:
       operationId: signinInfo
@@ -1006,9 +1074,10 @@ paths:
         With Overfin's own sign-in only. For the reverse proxy's forward auth
         in front of the site's pages, not for clients. Answers 204 for a
         signed-in, allowed visitor; for a visitor's page request
-        (`Sec-Fetch-Dest` of `document`), a redirect to `/login` (`/signin`
-        with managed sign-in) coming back to `X-Forwarded-Uri`;
-        `not-authenticated` for anything else.
+        (`Sec-Fetch-Dest` of `document`, or without it an `Accept` naming
+        `text/html`), a redirect to `/api/v1/login` (`/signin` with managed
+        sign-in) coming back to `X-Forwarded-Uri`; `not-authenticated` for
+        anything else.
       tags: [account]
       security: []
       responses:
@@ -1019,9 +1088,17 @@ paths:
         "401":
           description: Not logged in, and not a page request
             (`not-authenticated`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "403":
           description: Logged in, but not allowed on this instance
             (`account-not-allowed`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 
   /logout:
     post:
@@ -1041,6 +1118,8 @@ paths:
                   logoutUrl:
                     type: string
                     format: uri
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /profiles:
     get:
@@ -1104,7 +1183,109 @@ paths:
             examples: [/settings/profiles]
       responses:
         "303":
-          description: Off to the identity provider.
+          description: Off to the identity provider, or with managed sign-in
+            to `/signin?fresh=1`.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The account is disabled (`account-not-allowed`) or its
+            access ended (`account-expired`); identity provider only.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No account yet (`account-setup-required`); identity
+            provider only.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The identity provider can't be reached (`server-busy`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /auth/callback:
+    get:
+      operationId: authCallback
+      summary: Where the identity provider returns (not for clients)
+      description: |
+        Acts on nothing and needs no cookie. It answers a tiny HTML page that
+        sends the browser on to `/auth/finish` with the same `state`, `code`
+        and `error` (each up to 2048 characters): a navigation from this
+        site, so the browser sends its cookies even when the provider lives
+        on another site. Another site may navigate here.
+      tags: [account]
+      security: []
+      parameters:
+        - name: state
+          in: query
+          schema: { type: string, maxLength: 2048 }
+        - name: code
+          in: query
+          schema: { type: string, maxLength: 2048 }
+        - name: error
+          in: query
+          schema: { type: string, maxLength: 2048 }
+      responses:
+        "200":
+          description: A page that moves on to `/auth/finish`.
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /auth/finish:
+    get:
+      operationId: authFinish
+      summary: Completes a login or step-up (not for clients)
+      description: |
+        Reached from `/auth/callback` only, same-origin. The `state` works
+        once, within 10 minutes, and only in the browser (for a login) or
+        session (for a step-up) that started it. A login sets the login
+        cookie and returns to `return`; a step-up marks the session's login
+        fresh, lifts PIN locks, and returns there too. A step-up cancelled
+        at the provider returns without making the login fresh.
+      tags: [account]
+      security: []
+      parameters:
+        - name: state
+          in: query
+          schema: { type: string }
+        - name: code
+          in: query
+          schema: { type: string }
+        - name: error
+          in: query
+          schema: { type: string }
+      responses:
+        "303":
+          description: Done; back to `return`.
+        "401":
+          description: The provider refused the login or it couldn't be
+            confirmed (`not-authenticated`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Not allowed on this instance (`account-not-allowed`);
+            or, for a step-up, the login was another user's, older than the
+            step-up, or couldn't be confirmed (`step-up-required`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: An unknown, used or expired `state`, or one started
+            in another browser or session (`not-found`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 
   /ratings:
     get:
@@ -1905,7 +2086,8 @@ paths:
         answered as it would be alone, for the same caller, through the
         same checks and limits: an app's home page in one round trip, rows
         chosen by the app. At most 20; up to 6 run at once. Images,
-        streams and logins can't be batched (`invalid-request`).
+        streams, `/auth/…` and `/batch` itself can't be batched
+        (`invalid-request`).
       tags: [system]
       requestBody:
         required: true
@@ -1941,6 +2123,13 @@ paths:
                           type: integer
                         body:
                           description: The JSON body, or a problem; absent when there's none.
+        "400":
+          description: An empty or too long list, or a request a batch can't
+            hold (`invalid-request`; the detail names it).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 
   /images/{imageId}:
     parameters:
