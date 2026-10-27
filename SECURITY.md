@@ -297,7 +297,7 @@ comes from the internet, and media files can be written by anyone.
     one Jellyfin account (rule 3), are deleted or disabled, as the operator
     configures (`accounts.on_delete`), and the site tells the user which.
     A disabled Seerr user keeps its requests but not the person's name: it
-    is renamed `overfin-…`, like no one.
+    is renamed `overfin-…`, a name that points at no one.
 46. Overfin offers no hooks for extra data collection. Operators who want more
     collect it with their own tools. Social features are out of Overfin's
     scope: it stores no relations between users, comments, likes, messages
