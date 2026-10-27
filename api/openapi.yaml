@@ -108,9 +108,9 @@ info:
     page) and comes back to that path, then the client retries the
     same request. A confirmed login stays fresh for a few minutes (5 by
     default). Without a `stepUpUrl`, the instance offers no step-up and the
-    action can't be done. After a login or step-up, users are only ever sent back to the
-    same origin or to an origin the operator allows, never to an address
-    taken unchecked from the request.
+    action can't be done. After a login or step-up, users are only ever
+    sent back to a path on the same origin, never to an address taken
+    unchecked from the request.
 
 servers:
   - url: /api/v1
@@ -3632,8 +3632,7 @@ components:
               type: string
               format: uri-reference
               description: Where to send a user who isn't logged in. After
-                logging in, users return only to the same origin or to an
-                origin the operator allows.
+                logging in, users return only to a path on the same origin.
         imageSizes:
           type: array
           description: The sizes images can be requested in.
