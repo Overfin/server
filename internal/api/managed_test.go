@@ -279,6 +279,17 @@ func TestManagedMustChange(t *testing.T) {
 	if c, _ := signinPost(t, b, srv, "/api/v1/signin/password", map[string]any{"password": "short", "return": "/movies"}); c != 400 {
 		t.Errorf("a short one: %d", c)
 	}
+	// Signing out instead works too, and ends the login.
+	other := newBrowser(srv)
+	if c, out := signinPost(t, other, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "bob@example.org", "password": "from the admin 1!", "return": "/"})); c != 200 {
+		t.Fatalf("signing in elsewhere: %d %v", c, out)
+	}
+	if c, out := signinPost(t, other, srv, "/api/v1/logout", map[string]any{}); c != 200 {
+		t.Errorf("signing out before choosing: %d %v", c, out)
+	}
+	if res, body := openPage(t, other, srv, "/signin"); res.StatusCode != 200 || strings.Contains(body, `id="change"`) {
+		t.Errorf("after signing out, the page still asks for a new password: %d", res.StatusCode)
+	}
 	if c, out := signinPost(t, b, srv, "/api/v1/signin/password", map[string]any{"password": "my own one, 2026", "return": "/movies"}); c != 200 || out["next"] != "/movies" {
 		t.Fatalf("choosing it: %d %v", c, out)
 	}
