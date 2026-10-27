@@ -83,6 +83,9 @@ export interface Me {
   /** Whether the operator asks accounts what they like, and whether this
    * one answered (or chose to say nothing). */
   tastes: { asked: boolean; answered: boolean };
+  /** What the server offers that depends on its setup: discovery (TMDB or
+   * Seerr), requests (Seerr). Absent before 0.5. */
+  offers?: { discovery: boolean; requests: boolean };
 }
 
 /** What an account says it likes, for what the server keeps and gets. */

@@ -230,8 +230,8 @@ export class Overfin {
   /** Whether a title is on the watchlist. */
   async onWatchlist(id) {
     try {
-      await this.request('GET', `/me/watchlist/${enc(id)}`);
-      return true;
+      const out = await this.request('GET', `/me/watchlist/${enc(id)}`);
+      return out ? out.on === true : true; // before 0.5: 204 when on, 404 when off
     } catch (err) {
       if (err.status === 404) return false;
       throw err;

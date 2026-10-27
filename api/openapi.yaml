@@ -567,10 +567,21 @@ paths:
     get:
       operationId: onWatchlist
       summary: Whether a title is on the watchlist
+      description: >-
+        Before 0.5, 204 when it was and "not found" when it wasn't; clients
+        for older servers take both.
       tags: [watchlist]
       responses:
-        "204":
-          description: It is.
+        "200":
+          description: Whether it is.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [on]
+                properties:
+                  "on":
+                    type: boolean
         "404":
           $ref: "#/components/responses/NotFound"
     put:
@@ -2938,7 +2949,8 @@ paths:
         The owner profile also sees the requests of the account's kids
         profiles. Statuses are read again from Seerr when they may have
         changed. "Not found" when the server offers no requests (no Seerr
-        connected): clients hide the request button then.
+        connected), as /me's offers says: clients hide the request button
+        then.
       tags: [requests]
       responses:
         "200":
@@ -3403,7 +3415,7 @@ components:
 
     Me:
       type: object
-      required: [accountId, language, languages, limits, home, tastes]
+      required: [accountId, language, languages, limits, home, tastes, offers]
       properties:
         accountId:
           type: string
@@ -3475,6 +3487,18 @@ components:
             asked:
               type: boolean
             answered:
+              type: boolean
+        offers:
+          type: object
+          description: What the server offers that depends on its setup:
+            discovery (with TMDB or Seerr) and requests (with Seerr). Clients
+            show only those, without asking and getting "not found". Since
+            0.5.
+          required: [discovery, requests]
+          properties:
+            discovery:
+              type: boolean
+            requests:
               type: boolean
         activeProfile:
           description: Absent while this session has no profile chosen; the

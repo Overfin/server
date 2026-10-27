@@ -45,14 +45,15 @@ func TestWatchlistModule(t *testing.T) {
 	if code != 200 || !strings.Contains(body, movie1) || strings.Index(body, movie3) > strings.Index(body, movie1) {
 		t.Fatalf("list, newest first: %d %s", code, body)
 	}
-	if code, _ := getAs(t, srv, subject, "/api/v1/me/watchlist/"+movie1); code != 204 {
-		t.Errorf("on the list: %d", code)
+	if code, body := getAs(t, srv, subject, "/api/v1/me/watchlist/"+movie1); code != 200 || !strings.Contains(body, `"on":true`) {
+		t.Errorf("on the list: %d %s", code, body)
 	}
 	if code, _ := put(t, srv, "DELETE", "/api/v1/me/watchlist/"+movie1, ""); code != 204 {
 		t.Errorf("remove: %d", code)
 	}
-	if code, _ := getAs(t, srv, subject, "/api/v1/me/watchlist/"+movie1); code != 404 {
-		t.Errorf("after removing: %d", code)
+	// Off the list is an answer, not an error: no 404 in browsers' consoles.
+	if code, body := getAs(t, srv, subject, "/api/v1/me/watchlist/"+movie1); code != 200 || !strings.Contains(body, `"on":false`) {
+		t.Errorf("after removing: %d %s", code, body)
 	}
 	// Only titles that exist, and only well-formed IDs.
 	if code, _ := put(t, srv, "PUT", "/api/v1/me/watchlist/title_movie_tmdb_99", ""); code != 404 {

@@ -81,12 +81,17 @@ test('pages follow cursors and keep the shuffle seed', async () => {
 
 test('onWatchlist is a yes or no', async () => {
   fakeServer({
-    'GET /api/v1/me/watchlist/item_on': () => [204, null],
-    'GET /api/v1/me/watchlist/item_off': () => [404, { type: 'not-found', status: 404 }],
+    'GET /api/v1/me/watchlist/item_on': () => [200, { on: true }],
+    'GET /api/v1/me/watchlist/item_off': () => [200, { on: false }],
+    // Before 0.5.
+    'GET /api/v1/me/watchlist/item_old_on': () => [204, null],
+    'GET /api/v1/me/watchlist/item_old_off': () => [404, { type: 'not-found', status: 404 }],
   });
   const overfin = new Overfin();
   assert.equal(await overfin.onWatchlist('item_on'), true);
   assert.equal(await overfin.onWatchlist('item_off'), false);
+  assert.equal(await overfin.onWatchlist('item_old_on'), true);
+  assert.equal(await overfin.onWatchlist('item_old_off'), false);
 });
 
 test('discovery asks for its list and filters', async () => {
