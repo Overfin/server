@@ -343,12 +343,6 @@ func titleStats(f *store.ValuationFacts) map[string]*titleStatsJSON {
 			get(key).favorites++
 		}
 	}
-	atLeast2 := func(n int) int {
-		if n < 2 {
-			return 0
-		}
-		return n
-	}
 	out := make(map[string]*titleStatsJSON, len(totals))
 	for key, t := range totals {
 		s := &titleStatsJSON{Plays: atLeast2(t.plays), Viewers: atLeast2(len(t.viewers)), Favorites: atLeast2(t.favorites)}

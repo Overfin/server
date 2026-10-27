@@ -39,9 +39,20 @@ func TestApps(t *testing.T) {
 		}
 	}
 	json.Unmarshal(rec.Body.Bytes(), &stats)
+	// One viewer: counts below 2 are given as 0, and no day.
 	if rec.Code != 200 || len(stats.Titles) != 1 || stats.Titles[0].TmdbId != "949" || stats.Titles[0].ImdbId != "tt0113277" ||
-		stats.Titles[0].Plays != 1 || stats.Titles[0].Viewers != 1 || stats.Titles[0].LastPlayed != "2026-10-20" {
-		t.Errorf("stats: %d %s", rec.Code, rec.Body)
+		stats.Titles[0].Plays != 0 || stats.Titles[0].Viewers != 0 || stats.Titles[0].LastPlayed != "" {
+		t.Errorf("stats, one viewer: %d %s", rec.Code, rec.Body)
+	}
+	// A second account watches it: the totals and the day are given.
+	_, prof2, _ := db.CreateAccount(ctx, "person-2", store.NewOwner{Name: "Other", JellyfinUserID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", JellyfinUsername: "of-2", JellyfinToken: "t"})
+	db.RecordPlay(ctx, prof2.ID, "movie/tmdb/949", "", 0, true, time.Date(2026, 10, 19, 21, 0, 0, 0, time.UTC))
+	rec = app.do("GET", "/apps/v1/watch-stats", "", map[string]string{"Authorization": "Bearer " + made.Key})
+	stats.Titles = nil
+	json.Unmarshal(rec.Body.Bytes(), &stats)
+	if rec.Code != 200 || len(stats.Titles) != 1 || stats.Titles[0].Plays != 2 || stats.Titles[0].Viewers != 2 ||
+		stats.Titles[0].LastPlayed != "2026-10-20" {
+		t.Errorf("stats, two viewers: %d %s", rec.Code, rec.Body)
 	}
 	if strings.Contains(rec.Body.String(), prof.ID) || strings.Contains(rec.Body.String(), "person-1") {
 		t.Errorf("someone named: %s", rec.Body)

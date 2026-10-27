@@ -308,8 +308,8 @@ components:
     AppWatchStats:
       description: |
         What the profiles did with a film or a series, in total (a series
-        counts its seasons and episodes). Unlike `/apps/v1/titles`, small
-        counts are not rounded to 0.
+        counts its seasons and episodes). As on `/apps/v1/titles`, counts
+        below 2 are given as 0, so none points at one person.
       type: object
       required: [kind, plays, viewers, favorites, changedAt]
       properties:
@@ -338,6 +338,8 @@ components:
         lastPlayed:
           type: string
           format: date
+          description: The day it was last played; only with at least two
+            viewers.
         changedAt:
           $ref: "#/components/schemas/Timestamp"
 
