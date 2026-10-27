@@ -699,7 +699,39 @@ func (g *gateway) SetTranscoding(ctx context.Context, family, device string) err
 	if err := g.sh.db.SetTranscoding(ctx, f.ID, device); err != nil {
 		return err
 	}
-	changes, err := jfsettings.Apply(ctx, g.sh.jf, g.adminAuth(), f.Settings(device)...)
+	return g.applySettings(ctx)
+}
+
+// Previews is whether Overfin's Jellyfin makes seek-bar previews.
+func (g *gateway) Previews(ctx context.Context) (bool, error) { return g.sh.db.Previews(ctx) }
+
+// SetPreviews saves whether Overfin's Jellyfin makes seek-bar previews, and
+// sets its libraries to it now; it's set back at every start too.
+func (g *gateway) SetPreviews(ctx context.Context, on bool) error {
+	if err := g.sh.db.SetPreviews(ctx, on); err != nil {
+		return err
+	}
+	return g.applySettings(ctx)
+}
+
+// choices are the operator's, among the Jellyfin settings Overfin owns.
+func (g *gateway) choices(ctx context.Context) (jfsettings.Choices, error) {
+	family, device, err := g.sh.db.Transcoding(ctx)
+	if err != nil {
+		return jfsettings.Choices{}, err
+	}
+	previews, err := g.sh.db.Previews(ctx)
+	return jfsettings.Choices{Transcoding: transcodingSettings(family, device), Previews: previews}, err
+}
+
+// applySettings sets back the Jellyfin settings Overfin owns, with the
+// operator's choices, and logs each it changed.
+func (g *gateway) applySettings(ctx context.Context) error {
+	c, err := g.choices(ctx)
+	if err != nil {
+		return err
+	}
+	changes, err := jfsettings.Apply(ctx, g.sh.jf, g.adminAuth(), c)
 	for _, c := range changes {
 		g.sh.logger.Info("a Jellyfin setting was set back to Overfin's", "change", c.String())
 	}

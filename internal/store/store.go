@@ -1224,6 +1224,28 @@ func (s *Store) SetTranscoding(ctx context.Context, family, device string) error
 	return err
 }
 
+// Previews is whether Overfin's Jellyfin makes seek-bar previews: off
+// unless the operator turned them on.
+func (s *Store) Previews(ctx context.Context) (bool, error) {
+	var v []byte
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'previews'`).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return string(v) == "on", err
+}
+
+// SetPreviews saves whether Overfin's Jellyfin makes seek-bar previews.
+func (s *Store) SetPreviews(ctx context.Context, on bool) error {
+	v := "off"
+	if on {
+		v = "on"
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO meta (name, value) VALUES ('previews', ?)
+		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, []byte(v))
+	return err
+}
+
 // ReadTranscoding is Transcoding for the database at path, opened
 // read-only (for overfin -check).
 func ReadTranscoding(ctx context.Context, path string, box *seal.Box) (family, device string, err error) {
@@ -1233,6 +1255,17 @@ func ReadTranscoding(ctx context.Context, path string, box *seal.Box) (family, d
 	}
 	defer db.Close()
 	return (&Store{db: db, box: box}).Transcoding(ctx)
+}
+
+// ReadPreviews is Previews for the database at path, opened read-only
+// (for overfin -check).
+func ReadPreviews(ctx context.Context, path string) (bool, error) {
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return false, fmt.Errorf("store: %w", err)
+	}
+	defer db.Close()
+	return (&Store{db: db}).Previews(ctx)
 }
 
 // ReadJellyfin is Jellyfin for the database at path, opened read-only so

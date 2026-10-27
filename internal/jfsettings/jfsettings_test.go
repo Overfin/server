@@ -102,7 +102,7 @@ func TestPlanThenApply(t *testing.T) {
 	admin := jellyfin.Auth{Token: "admin", DeviceID: "t"}
 
 	// The plan changes nothing.
-	planned, err := Plan(ctx, jf, admin)
+	planned, err := Plan(ctx, jf, admin, Choices{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestPlanThenApply(t *testing.T) {
 	}
 
 	// Applied: only what differs is written, everything else is kept.
-	applied, err := Apply(ctx, jf, admin)
+	applied, err := Apply(ctx, jf, admin, Choices{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,37 @@ func TestPlanThenApply(t *testing.T) {
 
 	// Then there's nothing left to do.
 	f.writes = nil
-	if again, err := Apply(ctx, jf, admin); err != nil || len(again) != 0 || len(f.writes) != 0 {
+	if again, err := Apply(ctx, jf, admin, Choices{}); err != nil || len(again) != 0 || len(f.writes) != 0 {
 		t.Errorf("again: %v %v, wrote %v", keys(again), err, f.writes)
+	}
+}
+
+// Seek-bar previews follow the operator's choice: off unless turned on,
+// and back on when they are.
+func TestPreviews(t *testing.T) {
+	ctx := context.Background()
+	f, jf := newFake(t)
+	admin := jellyfin.Auth{Token: "admin", DeviceID: "t"}
+	f.lib["EnableTrickplayImageExtraction"] = true
+	f.lib["ExtractTrickplayImagesDuringLibraryScan"] = true
+
+	if _, err := Apply(ctx, jf, admin, Choices{}); err != nil {
+		t.Fatal(err)
+	}
+	if f.lib["EnableTrickplayImageExtraction"] != false || f.lib["ExtractTrickplayImagesDuringLibraryScan"] != false {
+		t.Errorf("off by default: %v", f.lib)
+	}
+	changes, err := Apply(ctx, jf, admin, Choices{Previews: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 2 || f.lib["EnableTrickplayImageExtraction"] != true || f.lib["ExtractTrickplayImagesDuringLibraryScan"] != true {
+		t.Errorf("turned on: %v, %v", keys(changes), f.lib)
+	}
+	if o := LibraryOptions(Choices{Previews: true}); o["EnableTrickplayImageExtraction"] != true {
+		t.Errorf("a new library's options: %v", o)
+	}
+	if o := LibraryOptions(Choices{}); o["EnableTrickplayImageExtraction"] != false {
+		t.Errorf("a new library's options, previews off: %v", o)
 	}
 }

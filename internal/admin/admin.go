@@ -260,6 +260,8 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/transcoding/test", p.signedIn(p.testTranscoding))
 	mux.HandleFunc("GET /admin/api/transcoding/test", p.signedIn(p.transcodingTest))
 	mux.HandleFunc("PUT /admin/api/transcoding", p.signedIn(p.setTranscoding))
+	mux.HandleFunc("GET /admin/api/previews", p.signedIn(p.previews))
+	mux.HandleFunc("PUT /admin/api/previews", p.signedIn(p.setPreviews))
 	mux.HandleFunc("GET /admin/api/libraries", p.signedIn(p.libraries))
 	mux.HandleFunc("POST /admin/api/libraries", p.signedIn(p.addLibrary))
 	mux.HandleFunc("PATCH /admin/api/libraries/{name}", p.signedIn(p.changeLibrary))

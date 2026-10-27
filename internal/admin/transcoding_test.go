@@ -8,9 +8,10 @@ import (
 	"github.com/overfin/server/internal/gpu"
 )
 
-// memTranscoding remembers the GPU chosen and what was tested.
+// memTranscoding remembers the GPU chosen, what was tested, and previews.
 type memTranscoding struct {
 	family, device string
+	previews       bool
 	tested         []string
 	last           *GPUTest
 }
@@ -30,6 +31,33 @@ func (m *memTranscoding) TranscodingTest() *GPUTest { return m.last }
 func (m *memTranscoding) SetTranscoding(_ context.Context, family, device string) error {
 	m.family, m.device = family, device
 	return nil
+}
+
+func (m *memTranscoding) Previews(context.Context) (bool, error) { return m.previews, nil }
+
+func (m *memTranscoding) SetPreviews(_ context.Context, on bool) error {
+	m.previews = on
+	return nil
+}
+
+func TestPreviewsRoutes(t *testing.T) {
+	p, idp, _ := newPanel(t)
+	tr := &memTranscoding{}
+	p.Transcoding = tr
+	b := &browser{h: p.Handler(), cookies: map[string]string{}}
+	if rec := b.do("PUT", "/admin/api/previews", `{"on":true}`, nil); rec.Code != 401 || tr.previews {
+		t.Fatalf("before signing in: %d", rec.Code)
+	}
+	signIn(t, b, idp, []string{"overfin-admins"})
+	if rec := b.do("GET", "/admin/api/previews", "", nil); rec.Body.String() != `{"on":false}`+"\n" {
+		t.Errorf("off by default: %s", rec.Body)
+	}
+	if rec := b.do("PUT", "/admin/api/previews", `{"on":true}`, nil); rec.Code != 200 || !tr.previews {
+		t.Errorf("turned on: %d %s", rec.Code, rec.Body)
+	}
+	if rec := b.do("PUT", "/admin/api/previews", `{"on":"yes"}`, nil); rec.Code != 400 {
+		t.Errorf("not a boolean: %d", rec.Code)
+	}
 }
 
 func TestTranscodingRoutes(t *testing.T) {

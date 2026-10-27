@@ -289,7 +289,12 @@ func ownSettings(ctx context.Context, db *store.Store, url, key string, logger *
 	if err != nil {
 		logger.Warn("the GPU chosen can't be read", "err", err)
 	}
-	changes, err := jfsettings.Apply(ctx, jf, jellyfin.Auth{Token: key, DeviceID: "overfin-admin"}, transcodingSettings(family, device)...)
+	previews, err := db.Previews(ctx)
+	if err != nil {
+		logger.Warn("whether to make seek-bar previews can't be read", "err", err)
+	}
+	changes, err := jfsettings.Apply(ctx, jf, jellyfin.Auth{Token: key, DeviceID: "overfin-admin"},
+		jfsettings.Choices{Transcoding: transcodingSettings(family, device), Previews: previews})
 	for _, c := range changes {
 		logger.Info("a Jellyfin setting was set back to Overfin's", "change", c.String())
 	}

@@ -381,9 +381,10 @@ async function brandingView() {
 
 // serverView: what Overfin connects to, each part tested before it's saved.
 async function serverView() {
-  const [jellyfin, transcoding, mail, catalog, seerr, ratings, languages, skipper, templates] = await Promise.all([
+  const [jellyfin, transcoding, previews, mail, catalog, seerr, ratings, languages, skipper, templates] = await Promise.all([
     api('GET', '/admin/api/jellyfin').catch(() => null),
     api('GET', '/admin/api/transcoding').catch(() => null),
+    api('GET', '/admin/api/previews').catch(() => null),
     api('GET', '/admin/api/mail').catch(() => null),
     api('GET', '/admin/api/catalog').catch(() => null),
     api('GET', '/admin/api/seerr').catch(() => null),
@@ -393,7 +394,7 @@ async function serverView() {
     api('GET', '/admin/api/mail/templates').catch(() => null),
   ]);
   show(pageHead('Server', 'What Overfin connects to. Every change is tested before it\'s saved, and applies at once.'),
-    h('div', { class: 'cards' }, jellyfinCard(jellyfin), transcodingCard(transcoding), catalogCard(catalog), mailCard(mail), emailsCard(templates, mail), seerrCard(seerr), languagesCard(languages), tmdbCard(ratings), introSkipperCard(skipper)));
+    h('div', { class: 'cards' }, jellyfinCard(jellyfin), transcodingCard(transcoding), previewsCard(previews), catalogCard(catalog), mailCard(mail), emailsCard(templates, mail), seerrCard(seerr), languagesCard(languages), tmdbCard(ratings), introSkipperCard(skipper)));
 }
 
 // introSkipperCard: Intro Skipper on Overfin's Jellyfin, installed from
@@ -570,6 +571,24 @@ function transcodingCard(t) {
   return card({ title: 'Transcoding', badge: current ? badge(current.vendor ? `${current.vendor} ${current.name}` : current.name, 'ok') : badge('Not chosen', 'plain'),
     description: 'The GPU Jellyfin converts videos with, when a device can\'t play them as they are. Test it on your own videos before using it.' },
   [h('div', { class: 'fields' }, field('GPU', choose, '', true), deviceField), about, results], [st, test, use]);
+}
+
+// previewsCard: whether Jellyfin makes seek-bar previews, off by default.
+function previewsCard(pv) {
+  if (!pv) return null;
+  const st = status('');
+  const on = h('input', { type: 'checkbox', 'aria-label': 'Make previews' });
+  on.checked = pv.on;
+  const save = h('button', { class: 'primary', type: 'button', onclick: () => busy(save, async () => {
+    if (on.checked === pv.on) return;
+    Object.assign(pv, await api('PUT', '/admin/api/previews', { on: on.checked }));
+    toast(pv.on ? 'Jellyfin makes previews now.' : 'Jellyfin makes no more previews.');
+    serverView();
+  }, (err) => st.set(err.message, 'error')) }, 'Save');
+  return card({ title: 'Seek-bar previews', badge: pv.on ? badge('On', 'ok') : badge('Off', 'plain'),
+    description: 'Small pictures shown above the seek bar while seeking. Jellyfin makes them from each video: it takes time, the GPU, and disk space (a few MB per video).' },
+  [setting('Make previews', 'On: Jellyfin makes them for every video, new ones as they arrive; the first time, with a large library, that takes days. Off: no more are made.', on)],
+  [st, save]);
 }
 
 function catalogCard(c) {

@@ -67,7 +67,7 @@ identity provider: see [Running it](#running-it).
   (how many streams and profiles an account gets, and whether each profile
   keeps a stream of its own), limits, languages,
   libraries, the GPU that converts videos (tested on your own files),
-  email, Seerr, fixing titles Jellyfin matched wrong, what each title is
+  seek-bar previews (off by default: they take time and disk space), email, Seerr, fixing titles Jellyfin matched wrong, what each title is
   worth to your server (Valuation).
 - **Bringing people over** from another Jellyfin, their watch history
   included, with their old username and password, once. Nothing changes on

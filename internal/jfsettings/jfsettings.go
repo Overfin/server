@@ -44,15 +44,13 @@ var documents = []struct {
 	}},
 }
 
-// librarySettings are every library's.
-var librarySettings = []Setting{
+// libraryBase are every library's, whatever the operator chose.
+var libraryBase = []Setting{
 	{"SaveLocalMetadata", false, "nothing is written into media folders"},
 	{"MetadataSavers", []string{}, "nothing is written into media folders"},
 	{"SaveSubtitlesWithMedia", false, "nothing is written into media folders"},
 	{"SaveTrickplayWithMedia", false, "nothing is written into media folders"},
 	{"SaveLyricsWithMedia", false, "nothing is written into media folders"},
-	{"EnableTrickplayImageExtraction", true, "the player shows previews while seeking"},
-	{"ExtractTrickplayImagesDuringLibraryScan", true, "previews are ready when a title arrives"},
 	{"EnableChapterImageExtraction", false, "no app shows chapter images"},
 	{"ExtractChapterImagesDuringLibraryScan", false, "no app shows chapter images"},
 	{"EnableLUFSScan", false, "no app evens out loudness"},
@@ -92,18 +90,38 @@ func show(v any) string {
 	return string(b)
 }
 
+// Choices are the operator's, among the settings Overfin owns.
+type Choices struct {
+	// Transcoding are the settings of the GPU chosen, if one was.
+	Transcoding []Setting
+	// Previews is whether Jellyfin makes seek-bar previews (trickplay
+	// images): off unless the operator turns them on.
+	Previews bool
+}
+
+// librarySettings are every library's, with the operator's choices.
+func librarySettings(c Choices) []Setting {
+	why := "the operator turned seek-bar previews off"
+	if c.Previews {
+		why = "the operator turned seek-bar previews on"
+	}
+	return append(slices.Clone(libraryBase),
+		Setting{"EnableTrickplayImageExtraction", c.Previews, why},
+		Setting{"ExtractTrickplayImagesDuringLibraryScan", c.Previews, why})
+}
+
 // Plan is what differs from Overfin's settings on the server, changing
-// nothing. transcoding are the settings of the GPU chosen, if one was.
-func Plan(ctx context.Context, jf *jellyfin.Client, admin jellyfin.Auth, transcoding ...Setting) ([]Change, error) {
-	return run(ctx, jf, admin, false, transcoding)
+// nothing.
+func Plan(ctx context.Context, jf *jellyfin.Client, admin jellyfin.Auth, c Choices) ([]Change, error) {
+	return run(ctx, jf, admin, false, c)
 }
 
 // Apply sets back what differs, and returns what it changed.
-func Apply(ctx context.Context, jf *jellyfin.Client, admin jellyfin.Auth, transcoding ...Setting) ([]Change, error) {
-	return run(ctx, jf, admin, true, transcoding)
+func Apply(ctx context.Context, jf *jellyfin.Client, admin jellyfin.Auth, c Choices) ([]Change, error) {
+	return run(ctx, jf, admin, true, c)
 }
 
-func run(ctx context.Context, jf *jellyfin.Client, admin jellyfin.Auth, apply bool, transcoding []Setting) ([]Change, error) {
+func run(ctx context.Context, jf *jellyfin.Client, admin jellyfin.Auth, apply bool, c Choices) ([]Change, error) {
 	var changes []Change
 	for _, doc := range documents {
 		s, err := jf.Settings(ctx, admin, doc.Name)
@@ -112,7 +130,7 @@ func run(ctx context.Context, jf *jellyfin.Client, admin jellyfin.Auth, apply bo
 		}
 		want := doc.Settings
 		if doc.Name == "encoding" {
-			want = append(slices.Clone(want), transcoding...)
+			want = append(slices.Clone(want), c.Transcoding...)
 		}
 		found := differences(s, want, doc.Name)
 		if apply && len(found) > 0 {
@@ -131,7 +149,7 @@ func run(ctx context.Context, jf *jellyfin.Client, admin jellyfin.Auth, apply bo
 		if l.ID == "" || l.Options == nil {
 			continue // still being made: next time
 		}
-		found := differences(l.Options, librarySettings, "library "+l.Name)
+		found := differences(l.Options, librarySettings(c), "library "+l.Name)
 		if apply && len(found) > 0 {
 			if err := jf.SetLibraryOptions(ctx, admin, l.ID, l.Options); err != nil {
 				return changes, err
@@ -191,8 +209,8 @@ func normalize(v any) any {
 
 // LibraryOptions are Overfin's settings for a new library, so it's right
 // from its first scan.
-func LibraryOptions() jellyfin.Settings {
+func LibraryOptions(c Choices) jellyfin.Settings {
 	options := jellyfin.Settings{}
-	differences(options, librarySettings, "")
+	differences(options, librarySettings(c), "")
 	return options
 }
