@@ -295,7 +295,8 @@ func (p Profiles) tags(w http.ResponseWriter, r *http.Request) {
 func (p Profiles) create(w http.ResponseWriter, r *http.Request) {
 	var req profileRequest
 	if !decode(r, &req) || req.Name == nil || !validName(*req.Name) || req.PIN != "" ||
-		(req.Language != nil && !languageTagRe.MatchString(*req.Language)) {
+		(req.Language != nil && !languageTagRe.MatchString(*req.Language)) ||
+		(req.Theme != nil && *req.Theme != "" && *req.Theme != "light" && *req.Theme != "dark") {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
@@ -352,6 +353,14 @@ func (p Profiles) create(w http.ResponseWriter, r *http.Request) {
 		p.Logger.Error("creating a profile failed", "err", err)
 		problem.Send(w, problem.Internal, "")
 	default:
+		// Its look, if one was chosen: kept like a change made later.
+		if req.Theme != nil && *req.Theme != "" {
+			if err := p.Store.SetProfileTheme(r.Context(), c.Account.ID, prof.ID, *req.Theme); err != nil {
+				p.Logger.Error("setting a new profile's look failed", "err", err)
+			} else {
+				prof.Theme = *req.Theme
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		writeOK(w, toProfileJSON(prof))
