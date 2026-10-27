@@ -160,9 +160,10 @@ type OIDC struct {
 func (o OIDC) Enabled() bool { return o.Issuer != "" }
 
 type Accounts struct {
-	// OnDelete is what happens to the Jellyfin users of a deleted account:
-	// "delete" (the default: with their watch history) or "disable" (kept,
-	// with their history, but unusable).
+	// OnDelete is what happens to the Jellyfin and Seerr users of a
+	// deleted account: "delete" (the default: with their watch history and
+	// requests) or "disable" (kept, with their history, but unusable; the
+	// Seerr user, with its requests, under an anonymous name).
 	OnDelete string `toml:"on_delete" json:"onDelete"`
 }
 
