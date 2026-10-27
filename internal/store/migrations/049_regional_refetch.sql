@@ -2,7 +2,7 @@
 -- translation only: titles without one were kept with their original name,
 -- no overview, and an English logo. Overfin now fills those from the
 -- language alone; everything is fetched again, as when the language
--- changes.
+-- changes. Seasons keep their time: the purge deletes old ones (and their
+-- episodes), and the library's come again with their series.
 DELETE FROM artwork_fetched;
 UPDATE catalog_titles SET details_at = 0;
-UPDATE catalog_seasons SET fetched_at = 0;

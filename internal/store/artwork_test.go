@@ -66,7 +66,14 @@ func TestArtwork(t *testing.T) {
 	if l, _ := s.TMDBLanguage(ctx); l != "en" {
 		t.Errorf("default language: %s", l)
 	}
+	s.SetSeason(ctx, "949", Season{Number: 1, Name: "Season 1"}, now)
 	s.SetTMDBLanguage(ctx, "fr")
+	// Its seasons stay until they're fetched again (they were all deleted
+	// once, from a purge right after).
+	s.PurgeSeasons(ctx, now.Add(-time.Hour))
+	if se, err := s.SeasonByTMDB(ctx, "949", 1); err != nil || se == nil {
+		t.Errorf("season after a new language: %+v, %v", se, err)
+	}
 	if l, _ := s.TMDBLanguage(ctx); l != "fr" {
 		t.Errorf("language: %s", l)
 	}
