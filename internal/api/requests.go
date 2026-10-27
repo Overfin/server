@@ -145,7 +145,8 @@ const maxName = 64
 
 // nameOf is the account's name as the control panel shows it: the
 // identity provider's (its name, else its username), else the label the
-// operator gave it, else its owner profile's. sure is false when the
+// operator gave it, else its owner profile's, else "Overfin"; never one
+// with an @, which may be an email (rule 47). sure is false when the
 // identity provider couldn't be asked: the name is then a fallback.
 func (q Requests) nameOf(ctx context.Context, a *store.Account) (name string, sure bool, err error) {
 	sure = true
@@ -155,11 +156,11 @@ func (q Requests) nameOf(ctx context.Context, a *store.Account) (name string, su
 			sure = false
 		}
 		if p, ok := people[a.Subject]; ok {
-			name = cmp.Or(strings.TrimSpace(p.Name), strings.TrimSpace(p.Username))
+			name = cmp.Or(notEmail(p.Name), notEmail(p.Username))
 		}
 	}
 	if name == "" {
-		name = strings.TrimSpace(a.Label)
+		name = notEmail(a.Label)
 	}
 	if name == "" {
 		profiles, err := q.Library.Provisioner.Store.Profiles(ctx, a.ID)
@@ -168,7 +169,7 @@ func (q Requests) nameOf(ctx context.Context, a *store.Account) (name string, su
 		}
 		for _, p := range profiles {
 			if p.Owner {
-				name = strings.TrimSpace(p.Name)
+				name = notEmail(p.Name)
 			}
 		}
 	}
@@ -176,6 +177,16 @@ func (q Requests) nameOf(ctx context.Context, a *store.Account) (name string, su
 		name = string(r[:maxName])
 	}
 	return cmp.Or(name, "Overfin"), sure, nil
+}
+
+// notEmail is s trimmed, or "" when it has an @: what may be an email is
+// never a name given to Seerr.
+func notEmail(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.Contains(s, "@") {
+		return ""
+	}
+	return s
 }
 
 // random is n random bytes, as lowercase letters and digits.
