@@ -164,9 +164,9 @@ func (p *Panel) retitled(w http.ResponseWriter, r *http.Request, s *session, id,
 		return
 	}
 	if tmdbID != "" {
-		p.Logger.Info("a title was identified in the control panel", "item", id, "tmdb", tmdbID, "by", s.name)
+		p.Logger.Info("a title was identified in the control panel", "item", id, "tmdb", tmdbID, "by", s.logID)
 	} else {
-		p.Logger.Info("a title went back to Jellyfin's identification", "item", id, "by", s.name)
+		p.Logger.Info("a title went back to Jellyfin's identification", "item", id, "by", s.logID)
 	}
 	// The new title's page and artwork are fetched now.
 	if p.OnRetitled != nil {

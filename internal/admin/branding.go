@@ -89,7 +89,7 @@ func (p *Panel) setBranding(w http.ResponseWriter, r *http.Request, s *session) 
 		p.fail(w, "saving the branding", err)
 		return
 	}
-	p.Logger.Info("branding changed in the control panel", "on", req.On, "by", s.name)
+	p.Logger.Info("branding changed in the control panel", "on", req.On, "by", s.logID)
 	p.branding(w, r, s)
 }
 
@@ -132,7 +132,7 @@ func (p *Panel) uploadBrandingFile(w http.ResponseWriter, r *http.Request, s *se
 		p.fail(w, "saving a branding file", err)
 		return
 	}
-	p.Logger.Info("a branding file was uploaded in the control panel", "kind", kind, "type", mt, "bytes", len(data), "by", s.name)
+	p.Logger.Info("a branding file was uploaded in the control panel", "kind", kind, "type", mt, "bytes", len(data), "by", s.logID)
 	p.branding(w, r, s)
 }
 
@@ -174,6 +174,6 @@ func (p *Panel) removeBrandingFile(w http.ResponseWriter, r *http.Request, s *se
 		p.fail(w, "removing a branding file", err)
 		return
 	}
-	p.Logger.Info("a branding file was removed in the control panel", "kind", kind, "by", s.name)
+	p.Logger.Info("a branding file was removed in the control panel", "kind", kind, "by", s.logID)
 	p.branding(w, r, s)
 }

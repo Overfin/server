@@ -92,7 +92,7 @@ func (p *Panel) testTranscoding(w http.ResponseWriter, r *http.Request, s *sessi
 		p.upstreamProblem(w, err, "testing a GPU")
 		return
 	}
-	p.Logger.Info("a GPU is being tested in the control panel", "gpu", f.ID, "by", s.name)
+	p.Logger.Info("a GPU is being tested in the control panel", "gpu", f.ID, "by", s.logID)
 	writeJSON(w, http.StatusAccepted, p.Transcoding.TranscodingTest())
 }
 
@@ -118,7 +118,7 @@ func (p *Panel) setTranscoding(w http.ResponseWriter, r *http.Request, s *sessio
 		p.upstreamProblem(w, err, "choosing a GPU")
 		return
 	}
-	p.Logger.Info("a GPU was chosen in the control panel", "gpu", f.ID, "by", s.name)
+	p.Logger.Info("a GPU was chosen in the control panel", "gpu", f.ID, "by", s.logID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

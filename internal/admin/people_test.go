@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/overfin/server/internal/config"
+	"github.com/overfin/server/internal/provision"
 	"github.com/overfin/server/internal/seal"
 	"github.com/overfin/server/internal/store"
 )
@@ -136,5 +137,49 @@ func TestPeople(t *testing.T) {
 	}
 	if _, err := db.UserByEmail(context.Background(), "bob@example.org"); err != store.ErrNotFound {
 		t.Errorf("Bob is still there: %v", err)
+	}
+}
+
+// TestLogsNameNoAdmin: the panel's logs name the admin by a keyed hash of
+// their subject, never by their email (SECURITY.md rule 54), while the
+// panel still shows their email.
+func TestLogsNameNoAdmin(t *testing.T) {
+	box, _ := seal.New(bytes.Repeat([]byte{3}, 32))
+	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "t.db"), box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	me, _ := db.CreateUser(context.Background(), "me@example.org", true)
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	prov := &provision.Provisioner{Store: db, LogKey: []byte("k"), Logger: logger}
+	p := &Panel{Features: &memFeatures{f: config.DefaultFeatures()}, Store: db, Logger: logger,
+		Provisioner: func() *provision.Provisioner { return prov },
+		SiteAdmin:   func(*http.Request) (string, bool, bool) { return "me@example.org", true, true }}
+	h := p.SiteHandler(false)
+	login := httptest.NewRecorder()
+	h.ServeHTTP(login, httptest.NewRequest("GET", "/admin/login", nil))
+	cookie := login.Result().Cookies()[0]
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do("GET", "/admin/api/session", ""); !strings.Contains(rec.Body.String(), "me@example.org") {
+		t.Errorf("the panel shows: %s", rec.Body)
+	}
+	if rec := do("PUT", "/admin/api/languages", `{"offered":["en-US"],"default":"en-US"}`); rec.Code != 200 {
+		t.Fatalf("changing the languages: %d %s", rec.Code, rec.Body)
+	}
+	out := logs.String()
+	if strings.Contains(out, "example.org") {
+		t.Errorf("an email in the logs:\n%s", out)
+	}
+	if !strings.Contains(out, "the languages changed") || !strings.Contains(out, "by="+prov.LogID(me.Subject)) {
+		t.Errorf("the admin isn't named by their hash:\n%s", out)
 	}
 }
