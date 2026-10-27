@@ -1878,6 +1878,13 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Library"
+        "503":
+          description: The media server can't be reached (`server-busy`). Try
+            again later.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 
   /titles:
     get:
@@ -1908,17 +1915,28 @@ paths:
               enum: [movie, series]
         - name: genre
           in: query
+          description: Repeat for any of several (at most 10). Each is at
+            most 128 characters, without `|` or control characters.
+          style: form
+          explode: true
           schema:
-            type: string
-            maxLength: 100
+            type: array
+            maxItems: 10
+            items:
+              type: string
+              maxLength: 128
         - name: yearFrom
           in: query
           schema:
             type: integer
+            minimum: 1800
+            maximum: 9999
         - name: yearTo
           in: query
           schema:
             type: integer
+            minimum: 1800
+            maximum: 9999
         - name: played
           in: query
           schema:
@@ -1936,13 +1954,17 @@ paths:
           schema:
             type: string
             enum: [name, addedAt, premiereDate, communityRating, lastPlayed, random]
+            default: name
         - name: order
           in: query
           schema:
             type: string
             enum: [asc, desc]
+            default: asc
         - name: seed
           in: query
+          description: Only with `sort=random` (else `invalid-request`); the
+            seed a previous page returned, to keep the same order.
           schema:
             type: string
             pattern: "^[A-Za-z0-9]{1,32}$"
@@ -2036,7 +2058,7 @@ paths:
         required: true
         schema:
           type: string
-          pattern: "^person_tmdb_[1-9][0-9]{0,11}$"
+          pattern: "^person_tmdb_[1-9][0-9]{0,9}$"
           examples: [person_tmdb_1245]
     get:
       operationId: getPerson
@@ -2113,6 +2135,9 @@ paths:
     delete:
       operationId: unmarkTitlePlayed
       summary: Mark a title not watched
+      description: >-
+        A series or a season unmarks its aired episodes too, in a library or
+        not.
       tags: [titles]
       responses:
         "200":
@@ -2187,6 +2212,9 @@ paths:
     delete:
       operationId: forgetTitleProgress
       summary: Take a title out of Continue Watching
+      description: >-
+        An episode takes its series out of Continue Watching too, its next
+        episode included, until the profile watches it again.
       tags: [titles]
       responses:
         "200":
@@ -2298,6 +2326,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SearchResults"
+        "429":
+          description: Too many searches this minute for the account
+            (`rate-limited`), without `retryAfter`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 
   /batch:
     post:
@@ -2388,7 +2423,19 @@ paths:
                 type: string
                 format: binary
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: The image doesn't exist, the profile may not see it,
+            or `size` isn't one of the sizes (`not-found`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The media server can't be reached (`server-busy`). Try
+            again later.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 
   /playback:
     post:
@@ -2777,6 +2824,7 @@ paths:
             enum: [trending, popular, upcoming]
         - name: mediaKind
           in: query
+          required: true
           schema:
             type: string
             enum: [movie, series]
@@ -2892,19 +2940,19 @@ paths:
       tags: [requests]
       responses:
         "200":
-          description: Newest first.
+          description: Newest first, all at once (not paged).
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: "#/components/schemas/PageInfo"
-                  - type: object
-                    required: [items]
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: "#/components/schemas/MediaRequest"
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MediaRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
     post:
       operationId: createRequest
       summary: Request a film, a series, or seasons of a series
@@ -2927,11 +2975,14 @@ paths:
                   maxLength: 128
                 seasons:
                   type: array
-                  description: For a series, which seasons. Absent means all.
+                  description: For a series, which seasons; absent means all.
+                    Refused for a film, a season or an episode (which asks for
+                    its own season).
                   maxItems: 100
                   items:
                     type: integer
                     minimum: 0
+                    maximum: 1000
       responses:
         "201":
           description: The request.
@@ -2939,12 +2990,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MediaRequest"
+        "400":
+          description: |
+            `seasons` for a film, a season or an episode, or a title TMDB
+            doesn't know (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: No such title (or a malformed `titleId`), the profile
+            may not see it, or the server offers no requests (`not-found`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "409":
-          description: Already requested or available (`already-requested`),
-            quota used up (`quota-exceeded`), or refused by Seerr
-            (`request-refused`).
+          description: |
+            Already requested, or a library already has all of it
+            (`already-requested`); quota used up (`quota-exceeded`); or
+            refused by Seerr (`request-refused`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: Too many requests this minute for the account
+            (`rate-limited`), without `retryAfter`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Seerr can't be reached (`server-busy`).
           content:
             application/problem+json:
               schema:
@@ -2983,6 +3061,19 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           description: No longer pending (`not-pending`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: Too many requests this minute for the account
+            (`rate-limited`), without `retryAfter`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Seerr can't be reached (`server-busy`).
           content:
             application/problem+json:
               schema:
@@ -3113,8 +3204,8 @@ components:
         one no one identified.
       schema:
         type: string
-        maxLength: 128
-        pattern: "^title_[a-z0-9_]{1,122}$"
+        maxLength: 126
+        pattern: "^title_[a-z0-9_]{1,120}$"
         examples: [title_movie_tmdb_949]
     PlaybackId:
       name: playbackId
@@ -3691,6 +3782,7 @@ components:
       description: The active profile's state for this item. Never anyone
         else's.
       type: object
+      required: [played, favorite]
       properties:
         positionMs:
           $ref: "#/components/schemas/Milliseconds"
@@ -3890,13 +3982,13 @@ components:
         kind:
           type: string
           description: Open set; clients must handle unknown values.
-          examples: [movies, shows, music, books, photos, homeVideos, liveTv, mixed]
+          examples: [movies, shows, music, musicVideos, books, photos, homeVideos, liveTv, collections, playlists, mixed]
         image:
           $ref: "#/components/schemas/ImageRef"
 
     Genre:
       type: object
-      required: [name]
+      required: [name, itemCount]
       properties:
         name:
           type: string
@@ -4030,7 +4122,7 @@ components:
         status:
           type: string
           description: Open set; clients must handle unknown values.
-          examples: [pending, approved, declined, processing, available, failed]
+          examples: [pending, approved, declined, processing, partiallyAvailable, available, failed]
         requestedAt:
           $ref: "#/components/schemas/Timestamp"
         profileName:
