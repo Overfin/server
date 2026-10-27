@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"strings"
 	texttemplate "text/template"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/overfin/server/internal/mail"
@@ -45,7 +46,7 @@ var overfinLight []byte
 var overfinDark []byte
 
 // Names are the emails Overfin sends.
-var Names = []string{"verify", "reset", "exists", "invite", "test"}
+var Names = []string{"verify", "reset", "exists", "invite", "test", "joined", "expiring", "expired", "ending"}
 
 // texts are the built-in sentences, by language ("en", "fr") then key
 // ("poweredBy", "signin.subject"…).
@@ -99,13 +100,20 @@ type data struct {
 	// Light and Dark are the theme's colors (theme.css), by name.
 	Light, Dark map[string]string
 	// Link is the email's link: confirming an address, choosing a new
-	// password, signing in, an invitation.
+	// password, signing in, an invitation, the site.
 	Link string
+	// Name is the account a notice is about; Date, when its access ends,
+	// written in the reader's language.
+	Name, Date string
 }
 
 // Vars are an email's own values.
 type Vars struct {
 	Link string
+	// Name and Date are a notice's: the account it's about, and when its
+	// access ends.
+	Name string
+	Date time.Time
 }
 
 // Write writes an email in a language (a regional tag such as "fr-CA").
@@ -126,7 +134,7 @@ func (w *Writer) write(ctx context.Context, name, lang string, v Vars) (mail.Mes
 		return mail.Message{}, err
 	}
 	d := data{Lang: lang, Site: brandName(br), Custom: br.On, Light: theme.Colors(true), Dark: theme.Colors(false),
-		Link: v.Link}
+		Link: v.Link, Name: v.Name, Date: Day(v.Date, lang)}
 	var images []mail.Image
 	// The banner on the dark header: the operator's, as a picture email
 	// apps show (not SVG), else their name as text; Overfin's otherwise.
@@ -157,6 +165,23 @@ func (w *Writer) write(ctx context.Context, name, lang string, v Vars) (mail.Mes
 	return mail.Message{Subject: subject, Text: text, HTML: html, Images: images}, nil
 }
 
+var months = map[string][]string{
+	"en": {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"},
+	"fr": {"janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"},
+}
+
+// Day writes a date in a language: "November 3, 2026", "3 novembre 2026";
+// "" for none.
+func Day(t time.Time, lang string) string {
+	if t.IsZero() {
+		return ""
+	}
+	if strings.SplitN(lang, "-", 2)[0] == "fr" {
+		return fmt.Sprintf("%d %s %d", t.Day(), months["fr"][t.Month()-1], t.Year())
+	}
+	return fmt.Sprintf("%s %d, %d", months["en"][t.Month()-1], t.Day(), t.Year())
+}
+
 func brandName(br store.Branding) string {
 	if br.On && br.Name != "" {
 		return br.Name
@@ -175,7 +200,7 @@ func sizeOf(b []byte, height int) *picture {
 }
 
 // translator is the "t" function: a sentence in the language (else in
-// English), with {site} filled in.
+// English), with {site}, {name} and {date} filled in.
 func (w *Writer) translator(lang string, d data) func(string) string {
 	set := texts[strings.SplitN(lang, "-", 2)[0]]
 	return func(key string) string {
@@ -183,7 +208,7 @@ func (w *Writer) translator(lang string, d data) func(string) string {
 		if !ok {
 			s = texts["en"][key]
 		}
-		return strings.ReplaceAll(s, "{site}", d.Site)
+		return strings.NewReplacer("{site}", d.Site, "{name}", d.Name, "{date}", d.Date).Replace(s)
 	}
 }
 

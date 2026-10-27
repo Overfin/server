@@ -32,6 +32,7 @@ import (
 	"github.com/overfin/server/internal/cookie"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/introskipper"
+	"github.com/overfin/server/internal/notices"
 	"github.com/overfin/server/internal/oidc"
 	"github.com/overfin/server/internal/provision"
 	"github.com/overfin/server/internal/store"
@@ -162,6 +163,8 @@ type Panel struct {
 	// Playing, when set, shows what's playing now and stops it (the live
 	// view).
 	Playing Playing
+	// Notices, when set, tells of account events as the panel sets.
+	Notices *notices.Notifier
 	// Interests, when set, lists what profiles keep for later (the
 	// watchlist), for the title valuation.
 	Interests func(ctx context.Context) ([]store.ProfileTitle, error)
@@ -282,6 +285,12 @@ func (p *Panel) handler() http.Handler {
 	if p.Playing != nil {
 		mux.HandleFunc("GET /admin/api/playing", p.signedIn(p.playing))
 		mux.HandleFunc("POST /admin/api/playing/{id}/stop", p.signedIn(p.stopPlaying))
+	}
+	if p.Notices != nil {
+		mux.HandleFunc("GET /admin/api/notices", p.signedIn(p.noticeSettings))
+		mux.HandleFunc("PUT /admin/api/notices", p.signedIn(p.setNoticeSettings))
+		mux.HandleFunc("POST /admin/api/notices/test", p.signedIn(p.testNotices))
+		mux.HandleFunc("POST /admin/api/notices/secret", p.signedIn(p.newNoticeSecret))
 	}
 	mux.HandleFunc("GET /admin/api/apps", p.signedIn(p.appKeys))
 	mux.HandleFunc("POST /admin/api/apps", p.signedIn(p.createAppKey))

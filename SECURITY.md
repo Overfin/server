@@ -300,7 +300,12 @@ comes from the internet, and media files can be written by anyone.
     A disabled Seerr user keeps its requests but not the person's name: it
     is renamed `overfin-…`, a name that points at no one.
 46. Overfin offers no hooks for extra data collection. Operators who want more
-    collect it with their own tools. Social features are out of Overfin's
+    collect it with their own tools. Notices (off by default) carry account
+    events only, never what anyone watches: an account made, its access
+    ending soon or ended. They go by email to the admins, to a webhook at
+    the address the operator sets (http or https, no redirects followed,
+    signed when the operator makes a key, its address never logged), and,
+    before their access ends, by email to the person. Social features are out of Overfin's
     scope: it stores no relations between users, comments, likes, messages
     or anything of the kind. Operators who want them build them in their own
     backend, logging users in with the same identity provider.

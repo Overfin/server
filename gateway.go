@@ -31,6 +31,7 @@ import (
 	"github.com/overfin/server/internal/keys"
 	"github.com/overfin/server/internal/library"
 	"github.com/overfin/server/internal/mail"
+	"github.com/overfin/server/internal/notices"
 	"github.com/overfin/server/internal/oidc"
 	"github.com/overfin/server/internal/pin"
 	"github.com/overfin/server/internal/playback"
@@ -73,6 +74,8 @@ type shared struct {
 	seerrKey string
 	// emails writes Overfin's emails, from its templates or the operator's.
 	emails *emails.Writer
+	// notices tells the operator about account events.
+	notices *notices.Notifier
 	// proof checks the sign-in pages' forms against scripts; one for the
 	// whole run, so a check is used once whatever reloads.
 	proof *proof.Checker
@@ -132,6 +135,9 @@ func newProvisioner(cfg *config.Config, sh *shared) *provision.Provisioner {
 		AdminGroup:    adminGroup(cfg),
 		LogKey:        sh.keys.LogID,
 		Logger:        sh.logger,
+	}
+	if sh.notices != nil {
+		p.Created = sh.notices.Joined
 	}
 	// A deleted account's Seerr user goes with it, or is made anonymous,
 	// through the Seerr connected now (connecting or disconnecting one
@@ -1130,8 +1136,8 @@ func (g *gateway) SendSample(ctx context.Context, name, to string) error {
 	site := strings.TrimSuffix(siteURL(g.cfg), "/")
 	v := emails.Vars{Link: map[string]string{
 		"verify": site + "/signin#verify=sample", "reset": site + "/reset#reset=sample",
-		"exists": site + "/signin", "invite": site + "/invite/sample",
-	}[name]}
+		"exists": site + "/signin", "invite": site + "/invite/sample", "ending": site + "/",
+	}[name], Name: "Alex", Date: time.Now().AddDate(0, 0, 7)}
 	msg, err := g.sh.emails.Write(ctx, name, lang, v)
 	if err != nil {
 		return err

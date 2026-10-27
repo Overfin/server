@@ -64,7 +64,8 @@ identity provider: see [Running it](#running-it).
 - **A setup wizard**, one step at a time: the default language, TMDB,
   Intro Skipper, Seerr, and you, its first admin.
 - **A control panel**: what's playing now (and stopping it), people and
-  their accounts, invitations, templates (how many streams and profiles an account gets, and whether each profile
+  their accounts, notices (an account made, access ending, by email or
+  webhook), invitations, templates (how many streams and profiles an account gets, and whether each profile
   keeps a stream of its own), limits, languages,
   libraries, the GPU that converts videos (tested on your own files),
   seek-bar previews (off by default: they take time and disk space), email, Seerr, fixing titles Jellyfin matched wrong, what each title is
@@ -365,13 +366,15 @@ Overfin's are the place to start, at the release you run:
 
 - `layout.html` and `layout.txt` frame every email; `verify` (confirming
   an address), `reset` (a new password), `exists` (someone registered
-  with an address that has an account), `invite` and `test` are each
-  email's own (`.html` and `.txt`). The subject is the `.txt` file's
-  `subject` block.
+  with an address that has an account), `invite`, `test`, the notices to
+  admins (`joined`, `expiring`, `expired`) and the one to someone whose
+  access ends (`ending`) are each email's own (`.html` and `.txt`). The
+  subject is the `.txt` file's `subject` block.
 - `reset.html` replaces it in every language; `reset.fr.html`, in
   French only; `reset.fr-CA.html`, in Canadian French only. Your own
   templates' languages are yours to cover.
 - Templates are Go templates, with `.Site`, `.Lang`, `.Subject`, `.Link`,
+  `.Name` and `.Date` (a notice's account, and when its access ends),
   `.Custom` (your brand is on), `.Banner` (`cid:banner`), `.Overfin`
   (Overfin's small logo, `cid:overfin`, with your brand on), `.Light` and
   `.Dark` (the theme's colors, such as `index .Light "accent"`), and `t`

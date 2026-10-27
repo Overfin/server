@@ -46,6 +46,7 @@ function icon(paths) {
 
 const icons = {
   play: ['M6 4l14 8-14 8z'],
+  bell: ['M6 16V11a6 6 0 0 1 12 0v5l2 2H4z', 'M10 20a2 2 0 0 0 4 0'],
   server: ['M4 5h16v6H4z', 'M4 13h16v6H4z', 'M8 8h.01', 'M8 16h.01'],
   sliders: ['M4 6h10', 'M18 6h2', 'M4 12h4', 'M12 12h8', 'M4 18h12', 'M20 18h0', 'M16 4v4', 'M10 10v4', 'M18 16v4'],
   people: ['M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1', 'M9.5 10a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z', 'M21 19v-1a4 4 0 0 0-3-3.87', 'M16 3.13a3.5 3.5 0 0 1 0 6.75'],
@@ -657,7 +658,9 @@ function mailCard(m) {
 
 // emailsCard: Overfin's emails, whose templates write each, and a sample
 // of each sent to the admin.
-const emailNames = { signin: 'Sign-in code', confirm: 'Confirmation code', test: 'Test' };
+const emailNames = { verify: 'Confirming an address', reset: 'A new password', exists: 'Already an account', invite: 'Invitation',
+  test: 'Test', joined: 'Notice: a new account', expiring: 'Notice: access ends soon', expired: 'Notice: access ended',
+  ending: 'To the person: their access ends soon' };
 function emailsCard(t, m) {
   if (!t) return null;
   const st = status('');
@@ -1272,6 +1275,60 @@ async function appsView() {
         h('div', { class: 'checks' }, Object.entries(scopes).map(([s, box]) => h('label', { class: 'inline' }, box, appScopeNames[s]))), make)));
 }
 
+// ---- Notices -------------------------------------------------------------------
+
+// noticesView sets which account events the operator is told about, and
+// where: the admins' email, a webhook, and the person whose access ends.
+async function noticesView() {
+  const n = await api('GET', '/admin/api/notices');
+  const box = (checked, label) => { const i = h('input', { type: 'checkbox', 'aria-label': label }); i.checked = checked; return i; };
+  const joined = box(n.joined, 'A new account'), expiring = box(n.expiring, 'Access ends soon'), expired = box(n.expired, 'Access ended');
+  const days = h('input', { type: 'number', min: '1', max: '60', value: String(n.days), 'aria-label': 'Days before' });
+  const admins = box(n.admins, 'Email the admins'), person = box(n.person, 'Email the person');
+  const webhook = h('input', { type: 'url', value: n.webhook, placeholder: 'https://…', autocomplete: 'off', spellcheck: 'false' });
+  const noEmail = !n.managed ? 'Only with Overfin\'s own sign-in: with an identity provider, Overfin doesn\'t know people\'s addresses.'
+    : !n.mail ? 'Email isn\'t set up yet (Server, Email).' : '';
+  if (!n.managed) { admins.disabled = true; person.disabled = true; }
+  const values = () => ({ joined: joined.checked, expiring: expiring.checked, expired: expired.checked, days: Number(days.value),
+    admins: admins.checked, webhook: webhook.value.trim(), person: person.checked });
+  const st = status('');
+  const save = h('button', { class: 'primary', type: 'button', onclick: () => busy(save, async () => {
+    await api('PUT', '/admin/api/notices', values());
+    toast('Notices saved.');
+    noticesView();
+  }, (err) => st.set(err.message, 'error')) }, 'Save');
+  const test = h('button', { type: 'button', onclick: () => busy(test, async () => {
+    st.set('Sending…');
+    st.set((await api('POST', '/admin/api/notices/test', values())).summary, 'ok');
+  }, (err) => st.set(err.message, 'error')) }, 'Send a test');
+  const made = h('div', {});
+  const key = h('button', { type: 'button', onclick: () => {
+    if (n.signed && !confirm('Make a new key? The old one stops matching: whatever checks the signatures needs the new one.')) return;
+    busy(key, async () => {
+      const { secret: k } = await api('POST', '/admin/api/notices/secret', {});
+      n.signed = true;
+      fill(made, secret('The webhook\'s key. Copy it now: it won\'t be shown again.', k,
+        'Each post carries X-Overfin-Signature: "sha256=" and the HMAC-SHA256 of its body with this key, in hex.'));
+    });
+  } }, n.signed ? 'Make a new key' : 'Sign the posts');
+  show(pageHead('Notices', 'Overfin can tell you about accounts: one made, one whose access ends soon or has ended. Never what anyone watches. All off until you switch them on.'),
+    card({ title: 'What to tell', badge: (n.joined || n.expiring || n.expired) ? badge('On', 'ok') : badge('Off', 'plain') }, [
+      setting('A new account', 'Someone signed in for the first time, invited or not.', joined),
+      setting('Access ends soon', 'An account with an end date (People) gets near it.', expiring),
+      setting('Days before', 'How long before its access ends an account is noticed, and its person warned.', days, true),
+      setting('Access ended', 'An account\'s end date has passed.', expired),
+    ]),
+    card({ title: 'Where', description: 'Email, a webhook, or both.' }, [
+      setting('Email the admins', noEmail || 'Every admin gets them, in the server\'s default language.', admins),
+      field('Webhook', webhook, 'Overfin posts JSON to this address: "event", "text" and "content" (the notice in words, as Discord and Slack read it), "account" ({id, name}), "expiresAt", "at". Leave empty for none.', true),
+      setting('Signing', n.signed ? 'Posts are signed.' : 'Posts aren\'t signed: make a key if what receives them checks signatures.', key),
+      made,
+    ]),
+    card({ title: 'Warning the person', description: 'Before their access ends, the person gets an email in their language, so they can ask for more time.' }, [
+      setting('Email the person', noEmail || 'Sent once per end date, the days set above before it.', person),
+    ], [st, test, save]));
+}
+
 // ---- Now playing ---------------------------------------------------------------
 
 // Jellyfin's reasons for converting, in words (as the site's player says them).
@@ -1693,6 +1750,7 @@ const views = {
   valuation: { label: 'Valuation', icon: icons.scale, view: () => valuationView() },
   apps: { label: 'Apps', icon: icons.key, view: () => appsView() },
   playing: { label: 'Now playing', icon: icons.play, view: () => playingView() },
+  notices: { label: 'Notices', icon: icons.bell, view: () => noticesView() },
 };
 // Older addresses still lead somewhere.
 const aliases = { settings: 'server', users: 'people', 'm/invites': 'registration' };
@@ -1731,6 +1789,7 @@ async function start() {
     link('people', views.people.label, views.people.icon),
     link('registration', views.registration.label, views.registration.icon),
     link('templates', views.templates.label, views.templates.icon),
+    link('notices', views.notices.label, views.notices.icon),
     link('playing', views.playing.label, views.playing.icon),
     tabs.map((m) => link(`m/${encodeURIComponent(m.name)}`, featureName(m.name), moduleIcons[m.name] || icons.puzzle)),
     h('div', { class: 'group' }, 'Library'),

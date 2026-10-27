@@ -1,0 +1,11 @@
+{{define "subject"}}{{t "ending.subject"}}{{end}}
+{{define "content" -}}
+{{t "ending.intro"}}
+
+{{.Link}}
+{{- with t "ending.expires"}}
+
+{{.}}
+{{- end}}
+{{- end}}
+{{define "why"}}{{t "ending.why"}}{{end}}
