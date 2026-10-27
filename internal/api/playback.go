@@ -692,7 +692,8 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 	// file (rule 54): what tells a needless conversion.
 	pb.Logger.Info("playback started", "playback", s.ID, "method", dec.Method, "reasons", dec.Reasons(),
 		"maxKbps", kbps, "videoCodecs", req.Capabilities.VideoCodecs, "hdr", req.Capabilities.HDR,
-		"maxHeight", req.Capabilities.MaxHeight, "clientKbps", req.Capabilities.MaxBitrateKbps, "askedKbps", req.MaxBitrateKbps)
+		"maxHeight", req.Capabilities.MaxHeight, "clientKbps", req.Capabilities.MaxBitrateKbps, "askedKbps", req.MaxBitrateKbps,
+		"audioLanguage", req.AudioLanguage, "askedAudio", req.AudioTrack, "audio", out.AudioTrack)
 
 	s.View = out
 	if err := l.Jellyfin.ReportStart(ctx, s.Auth, pb.state(s, pb.Tickets.Snapshot(s))); err != nil {
