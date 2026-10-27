@@ -29,10 +29,9 @@ network security expert. So the rules come in two kinds:
     have passwords nobody knows. An admin can open it from the control
     panel, and close it again.
   - **What the operator may choose to share or allow**, each off or at
-    its strictest by default: profiles of an account seeing each other
-    (rule 50), privacy-sensitive fields (rule 55), copying history from
-    another server (rule 60), apps reading totals (rule 40), and how many
-    wrong PINs lock a profile (rule 22, within 3 to 10).
+    its strictest by default: privacy-sensitive fields (rule 55), copying
+    history from another server (rule 60), apps reading totals (rule 40),
+    and how many wrong PINs lock a profile (rule 22, within 3 to 10).
 
 Every rule not named here is a hard rule.
 
@@ -260,7 +259,9 @@ comes from the internet, and media files can be written by anyone.
     Overfin's own sign-in, each person's email, a hash of their password
     (PBKDF2-SHA256, 600,000 rounds) and keyed hashes of the links it emails
     them, deleted with their account (and, until a registration is
-    confirmed, its invitation, sealed); and what each profile did with each title (where it
+    confirmed, its invitation, sealed); what each account said it likes,
+    when the operator asks (seen by its owner profile, deleted with the
+    account); and what each profile did with each title (where it
     stopped, whether it watched it, how many times and when last, its
     favorites), brought over from Jellyfin once with the profile's own
     token, then kept by Overfin. That belongs to its profile: only that
@@ -306,20 +307,23 @@ comes from the internet, and media files can be written by anyone.
 48. Search terms and other personal input travel in request bodies, never in
     URLs, so they stay out of access logs and browser history.
 49. Users never learn who else requested a title, only that it was requested.
-50. Profiles are private from each other by default; kids profiles are visible
-    to their account owner. Operators can change this.
+50. Profiles are private from each other; kids profiles are visible to their
+    account owner.
 51. The owner profile can list and end all of the account's sessions; other
     profiles only see and end the sessions currently using them.
 52. Users can download what Overfin holds about them, except secrets: tokens,
     PIN hashes and keys are never exported. The owner profile's export covers
-    the account; any other profile's export covers only that profile.
+    the account; any other profile's export covers only that profile. A kids
+    profile has no export of its own: it's in the owner's.
 53. Sites built for Overfin should load nothing from third parties (fonts,
     scripts, icons); overfin-web does exactly that.
 54. Logs identify users only by a keyed hash (HMAC) of their ID and never
     contain query strings.
-55. Privacy-sensitive fields are off by default, and operators turn on each one
-    they want: photo capture time, location and camera data, item tags, and
-    version names (derived from file names).
+55. Privacy-sensitive fields are off by default: version names (derived from
+    file names) are served only if the operator turns them on
+    (`privacy.expose`); photos' capture time, location and camera data, and
+    items' tags, are never served (owners see the list of the libraries'
+    tags, to hide some from a profile).
     Embedded metadata is still stripped from image files (rule 10).
     Security-sensitive data (file paths, server internals, permission flags) is
     never exposed, whatever the configuration. The one exception is the
@@ -354,11 +358,14 @@ comes from the internet, and media files can be written by anyone.
       addresses, with the guard below. With `admin.listen` instead, it's
       only on a listener of its own, with the guard below, which also
       serves the sign-in, so admins sign in there, and the site has no
-      panel at all; so does the setup page. In the panel, admins can't take
-      the admin mark from themselves or remove themselves.
+      panel at all; so does the setup page. On the site, the panel opens
+      only from the account's owner profile. In the panel, admins can't take
+      the admin mark from themselves, remove themselves or disable their own
+      account.
     - With an identity provider, it's on its own listener, off by default,
-      which answers only clients with private addresses (loopback, private
-      ranges, unique-local IPv6) and refuses any request a proxy relays for
+      which answers only clients with private addresses (loopback,
+      link-local, private ranges, the shared range VPNs use (100.64.0.0/10),
+      unique-local IPv6) and refuses any request a proxy relays for
       a public address, so routing it through a public reverse proxy fails
       closed. How admins reach it (LAN, VPN, SSH tunnel) is the operator's
       choice. Admins sign in there with a fresh login every time, and must
@@ -368,8 +375,8 @@ comes from the internet, and media files can be written by anyone.
     first admin), it serves only the setup page, on the panel's listener
     with its guards, and with Overfin's own sign-in on the site's address
     too: it saves nothing without the one-time code from Overfin's log,
-    stops answering after 10 wrong codes until a restart, and checks
-    everything before saving anything; Jellyfin's key is kept sealed, like
+    stops answering after 10 wrong codes until a restart, and checks each
+    step before saving it; Jellyfin's key is kept sealed, like
     every token. Other apps
     (Stewarr…) read what Overfin shares with them on the same listener,
     with the same guards, under /apps/: each with a key an admin made for
@@ -405,7 +412,8 @@ comes from the internet, and media files can be written by anyone.
     runs, and there's no way to plug code of one's own into it. Features
     written on the internal feature contract (the watchlist, invitations,
     migration) go through the same registrar as the rest (no catch-alls, a
-    login required), act only as the calling profile (or, on a visitor's
+    login required; their control-panel routes, under
+    `/admin/api/modules/<name>/`, behind the panel's sign-in), act only as the calling profile (or, on a visitor's
     route, can only have Overfin set the visitor's account up), and never
     get the media server's admin key. Each talks only to Overfin's core,
     never to another feature, the media server or the core's own data: it
@@ -423,8 +431,9 @@ comes from the internet, and media files can be written by anyone.
     account is set up with it only after a login, under the account-creation lock, so a
     single-use invitation is used once. Uses stay counted when the account
     is deleted. With an identity provider, an invitation decides what an
-    account gets, never who may log in: the provider and the required group
-    still do. With Overfin's own sign-in, an invitation is what lets a new
+    account gets, and, if the operator makes accounts invitation-only,
+    whether one is set up; it never lets in someone the provider or the
+    required group refuses. With Overfin's own sign-in, an invitation is what lets a new
     email in (rule 66); everyone else is someone an admin added.
 
 ### The site
@@ -468,9 +477,10 @@ comes from the internet, and media files can be written by anyone.
     password within an hour); a new one replaces the last. Their token
     travels in the address's fragment, so it never reaches a server's logs,
     and is used only on a click, so mail scanners opening links use nothing.
-    Only keyed hashes of them are kept. Passwords are 10 to 256 characters;
-    the operator can ask for more (a longer minimum, a digit, a special
-    character), never less. Someone an admin adds is asked, by default, for
+    Only keyed hashes of them are kept. Passwords are 10 to 256 characters
+    and, by default, need a digit and a special character; the operator can
+    ask for a longer minimum (up to 64) or drop the digit or the special
+    character, never fewer than 10 characters. Someone an admin adds is asked, by default, for
     a new password at their first sign-in, and gets nothing before choosing
     one. A new password ends the person's other logins.
 
@@ -490,7 +500,7 @@ comes from the internet, and media files can be written by anyone.
     administrator account a new password, shown once with a warning that
     changes made in Jellyfin may break Overfin and be undone by it, and
     close it again, which gives every administrator a new password nobody
-    knows, ending every sign-in there, and changes nothing else (other
+    knows, which ends their sign-ins there, and changes nothing else (other
     users stay, and other apps' keys, such as Seerr's, are never touched).
     The settings Overfin needs are its own: it sets them, and sets them
     back on every start. Only when the operator asks (setup wizard or
