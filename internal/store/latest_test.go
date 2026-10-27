@@ -57,14 +57,14 @@ func TestCatalogGenres(t *testing.T) {
 		}
 		s.SetTitleDetails(ctx, Title{Kind: kind, TMDB: tmdb, Name: tmdb}, det, time.Now())
 	}
-	got, err := s.CatalogGenres(ctx, "films", nil)
+	got, err := s.CatalogGenres(ctx, "films", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := []GenreCount{{"Crime", 1}, {"Drama", 2}}; !slices.Equal(got, want) {
 		t.Errorf("films = %v, want %v", got, want)
 	}
-	got, _ = s.CatalogGenres(ctx, "films", &Access{BlockedTags: []string{"hidden"}})
+	got, _ = s.CatalogGenres(ctx, "films", nil, &Access{BlockedTags: []string{"hidden"}})
 	if want := []GenreCount{{"Crime", 1}, {"Drama", 1}}; !slices.Equal(got, want) {
 		t.Errorf("with a hidden tag = %v, want %v", got, want)
 	}

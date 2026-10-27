@@ -869,15 +869,17 @@ nothing beyond what that needs.
 - **Jellyfin companion plugin**, only where the Jellyfin API falls short.
 - **Example clients**, beside overfin-web: small sites in common
   frameworks, showing how to build on the API and the SDK.
-- **Custom categories.** The operator makes categories (Anime,
-  Documentaries, Québécois…) from what the catalog already knows: genres,
-  kind (film or series), language, origin. Each appears as a section of
-  the site and can be a row on the home page; the operator changes them at
-  will. An account's owner can also limit a profile to some categories
-  (a kids profile to Kids, say), beside its rating ceilings, and account
-  templates can carry category limits too, so accounts made from them
-  start with them. Nothing moves
-  on disk: one library can hold everything.
+- ~~**Custom categories**~~ Done, first step (0.6): the operator makes
+  categories (Films, Series, Anime, Kids…) in the panel from rules on
+  what the catalog already knows: films or series, TMDB's genres, the
+  original language, the library, Jellyfin's tags (often TMDB's
+  keywords), rated at most, and except other categories. Each is named
+  in every language offered, has its page and its place in the site's
+  menu, and can be a row on the home page; the libraries can leave the
+  menu. Nothing moves on disk: one library can hold everything. Next: an
+  account's owner limiting a profile to some categories (a kids profile
+  to Kids, say), beside its rating ceilings, and account templates
+  carrying such limits; titles picked by hand; titles no library has.
 - **A home page of one's own.** Each profile's home follows its tastes and
   habits. First step: the slideshow shows the titles that fit that profile
   (from Tastes and what it watches), instead of the same ones for everyone.

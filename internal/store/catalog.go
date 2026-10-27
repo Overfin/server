@@ -419,6 +419,8 @@ type ListQuery struct {
 	InProgress bool
 	// Access, when set, keeps only what the profile may see.
 	Access *Access
+	// Category, when set, keeps only its titles.
+	Category *CategoryFilter
 	// Sort is "name", "premiereDate", "addedAt", "communityRating",
 	// "latest" (when the title or, for a series, its newest episode was
 	// added) or "lastPlayed" (by the profile's ProfileID). Names, dates and
@@ -554,6 +556,10 @@ func (q ListQuery) where() ([]string, []any) {
 		cond, a := q.Access.itemAllowed("catalog_items")
 		where, args = append(where, cond), append(args, a...)
 	}
+	if q.Category != nil {
+		cond, a := q.Category.itemIn("catalog_items")
+		where, args = append(where, cond), append(args, a...)
+	}
 	return where, args
 }
 
@@ -564,13 +570,17 @@ type GenreCount struct {
 }
 
 // CatalogGenres lists the genres (TMDB's) of a library's films and series
-// (any library's, with libraryID empty), counting only what access lets
-// the profile see, by name.
-func (s *Store) CatalogGenres(ctx context.Context, libraryID string, access *Access) ([]GenreCount, error) {
+// (any library's, with libraryID empty), within a category when one is
+// given, counting only what access lets the profile see, by name.
+func (s *Store) CatalogGenres(ctx context.Context, libraryID string, category *CategoryFilter, access *Access) ([]GenreCount, error) {
 	where := []string{"catalog_items.kind IN ('movie', 'series')"}
 	var args []any
 	if libraryID != "" {
 		where, args = append(where, "catalog_items.library_id = ?"), append(args, libraryID)
+	}
+	if category != nil {
+		cond, a := category.itemIn("catalog_items")
+		where, args = append(where, cond), append(args, a...)
 	}
 	if access != nil {
 		cond, a := access.itemAllowed("catalog_items")

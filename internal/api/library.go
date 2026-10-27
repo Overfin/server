@@ -62,6 +62,7 @@ func (l Library) Register(r *plugin.Registrar) error {
 	for pattern, h := range map[string]http.HandlerFunc{
 		"GET /api/v1/libraries":   l.libraries,
 		"GET /api/v1/genres":      l.genres,
+		"GET /api/v1/categories":  l.categories,
 		"GET /api/v1/images/{id}": l.image,
 		// Titles, in a library or not (milestone 5).
 		"GET /api/v1/titles":              l.titles,
@@ -242,7 +243,11 @@ func newSeed() string {
 // genres lists the genres of a library's films and series, from the index,
 // counting only what the profile may see; nothing until the index is read.
 func (l Library) genres(w http.ResponseWriter, r *http.Request) {
-	if !onlyParams(w, r, "library") {
+	if !onlyParams(w, r, "library", "category") {
+		return
+	}
+	cat, ok := l.categoryFilter(w, r)
+	if !ok {
 		return
 	}
 	var lib string
@@ -268,7 +273,7 @@ func (l Library) genres(w http.ResponseWriter, r *http.Request) {
 			l.storeError(w, err)
 			return
 		}
-		all, err := l.Provisioner.Store.CatalogGenres(r.Context(), lib, a)
+		all, err := l.Provisioner.Store.CatalogGenres(r.Context(), lib, cat, a)
 		if err != nil {
 			l.storeError(w, err)
 			return

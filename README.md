@@ -63,6 +63,10 @@ identity provider: see [Running it](#running-it).
   reverse proxy, or plain http on a LAN.
 - **A setup wizard**, one step at a time: the default language, TMDB,
   Intro Skipper, Seerr, and you, its first admin.
+- **Categories** of your own (Films, Series, Anime, Kids…), made from
+  rules (genres, language, library, tags, ratings), each in the site's
+  menu with its page, and on the home page if you like; the libraries can
+  leave the menu.
 - **A control panel**: what's playing now (and stopping it), people and
   their accounts, notices (an account made, access ending, by email or
   webhook), invitations, templates (how many streams and profiles an account gets, and whether each profile

@@ -1870,6 +1870,13 @@ paths:
           schema:
             type: string
             maxLength: 64
+        - name: category
+          in: query
+          description: Only the titles of this category (GET /categories).
+            An unknown one is "not found".
+          schema:
+            type: string
+            pattern: "^cat_[a-z2-7]{26}$"
         - name: kind
           in: query
           required: true
@@ -2242,6 +2249,44 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /categories:
+    get:
+      operationId: listCategories
+      summary: The site's categories, and whether the menu shows libraries
+      description: >-
+        Sections the operator made from rules (films or series, genres,
+        original language, library, tag, rated at most, except other
+        categories), named in the account's language, in the operator's
+        order. Their titles are listed with `GET /titles?category=`. With
+        `libraries` false, the operator wants the site's menu without the
+        libraries. Since 0.6.
+      tags: [library]
+      responses:
+        "200":
+          description: The categories.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, libraries]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, home]
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                        home:
+                          type: boolean
+                          description: Also a row on the home page.
+                  libraries:
+                    type: boolean
+                    description: Whether the site's menu shows the libraries.
+
   /genres:
     get:
       operationId: listGenres
@@ -2255,6 +2300,13 @@ paths:
           schema:
             type: string
             maxLength: 64
+        - name: category
+          in: query
+          description: Only the titles of this category (GET /categories).
+            An unknown one is "not found".
+          schema:
+            type: string
+            pattern: "^cat_[a-z2-7]{26}$"
       responses:
         "200":
           description: Genres, by name.

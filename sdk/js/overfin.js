@@ -206,7 +206,9 @@ export class Overfin {
 
   /** Continue Watching: started titles and each followed series' next episode, a library's or not. */
   async continueWatching(limit = 20) { return (await this.request('GET', `/titles/continue${toQuery({ limit })}`)).items; }
-  async genres(libraryId) { return (await this.request('GET', `/genres${toQuery({ library: libraryId })}`)).items; }
+  async genres(libraryId, categoryId) { return (await this.request('GET', `/genres${toQuery({ library: libraryId, category: categoryId })}`)).items; }
+  /** The operator's categories, and whether the menu shows the libraries. */
+  categories() { return this.request('GET', '/categories'); }
   /** What's new: films and series, a series by its newest episode. */
   async latest(libraryId, limit = 16) { return (await this.request('GET', `/titles/latest${toQuery({ library: libraryId, limit })}`)).items; }
 
