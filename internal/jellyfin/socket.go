@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -44,14 +45,24 @@ const keepAliveEvery = 30 * time.Second
 // IDs.
 const maxMessage = 16 << 20
 
+// socketSilence is how long the socket may stay silent before Overfin
+// drops it: Jellyfin answers each keep-alive, so silence that long means
+// several went unanswered (rule 6).
+var socketSilence = 3 * keepAliveEvery
+
 // socketHTTP makes the upgrade request: HTTP/1.1 only (HTTP/2 can't
-// upgrade), no time limit on the connection it hands over, never a
-// redirect (rule 6).
+// upgrade), never a redirect, and time limits on connecting and on the
+// answer as the API client has (rule 6). The connection it hands over has
+// no overall limit, a socket being meant to last; socketSilence bounds it
+// instead.
 var socketHTTP = &http.Client{
 	Transport: &http.Transport{
-		Proxy:             http.ProxyFromEnvironment,
-		ForceAttemptHTTP2: false,
-		TLSNextProto:      map[string]func(string, *tls.Conn) http.RoundTripper{},
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+		ForceAttemptHTTP2:     false,
+		TLSNextProto:          map[string]func(string, *tls.Conn) http.RoundTripper{},
 	},
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
@@ -97,7 +108,11 @@ func (c *Client) Watch(ctx context.Context, a Auth, connected func(), changed fu
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stop()
 
-	ws := &socket{r: bufio.NewReader(conn), w: conn}
+	// Silent too long: the connection is closed, which ends the read in
+	// progress. Every frame from Jellyfin pushes it back.
+	silent := time.AfterFunc(socketSilence, func() { conn.Close() })
+	defer silent.Stop()
+	ws := &socket{r: bufio.NewReader(conn), w: conn, heard: func() { silent.Reset(socketSilence) }}
 	if err := ws.keepAlive(); err != nil {
 		return err
 	}
@@ -124,6 +139,9 @@ func (c *Client) Watch(ctx context.Context, a Auth, connected func(), changed fu
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
+			}
+			if !silent.Stop() {
+				return errors.New("jellyfin: socket: silent too long")
 			}
 			return fmt.Errorf("jellyfin: socket: %w", err)
 		}
@@ -153,6 +171,8 @@ type socket struct {
 	r  *bufio.Reader
 	mu sync.Mutex // one frame written at a time
 	w  io.Writer
+	// heard, if set, runs for each frame received.
+	heard func()
 }
 
 func (s *socket) keepAlive() error {
@@ -191,6 +211,9 @@ func (s *socket) read() ([]byte, error) {
 		var head [2]byte
 		if _, err := io.ReadFull(s.r, head[:]); err != nil {
 			return nil, err
+		}
+		if s.heard != nil {
+			s.heard()
 		}
 		fin, opcode := head[0]&0x80 != 0, head[0]&0x0F
 		if head[1]&0x80 != 0 {

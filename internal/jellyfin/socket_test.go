@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -91,5 +92,76 @@ func TestWatch(t *testing.T) {
 	// Refused: says so.
 	if err := c.Watch(ctx, Auth{Token: "bad"}, func() {}, func(LibraryChange) {}); !IsStatus(err, 401) {
 		t.Errorf("refused: %v", err)
+	}
+}
+
+// upgraded answers the handshake, then hands the connection to talk.
+func upgraded(talk func(conn net.Conn, r *bufio.Reader)) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sum := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + websocketGUID))
+		conn, rw, _ := w.(http.Hijacker).Hijack()
+		defer conn.Close()
+		rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " +
+			base64.StdEncoding.EncodeToString(sum[:]) + "\r\n\r\n")
+		rw.Flush()
+		talk(conn, rw.Reader)
+	}))
+}
+
+// A socket that goes silent is dropped; one Jellyfin keeps talking on
+// stays, past the silence allowed (rule 6).
+func TestWatchSilence(t *testing.T) {
+	was := socketSilence
+	socketSilence = 200 * time.Millisecond
+	defer func() { socketSilence = was }()
+	c, _ := New("http://192.0.2.1", "test")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	silent := upgraded(func(conn net.Conn, r *bufio.Reader) {
+		io.Copy(io.Discard, r) // reads, never answers
+	})
+	defer silent.Close()
+	c.SetURL(silent.URL)
+	start := time.Now()
+	err := c.Watch(ctx, Auth{Token: "tok"}, func() {}, func(LibraryChange) {})
+	if err == nil || !strings.Contains(err.Error(), "silent") || time.Since(start) > 2*time.Second {
+		t.Errorf("silent: %v after %v", err, time.Since(start))
+	}
+
+	talking := upgraded(func(conn net.Conn, r *bufio.Reader) {
+		go io.Copy(io.Discard, r)
+		for range 8 {
+			time.Sleep(100 * time.Millisecond)
+			conn.Write(serverFrame(0x1, true, `{"MessageType":"KeepAlive"}`))
+		}
+		conn.Write(serverFrame(0x8, true, ""))
+		time.Sleep(100 * time.Millisecond)
+	})
+	defer talking.Close()
+	c.SetURL(talking.URL)
+	start = time.Now()
+	err = c.Watch(ctx, Auth{Token: "tok"}, func() {}, func(LibraryChange) {})
+	if err == nil || strings.Contains(err.Error(), "silent") || time.Since(start) < 800*time.Millisecond {
+		t.Errorf("talking: %v after %v", err, time.Since(start))
+	}
+}
+
+// A Jellyfin that never answers the handshake doesn't hold Overfin.
+func TestWatchHandshakeTimeout(t *testing.T) {
+	tr := socketHTTP.Transport.(*http.Transport)
+	was := tr.ResponseHeaderTimeout
+	tr.ResponseHeaderTimeout = 200 * time.Millisecond
+	defer func() { tr.ResponseHeaderTimeout = was }()
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	defer srv.Close()
+	defer close(release)
+	c, _ := New(srv.URL, "test")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	if err := c.Watch(ctx, Auth{Token: "tok"}, func() {}, func(LibraryChange) {}); err == nil || time.Since(start) > 2*time.Second {
+		t.Errorf("no answer: %v after %v", err, time.Since(start))
 	}
 }
