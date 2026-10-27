@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -46,9 +47,11 @@ type Client struct {
 	// the client share it.
 	slow *gate
 	// Language, when set, is the language TMDB answers in, ISO 639-1 or
-	// regional ("fr", "fr-CA": TMDB falls back to the language's other
-	// text field by field): titles, overviews, and the text on posters
-	// and logos.
+	// regional ("fr", "fr-CA"): titles, overviews, and the text on posters
+	// and logos. Asked in a regional one, TMDB answers with that region's
+	// translation only: where there's none, a title comes with its
+	// original name and no overview, so those are asked again in the
+	// language alone (see baseLanguage).
 	Language func() string
 }
 
@@ -75,6 +78,75 @@ func (c *Client) withLanguage(q url.Values) url.Values {
 		q.Set("language", l)
 	}
 	return q
+}
+
+// baseLanguage is the language without its region ("fr" for "fr-CA"), to fill
+// what the region's translation lacks; "" when the language has no region.
+func (c *Client) baseLanguage() string {
+	l, _, regional := strings.Cut(c.language(), "-")
+	if !regional {
+		return ""
+	}
+	return l
+}
+
+// inBase is a copy of a query, in the language without its region.
+func (c *Client) inBase(q url.Values) url.Values {
+	out := url.Values{}
+	for k, v := range q {
+		out[k] = v
+	}
+	out.Set("language", c.baseLanguage())
+	return out
+}
+
+// lacks says whether a title, in a regional language, came without that
+// region's translation: its original name though it's in another
+// language, or no overview.
+func (r rawTitle) lacks(base string) bool {
+	name, original := r.Title, r.OriginalTitle
+	if r.Name != "" {
+		name, original = r.Name, r.OriginalName
+	}
+	return r.Overview == "" || (name == original && r.OriginalLanguage != base)
+}
+
+// fill takes what the region's translation lacked from the language's.
+func (r *rawTitle) fill(b rawTitle) {
+	if r.Overview == "" {
+		r.Overview = b.Overview
+	}
+	if r.Title == r.OriginalTitle && b.Title != "" {
+		r.Title = b.Title
+	}
+	if r.Name == r.OriginalName && b.Name != "" {
+		r.Name = b.Name
+	}
+}
+
+// fillTitles fills a list's titles that lack the region's translation
+// from the same list in the language alone. Failing that, they stay as
+// they are.
+func (c *Client) fillTitles(ctx context.Context, path string, q url.Values, titles []*rawTitle) {
+	base := c.baseLanguage()
+	if base == "" || !slices.ContainsFunc(titles, func(r *rawTitle) bool { return r.lacks(base) }) {
+		return
+	}
+	var raw struct {
+		Results []rawTitle `json:"results"`
+	}
+	if c.get(ctx, path, c.inBase(q), &raw) != nil {
+		return
+	}
+	byID := map[int]rawTitle{}
+	for _, b := range raw.Results {
+		byID[b.ID] = b
+	}
+	for _, r := range titles {
+		if b, ok := byID[r.ID]; ok && r.lacks(base) {
+			r.fill(b)
+		}
+	}
 }
 
 // New returns a client for TMDB at baseURL (BaseURL, or a test server),
@@ -274,9 +346,15 @@ func (c *Client) page(ctx context.Context, path, kind string, q url.Values) (*Pa
 		TotalPages int        `json:"total_pages"`
 		Results    []rawTitle `json:"results"`
 	}
-	if err := c.get(ctx, path, c.withLanguage(q), &raw); err != nil {
+	q = c.withLanguage(q)
+	if err := c.get(ctx, path, q, &raw); err != nil {
 		return nil, err
 	}
+	var titles []*rawTitle
+	for i := range raw.Results {
+		titles = append(titles, &raw.Results[i])
+	}
+	c.fillTitles(ctx, path, q, titles)
 	out := &Page{Page: raw.Page, TotalPages: min(raw.TotalPages, 500)}
 	for _, r := range raw.Results {
 		if r.MediaType != "" && r.MediaType != k {
@@ -339,11 +417,18 @@ func (c *Client) details(ctx context.Context, kind string, tmdbID int) (*rawDeta
 		extra = "credits,content_ratings"
 	}
 	var raw rawDetails
-	if err := c.get(ctx, "/"+k+"/"+strconv.Itoa(tmdbID), c.withLanguage(url.Values{"append_to_response": {extra}}), &raw); err != nil {
+	path := "/" + k + "/" + strconv.Itoa(tmdbID)
+	if err := c.get(ctx, path, c.withLanguage(url.Values{"append_to_response": {extra}}), &raw); err != nil {
 		return nil, err
 	}
 	if raw.ID != tmdbID {
 		return nil, ErrNotFound
+	}
+	if base := c.baseLanguage(); base != "" && raw.lacks(base) {
+		var b rawTitle
+		if c.get(ctx, path, c.inBase(nil), &b) == nil && b.ID == tmdbID {
+			raw.fill(b)
+		}
 	}
 	return &raw, nil
 }
@@ -436,14 +521,17 @@ type Artwork struct {
 type rawImage struct {
 	FilePath string `json:"file_path"`
 	Language string `json:"iso_639_1"`
+	Region   string `json:"iso_3166_1"`
 }
 
 // pick chooses, among images (best first, as TMDB orders them), one in the
-// language, else one without text, else one in English.
+// language, the same region's first ("fr-CA": a Canadian one, else any
+// French one), else one without text, else one in English.
 func pick(images []rawImage, lang string) string {
-	for _, want := range []string{lang, "", "en"} {
+	language, region, _ := strings.Cut(lang, "-")
+	for _, want := range []rawImage{{Language: language, Region: region}, {Language: language}, {}, {Language: "en"}} {
 		for _, im := range images {
-			if im.Language == want && imagePath.MatchString(im.FilePath) {
+			if im.Language == want.Language && (want.Region == "" || im.Region == want.Region) && imagePath.MatchString(im.FilePath) {
 				return im.FilePath
 			}
 		}
