@@ -45,6 +45,7 @@ function icon(paths) {
 }
 
 const icons = {
+  play: ['M6 4l14 8-14 8z'],
   server: ['M4 5h16v6H4z', 'M4 13h16v6H4z', 'M8 8h.01', 'M8 16h.01'],
   sliders: ['M4 6h10', 'M18 6h2', 'M4 12h4', 'M12 12h8', 'M4 18h12', 'M20 18h0', 'M16 4v4', 'M10 10v4', 'M18 16v4'],
   people: ['M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1', 'M9.5 10a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z', 'M21 19v-1a4 4 0 0 0-3-3.87', 'M16 3.13a3.5 3.5 0 0 1 0 6.75'],
@@ -1271,6 +1272,71 @@ async function appsView() {
         h('div', { class: 'checks' }, Object.entries(scopes).map(([s, box]) => h('label', { class: 'inline' }, box, appScopeNames[s]))), make)));
 }
 
+// ---- Now playing ---------------------------------------------------------------
+
+// Jellyfin's reasons for converting, in words (as the site's player says them).
+const convertReasons = {
+  ContainerNotSupported: 'the browser can\'t read the container (repackaged)',
+  VideoCodecNotSupported: 'the browser can\'t play the video format',
+  AudioCodecNotSupported: 'the browser can\'t play the audio format',
+  SubtitleCodecNotSupported: 'picture subtitles, drawn into the video',
+  AudioIsExternal: 'the audio is in a separate file',
+  SecondaryAudioNotSupported: 'another audio track than the first',
+  VideoProfileNotSupported: 'the video\'s profile',
+  VideoLevelNotSupported: 'the video\'s level',
+  VideoResolutionNotSupported: 'the picture is larger than allowed',
+  VideoBitDepthNotSupported: 'the video\'s bit depth',
+  VideoFramerateNotSupported: 'the frame rate',
+  AudioChannelsNotSupported: 'too many audio channels',
+  ContainerBitrateExceedsLimit: 'the bitrate is above the limit',
+  VideoBitrateNotSupported: 'the video\'s bitrate is above the limit',
+  AudioBitrateNotSupported: 'the audio\'s bitrate is above the limit',
+  VideoRangeTypeNotSupported: 'the screen or browser can\'t show HDR',
+  DirectPlayError: 'playing the file as it is failed',
+};
+const methodNames = { direct: ['As is', 'ok'], remux: ['Repackaged', 'plain'], transcode: ['Converted', 'warn'] };
+
+function clock(ms) {
+  const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+  return `${h ? `${h}:${String(m).padStart(2, '0')}` : m}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// playingView shows the playbacks running now, refreshed while it's open,
+// and stops one. Nothing of it is kept.
+async function playingView() {
+  const { items, transcodes, maxTranscodes } = await api('GET', '/admin/api/playing');
+  if (location.hash !== '#/playing') return;
+  const rows = items.map((pb) => {
+    const [method, kind] = methodNames[pb.method] || [pb.method, 'plain'];
+    const why = (pb.reasons || []).map((r) => convertReasons[r] || r).join('; ');
+    const quality = [pb.height && `${pb.height}p`, pb.bitrateKbps && `${(pb.bitrateKbps / 1000).toFixed(1)} Mb/s`].filter(Boolean).join(', ');
+    const stop = h('button', { type: 'button', class: 'small danger', onclick: () => {
+      if (!confirm(`Stop ${pb.title || 'this playback'} for ${pb.account.name}? Their player says the server's administrator stopped it.`)) return;
+      busy(stop, async () => {
+        await api('POST', `/admin/api/playing/${pb.id}/stop`, {}).catch((err) => { if (!/ended/.test(err.message)) throw err; });
+        toast('Playback stopped.');
+        playingView();
+      });
+    } }, 'Stop');
+    return h('tr', {},
+      h('td', {}, h('div', { class: 'name' }, pb.account.name), h('div', { class: 'hint' }, [pb.profile, pb.device].filter(Boolean).join(' · '))),
+      h('td', {}, h('div', {}, pb.title || 'Starting…'),
+        h('div', { class: 'hint' }, `${pb.paused ? 'Paused at' : 'At'} ${clock(pb.positionMs)}${pb.durationMs ? ` of ${clock(pb.durationMs)}` : ''} · started ${ago(pb.startedAt)}`)),
+      h('td', {}, badge(method, kind), quality && h('div', { class: 'hint' }, quality), why && h('div', { class: 'hint' }, why)),
+      h('td', { class: 'actions' }, stop));
+  });
+  const limit = maxTranscodes ? ` of ${maxTranscodes} allowed` : '';
+  show(pageHead('Now playing', 'What\'s playing on the server now, refreshed every few seconds. Nothing of it is kept: history stays each profile\'s own.'),
+    card({ title: `${plural(items.length, 'playback')}`, description: `${plural(transcodes, 'conversion')}${limit} running.` },
+      h('div', { class: 'table-wrap' }, h('table', {},
+        h('thead', {}, h('tr', {}, h('th', {}, 'Who'), h('th', {}, 'What'), h('th', {}, 'How'), h('th', {}))),
+        h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { colspan: '4', class: 'empty' }, 'Nothing is playing.')))))));
+  // One refresh at a time, however the page was opened again.
+  clearTimeout(playingTimer);
+  playingTimer = setTimeout(() => { if (location.hash === '#/playing') playingView().catch(fail); }, document.hidden ? 30000 : 5000);
+}
+let playingTimer;
+
 // ---- Identification ------------------------------------------------------------
 
 // identificationView lists every film and series with the TMDB title it's
@@ -1626,6 +1692,7 @@ const views = {
   identification: { label: 'Identification', icon: icons.check, view: () => identificationView() },
   valuation: { label: 'Valuation', icon: icons.scale, view: () => valuationView() },
   apps: { label: 'Apps', icon: icons.key, view: () => appsView() },
+  playing: { label: 'Now playing', icon: icons.play, view: () => playingView() },
 };
 // Older addresses still lead somewhere.
 const aliases = { settings: 'server', users: 'people', 'm/invites': 'registration' };
@@ -1664,6 +1731,7 @@ async function start() {
     link('people', views.people.label, views.people.icon),
     link('registration', views.registration.label, views.registration.icon),
     link('templates', views.templates.label, views.templates.icon),
+    link('playing', views.playing.label, views.playing.icon),
     tabs.map((m) => link(`m/${encodeURIComponent(m.name)}`, featureName(m.name), moduleIcons[m.name] || icons.puzzle)),
     h('div', { class: 'group' }, 'Library'),
     link('libraries', views.libraries.label, views.libraries.icon),

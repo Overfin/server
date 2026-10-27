@@ -50,6 +50,7 @@ const (
 	PlaybackTakenOver    Type = "playback-taken-over"
 	PlaybackExpired      Type = "playback-expired"
 	PlaybackStopped      Type = "playback-stopped"
+	PlaybackEndedByAdmin Type = "playback-ended-by-admin"
 	UnsupportedMediaType Type = "unsupported-media-type"
 	InvalidRequest       Type = "invalid-request"
 	InvalidCursor        Type = "invalid-cursor"
@@ -103,6 +104,7 @@ var registry = map[Type]info{
 	PlaybackTakenOver:    {http.StatusGone, "Playback continued on another device"},
 	PlaybackExpired:      {http.StatusGone, "Playback ended after a period of inactivity"},
 	PlaybackStopped:      {http.StatusGone, "Playback was stopped"},
+	PlaybackEndedByAdmin: {http.StatusGone, "Playback was stopped by an administrator"},
 	UnsupportedMediaType: {http.StatusUnsupportedMediaType, "Requests must be JSON"},
 	InvalidRequest:       {http.StatusBadRequest, "Invalid request"},
 	InvalidCursor:        {http.StatusBadRequest, "Invalid cursor"},

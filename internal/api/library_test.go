@@ -315,6 +315,9 @@ type options struct {
 	freshFor time.Duration
 	// signUp, when set, makes the identity provider's sign-up links.
 	signUp func(ctx context.Context, previous string, uses int, until time.Time) (string, string, error)
+	// playback, when set, receives the playback handler (the control
+	// panel's live view uses it).
+	playback *api.Playback
 }
 
 func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
@@ -433,6 +436,9 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		*o.store = st
 	}
 	pb := api.Playback{Library: lib, Tickets: playback.NewTickets(time.Hour), MaxTranscodes: o.maxTranscodes, Logger: logger}
+	if o.playback != nil {
+		*o.playback = pb
+	}
 	checker := &pin.Checker{Key: []byte("pin-key"), Store: st}
 	// The watchlist and migration modules, mounted as the real program
 	// mounts them, each with a database of its own; migration copies
@@ -989,6 +995,36 @@ func TestTranscodeLimitStopsNothing(t *testing.T) {
 	startPlayback(t, srv, "Tablet")
 	if code, _ := getAs(t, srv, subject, "/api/v1/playback/"+transcoded); code != http.StatusGone {
 		t.Errorf("the oldest, a transcode, replaced: %d", code)
+	}
+}
+
+// The control panel's live view lists what plays, and stops it: the
+// player learns an administrator stopped it, and the transcode stops.
+func TestLiveViewStopsAPlayback(t *testing.T) {
+	var pb api.Playback
+	srv, fake := newServerWith(t, options{maxStreams: 2, playback: &pb})
+	id := startPlayback(t, srv, "Bedroom laptop")
+
+	live := pb.Tickets.Live(time.Now())
+	if len(live) != 1 || live[0].Stream.ID != id || live[0].Stream.Device != "Bedroom laptop" ||
+		live[0].Method != "transcode" {
+		t.Fatalf("live: %+v", live)
+	}
+	if !pb.EndByAdmin(id) {
+		t.Fatal("not stopped")
+	}
+	if pb.EndByAdmin(id) {
+		t.Error("stopped twice")
+	}
+	code, body := getAs(t, srv, subject, "/api/v1/playback/"+id)
+	if code != http.StatusGone || !strings.Contains(body, "playback-ended-by-admin") {
+		t.Errorf("its player: %d %s", code, body)
+	}
+	if !eventually(t, func() bool { return fake.called("DELETE /Videos/ActiveEncodings") == 1 }) {
+		t.Error("its transcode was not stopped")
+	}
+	if live := pb.Tickets.Live(time.Now()); len(live) != 0 {
+		t.Errorf("after: %+v", live)
 	}
 }
 

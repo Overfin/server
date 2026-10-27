@@ -273,8 +273,9 @@ comes from the internet, and media files can be written by anyone.
     profile sees it (and, for a kids profile, its account's owner, rule
     50), never the admins, whom neither the panel nor any admin route
     shows it; it's in the data download (rule 52) and deleted with the
-    profile. The admin side reads activity from Jellyfin live, for the page
-    being viewed, and never stores it: at most it keeps it in memory, never on
+    profile. The admin side reads activity live (Now playing: what plays
+    now, from Overfin's memory), for the page being viewed, and never
+    stores it: at most it keeps it in memory, never on
     disk, for a few minutes and within a size limit, so a restart forgets
     it. Names and emails from the identity provider are shown live through
     its connector, the same way, never stored; only the name is handed on,

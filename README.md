@@ -63,8 +63,8 @@ identity provider: see [Running it](#running-it).
   reverse proxy, or plain http on a LAN.
 - **A setup wizard**, one step at a time: the default language, TMDB,
   Intro Skipper, Seerr, and you, its first admin.
-- **A control panel**: people and their accounts, invitations, templates
-  (how many streams and profiles an account gets, and whether each profile
+- **A control panel**: what's playing now (and stopping it), people and
+  their accounts, invitations, templates (how many streams and profiles an account gets, and whether each profile
   keeps a stream of its own), limits, languages,
   libraries, the GPU that converts videos (tested on your own files),
   seek-bar previews (off by default: they take time and disk space), email, Seerr, fixing titles Jellyfin matched wrong, what each title is

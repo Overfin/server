@@ -4567,7 +4567,8 @@ components:
         device of the same account started playing; `takenOverBy` names it,
         so the site can offer to continue here. With `playback-expired`, it
         stopped reporting progress for too long. With `playback-stopped`, it
-        was stopped.
+        was stopped. With `playback-ended-by-admin`, an administrator stopped
+        it from the control panel.
       content:
         application/problem+json:
           schema:

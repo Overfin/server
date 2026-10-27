@@ -121,6 +121,38 @@ func (pb Playback) state(s *playback.Stream, snap playback.Snapshot) jellyfin.Pl
 	}
 }
 
+// EndByAdmin ends a playback from the control panel's live view; its
+// player is told an administrator stopped it. False when it had already
+// ended.
+func (pb Playback) EndByAdmin(id string) bool {
+	s, ok := pb.Tickets.Find(id, time.Now())
+	if !ok || !pb.Tickets.Remove(s, "ended-by-admin", "", time.Now()) {
+		return false
+	}
+	pb.stopped(s)
+	return true
+}
+
+// describe puts what plays in words for the live view: a film's name and
+// year, or an episode's series, number and name.
+func describe(t *library.TitleSummary) string {
+	if t == nil {
+		return ""
+	}
+	name := t.Name
+	if t.Kind == "episode" && t.Series != nil {
+		num := ""
+		if t.SeasonNumber != nil && t.EpisodeNumber != nil {
+			num = fmt.Sprintf("S%d E%d · ", *t.SeasonNumber, *t.EpisodeNumber)
+		}
+		return t.Series.Name + " · " + num + name
+	}
+	if t.Year > 0 {
+		name += fmt.Sprintf(" (%d)", t.Year)
+	}
+	return name
+}
+
 // ---- Progress, stop, restore ---------------------------------------------------
 
 type progressRequest struct {
@@ -163,6 +195,8 @@ func sendEnded(w http.ResponseWriter, e *playback.Ended) {
 		problem.Write(w, prob)
 	case "expired":
 		problem.Send(w, problem.PlaybackExpired, "")
+	case "ended-by-admin":
+		problem.Send(w, problem.PlaybackEndedByAdmin, "")
 	default:
 		problem.Send(w, problem.PlaybackStopped, "")
 	}
@@ -696,6 +730,7 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 		"audioLanguage", req.AudioLanguage, "askedAudio", req.AudioTrack, "audio", out.AudioTrack)
 
 	s.View = out
+	pb.Tickets.Describe(s, describe(out.Title))
 	if err := l.Jellyfin.ReportStart(ctx, s.Auth, pb.state(s, pb.Tickets.Snapshot(s))); err != nil {
 		pb.Logger.Warn("could not report a playback start", "playback", s.ID, "err", err)
 	}
