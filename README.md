@@ -335,7 +335,9 @@ and banner in place of Overfin's: on the site, its sign-in page and its
 emails. They're kept as you upload them, PNG or JPEG (not SVG, which emails
 can't show); a banner for light pages is optional. With your brand, the
 site and emails say "Powered by Overfin", discreetly. The control panel
-stays Overfin's.
+stays Overfin's. The same page's **Home page** card chooses whether the
+site's home page also shows titles no library has, to be requested (off by
+default).
 
 **Emails** are Overfin's own, in each person's language (confirming an
 address, choosing a new password, invitations, the panel's test), in HTML
