@@ -112,14 +112,17 @@ path = "/data/overfin.db"
 
 [mail]
 # Managed sign-in only: the SMTP server for emails (confirming an address,
-# choosing a new password, invitations). Without it, nobody registers, and
-# an admin sets forgotten passwords. Off when host is empty.
+# choosing a new password, invitations). Usually set in the control panel
+# (Server, Email) instead; when host is set here, the file wins and the
+# panel only shows it. Without an SMTP server, nobody registers, and an
+# admin sets forgotten passwords. Off when host is empty; the other keys
+# then stay out.
 host = ""                       # e.g. "smtp.example.org"
-port = 587                      # 587 for starttls, 465 for tls
-tls = "starttls"                # "starttls", "tls", or "none" (a relay on
+# port = 587                    # the default: 587; 465 with tls, 25 with none
+# tls = "starttls"              # the default; "tls", or "none" (a relay on
                                 # the local network, without a password)
-from = ""                       # e.g. "Media <media@example.org>"
-username = ""                   # with OVERFIN_MAIL_PASSWORD
+# from = "Media <media@example.org>"
+# username = ""                 # with OVERFIN_MAIL_PASSWORD
 
 [admin]
 # With managed sign-in, the control panel is at /admin/ on the site's own
@@ -179,7 +182,8 @@ serve = "builtin"
 # the built-in client, whose pages have real paths (/title/…).
 spa_fallback = false
 # The site's public address, for the links in emails (confirming an
-# address, a new password, invitations): emails with a link need it.
+# address, a new password, invitations): emails with a link need it. With
+# [https], it's https://<domain> already.
 # url = "https://example.org"
 
 # ---- Feature settings --------------------------------------------------------
@@ -198,7 +202,9 @@ max_bitrate_kbps = 0
 # when the account owner logs in again (with step-up), or after 15 minutes.
 pin_attempts = 5
 # When an account starts one stream too many: "replace-oldest" stops its
-# oldest stream (that device is told why), "refuse" refuses the new one.
+# oldest stream (that device is told why; with a stream reserved for each
+# profile, an account template's setting, that profile's own oldest only),
+# "refuse" refuses the new one.
 on_limit = "replace-oldest"
 
 # Features' own settings, each under its name. Migration lets people bring
@@ -209,6 +215,13 @@ on_limit = "replace-oldest"
 # The other server's address, as Overfin reaches it. Nothing is offered
 # without it.
 from = ""
+
+[modules.invites]
+# With an identity provider: "on" gives accounts only by invitation
+# (bringing a previous account still works); "off", the default, gives
+# one to anyone who can log in there. With managed sign-in, registering
+# always takes an invitation.
+required = "off"
 
 [accounts]
 # When someone deletes their account, its Jellyfin users are "delete"d with
