@@ -171,16 +171,21 @@ comes from the internet, and media files can be written by anyone.
     count starts over 15 minutes after the last wrong PIN.
 
 ### Authorization
-23. Every Overfin resource ID (profiles, playback sessions, stream tickets,
-    invitations, and the planned transfer codes) is random, at least 128 bits, and every lookup checks that
-    it belongs to the current account (or, for invitations, that an admin
-    asks).
+23. Every resource ID Overfin issues (profiles, sessions, playbacks, stream
+    tickets, requests, invitations, app keys, and the planned transfer codes)
+    is random, at least 128 bits, and every lookup checks that it belongs to
+    the current account (for playbacks and tickets, its profile; for
+    invitations and app keys, that an admin asks). Catalog IDs (titles,
+    people) are built from TMDB's and name nothing private.
 24. Anything the caller may not see returns 404, never 403. A 403 only ever
-    means the caller can see the thing but may not do this to it (owner-only
-    actions, or a missing step-up).
-25. Account-wide actions are reserved for the owner profile: managing profiles,
+    means the caller may not do this: an owner-only action, a missing step-up
+    or PIN, an account that has ended or isn't allowed, a missing invitation,
+    a cross-site request.
+25. Account-wide actions are reserved for the owner profile: managing profiles
+    and their PINs, the account's language, its tastes and its sign-in,
     deleting the account, exporting the whole account, and ending other
-    devices' sessions.
+    devices' sessions. Kids profiles can't export themselves; the owner's
+    export holds them.
 26. The client never chooses who acts for it upstream: Jellyfin calls run
     as Overfin's one account (rule 3), and Seerr's as the account's own
     Seerr user, which Overfin derives from the session.
@@ -200,7 +205,10 @@ comes from the internet, and media files can be written by anyone.
 29. Play queues aren't accepted yet; when they are, every entry is checked
     against the active profile, when the queue is set and again when it
     advances.
-30. Stream tickets are short-lived and bound to the session that created them.
+30. A stream ticket lasts only as long as its playback: it ends when the
+    playback stops, after 2 minutes without progress reports or stream
+    requests, or after 24 hours at most, and is never renewed. It works only
+    in the session, and for the profile, that started it.
     Transfer codes (planned, for profile transfer) will be long, single-use,
     rate-limited and expire within minutes.
 
@@ -224,16 +232,20 @@ comes from the internet, and media files can be written by anyone.
 
 ### Web hardening
 34. Strict response headers: CSP, frame-ancestors none, nosniff, no referrer.
-35. Errors use RFC 9457 problem details with a machine-readable `type`.
-    Upstream errors are mapped to generic responses; internal details stay in
+35. The API's errors use RFC 9457 problem details with a machine-readable
+    `type`; the control panel and the apps API (rule 58) answer with plain
+    errors. Upstream errors are mapped to generic responses; internal details stay in
     the server log.
 36. Logs never contain tokens, cookies, passwords or PINs.
 37. Public endpoints (`/api/v1/health`, the sign-in, invitation and
     forgotten-password pages with their script, style, logo and check
-    against scripts, `theme.css`, and the operator's branding) never reveal
+    against scripts, the sign-in, registration and forgotten-password calls,
+    the identity provider's return, the gate, `theme.css`, and the
+    operator's branding) never reveal
     software versions, upstream servers or anything about users.
-38. Cursors are signed and bound to the query that produced them. A modified
-    cursor, or one used with a different query, is refused.
+38. The API's cursors are signed and bound to the query that produced them. A
+    modified cursor, or one used with a different query, is refused. The
+    apps API's (rule 58) are plain positions in a list the key may read whole.
 39. Today, only admins upload files: branding pictures (rule 10).
     Profile pictures (planned) will get rule 10's treatment, with stricter
     size limits and a rate limit. Overfin keeps uploads itself, never in
@@ -269,8 +281,9 @@ comes from the internet, and media files can be written by anyone.
 41. No analytics, no telemetry, no calls home. Metrics are aggregate counts
     with no user labels.
 42. Client IPs are used in memory (rate limiting) and never stored by Overfin.
-43. Overfin never sends the browser to a third party: images, including TMDB
-    posters, are served by the gateway.
+43. Overfin never sends the browser to a third party other than the identity
+    provider, for signing in and out: images, including TMDB posters, are
+    served by the gateway.
 44. A public API response never reveals other users' data or activity. Only
     the admin API (rule 58) shows users, to the operator's admins.
 45. Deleting an account deletes everything Overfin holds about it. Its
