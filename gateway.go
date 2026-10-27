@@ -711,6 +711,15 @@ func (g *gateway) SetTranscoding(ctx context.Context, family, device string) err
 }
 
 // Previews is whether Overfin's Jellyfin makes seek-bar previews.
+// NowPlaying lists the live playbacks for the control panel.
+func (g *gateway) NowPlaying() ([]playback.Live, int) {
+	pb := g.current.Load().playback
+	return pb.Tickets.Live(time.Now()), pb.MaxTranscodes
+}
+
+// EndPlayback stops a playback from the control panel.
+func (g *gateway) EndPlayback(id string) bool { return g.current.Load().playback.EndByAdmin(id) }
+
 func (g *gateway) Previews(ctx context.Context) (bool, error) { return g.sh.db.Previews(ctx) }
 
 // SetPreviews saves whether Overfin's Jellyfin makes seek-bar previews, and

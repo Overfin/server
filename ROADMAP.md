@@ -229,9 +229,11 @@ Everything is off by default.
    again while it works), where the person makes their account and
    passkey. Passwords never pass through Overfin. The connector's key is
    used by the admin side, at start, and by invitation links.
-5. Live view: who's watching, method and bitrate, transcode load; stopping a
-   stream; read live, never stored. People's own viewing history is theirs
-   only, never shown to admins (milestone 4).
+5. ~~Live view~~ Done (Now playing): who's watching what, as is or
+   converted and why, the quality, conversions against their limit;
+   stopping a playback, whose player says the server's administrator
+   stopped it. Read live from memory, never stored. People's own viewing
+   history is theirs only, never shown to admins (milestone 4).
 6. Notices, off by default: invite used, account expiring (email, webhook),
    carrying account events only, never viewing activity.
 7. ~~Email~~ Done: the SMTP server is set in the panel (or the file), and

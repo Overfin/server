@@ -159,6 +159,9 @@ type Panel struct {
 	People People
 	// Mail, with managed sign-in, shows and changes the SMTP server.
 	Mail Mail
+	// Playing, when set, shows what's playing now and stops it (the live
+	// view).
+	Playing Playing
 	// Interests, when set, lists what profiles keep for later (the
 	// watchlist), for the title valuation.
 	Interests func(ctx context.Context) ([]store.ProfileTitle, error)
@@ -276,6 +279,10 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("DELETE /admin/api/accounts/{id}/sessions/{session}", p.signedIn(p.endSession))
 	mux.HandleFunc("DELETE /admin/api/accounts/{id}/history-copy", p.signedIn(p.allowHistoryCopy))
 	mux.HandleFunc("POST /admin/api/profiles/{id}/unlock-pin", p.signedIn(p.unlockPIN))
+	if p.Playing != nil {
+		mux.HandleFunc("GET /admin/api/playing", p.signedIn(p.playing))
+		mux.HandleFunc("POST /admin/api/playing/{id}/stop", p.signedIn(p.stopPlaying))
+	}
 	mux.HandleFunc("GET /admin/api/apps", p.signedIn(p.appKeys))
 	mux.HandleFunc("POST /admin/api/apps", p.signedIn(p.createAppKey))
 	mux.HandleFunc("DELETE /admin/api/apps/{id}", p.signedIn(p.deleteAppKey))

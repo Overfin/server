@@ -40,6 +40,8 @@ type Stream struct {
 	lastSeen      time.Time
 	positionTicks int64
 	paused        bool
+	// title is what plays, in words, for the control panel (Describe).
+	title string
 
 	mu sync.Mutex
 	// files maps the neutral names in rewritten playlists to the real
@@ -94,7 +96,7 @@ func (s *Stream) PlayMethod() string {
 
 // Ended remembers why a playback stopped, so its device can be told.
 type Ended struct {
-	Reason string // "taken-over", "expired" or "stopped"
+	Reason string // "taken-over", "expired", "stopped" or "ended-by-admin"
 	By     string // for "taken-over": the device that took over
 	at     time.Time
 }
@@ -295,11 +297,57 @@ func (t *Tickets) forAccount(accountID string) []*Stream {
 	return out
 }
 
+// Live is a playback as it stands now, for the control panel's live view:
+// read from memory when the page asks, never kept (rule 40).
+type Live struct {
+	Stream     *Stream
+	Title      string // as Describe set it; "" while starting
+	Method     string // as Method says
+	Started    time.Time
+	PositionMs int64
+	Paused     bool
+}
+
+// Live lists the live playbacks, oldest first.
+func (t *Tickets) Live(now time.Time) []Live {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var out []Live
+	for _, s := range t.byID {
+		if t.live(s, now) {
+			out = append(out, Live{Stream: s, Title: s.title, Method: t.method(s), Started: s.started,
+				PositionMs: s.positionTicks / 10_000, Paused: s.paused})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Started.Before(out[j].Started) })
+	return out
+}
+
+// Describe sets what a playback plays, in words, for the live view.
+func (t *Tickets) Describe(s *Stream, title string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s.title = title
+}
+
+// Find returns a live playback by its public ID, whoever's it is: for the
+// control panel only.
+func (t *Tickets) Find(id string, now time.Time) (*Stream, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s, ok := t.byID[id]
+	return s, ok && t.live(s, now)
+}
+
 // Method is how the playback is served: "direct", "remux" or "transcode",
 // a remux found to re-encode its video being a transcode.
 func (t *Tickets) Method(s *Stream) string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	return t.method(s)
+}
+
+func (t *Tickets) method(s *Stream) string {
 	if s.reencodes {
 		return "transcode"
 	}
