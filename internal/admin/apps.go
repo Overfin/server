@@ -153,7 +153,9 @@ type watchStatsJSON struct {
 // watchStats (GET /apps/v1/watch-stats?since=RFC 3339) answers, for each
 // film and series anyone watched or keeps as a favorite, what the profiles
 // did with it in total: plays to the end, viewers (accounts), favorites
-// (profiles), the day it was last played. Never anything per person.
+// (profiles), the day it was last played. Never anything per person:
+// counts below 2 are given as 0, and the day only with two viewers or
+// more, as on /apps/v1/titles, so none points at one person.
 func (p *Panel) watchStats(w http.ResponseWriter, r *http.Request) {
 	if p.appKey(w, r, "watch-stats") == nil {
 		return
@@ -174,12 +176,21 @@ func (p *Panel) watchStats(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]watchStatsJSON, 0, len(all))
 	for _, s := range all {
-		j := watchStatsJSON{Kind: s.Kind, TMDB: s.TMDB, IMDb: s.IMDb, TVDB: s.TVDB, Plays: s.Plays, Viewers: s.Viewers,
-			Favorites: s.Favorites, Changed: s.Changed.Format(time.RFC3339)}
-		if !s.LastPlayed.IsZero() {
+		j := watchStatsJSON{Kind: s.Kind, TMDB: s.TMDB, IMDb: s.IMDb, TVDB: s.TVDB, Plays: atLeast2(s.Plays),
+			Viewers: atLeast2(s.Viewers), Favorites: atLeast2(s.Favorites), Changed: s.Changed.Format(time.RFC3339)}
+		if !s.LastPlayed.IsZero() && s.Viewers >= 2 {
 			j.LastPlayed = s.LastPlayed.Format(time.DateOnly)
 		}
 		out = append(out, j)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"titles": out, "generatedAt": now.UTC().Format(time.RFC3339)})
+}
+
+// atLeast2 gives counts below 2 as 0, so a total never points at one
+// person.
+func atLeast2(n int) int {
+	if n < 2 {
+		return 0
+	}
+	return n
 }
