@@ -64,7 +64,8 @@ identity provider: see [Running it](#running-it).
 - **A setup wizard**, one step at a time: the default language, TMDB,
   Intro Skipper, Seerr, and you, its first admin.
 - **A control panel**: people and their accounts, invitations, templates
-  (how many streams and profiles an account gets), limits, languages,
+  (how many streams and profiles an account gets, and whether each profile
+  keeps a stream of its own), limits, languages,
   libraries, the GPU that converts videos (tested on your own files),
   email, Seerr, fixing titles Jellyfin matched wrong.
 - **Bringing people over** from another Jellyfin, their watch history

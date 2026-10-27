@@ -822,19 +822,23 @@ nothing beyond what that needs.
 - Profile avatars, profile transfers.
 - ~~Trickplay~~ (done), lyrics, bitrate test.
 
-- **A stream reserved for each profile**, an account template's setting,
-  off by default. Each profile of the account owns one of its streams;
-  the rest (the limit less the number of profiles) are shared. A profile
-  may start a stream when its own is free, or while the shared ones last.
+- ~~**A stream reserved for each profile**~~ Done: an account template's
+  setting (**A stream for each profile** in the panel), off by default.
+  Each profile of the account owns one of its streams; the rest (the
+  limit less the number of profiles) are shared. A profile may start a
+  stream when its own is free, or while the shared ones last.
   With a limit of 3: one profile may watch in 3 places; two profiles, one
   of them in 2 places while the other keeps its own; three profiles, one
   place each. A profile's own stream is never lent, so nobody is ever cut
-  off to make room. Kids profiles count like the others. While it's on, an
-  account can't have more profiles than streams: the template's limits are
-  checked, and a profile beyond them is refused. Unused profiles keep their
-  stream reserved: the owner removes them, and "Who's watching?" says so (a
-  notice that each profile keeps a stream of its own, and how many are
-  left to share). Sharing a login also costs the owner a stream of theirs.
+  off to make room: a profile out of room replaces its own oldest
+  playback, never another profile's (or is refused, when the operator
+  refuses streams over the limit). Kids profiles count like the others.
+  While it's on, an account can't have more profiles than streams: the
+  panel refuses such a template, and a profile beyond them is refused.
+  Unused profiles keep their stream reserved: the owner removes them.
+  `GET /me` says so in its limits (`reservedStreams`, and `sharedStreams`,
+  how many are left to share), for "Who's watching?" to tell. Sharing a
+  login also costs the owner a stream of theirs.
 
 ## Planned, not designed yet
 
