@@ -540,6 +540,15 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Everything that can fail comes before the playback is registered:
+	// one registered without its view would count against the stream
+	// limit until it went idle, and answer nothing.
+	titles, err := l.titlesOfItems(ctx, p, []string{jfItem})
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+
 	// The account's stream limit: replace its oldest playback, whose device
 	// is then told who took over, or refuse (rule 32). Another account's
 	// playback is never touched. With a stream reserved for each profile,
@@ -600,11 +609,6 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 	pb.Tickets.Add(s, pr.StartTimeTicks, time.Now())
 	started = true // the device is the playback's now, freed when it ends
 
-	titles, err := l.titlesOfItems(ctx, p, []string{jfItem})
-	if err != nil {
-		l.storeError(w, err)
-		return
-	}
 	out := sessionJSON{
 		ID: s.ID, Method: dec.Method,
 		PositionMs: req.StartPositionMs, DurationMs: dec.Source.RunTimeTicks / 10_000,

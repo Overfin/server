@@ -298,6 +298,8 @@ type options struct {
 	// seerr, when set, connects discovery to it; store receives the store.
 	seerr *seerr.Client
 	store **store.Store
+	// dbPath, when set, receives the database file's path.
+	dbPath *string
 	// directory, when set, is the identity provider's connector.
 	directory connector.Directory
 	// tmdb, when set, is TMDB for the pages fetched when opened.
@@ -324,11 +326,15 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 	jf, _ := jellyfin.New(jfSrv.URL, "test")
 
 	box, _ := seal.New(bytes.Repeat([]byte{1}, 32))
-	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "t.db"), box)
+	dbFile := filepath.Join(t.TempDir(), "t.db")
+	st, err := store.Open(context.Background(), dbFile, box)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
+	if o.dbPath != nil {
+		*o.dbPath = dbFile
+	}
 	// The US scales, as TMDB has them (in part).
 	st.SetRatingScales(context.Background(), "movie", map[string][]store.RatingLevel{"US": {
 		{Certification: "NR", Position: 0}, {Certification: "G", Position: 1},
