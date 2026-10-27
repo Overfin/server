@@ -19,8 +19,7 @@ curl -fsSLO https://raw.githubusercontent.com/overfin/server/v0.4.0/deploy/compo
 curl -fsSL -o .env https://raw.githubusercontent.com/overfin/server/v0.4.0/deploy/.env.example
 ```
 
-In `.env`, set `MEDIA_DIR_1` to your media folder (`MEDIA_DIR_2` to
-`MEDIA_DIR_4` for more, on other disks or shares), and `OVERFIN_DOMAIN` to
+In `.env`, set `MEDIA_DIR` to your media folder, and `OVERFIN_DOMAIN` to
 your domain if you have one. Then:
 
 ```sh
@@ -49,7 +48,7 @@ and a password, as the first admin.
 Then, in the control panel (`/admin/`):
 
 - **Libraries**: add yours, with folders under `/media`, where the compose
-  file puts `MEDIA_DIR_1` (`/media2` to `/media4` for the others).
+  file puts `MEDIA_DIR`.
 - **Server, Email**: an SMTP server, so people can register with an
   invitation and choose a new password by email. Without one, you add
   people with a password, and set forgotten ones.
