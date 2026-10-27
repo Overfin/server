@@ -15,6 +15,7 @@ import (
 	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/library"
 	"github.com/overfin/server/internal/pin"
+	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/provision"
@@ -118,6 +119,11 @@ type meHomeJSON struct {
 type meLimitsJSON struct {
 	MaxProfiles int `json:"maxProfiles"`
 	MaxStreams  int `json:"maxStreams"`
+	// ReservedStreams: each profile owns one of the account's streams;
+	// SharedStreams are the rest, which any profile may use (all of them
+	// when it's off).
+	ReservedStreams bool `json:"reservedStreams"`
+	SharedStreams   int  `json:"sharedStreams"`
 }
 
 func (a Account) me(w http.ResponseWriter, r *http.Request) {
@@ -261,7 +267,15 @@ func (s *Sessions) me(r *http.Request, acct *store.Account, prof *store.Profile)
 		acct.Language = tag
 	}
 	out := meJSON{AccountID: acct.ID, Language: def, Languages: []lang.Choice{},
-		Limits: meLimitsJSON{MaxProfiles: acct.Template.MaxProfiles, MaxStreams: acct.Template.MaxStreams}}
+		Limits: meLimitsJSON{MaxProfiles: acct.Template.ProfileLimit(), MaxStreams: acct.Template.MaxStreams,
+			ReservedStreams: acct.Template.ReserveStreams, SharedStreams: acct.Template.MaxStreams}}
+	if acct.Template.ReserveStreams {
+		profiles, err := s.Store.Profiles(ctx, acct.ID)
+		if err != nil {
+			return meJSON{}, err
+		}
+		out.Limits.SharedStreams = playback.SharedStreams(acct.Template.MaxStreams, len(profiles))
+	}
 	if slices.Contains(offered, acct.Language) {
 		out.Language = acct.Language
 	}
