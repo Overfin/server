@@ -740,7 +740,7 @@ func (g *gateway) applySettings(ctx context.Context) error {
 	}
 	changes, err := jfsettings.Apply(ctx, g.sh.jf, g.adminAuth(), c)
 	for _, c := range changes {
-		g.sh.logger.Info("a Jellyfin setting was set back to Overfin's", "change", c.String())
+		g.sh.logger.Info("a Jellyfin setting was set to Overfin's", "change", c.String())
 	}
 	return err
 }
