@@ -347,7 +347,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 	if streams == 0 {
 		streams = 100
 	}
-	tmpl, err := st.CreateTemplate(context.Background(), "Test", streams, 3)
+	tmpl, err := st.CreateTemplate(context.Background(), "Test", streams, 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}

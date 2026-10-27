@@ -170,8 +170,22 @@ type Template struct {
 	Name        string
 	MaxStreams  int
 	MaxProfiles int
+	// ReserveStreams: each profile of the account owns one of its streams,
+	// the rest are shared. While it's on, an account has no more profiles
+	// than streams.
+	ReserveStreams bool
 	// Accounts is how many accounts follow it (filled by Templates only).
 	Accounts int
+}
+
+// ProfileLimit is how many profiles an account on the template may have:
+// its profile limit, and no more than its streams while each profile has
+// one reserved.
+func (t Template) ProfileLimit() int {
+	if t.ReserveStreams && t.MaxStreams < t.MaxProfiles {
+		return t.MaxStreams
+	}
+	return t.MaxProfiles
 }
 
 // DefaultTemplate is the template that exists from the start: one profile,
@@ -185,7 +199,7 @@ func (a *Account) Expired(now time.Time) bool {
 }
 
 const accountSelect = `SELECT a.id, a.subject, a.created_at, a.disabled_at, a.label, a.expires_at, a.language,
-		t.id, t.name, t.max_streams, t.max_profiles
+		t.id, t.name, t.max_streams, t.max_profiles, t.reserve_streams
 	FROM accounts a JOIN account_templates t ON t.id = COALESCE(a.template_id, 'tmpl_default')`
 
 func scanAccount(sc scanner) (*Account, error) {
@@ -194,7 +208,7 @@ func scanAccount(sc scanner) (*Account, error) {
 	var disabled, expires sql.NullInt64
 	var label, language sql.NullString
 	err := sc.Scan(&a.ID, &a.Subject, &created, &disabled, &label, &expires, &language,
-		&a.Template.ID, &a.Template.Name, &a.Template.MaxStreams, &a.Template.MaxProfiles)
+		&a.Template.ID, &a.Template.Name, &a.Template.MaxStreams, &a.Template.MaxProfiles, &a.Template.ReserveStreams)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -1348,7 +1362,7 @@ func (s *Store) templateNameTaken(ctx context.Context, name, exceptID string) (b
 // accounts follow each.
 func (s *Store) Templates(ctx context.Context) ([]*Template, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT t.id, t.name, t.max_streams, t.max_profiles,
+		SELECT t.id, t.name, t.max_streams, t.max_profiles, t.reserve_streams,
 			(SELECT count(*) FROM accounts a WHERE COALESCE(a.template_id, 'tmpl_default') = t.id)
 		FROM account_templates t ORDER BY t.id != 'tmpl_default', t.name`)
 	if err != nil {
@@ -1358,7 +1372,7 @@ func (s *Store) Templates(ctx context.Context) ([]*Template, error) {
 	var out []*Template
 	for rows.Next() {
 		var t Template
-		if err := rows.Scan(&t.ID, &t.Name, &t.MaxStreams, &t.MaxProfiles, &t.Accounts); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.MaxStreams, &t.MaxProfiles, &t.ReserveStreams, &t.Accounts); err != nil {
 			return nil, err
 		}
 		out = append(out, &t)
@@ -1367,27 +1381,28 @@ func (s *Store) Templates(ctx context.Context) ([]*Template, error) {
 }
 
 // CreateTemplate adds an account template.
-func (s *Store) CreateTemplate(ctx context.Context, name string, maxStreams, maxProfiles int) (*Template, error) {
+func (s *Store) CreateTemplate(ctx context.Context, name string, maxStreams, maxProfiles int, reserveStreams bool) (*Template, error) {
 	if taken, err := s.templateNameTaken(ctx, name, ""); err != nil {
 		return nil, err
 	} else if taken {
 		return nil, ErrTemplateNameTaken
 	}
-	t := &Template{ID: ids.New(ids.Template), Name: name, MaxStreams: maxStreams, MaxProfiles: maxProfiles}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO account_templates (id, name, max_streams, max_profiles, created_at)
-		VALUES (?, ?, ?, ?, ?)`, t.ID, name, maxStreams, maxProfiles, s.now().Unix())
+	t := &Template{ID: ids.New(ids.Template), Name: name, MaxStreams: maxStreams, MaxProfiles: maxProfiles,
+		ReserveStreams: reserveStreams}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO account_templates (id, name, max_streams, max_profiles, reserve_streams, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`, t.ID, name, maxStreams, maxProfiles, reserveStreams, s.now().Unix())
 	return t, err
 }
 
 // UpdateTemplate changes a template; every account on it follows at once.
-func (s *Store) UpdateTemplate(ctx context.Context, id, name string, maxStreams, maxProfiles int) error {
+func (s *Store) UpdateTemplate(ctx context.Context, id, name string, maxStreams, maxProfiles int, reserveStreams bool) error {
 	if taken, err := s.templateNameTaken(ctx, name, id); err != nil {
 		return err
 	} else if taken {
 		return ErrTemplateNameTaken
 	}
-	res, err := s.db.ExecContext(ctx, `UPDATE account_templates SET name = ?, max_streams = ?, max_profiles = ? WHERE id = ?`,
-		name, maxStreams, maxProfiles, id)
+	res, err := s.db.ExecContext(ctx, `UPDATE account_templates SET name = ?, max_streams = ?, max_profiles = ?, reserve_streams = ?
+		WHERE id = ?`, name, maxStreams, maxProfiles, reserveStreams, id)
 	return oneRow(res, err)
 }
 
