@@ -34,3 +34,24 @@ why = "Vous recevez ce courriel parce qu’un administrateur de {site} vous a in
 subject = "{site} peut envoyer des courriels"
 intro = "Ce test vient du panneau de contrôle : les courriels que les gens recevront arriveront comme lui."
 why = "Vous recevez ce courriel parce qu’un administrateur de {site} a configuré ses courriels avec cette adresse."
+
+[joined]
+subject = "{name} a un compte sur {site}"
+intro = "Un nouveau compte a été créé sur {site} : {name}."
+why = "Vous recevez ce courriel parce que vous administrez {site} et que ses avis sont activés (panneau de contrôle, Notices)."
+
+[expiring]
+subject = "L’accès de {name} à {site} prend fin le {date}"
+intro = "L’accès de {name} à {site} prend fin le {date}. Pour lui donner plus de temps, changez la date de fin du compte dans le panneau de contrôle (People)."
+why = "Vous recevez ce courriel parce que vous administrez {site} et que ses avis sont activés (panneau de contrôle, Notices)."
+
+[expired]
+subject = "L’accès de {name} à {site} a pris fin"
+intro = "L’accès de {name} à {site} a pris fin le {date}. Pour le lui redonner, changez la date de fin du compte dans le panneau de contrôle (People)."
+why = "Vous recevez ce courriel parce que vous administrez {site} et que ses avis sont activés (panneau de contrôle, Notices)."
+
+[ending]
+subject = "Votre accès à {site} prend fin le {date}"
+intro = "Votre accès à {site} prend fin le {date}. Pour le garder, demandez-le à l’administrateur du site."
+button = "Ouvrir {site}"
+why = "Vous recevez ce courriel parce que vous avez un compte sur {site}."

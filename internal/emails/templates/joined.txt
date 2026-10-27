@@ -1,0 +1,3 @@
+{{define "subject"}}{{t "joined.subject"}}{{end}}
+{{define "content"}}{{t "joined.intro"}}{{end}}
+{{define "why"}}{{t "joined.why"}}{{end}}

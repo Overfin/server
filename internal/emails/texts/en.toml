@@ -34,3 +34,24 @@ why = "You got this email because an admin of {site} invited you with this addre
 subject = "{site} can send emails"
 intro = "This test comes from the control panel: the emails people get will arrive like it."
 why = "You got this email because an admin of {site} set up its emails with this address."
+
+[joined]
+subject = "{name} has an account on {site}"
+intro = "A new account was made on {site}: {name}."
+why = "You got this email because you're an admin of {site}, and its notices are on (control panel, Notices)."
+
+[expiring]
+subject = "{name}'s access to {site} ends on {date}"
+intro = "{name}'s access to {site} ends on {date}. To give more time, change the account's end date in the control panel (People)."
+why = "You got this email because you're an admin of {site}, and its notices are on (control panel, Notices)."
+
+[expired]
+subject = "{name}'s access to {site} has ended"
+intro = "{name}'s access to {site} ended on {date}. To give it back, change the account's end date in the control panel (People)."
+why = "You got this email because you're an admin of {site}, and its notices are on (control panel, Notices)."
+
+[ending]
+subject = "Your access to {site} ends on {date}"
+intro = "Your access to {site} ends on {date}. To keep it, ask the site's administrator."
+button = "Open {site}"
+why = "You got this email because you have an account on {site}."

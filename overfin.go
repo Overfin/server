@@ -35,6 +35,7 @@ import (
 	"github.com/overfin/server/internal/introskipper"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/keys"
+	"github.com/overfin/server/internal/notices"
 	"github.com/overfin/server/internal/oidc"
 	"github.com/overfin/server/internal/personal"
 	"github.com/overfin/server/internal/playback"
@@ -483,6 +484,7 @@ func run(logger *slog.Logger) error {
 	// The library's artwork, kept on disk next to the database.
 	go (&catalog.LibraryArtwork{Store: db, Images: sh.images, Logger: logger, Every: time.Hour}).Run(ctx)
 	go (&personal.Importer{Jellyfin: sh.jf, Store: db, Logger: logger, Every: 10 * time.Minute}).Run(ctx)
+	go sh.notices.Run(ctx)
 
 	if a := cfg.Admin; a.Enabled() || managed {
 		o := cfg.OIDC
@@ -490,7 +492,7 @@ func run(logger *slog.Logger) error {
 			TMDB: func() bool { return gw.tmdbSource() != nil }, TMDBTokens: gw, IntroSkipper: skipper,
 			// A new language: artwork and discovery's lists, read again now.
 			OnLanguage: func() { sh.titles.Wake(); sh.lists.Wake() },
-			Store:      db, Provisioner: gw.Provisioner, Interests: gw.Interests, Playing: gw,
+			Store:      db, Provisioner: gw.Provisioner, Interests: gw.Interests, Playing: gw, Notices: sh.notices,
 			Provider: &oidc.Provider{Issuer: o.Issuer, ClientID: o.ClientID, ClientSecret: cfg.Secrets.OIDCClientSecret,
 				RedirectURL: a.RedirectURL, GroupsClaim: o.GroupsClaim, HTTP: oidc.NewClient(o.Dial)}}
 		if sh.directory != nil {
@@ -554,6 +556,14 @@ func newShared(cfg *config.Config, db *store.Store, moduleDBs map[string]*sql.DB
 		// Emails, with the operator's own templates next to the database.
 		emails: &emails.Writer{Dir: filepath.Join(filepath.Dir(cfg.Storage.Path), "mail-templates"), Store: db, Logger: logger},
 		proof:  &proof.Checker{Key: k.Proof}}
+	// Notices: account events, by email and webhook, as the panel sets.
+	sh.notices = &notices.Notifier{Store: db, Emails: sh.emails, Managed: cfg.Identity.Mode == "managed",
+		Site: siteURL(cfg), Logger: logger, Mail: func() notices.Sender {
+			if s := sh.mail.Load(); s != nil {
+				return s
+			}
+			return nil
+		}}
 	if cn := cfg.Connector; cn.Enabled() {
 		sh.directory = &connector.Cache{Directory: connector.New(cn.Kind, cn.URL, cfg.Secrets.ConnectorToken, oidc.NewClient(cn.Dial))}
 	}

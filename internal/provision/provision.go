@@ -73,6 +73,9 @@ type Provisioner struct {
 	// account's gets an anonymous name (AnonymousName); nil when no Seerr
 	// is connected.
 	RenameSeerrUser func(ctx context.Context, seerrID int, name string) error
+	// Created, when set, is told of each account made (notices). It must
+	// not block.
+	Created func(acct *store.Account)
 	// mu serializes account creation and adoption. Both are rare, and
 	// serializing them rules out two accounts for one person.
 	mu       sync.Mutex
@@ -171,7 +174,11 @@ func (p *Provisioner) Create(ctx context.Context, id identity.Identity, hooks *H
 		return nil, nil, err
 	}
 	// Read back whole: its template, which an invitation may have chosen.
-	return p.Find(ctx, id)
+	acct, owner, err = p.Find(ctx, id)
+	if err == nil && p.Created != nil {
+		p.Created(acct)
+	}
+	return acct, owner, err
 }
 
 // allowed checks the parts of rule 15 that don't need the database.

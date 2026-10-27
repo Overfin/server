@@ -167,7 +167,7 @@ standalone tool), which reads what Overfin knows (title
 values and requests, never who) and decides what the server gets and
 keeps (see "Requests in Overfin" below).
 
-## Milestone 2: administration
+## Milestone 2: administration (done)
 
 **Overfin's own control panel**, built in and the same for every operator:
 the place to run an instance without Jellyfin's dashboard, where Overfin's
@@ -234,8 +234,10 @@ Everything is off by default.
    stopping a playback, whose player says the server's administrator
    stopped it. Read live from memory, never stored. People's own viewing
    history is theirs only, never shown to admins (milestone 4).
-6. Notices, off by default: invite used, account expiring (email, webhook),
-   carrying account events only, never viewing activity.
+6. ~~Notices~~ Done, off by default: an account made, its access ending
+   soon or ended, by email to the admins and to a webhook (signed when the
+   operator makes a key); before their access ends, the person gets an
+   email too. Account events only, never viewing activity.
 7. ~~Email~~ Done: the SMTP server is set in the panel (or the file), and
    sends the emails of Overfin's own sign-in (confirming an address, a new
    password, invitations) from templates the operator may replace. Step-up
