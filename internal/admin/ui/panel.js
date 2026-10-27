@@ -1275,6 +1275,138 @@ async function appsView() {
         h('div', { class: 'checks' }, Object.entries(scopes).map(([s, box]) => h('label', { class: 'inline' }, box, appScopeNames[s]))), make)));
 }
 
+// ---- Categories ----------------------------------------------------------------
+
+// categoriesView lists the site's categories in their order, edits them,
+// and says whether the site's menu shows the libraries too.
+async function categoriesView(editing) {
+  const data = await api('GET', '/admin/api/categories');
+  const langName = (code) => { try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code; } catch { return code; } };
+  const nameOf = (c) => c.names.en || Object.values(c.names)[0] || 'Unnamed';
+  const genreNames = Object.fromEntries(data.genres.map((g) => [g.id, g.name]));
+  const libNames = Object.fromEntries(data.libraries.map((l) => [l.id, l.name]));
+  const catNames = Object.fromEntries(data.items.map((c) => [c.id, nameOf(c)]));
+  const summary = (r) => [
+    r.kinds?.length === 1 && (r.kinds[0] === 'movie' ? 'Films' : 'Series'),
+    r.genres?.length && r.genres.map((g) => genreNames[g] || g).join(' or '),
+    r.languages?.length && `in ${r.languages.map(langName).join(' or ')}`,
+    r.libraries?.length && `from ${r.libraries.map((l) => libNames[l] || 'a library').join(' or ')}`,
+    r.tags?.length && `tagged ${r.tags.join(' or ')}`,
+    (r.movieCeiling || r.seriesCeiling) && `rated at most ${[r.movieCeiling, r.seriesCeiling].filter(Boolean).join(' / ')}`,
+    r.except?.length && `except ${r.except.map((x) => catNames[x] || '?').join(', ')}`,
+  ].filter(Boolean).join(' · ') || 'Every film and series';
+
+  const shown = h('input', { type: 'checkbox', 'aria-label': 'Libraries in the menu' });
+  shown.checked = data.librariesShown;
+  shown.addEventListener('change', () => busy(null, async () => {
+    await api('PUT', '/admin/api/categories/libraries', { shown: shown.checked });
+    toast(shown.checked ? 'The libraries are in the site\'s menu.' : 'The libraries are out of the site\'s menu.');
+  }, (err) => { shown.checked = !shown.checked; toast(err.message, true); }));
+
+  const order = data.items.map((c) => c.id);
+  const move = (i, by) => busy(null, async () => {
+    [order[i], order[i + by]] = [order[i + by], order[i]];
+    await api('PUT', '/admin/api/categories/order', { ids: order });
+    categoriesView();
+  });
+  const rows = data.items.map((c, i) => {
+    const del = h('button', { type: 'button', class: 'small danger', onclick: () => {
+      if (!confirm(`Delete ${nameOf(c)}? Nothing moves on disk: only the category goes.`)) return;
+      busy(del, async () => { await api('DELETE', `/admin/api/categories/${c.id}`); toast('Category deleted.'); categoriesView(); });
+    } }, 'Delete');
+    return h('tr', {},
+      h('td', {}, h('div', { class: 'name' }, nameOf(c)), h('div', { class: 'hint' }, summary(c.rules))),
+      h('td', { class: 'hint' }, plural(c.count, 'title')),
+      h('td', {}, c.home ? badge('Home row', 'info') : null),
+      h('td', { class: 'actions' },
+        h('button', { type: 'button', class: 'small', disabled: i === 0, 'aria-label': 'Up', onclick: () => move(i, -1) }, '↑'),
+        h('button', { type: 'button', class: 'small', disabled: i === data.items.length - 1, 'aria-label': 'Down', onclick: () => move(i, 1) }, '↓'),
+        h('button', { type: 'button', class: 'small', onclick: () => categoriesView(c.id) }, 'Edit'), del));
+  });
+
+  const editor = editing !== undefined ? categoryEditor(data, data.items.find((c) => c.id === editing), langName, nameOf) : null;
+  show(pageHead('Categories', 'Sections of the site, made from rules: Films, Series, Anime, Kids… A title is in every category it fits. Nothing moves on disk.',
+    h('button', { class: 'primary', type: 'button', onclick: () => categoriesView(null) }, 'New category')),
+  editor,
+  card({ title: 'Categories', description: 'In the site\'s menu in this order, each with its page; a category with a home row also shows on the home page.' },
+    h('div', { class: 'table-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, h('th', {}, 'Category'), h('th', {}, 'Titles'), h('th', {}), h('th', {}))),
+      h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { colspan: '4', class: 'empty' }, 'No category yet: the site shows its libraries.')))))),
+  card({ title: 'The site\'s menu' }, [setting('Libraries in the menu', 'With categories, you may want them alone: off, the menu shows only the categories.', shown)]));
+}
+
+// categoryEditor edits a category (c), or makes one (none given), with a
+// live count of the titles it would have.
+function categoryEditor(data, c, langName, nameOf) {
+  const r = c?.rules || {};
+  const names = Object.fromEntries(data.languages.map((l) => [l, h('input', { value: c?.names[l] || '', maxlength: '40', 'aria-label': `Name in ${langName(l)}` })]));
+  const boxes = (list, picked, label) => list.map(([v, text]) => {
+    const box = h('input', { type: 'checkbox', 'aria-label': `${label}: ${text}` });
+    box.checked = (picked || []).includes(v);
+    box.dataset.v = v;
+    return h('label', { class: 'inline' }, box, text);
+  });
+  const picked = (group) => [...group.querySelectorAll('input:checked')].map((b) => b.dataset.v);
+  const kinds = h('div', { class: 'checks' }, boxes([['movie', 'Films'], ['series', 'Series']], r.kinds, 'Kind'));
+  const genres = h('div', { class: 'checks' }, boxes(data.genres.map((g) => [String(g.id), g.name]), (r.genres || []).map(String), 'Genre'));
+  const languages = h('div', { class: 'checks' }, boxes(data.originalLanguages.map((l) => [l, langName(l)]), r.languages, 'Language'));
+  const libraries = h('div', { class: 'checks' }, boxes(data.libraries.map((l) => [l.id, l.name]), r.libraries, 'Library'));
+  // Tags can be many (TMDB's keywords, with Jellyfin's default metadata):
+  // the ticked first, and a search.
+  const tagList = [...data.tags].sort((a, b) => Number((r.tags || []).includes(b)) - Number((r.tags || []).includes(a)));
+  const tags = h('div', { class: 'checks' }, boxes(tagList.map((t) => [t, t]), r.tags, 'Tag'));
+  const tagSearch = h('input', { type: 'search', placeholder: 'Find a tag', 'aria-label': 'Find a tag', oninput: () => {
+    const q = tagSearch.value.trim().toLowerCase();
+    for (const label of tags.children) label.hidden = Boolean(q) && !label.textContent.toLowerCase().includes(q) && !label.querySelector('input').checked;
+  } });
+  const except = h('div', { class: 'checks' }, boxes(data.items.filter((x) => x.id !== c?.id).map((x) => [x.id, nameOf(x)]), r.except, 'Leave out'));
+  const ceiling = (kind, value) => {
+    const sel = h('select', { 'aria-label': `${kind === 'movie' ? 'Films' : 'Series'} rated at most` },
+      h('option', { value: '' }, 'Any rating'), data.ratings[kind].map((x) => h('option', { value: x }, x)));
+    sel.value = value || '';
+    return sel;
+  };
+  const movieCeiling = ceiling('movie', r.movieCeiling), seriesCeiling = ceiling('series', r.seriesCeiling);
+  const home = h('input', { type: 'checkbox', 'aria-label': 'A row on the home page' });
+  home.checked = Boolean(c?.home);
+  const rules = () => ({ kinds: picked(kinds), genres: picked(genres).map(Number), languages: picked(languages), libraries: picked(libraries),
+    tags: picked(tags), movieCeiling: movieCeiling.value, seriesCeiling: seriesCeiling.value, except: picked(except) });
+  const preview = h('div', { class: 'hint' }, '');
+  let timer;
+  const refresh = () => { clearTimeout(timer); timer = setTimeout(async () => {
+    try {
+      const p = await api('POST', '/admin/api/categories/preview', { id: c?.id || '', rules: rules() });
+      preview.textContent = `${plural(p.count, 'title')}${p.sample.length ? `: ${p.sample.join(', ')}${p.count > p.sample.length ? '…' : ''}` : ''}`;
+    } catch (err) { preview.textContent = err.message; }
+  }, 300); };
+  const st = status('');
+  const save = h('button', { class: 'primary', type: 'button', onclick: () => busy(save, async () => {
+    const body = { names: Object.fromEntries(Object.entries(names).map(([l, i]) => [l, i.value.trim()])), rules: rules(), home: home.checked };
+    await (c ? api('PUT', `/admin/api/categories/${c.id}`, body) : api('POST', '/admin/api/categories', body));
+    toast(c ? 'Category saved.' : 'Category made.');
+    categoriesView();
+  }, (err) => st.set(err.message, 'error')) }, c ? 'Save' : 'Make it');
+  const cancel = h('button', { type: 'button', onclick: () => categoriesView() }, 'Cancel');
+  const group = (label, hint, el) => h('div', { class: 'setting stack' }, h('div', {}, h('div', { class: 'label' }, label), hint && h('div', { class: 'hint' }, hint)), el);
+  const form = card({ title: c ? `Edit ${nameOf(c)}` : 'A new category', description: 'A title is in it when it fits every rule you set; within a rule, any of what you tick. Nothing ticked: no limit.' }, [
+    Object.entries(names).map(([l, i]) => field(`Name in ${langName(l)}`, i)),
+    group('Films or series', null, kinds),
+    group('Genres', 'TMDB\'s.', genres),
+    group('Original language', null, languages),
+    data.libraries.length > 1 && group('Libraries', null, libraries),
+    data.tags.length > 0 && group('Tags', 'Jellyfin\'s: often TMDB\'s keywords (christmas, anime, based on novel…).', h('div', {}, data.tags.length > 12 && tagSearch, tags)),
+    group('Rated at most', `In ${data.ratingsCountry}: for kids, say. A title without a rating there is left out.`,
+      h('div', { class: 'row' }, h('label', { class: 'inline' }, 'Films', movieCeiling), h('label', { class: 'inline' }, 'Series', seriesCeiling))),
+    data.items.some((x) => x.id !== c?.id) && group('Leave out', 'Titles of these categories aren\'t in this one: Series except Anime, say.', except),
+    setting('A row on the home page', null, home),
+    h('div', { class: 'setting' }, h('div', {}, h('div', { class: 'label' }, 'What it holds'), preview)),
+  ], [st, cancel, save]);
+  form.addEventListener('change', refresh);
+  refresh();
+  setTimeout(() => (Object.values(names)[0])?.focus(), 0);
+  return form;
+}
+
 // ---- Notices -------------------------------------------------------------------
 
 // noticesView sets which account events the operator is told about, and
@@ -1748,6 +1880,7 @@ const views = {
   libraries: { label: 'Libraries', icon: icons.folder, view: () => librariesView() },
   identification: { label: 'Identification', icon: icons.check, view: () => identificationView() },
   valuation: { label: 'Valuation', icon: icons.scale, view: () => valuationView() },
+  categories: { label: 'Categories', icon: icons.layers, view: () => categoriesView() },
   apps: { label: 'Apps', icon: icons.key, view: () => appsView() },
   playing: { label: 'Now playing', icon: icons.play, view: () => playingView() },
   notices: { label: 'Notices', icon: icons.bell, view: () => noticesView() },
@@ -1794,6 +1927,7 @@ async function start() {
     tabs.map((m) => link(`m/${encodeURIComponent(m.name)}`, featureName(m.name), moduleIcons[m.name] || icons.puzzle)),
     h('div', { class: 'group' }, 'Library'),
     link('libraries', views.libraries.label, views.libraries.icon),
+    link('categories', views.categories.label, views.categories.icon),
     link('identification', views.identification.label, views.identification.icon),
     link('valuation', views.valuation.label, views.valuation.icon),
     link('apps', views.apps.label, views.apps.icon));

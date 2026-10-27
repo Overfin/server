@@ -292,6 +292,13 @@ func (p *Panel) handler() http.Handler {
 		mux.HandleFunc("POST /admin/api/notices/test", p.signedIn(p.testNotices))
 		mux.HandleFunc("POST /admin/api/notices/secret", p.signedIn(p.newNoticeSecret))
 	}
+	mux.HandleFunc("GET /admin/api/categories", p.signedIn(p.categories))
+	mux.HandleFunc("POST /admin/api/categories", p.signedIn(p.createCategory))
+	mux.HandleFunc("POST /admin/api/categories/preview", p.signedIn(p.previewCategory))
+	mux.HandleFunc("PUT /admin/api/categories/order", p.signedIn(p.orderCategories))
+	mux.HandleFunc("PUT /admin/api/categories/libraries", p.signedIn(p.setLibrariesShown))
+	mux.HandleFunc("PUT /admin/api/categories/{id}", p.signedIn(p.changeCategory))
+	mux.HandleFunc("DELETE /admin/api/categories/{id}", p.signedIn(p.deleteCategory))
 	mux.HandleFunc("GET /admin/api/apps", p.signedIn(p.appKeys))
 	mux.HandleFunc("POST /admin/api/apps", p.signedIn(p.createAppKey))
 	mux.HandleFunc("DELETE /admin/api/apps/{id}", p.signedIn(p.deleteAppKey))

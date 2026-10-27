@@ -78,8 +78,12 @@ func (l Library) nextCursor(r *http.Request, p *store.Profile, start int, seed s
 // asked, from the index and TMDB's data.
 func (l Library) titles(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	if !onlyParams(w, r, "library", "kind", "genre", "yearFrom", "yearTo",
+	if !onlyParams(w, r, "library", "category", "kind", "genre", "yearFrom", "yearTo",
 		"played", "favorite", "inProgress", "sort", "order", "seed", "limit", "cursor") {
+		return
+	}
+	cat, ok := l.categoryFilter(w, r)
+	if !ok {
 		return
 	}
 	jq, ok := parseItemQuery(q)
@@ -104,7 +108,7 @@ func (l Library) titles(w http.ResponseWriter, r *http.Request) {
 		l.storeError(w, err)
 		return
 	}
-	lq.ProfileID, lq.Access = p.ID, a
+	lq.ProfileID, lq.Access, lq.Category = p.ID, a, cat
 	st := l.Provisioner.Store
 
 	if jq.SortBy == "random" {

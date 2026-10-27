@@ -1,0 +1,330 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"slices"
+	"strings"
+
+	"github.com/overfin/server/internal/ids"
+)
+
+// Category is a section of the site the operator makes from rules: the
+// library's films and series that fit them. Nothing moves on disk.
+type Category struct {
+	ID string
+	// Names are its name in each language (a tag's two letters: "en",
+	// "fr").
+	Names map[string]string
+	Rules CategoryRules
+	// Home makes it a row on the home page.
+	Home bool
+}
+
+// CategoryRules say which titles are in a category: those that fit every
+// rule given (none given: every film and series). Within a rule, any of
+// its values fits.
+type CategoryRules struct {
+	Kinds     []string `json:"kinds,omitempty"`     // movie, series
+	Genres    []int    `json:"genres,omitempty"`    // TMDB's genre IDs
+	Languages []string `json:"languages,omitempty"` // original languages (ISO 639-1)
+	Libraries []string `json:"libraries,omitempty"` // Jellyfin library IDs
+	Tags      []string `json:"tags,omitempty"`      // Jellyfin tags, regardless of case
+	// MovieCeiling and SeriesCeiling: films and series rated at most that,
+	// in the server's ratings country ("" for no limit).
+	MovieCeiling  string `json:"movieCeiling,omitempty"`
+	SeriesCeiling string `json:"seriesCeiling,omitempty"`
+	// Except leaves out the titles of these categories (by ID), as their
+	// own rules say.
+	Except []string `json:"except,omitempty"`
+}
+
+// Name is the category's name in a language (a regional tag such as
+// "fr-CA"), else in English, else in any.
+func (c *Category) Name(lang string) string {
+	if n := c.Names[strings.SplitN(lang, "-", 2)[0]]; n != "" {
+		return n
+	}
+	if n := c.Names["en"]; n != "" {
+		return n
+	}
+	keys := make([]string, 0, len(c.Names))
+	for k := range c.Names {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		if c.Names[k] != "" {
+			return c.Names[k]
+		}
+	}
+	return ""
+}
+
+// Categories lists the categories in the operator's order.
+func (s *Store) Categories(ctx context.Context) ([]*Category, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, names, rules, home FROM categories ORDER BY position, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Category
+	for rows.Next() {
+		c, err := scanCategory(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// CategoryByID returns a category, or ErrNotFound.
+func (s *Store) CategoryByID(ctx context.Context, id string) (*Category, error) {
+	c, err := scanCategory(s.db.QueryRowContext(ctx, `SELECT id, names, rules, home FROM categories WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return c, err
+}
+
+func scanCategory(sc scanner) (*Category, error) {
+	var c Category
+	var names, rules string
+	if err := sc.Scan(&c.ID, &names, &rules, &c.Home); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(names), &c.Names); err != nil {
+		return nil, err
+	}
+	return &c, json.Unmarshal([]byte(rules), &c.Rules)
+}
+
+// SaveCategory saves a category: a new one (no ID yet) gets one and goes
+// last.
+func (s *Store) SaveCategory(ctx context.Context, c *Category) error {
+	names, err := json.Marshal(c.Names)
+	if err != nil {
+		return err
+	}
+	rules, err := json.Marshal(c.Rules)
+	if err != nil {
+		return err
+	}
+	if c.ID == "" {
+		c.ID = ids.New("cat")
+		_, err = s.db.ExecContext(ctx, `INSERT INTO categories (id, position, names, rules, home)
+			VALUES (?, coalesce((SELECT max(position) + 1 FROM categories), 0), ?, ?, ?)`, c.ID, string(names), string(rules), c.Home)
+		return err
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE categories SET names = ?, rules = ?, home = ? WHERE id = ?`, string(names), string(rules), c.Home, c.ID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteCategory deletes a category; the others no longer leave its titles
+// out.
+func (s *Store) DeleteCategory(ctx context.Context, id string) error {
+	all, err := s.Categories(ctx)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `DELETE FROM categories WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	for _, c := range all {
+		if c.ID == id || !slices.Contains(c.Rules.Except, id) {
+			continue
+		}
+		c.Rules.Except = slices.DeleteFunc(c.Rules.Except, func(x string) bool { return x == id })
+		rules, _ := json.Marshal(c.Rules)
+		if _, err := tx.ExecContext(ctx, `UPDATE categories SET rules = ? WHERE id = ?`, string(rules), c.ID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// OrderCategories puts the categories in this order (every one's ID).
+func (s *Store) OrderCategories(ctx context.Context, order []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM categories`).Scan(&n); err != nil {
+		return err
+	}
+	if n != len(order) {
+		return ErrNotFound
+	}
+	for i, id := range order {
+		res, err := tx.ExecContext(ctx, `UPDATE categories SET position = ? WHERE id = ?`, i, id)
+		if err != nil {
+			return err
+		}
+		if k, _ := res.RowsAffected(); k == 0 {
+			return ErrNotFound
+		}
+	}
+	return tx.Commit()
+}
+
+// LibrariesShown says whether the site's menu shows the libraries; until
+// the operator says otherwise, it does.
+func (s *Store) LibrariesShown(ctx context.Context) (bool, error) {
+	var v []byte
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'libraries-shown'`).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	return string(v) != "off", err
+}
+
+// SetLibrariesShown saves it.
+func (s *Store) SetLibrariesShown(ctx context.Context, on bool) error {
+	v := "off"
+	if on {
+		v = "on"
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO meta (name, value) VALUES ('libraries-shown', ?)
+		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, []byte(v))
+	return err
+}
+
+// CategoryFilter is a category as listings apply it: its rules, and
+// those of the categories it leaves out.
+type CategoryFilter struct {
+	Rules   CategoryRules
+	Except  []CategoryRules
+	Country string // the ratings country, for ceilings
+}
+
+// CategoryFilterOf returns how listings apply a category.
+func (s *Store) CategoryFilterOf(ctx context.Context, id string) (*CategoryFilter, error) {
+	c, err := s.CategoryByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.FilterFor(ctx, c.Rules, c.ID)
+}
+
+// FilterFor returns how listings would apply rules, of the category self
+// ("" for one not saved yet), for a preview.
+func (s *Store) FilterFor(ctx context.Context, rules CategoryRules, self string) (*CategoryFilter, error) {
+	country, err := s.RatingsCountry(ctx)
+	if err != nil {
+		return nil, err
+	}
+	f := &CategoryFilter{Rules: rules, Country: country}
+	for _, x := range rules.Except {
+		if o, err := s.CategoryByID(ctx, x); err == nil && o.ID != self {
+			f.Except = append(f.Except, o.Rules)
+		} else if err != nil && !errors.Is(err, ErrNotFound) {
+			return nil, err
+		}
+	}
+	return f, nil
+}
+
+// LibraryLanguages lists the original languages of the library's films
+// and series (ISO 639-1), the most common first.
+func (s *Store) LibraryLanguages(ctx context.Context) ([]string, error) {
+	return s.ids(ctx, `SELECT l FROM (SELECT json_extract(t.details, '$.language') AS l, count(*) AS n
+		FROM catalog_titles t WHERE t.details IS NOT NULL
+			AND EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = t.kind AND i.tmdb = t.tmdb)
+		GROUP BY l) WHERE l IS NOT NULL AND l <> '' ORDER BY n DESC, l`)
+}
+
+// itemIn is the filter as SQL, for the catalog_items row named table.
+func (f CategoryFilter) itemIn(table string) (string, []any) {
+	cond, args := f.Rules.itemFits(table, f.Country)
+	for _, x := range f.Except {
+		c, a := x.itemFits(table, f.Country)
+		cond, args = cond+" AND NOT "+c, append(args, a...)
+	}
+	return "(" + cond + ")", args
+}
+
+// itemFits is the rules as SQL, for the catalog_items row named table (a
+// film or a series).
+func (r CategoryRules) itemFits(table, country string) (string, []any) {
+	conds := []string{table + ".kind IN ('movie', 'series')"}
+	var args []any
+	in := func(expr string, values []any) {
+		conds = append(conds, expr+" IN ("+marks(len(values))+")")
+		args = append(args, values...)
+	}
+	anyOf := func(values []string) []any {
+		out := make([]any, len(values))
+		for i, v := range values {
+			out[i] = v
+		}
+		return out
+	}
+	if len(r.Kinds) > 0 {
+		in(table+".kind", anyOf(r.Kinds))
+	}
+	if len(r.Libraries) > 0 {
+		in(table+".library_id", anyOf(r.Libraries))
+	}
+	if len(r.Genres) > 0 {
+		g := make([]any, len(r.Genres))
+		for i, v := range r.Genres {
+			g[i] = v
+		}
+		conds = append(conds, `EXISTS (SELECT 1 FROM catalog_title_genres g WHERE g.kind = `+table+`.kind AND g.tmdb = `+table+`.tmdb
+			AND g.genre IN (`+marks(len(g))+`))`)
+		args = append(args, g...)
+	}
+	if len(r.Languages) > 0 {
+		conds = append(conds, `EXISTS (SELECT 1 FROM catalog_titles t WHERE t.kind = `+table+`.kind AND t.tmdb = `+table+`.tmdb
+			AND json_extract(t.details, '$.language') IN (`+marks(len(r.Languages))+`))`)
+		args = append(args, anyOf(r.Languages)...)
+	}
+	if len(r.Tags) > 0 {
+		conds = append(conds, `EXISTS (SELECT 1 FROM catalog_tags t WHERE t.item_id = `+table+`.id
+			AND fold(t.tag) IN (`+marks(len(r.Tags))+`))`)
+		for _, t := range r.Tags {
+			args = append(args, FoldTag(t))
+		}
+	}
+	// Rated at most: each kind by its own ceiling, the other kind as it is.
+	for _, k := range []struct{ kind, ceiling string }{{"movie", r.MovieCeiling}, {"series", r.SeriesCeiling}} {
+		if k.ceiling == "" {
+			continue
+		}
+		c, a := Ceiling{Country: country, Movie: k.ceiling, Series: k.ceiling}.itemAllowed(table)
+		conds = append(conds, "("+table+".kind <> '"+k.kind+"' OR "+c+")")
+		args = append(args, a...)
+	}
+	return "(" + strings.Join(conds, " AND ") + ")", args
+}
+
+// CategorySample names the first titles (by name) a filter keeps, for the
+// control panel's preview.
+func (s *Store) CategorySample(ctx context.Context, f *CategoryFilter, n int) ([]string, error) {
+	ids, err := s.ListCatalog(ctx, ListQuery{Sort: "name", Category: f, Limit: n})
+	if err != nil || len(ids) == 0 {
+		return nil, err
+	}
+	return s.ids(ctx, `SELECT coalesce((SELECT t.name FROM catalog_titles t WHERE t.kind = i.kind AND t.tmdb = i.tmdb), i.name)
+		FROM catalog_items i JOIN json_each(?) j ON j.value = i.id ORDER BY j.key`, jsonList(ids))
+}

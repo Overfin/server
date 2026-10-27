@@ -150,9 +150,19 @@ export interface Library {
   image?: ImageRef;
 }
 
+/** A section of the site the operator made from rules (since 0.6). */
+export interface Category {
+  id: string;
+  name: string;
+  /** Also a row on the home page. */
+  home: boolean;
+}
+
 /** What a library's titles are filtered and sorted by. */
 export interface TitleQuery {
   library?: string;
+  /** A category's titles (since 0.6). */
+  category?: string;
   kind?: 'movie' | 'series' | ('movie' | 'series')[];
   genre?: string;
   yearFrom?: number;
@@ -433,8 +443,10 @@ export class Overfin {
   pages(query?: TitleQuery): AsyncGenerator<TitlePage>;
   /** Started titles and each followed series' next episode, a library's or not. */
   continueWatching(limit?: number): Promise<TitleSummary[]>;
-  /** A library's genres (every library's without one), for filters. */
-  genres(libraryId?: string): Promise<Genre[]>;
+  /** A library's genres (every library's without one), or a category's, for filters. */
+  genres(libraryId?: string, categoryId?: string): Promise<Genre[]>;
+  /** The operator's categories (since 0.6); libraries: whether the menu shows the libraries. */
+  categories(): Promise<{ items: Category[]; libraries: boolean }>;
   latest(libraryId: string, limit?: number): Promise<TitleSummary[]>;
   imageUrl(ref: ImageRef | undefined, size?: 'small' | 'medium' | 'large'): string;
 
