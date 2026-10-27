@@ -148,7 +148,7 @@ func (p *Panel) setValuation(w http.ResponseWriter, r *http.Request, s *session)
 			p.fail(w, "saving the discovery share", err)
 			return
 		}
-		p.Logger.Info("the discovery share changed in the control panel", "share", *req.DiscoveryShare, "by", s.name)
+		p.Logger.Info("the discovery share changed in the control panel", "share", *req.DiscoveryShare, "by", s.logID)
 		if req.AskTastes == nil && req.Weights == nil && !req.Reset {
 			p.writeValuation(w, r)
 			return
@@ -162,7 +162,7 @@ func (p *Panel) setValuation(w http.ResponseWriter, r *http.Request, s *session)
 		p.valued.mu.Lock()
 		p.valued.m = nil // measured again, with or without what accounts said
 		p.valued.mu.Unlock()
-		p.Logger.Info("asking accounts what they like switched in the control panel", "on", *req.AskTastes, "by", s.name)
+		p.Logger.Info("asking accounts what they like switched in the control panel", "on", *req.AskTastes, "by", s.logID)
 		if req.Weights == nil && !req.Reset {
 			p.writeValuation(w, r)
 			return
@@ -179,7 +179,7 @@ func (p *Panel) setValuation(w http.ResponseWriter, r *http.Request, s *session)
 		p.fail(w, "saving the valuation's weights", err)
 		return
 	}
-	p.Logger.Info("the valuation's weights changed in the control panel", "reset", req.Reset, "by", s.name)
+	p.Logger.Info("the valuation's weights changed in the control panel", "reset", req.Reset, "by", s.logID)
 	p.writeValuation(w, r)
 }
 

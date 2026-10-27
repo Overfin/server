@@ -56,7 +56,7 @@ func (p *Panel) setRegistration(w http.ResponseWriter, r *http.Request, s *sessi
 		return
 	}
 	p.Logger.Info("password rules changed in the control panel", "min", req.Rules.MinLength,
-		"digit", req.Rules.Digit, "special", req.Rules.Special, "by", s.name)
+		"digit", req.Rules.Digit, "special", req.Rules.Special, "by", s.logID)
 	p.registration(w, r, s)
 }
 

@@ -126,7 +126,7 @@ func (p *Panel) addLibrary(w http.ResponseWriter, r *http.Request, s *session) {
 		p.upstreamProblem(w, err, "adding a library")
 		return
 	}
-	p.Logger.Info("a library was added in the control panel", "library", name, "by", s.name)
+	p.Logger.Info("a library was added in the control panel", "library", name, "by", s.logID)
 	writeJSON(w, http.StatusCreated, map[string]string{"name": name})
 }
 
@@ -159,7 +159,7 @@ func (p *Panel) changeLibrary(w http.ResponseWriter, r *http.Request, s *session
 		p.upstreamProblem(w, err, "changing a library")
 		return
 	}
-	p.Logger.Info("a library was changed in the control panel", "library", name, "by", s.name)
+	p.Logger.Info("a library was changed in the control panel", "library", name, "by", s.logID)
 	writeJSON(w, http.StatusOK, map[string]string{"name": cmp.Or(newName, name)})
 }
 
@@ -173,7 +173,7 @@ func (p *Panel) removeLibrary(w http.ResponseWriter, r *http.Request, s *session
 		p.upstreamProblem(w, err, "removing a library")
 		return
 	}
-	p.Logger.Info("a library was removed in the control panel", "library", name, "by", s.name)
+	p.Logger.Info("a library was removed in the control panel", "library", name, "by", s.logID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

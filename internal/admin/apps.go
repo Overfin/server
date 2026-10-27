@@ -97,7 +97,7 @@ func (p *Panel) createAppKey(w http.ResponseWriter, r *http.Request, s *session)
 		p.fail(w, "creating an app key", err)
 		return
 	}
-	p.Logger.Info("an app key was created in the control panel", "app", k.ID, "scope", k.Scope, "by", s.name)
+	p.Logger.Info("an app key was created in the control panel", "app", k.ID, "scope", k.Scope, "by", s.logID)
 	j := appKeyOf(*k)
 	j.Key = key
 	writeJSON(w, http.StatusCreated, j)
@@ -113,7 +113,7 @@ func (p *Panel) deleteAppKey(w http.ResponseWriter, r *http.Request, s *session)
 		p.fail(w, "revoking an app key", err)
 		return
 	}
-	p.Logger.Info("an app key was revoked in the control panel", "app", id, "by", s.name)
+	p.Logger.Info("an app key was revoked in the control panel", "app", id, "by", s.logID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

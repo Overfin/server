@@ -37,7 +37,7 @@ func (p *Panel) setLanguages(w http.ResponseWriter, r *http.Request, s *session)
 		p.fail(w, "changing the languages", err)
 		return
 	}
-	p.Logger.Info("the languages changed in the control panel", "offered", req.Offered, "default", req.Default, "by", s.name)
+	p.Logger.Info("the languages changed in the control panel", "offered", req.Offered, "default", req.Default, "by", s.logID)
 	if changed && p.OnLanguage != nil {
 		p.OnLanguage()
 	}

@@ -228,7 +228,7 @@ func (p *Panel) changeAccount(w http.ResponseWriter, r *http.Request, s *session
 		p.fail(w, "changing an account", err)
 		return
 	}
-	p.Logger.Info("account changed in the control panel", "account", a.ID)
+	p.Logger.Info("account changed in the control panel", "user", p.logID(a.Subject), "by", s.logID)
 	writeJSON(w, http.StatusOK, aj)
 }
 
@@ -287,7 +287,7 @@ func (p *Panel) allowHistoryCopy(w http.ResponseWriter, r *http.Request, s *sess
 		return
 	}
 	if n > 0 {
-		p.Logger.Info("an account may bring a history again", "account", r.PathValue("id"), "by", s.name)
+		p.Logger.Info("an account may bring a history again", "account", p.logID(r.PathValue("id")), "by", s.logID)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

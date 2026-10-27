@@ -177,7 +177,8 @@ type Panel struct {
 // session is a signed-in admin. Kept in memory only: a restart signs
 // admins out.
 type session struct {
-	name     string
+	name     string // shown in the panel only
+	logID    string // how logs name the admin (rule 54)
 	lastSeen time.Time
 	expires  time.Time
 }
@@ -568,7 +569,7 @@ func (p *Panel) finish(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "The identity provider didn't ask for a new login", http.StatusForbidden)
 		return
 	}
-	p.startSession(w, r, login.Name)
+	p.startSession(w, r, login.Name, login.Subject)
 	http.Redirect(w, r, pd.ret, http.StatusSeeOther)
 }
 
@@ -591,13 +592,22 @@ func (p *Panel) siteLogin(w http.ResponseWriter, r *http.Request) {
 	case !fresh:
 		http.Redirect(w, r, "/signin?"+url.Values{"fresh": {"1"}, "return": {back}}.Encode(), http.StatusSeeOther)
 	default:
-		p.startSession(w, r, email)
+		// Logs name the admin by their subject's keyed hash, never by
+		// their email (rule 54).
+		subject := ""
+		if p.Store != nil {
+			if u, err := p.Store.UserByEmail(r.Context(), email); err == nil {
+				subject = u.Subject
+			}
+		}
+		p.startSession(w, r, email, subject)
 		http.Redirect(w, r, ret, http.StatusSeeOther)
 	}
 }
 
-// startSession signs an admin in to the panel.
-func (p *Panel) startSession(w http.ResponseWriter, r *http.Request, name string) {
+// startSession signs an admin in to the panel. name is shown in the panel;
+// logs name the admin by a keyed hash of their subject.
+func (p *Panel) startSession(w http.ResponseWriter, r *http.Request, name, subject string) {
 	token := oidc.Random(32)
 	now := p.clock()
 	p.mu.Lock()
@@ -609,10 +619,24 @@ func (p *Panel) startSession(w http.ResponseWriter, r *http.Request, name string
 			delete(p.sessions, k)
 		}
 	}
-	p.sessions[hashToken(token)] = &session{name: name, lastSeen: now, expires: now.Add(sessionFor)}
+	p.sessions[hashToken(token)] = &session{name: name, logID: p.logID(subject), lastSeen: now, expires: now.Add(sessionFor)}
 	p.mu.Unlock()
 	cookie.Set(w, r, &http.Cookie{Name: cookieName, Value: token, MaxAge: int(sessionFor.Seconds())})
-	p.Logger.Info("admin signed in")
+	p.Logger.Info("admin signed in", "by", p.logID(subject))
+}
+
+// logID is how the panel's logs name a user, an account or the admin: the
+// keyed hash logs use everywhere (SECURITY.md rule 54). Without a
+// provisioner or a subject, logs don't name them at all.
+func (p *Panel) logID(id string) string {
+	if p.Provisioner == nil || id == "" {
+		return ""
+	}
+	prov := p.Provisioner()
+	if prov == nil {
+		return ""
+	}
+	return prov.LogID(id)
 }
 
 func (p *Panel) logout(w http.ResponseWriter, r *http.Request) {
@@ -823,7 +847,7 @@ func (p *Panel) setRatings(w http.ResponseWriter, r *http.Request, s *session) {
 		old, err := p.Store.TitlesShown(ctx)
 		if err == nil && old != req.Shown {
 			if err = p.Store.SetTitlesShown(ctx, req.Shown); err == nil {
-				p.Logger.Info("the titles shown changed in the control panel", "shown", req.Shown, "by", s.name)
+				p.Logger.Info("the titles shown changed in the control panel", "shown", req.Shown, "by", s.logID)
 			}
 		}
 		if err != nil {
@@ -844,7 +868,7 @@ func (p *Panel) setRatings(w http.ResponseWriter, r *http.Request, s *session) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"type": "internal", "detail": "Overfin's log says why"})
 		return
 	}
-	p.Logger.Info("ratings country changed in the control panel", "country", req.Country, "by", s.name)
+	p.Logger.Info("ratings country changed in the control panel", "country", req.Country, "by", s.logID)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -877,7 +901,7 @@ func (p *Panel) setHome(w http.ResponseWriter, r *http.Request, s *session) {
 	old, err := p.Store.HomeMissing(ctx)
 	if err == nil && old != req.MissingTitles {
 		if err = p.Store.SetHomeMissing(ctx, req.MissingTitles); err == nil {
-			p.Logger.Info("titles no library has on the home page changed in the control panel", "on", req.MissingTitles, "by", s.name)
+			p.Logger.Info("titles no library has on the home page changed in the control panel", "on", req.MissingTitles, "by", s.logID)
 		}
 	}
 	if err != nil {
@@ -932,11 +956,11 @@ func (p *Panel) setJellyfinAccess(w http.ResponseWriter, r *http.Request, s *ses
 		return
 	}
 	if req.Open {
-		p.Logger.Warn("access to Jellyfin itself was opened in the control panel", "by", s.name)
+		p.Logger.Warn("access to Jellyfin itself was opened in the control panel", "by", s.logID)
 		writeJSON(w, http.StatusOK, map[string]string{"username": name, "password": password})
 		return
 	}
-	p.Logger.Info("access to Jellyfin itself was closed in the control panel", "by", s.name)
+	p.Logger.Info("access to Jellyfin itself was closed in the control panel", "by", s.logID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -971,7 +995,7 @@ func (p *Panel) installIntroSkipper(w http.ResponseWriter, r *http.Request, s *s
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": err.Error()})
 		return
 	}
-	p.Logger.Info("Intro Skipper's install started in the control panel", "by", s.name)
+	p.Logger.Info("Intro Skipper's install started in the control panel", "by", s.logID)
 	writeJSON(w, http.StatusAccepted, p.IntroSkipper.Progress())
 }
 
@@ -985,7 +1009,7 @@ func (p *Panel) removeIntroSkipper(w http.ResponseWriter, r *http.Request, s *se
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": err.Error()})
 		return
 	}
-	p.Logger.Info("Intro Skipper's removal started in the control panel", "by", s.name)
+	p.Logger.Info("Intro Skipper's removal started in the control panel", "by", s.logID)
 	writeJSON(w, http.StatusAccepted, p.IntroSkipper.Progress())
 }
 
