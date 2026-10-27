@@ -76,14 +76,47 @@ done.
 
 ## Updating
 
-Set the new release's images in `compose.yaml` (or take the release's
-`compose.yaml`), then `docker compose pull && docker compose up -d`.
-Overfin migrates its database by itself. Jellyfin's version comes with
-Overfin's releases: keep the one the compose file names.
+Back up first (below): Overfin migrates its database by itself when it
+starts, and a migrated database doesn't go back to an older Overfin. The
+backup is the way back.
+
+Then take the release's `compose.yaml` (keep your `.env`, and copy over
+any lines you added, such as more media folders or a GPU), and
+`docker compose pull && docker compose up -d`. Jellyfin's version comes
+with Overfin's releases: keep the one the compose file names.
 
 ## Backups
 
 `overfin-secrets` holds Overfin's secret key, `overfin-data` everything
-else; `jellyfin-config` is Jellyfin's. Back the secret key up apart from
-the rest. Stop the stack first (`docker compose stop`), so the databases
-are copied whole, then start it again.
+else; `jellyfin-config` is Jellyfin's. `jellyfin-cache` needs no backup:
+Jellyfin makes it again. Keep the secret key apart from the rest: with
+it, anyone can read the tokens sealed in Overfin's database.
+
+Stop the stack first, so the databases are copied whole, then start it
+again. From the folder with `compose.yaml` (the volumes' names start with
+that folder's name, here `overfin`):
+
+```sh
+docker compose stop
+mkdir -p backup
+for v in overfin-data overfin-secrets jellyfin-config; do
+  docker run --rm -v overfin_$v:/v:ro -v "$PWD/backup":/b alpine tar czf /b/$v.tgz -C /v .
+done
+cp compose.yaml .env backup/
+docker compose start
+```
+
+To restore, into empty volumes (after `docker compose down` and
+`docker volume rm` of the three, or on a new machine):
+
+```sh
+for v in overfin-data overfin-secrets jellyfin-config; do
+  docker volume create overfin_$v
+  docker run --rm -v overfin_$v:/v -v "$PWD/backup":/b:ro alpine tar xzf /b/$v.tgz -C /v
+done
+cp backup/compose.yaml backup/.env .
+docker compose up -d
+```
+
+Both were tested end to end: a backup of 0.4.0, an update to 0.5 and back
+to 0.4.0 from the backup, accounts, libraries and settings intact.
