@@ -244,12 +244,14 @@ func (w handlers) add(c *feature.Caller, rw http.ResponseWriter, r *http.Request
 		return
 	}
 	defer tx.Rollback()
-	var n int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM watchlist WHERE profile_id = ?`, c.ProfileID).Scan(&n); err != nil {
+	// A title already on it is fine, full or not: adding it changes nothing.
+	var n, there int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*), count(*) FILTER (WHERE item_id = ?) FROM watchlist WHERE profile_id = ?`,
+		id, c.ProfileID).Scan(&n, &there); err != nil {
 		feature.Problem(rw, feature.Internal, "")
 		return
 	}
-	if n >= Max {
+	if n >= Max && there == 0 {
 		feature.Problem(rw, feature.InvalidRequest, "the watchlist is full")
 		return
 	}
