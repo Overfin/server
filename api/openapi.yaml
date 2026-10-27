@@ -243,11 +243,11 @@ paths:
       summary: The current account and active profile
       description: |
         On the first visit, this creates the account and its owner profile.
-        When the operator offers bringing the history of an account on
-        another server (migration), it doesn't: it answers
-        `account-setup-required` with a `claim` member, and the site offers
-        to start fresh (`POST /me`) or to bring that history
-        (`POST /me/claim`).
+        It doesn't with Overfin's own sign-in, or when the operator offers
+        bringing the history of an account on another server (migration):
+        it answers `account-setup-required` (with a `claim` member when
+        bringing a history is offered), and the site offers to start fresh
+        (`POST /me`) or to bring that history (`POST /me/claim`).
       tags: [account]
       responses:
         "200":
@@ -259,8 +259,9 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
-          description: No account yet, and claiming is enabled
-            (`account-setup-required`).
+          description: No account yet, and the site sets it up first
+            (`account-setup-required`); or anonymous visitors, who have none
+            (`not-found`).
           content:
             application/problem+json:
               schema:
@@ -268,8 +269,9 @@ paths:
         "403":
           description: This identity may not use the service, because it isn't
             in the required group or its account is disabled
-            (`account-not-allowed`); or accounts are by invitation only and
-            it has none (`invitation-required`).
+            (`account-not-allowed`); or its access has ended
+            (`account-expired`); or accounts are by invitation only and it
+            has none (`invitation-required`).
           content:
             application/problem+json:
               schema:
@@ -337,6 +339,8 @@ paths:
                   history:
                     type: string
                     enum: [deleted, kept]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/StepUpOrOwnerOnly"
 
@@ -344,8 +348,9 @@ paths:
       operationId: createAccount
       summary: Start fresh with a new account
       description: Creates the account, its owner profile and a new media
-        server user. Mostly useful when claiming is enabled; otherwise
-        `GET /me` does this on the first visit.
+        server user. Needed with Overfin's own sign-in and when claiming is
+        enabled; otherwise `GET /me` does this on the first visit. The body
+        is not read.
       tags: [account]
       responses:
         "201":
@@ -354,6 +359,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "403":
           description: Not in the required group (`account-not-allowed`);
             or accounts are by invitation only and this visitor has none
@@ -414,16 +423,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Me"
-        "403":
-          description: Wrong username or password, deliberately without
-            saying which (`claim-failed`); or that account's history was
-            copied into another account already (`claim-not-allowed`); or not
-            in the required group
-            (`account-not-allowed`).
+        "400":
+          description: An empty or too long username or password (`invalid-request`).
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "403":
+          description: Wrong username or password, deliberately without
+            saying which (`claim-failed`); or that account's history was
+            copied into another account already (`claim-not-allowed`); or not
+            in the required group (`account-not-allowed`); or accounts are by
+            invitation only and this visitor has none (`invitation-required`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "409":
           description: This identity already has an account
             (`account-exists`).
@@ -495,6 +512,12 @@ paths:
       responses:
         "204":
           description: Copied.
+        "400":
+          description: An empty or too long username or password (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -560,6 +583,10 @@ paths:
         "400":
           description: Not a kind of title one watches, or the watchlist is
             full (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "404":
           $ref: "#/components/responses/NotFound"
     delete:
@@ -569,6 +596,8 @@ paths:
       responses:
         "204":
           description: It's off the watchlist (or wasn't on it).
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /me/history:
     delete:
@@ -589,10 +618,11 @@ paths:
     put:
       operationId: setSubtitleLanguage
       summary: Keep the active profile's subtitle language
-      description: The language the profile chose for subtitles, or `""`
-        for none. Its next playbacks start with subtitles in it when the
-        video has them (text first, whole before forced). Each profile has
-        its own.
+      description: |
+        The language the profile chose for subtitles, or `""` for none,
+        kept as its base language (`fr-CA` and `fre` are kept as `fr`).
+        Its next playbacks start with subtitles in it when the video has
+        them (text first, whole before forced). Each profile has its own.
       tags: [playback]
       requestBody:
         required: true
@@ -601,6 +631,7 @@ paths:
             schema:
               type: object
               required: [language]
+              additionalProperties: false
               properties:
                 language:
                   type: string
@@ -610,6 +641,10 @@ paths:
           description: Kept.
         "400":
           description: Not a language Overfin knows (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 
   /me/tastes:
     get:
@@ -656,6 +691,10 @@ paths:
                     type: boolean
                     description: The account has a kids profile, so it gets
                       kids' content without saying so.
+        "403":
+          $ref: "#/components/responses/OwnerOnly"
+        "404":
+          $ref: "#/components/responses/NotFound"
     put:
       operationId: setTastes
       summary: Keep what the account likes
@@ -668,10 +707,12 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               properties:
                 prefer:
                   type: string
-                  enum: [series, movies, both]
+                  description: Absent or `""` for no preference.
+                  enum: ["", series, movies, both]
                 genres:
                   type: array
                   maxItems: 40
@@ -680,9 +721,34 @@ paths:
                   type: boolean
       responses:
         "200":
-          description: Kept.
+          description: Kept, as now saved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [genres, kids]
+                properties:
+                  prefer:
+                    type: string
+                    enum: [series, movies, both]
+                  genres:
+                    type: array
+                    items: { type: integer }
+                  kids:
+                    type: boolean
+                  updatedAt:
+                    type: string
+                    format: date-time
         "400":
           description: Not a preference, or not a genre to choose (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          $ref: "#/components/responses/OwnerOnly"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /me/export:
     post:
@@ -704,19 +770,28 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               properties:
                 pin:
                   $ref: "#/components/schemas/Pin"
       responses:
         "200":
-          description: The account's data.
+          description: The account's data, as a download (`my-data.json`).
           content:
             application/json:
               schema:
                 type: object
                 description: Format documented separately; stable within v1.
+        "400":
+          description: Not a JSON body with `pin` alone (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "403":
-          $ref: "#/components/responses/StepUpRequired"
+          $ref: "#/components/responses/StepUpOrOwnerOnly"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /login:
     get:
@@ -776,11 +851,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/SigninDone"
         "400":
-          description: Not an email, or the check against scripts failed.
+          description: Not an email, or the check against scripts failed
+            (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "401":
-          description: Wrong email or password (`signin-failed`).
+          description: Wrong email or password (`signin-failed`); with
+            `fresh`, nobody is signed in (`not-authenticated`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "429":
-          description: Too many tries (`rate-limited`).
+          description: Too many tries (`rate-limited`), from this address or
+            for this email.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 
   /signin/password:
     post:
@@ -788,7 +878,8 @@ paths:
       summary: Choose a password of one's own
       description: For the person signed in whose password an admin set,
         before anything else; it ends their other logins. It follows the
-        password rules.
+        password rules. Someone with no new password to choose gets `next`
+        and nothing changes.
       tags: [account]
       security: []
       requestBody:
@@ -805,10 +896,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/SigninDone"
         "400":
-          description: The password doesn't follow the rules (the detail
-            says what it lacks).
+          description: The password doesn't follow the rules
+            (`invalid-request`; the detail says what it lacks).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "401":
-          description: Nobody is signed in.
+          description: Nobody is signed in (`not-authenticated`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /signin/verify:
     post:
@@ -827,13 +928,25 @@ paths:
               $ref: "#/components/schemas/Signin"
       responses:
         "200":
-          description: Confirmed and signed in.
+          description: Confirmed and signed in; `next` is `/`.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SigninDone"
+        "400":
+          description: Not a request this step takes (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "401":
           description: Expired or used link (`signin-failed`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /signin/resend:
     post:
@@ -856,6 +969,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SigninDone"
+        "400":
+          description: Not an email, or the check against scripts failed
+            (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /register:
     post:
@@ -886,9 +1008,19 @@ paths:
                 $ref: "#/components/schemas/SigninDone"
         "400":
           description: Not an email, a password against the rules, the
-            check failed, or this server sends no emails.
+            check failed, or this server sends no emails (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "403":
           description: No invitation that works (`invitation-required`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /reset:
     post:
@@ -913,7 +1045,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/SigninDone"
         "400":
-          description: Not an email, the check failed, or no emails here.
+          description: Not an email, the check failed, or no emails here
+            (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /reset/password:
     post:
@@ -938,9 +1077,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/SigninDone"
         "400":
-          description: The password doesn't follow the rules.
+          description: The password doesn't follow the rules
+            (`invalid-request`; the detail says what it lacks).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "401":
           description: Expired or used link (`signin-failed`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /pages/challenge:
     get:
@@ -1035,6 +1185,10 @@ paths:
                     type: boolean
                   reset:
                     type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/OwnerOnly"
 
   /me/password:
     put:
@@ -1053,6 +1207,7 @@ paths:
             schema:
               type: object
               required: [password]
+              additionalProperties: false
               properties:
                 password:
                   type: string
@@ -1061,10 +1216,26 @@ paths:
       responses:
         "200":
           description: Changed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [hasPassword]
+                properties:
+                  hasPassword:
+                    type: boolean
+                    enum: [true]
         "400":
-          description: The password doesn't follow the rules.
+          description: The password doesn't follow the rules
+            (`invalid-request`; the detail says what it lacks).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          description: A fresh login is needed (`step-up-required`).
+          $ref: "#/components/responses/StepUpOrOwnerOnly"
 
   /gate:
     get:
@@ -2929,11 +3100,14 @@ components:
         email:
           type: string
           format: email
+          maxLength: 254
           description: Ignored with `fresh`, which is for the person signed in.
         password:
           type: string
+          description: At most 1024 bytes.
         link:
           type: string
+          maxLength: 64
           description: The token after `#verify=` or `#reset=` in the email's
             link.
         fresh:
@@ -2941,12 +3115,14 @@ components:
           description: Confirms a fresh login (step-up) instead of signing in.
         return:
           type: string
-          description: Path on this site to go to next.
+          description: Path on this site to go to next; a longer one, or
+            anything that isn't a plain path, is replaced by `/`.
         challenge:
           type: string
           description: A check from `GET /pages/challenge`.
         answer:
           type: string
+          maxLength: 16
           description: Its answer.
     SigninDone:
       type: object
