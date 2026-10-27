@@ -208,7 +208,9 @@ comes from the internet, and media files can be written by anyone.
     accounts are rate-limited.
 32. When an account reaches its stream limit, its oldest stream stops and the
     stopped device is told why (operators can choose to refuse the new stream
-    instead). Overfin never stops another user's stream: when every
+    instead). With a stream reserved for each profile (a template's setting),
+    only the profile's own oldest stream ever stops, never another
+    profile's. Overfin never stops another user's stream: when every
     transcode is taken, a new playback that needs one is refused (Overfin
     already plays files as they are, or copies their video, whenever the
     device can take it).
