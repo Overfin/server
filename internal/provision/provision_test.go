@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -392,13 +393,19 @@ func TestCopyHooks(t *testing.T) {
 	}
 }
 
-// A deleted account's Seerr user goes with it, unless its history is kept.
+// A deleted account's Seerr user goes with it, unless its history is kept:
+// then it's kept, with its requests, under an anonymous name.
 func TestDeletingAnAccountDeletesItsSeerrUser(t *testing.T) {
 	p := setup(t, &fakeJellyfin{}, "")
 	ctx := context.Background()
 	var deleted []int
+	renamed := map[int]string{}
 	p.DeleteSeerrUser = func(_ context.Context, id int) error {
 		deleted = append(deleted, id)
+		return nil
+	}
+	p.RenameSeerrUser = func(_ context.Context, id int, name string) error {
+		renamed[id] = name
 		return nil
 	}
 	for i, keep := range []bool{true, false} {
@@ -413,6 +420,9 @@ func TestDeletingAnAccountDeletesItsSeerrUser(t *testing.T) {
 	}
 	if len(deleted) != 1 || deleted[0] != 41 {
 		t.Errorf("Seerr users deleted: %v", deleted)
+	}
+	if len(renamed) != 1 || !regexp.MustCompile(`^overfin-[a-z2-7]{10}$`).MatchString(renamed[40]) {
+		t.Errorf("Seerr users renamed: %v", renamed)
 	}
 }
 

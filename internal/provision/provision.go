@@ -69,6 +69,10 @@ type Provisioner struct {
 	// DeleteSeerrUser, when set, deletes a deleted account's Seerr user
 	// (by its Seerr ID); nil when no Seerr is connected.
 	DeleteSeerrUser func(ctx context.Context, seerrID int) error
+	// RenameSeerrUser, when set, renames a Seerr user: a disabled
+	// account's gets an anonymous name (AnonymousName); nil when no Seerr
+	// is connected.
+	RenameSeerrUser func(ctx context.Context, seerrID int, name string) error
 	// mu serializes account creation and adoption. Both are rare, and
 	// serializing them rules out two accounts for one person.
 	mu       sync.Mutex
@@ -415,10 +419,11 @@ func (p *Provisioner) Relogin(ctx context.Context, jellyfinUserID, username stri
 
 // DeleteAccount deletes an account and everything Overfin holds about it.
 // Its Jellyfin users go first, deleted with their history or disabled
-// (keepHistory), and its Seerr user, deleted with its requests (kept with
-// keepHistory: it's anonymous, and no one can sign in as it), so a failure
-// deletes nothing here and a retry picks up where it stopped. It returns
-// the account's profiles, as they were.
+// (keepHistory), and its Seerr user, deleted with its requests, or with
+// keepHistory renamed to an anonymous name and kept with its requests (no
+// one can sign in as it), so a failure deletes nothing here and a retry
+// picks up where it stopped. It returns the account's profiles, as they
+// were.
 func (p *Provisioner) DeleteAccount(ctx context.Context, accountID string, keepHistory bool) ([]*store.Profile, error) {
 	profiles, err := p.Store.Profiles(ctx, accountID)
 	if err != nil {
@@ -437,13 +442,17 @@ func (p *Provisioner) DeleteAccount(ctx context.Context, accountID string, keepH
 			return nil, err
 		}
 	}
-	if !keepHistory && p.DeleteSeerrUser != nil {
-		if id, ok, err := p.Store.SeerrUser(ctx, accountID); err != nil {
+	if id, ok, err := p.Store.SeerrUser(ctx, accountID); err != nil {
+		return nil, err
+	} else if ok {
+		switch {
+		case !keepHistory && p.DeleteSeerrUser != nil:
+			err = p.DeleteSeerrUser(ctx, id)
+		case keepHistory && p.RenameSeerrUser != nil:
+			err = p.RenameSeerrUser(ctx, id, AnonymousName())
+		}
+		if err != nil {
 			return nil, err
-		} else if ok {
-			if err := p.DeleteSeerrUser(ctx, id); err != nil {
-				return nil, err
-			}
 		}
 	}
 	if err := p.Store.DeleteAccount(ctx, accountID); err != nil {
@@ -522,6 +531,14 @@ func randomName() string {
 }
 
 // randomSecret is a 256-bit password, used once.
+// AnonymousName is a name that says nothing of anyone, for a Seerr user
+// whose person can't or mustn't be named: "overfin-" and random letters.
+func AnonymousName() string {
+	b := make([]byte, 6)
+	rand.Read(b)
+	return "overfin-" + nameEncoding.EncodeToString(b)
+}
+
 func randomSecret() string {
 	b := make([]byte, 32)
 	rand.Read(b)

@@ -133,10 +133,17 @@ func newProvisioner(cfg *config.Config, sh *shared) *provision.Provisioner {
 		LogKey:        sh.keys.LogID,
 		Logger:        sh.logger,
 	}
-	// A deleted account's Seerr user goes with it, through the Seerr
-	// connected now (connecting or disconnecting one builds again).
+	// A deleted account's Seerr user goes with it, or is made anonymous,
+	// through the Seerr connected now (connecting or disconnecting one
+	// builds again). A user Seerr lost counts as done.
 	if client := sh.seerr; client != nil {
 		p.DeleteSeerrUser = client.DeleteUser
+		p.RenameSeerrUser = func(ctx context.Context, id int, name string) error {
+			if err := client.Rename(ctx, id, name); err != nil && !errors.Is(err, seerr.ErrNotFound) {
+				return err
+			}
+			return nil
+		}
 	}
 	return p
 }
