@@ -73,8 +73,10 @@ export interface Me {
   language: string;
   /** Those it may choose among, each named in itself. */
   languages: { tag: string; name: string }[];
-  /** The account template's limits; 0 means none. */
-  limits: { maxProfiles: number; maxStreams: number };
+  /** The account template's limits; 0 means none. With reservedStreams,
+   * each profile owns one of the streams (never lent) and sharedStreams
+   * are the rest, any profile's; without, sharedStreams is maxStreams. */
+  limits: { maxProfiles: number; maxStreams: number; reservedStreams: boolean; sharedStreams: number };
   /** How the operator set the home page: missingTitles shows titles no
    * library has among what's trending and in the slideshow. */
   home: { missingTitles: boolean };

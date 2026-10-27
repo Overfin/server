@@ -2010,7 +2010,12 @@ paths:
         "409":
           description: The account is at its stream limit and the operator
             refuses new streams (`stream-limit-reached`), or the item can't be
-            played (`not-playable`).
+            played (`not-playable`). With a stream reserved for each profile
+            (`limits.reservedStreams` in GET /me), a profile whose own stream
+            is taken and the shared ones too replaces its own oldest playback,
+            never another profile's; when only other profiles' playbacks
+            could make room, or the operator refuses new streams, it gets
+            `stream-limit-reached`.
           content:
             application/problem+json:
               schema:
@@ -2919,14 +2924,29 @@ components:
           type: object
           description: What the account may have, from its account template
             (0 means no limit), so the site offers only what will work.
-          required: [maxProfiles, maxStreams]
+          required: [maxProfiles, maxStreams, reservedStreams, sharedStreams]
           properties:
             maxProfiles:
               type: integer
+              description: With reservedStreams, never more than maxStreams.
               examples: [3]
             maxStreams:
               type: integer
               examples: [3]
+            reservedStreams:
+              type: boolean
+              description: A stream reserved for each profile, the account
+                template's setting (off by default). Each profile owns one of
+                the account's streams, its own stream never lent to another,
+                and the account has no more profiles than streams. Unused
+                profiles keep theirs until the owner removes them, which is
+                worth saying where profiles are chosen.
+            sharedStreams:
+              type: integer
+              description: The streams any profile may use beyond its own,
+                maxStreams less the number of profiles (0 at least). Without
+                reservedStreams, all of them (maxStreams).
+              examples: [1]
         home:
           type: object
           description: How the operator set the site's home page.

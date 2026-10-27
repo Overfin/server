@@ -340,7 +340,7 @@ func (p Profiles) create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	prof, err := p.Provisioner.AddProfile(r.Context(), c.Account.ID, np, c.Account.Template.MaxProfiles)
+	prof, err := p.Provisioner.AddProfile(r.Context(), c.Account.ID, np, c.Account.Template.ProfileLimit())
 	switch {
 	case errors.Is(err, store.ErrNameTaken):
 		problem.Send(w, problem.NameTaken, "")
