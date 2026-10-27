@@ -3490,10 +3490,10 @@ components:
               type: boolean
         offers:
           type: object
-          description: What the server offers that depends on its setup:
-            discovery (with TMDB or Seerr) and requests (with Seerr). Clients
-            show only those, without asking and getting "not found". Since
-            0.5.
+          description: >-
+            What the server offers that depends on its setup: discovery
+            (with TMDB or Seerr) and requests (with Seerr). Clients show only
+            those, without asking and getting "not found". Since 0.5.
           required: [discovery, requests]
           properties:
             discovery:
