@@ -542,14 +542,28 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 
 	// The account's stream limit: replace its oldest playback, whose device
 	// is then told who took over, or refuse (rule 32). Another account's
-	// playback is never touched.
+	// playback is never touched. With a stream reserved for each profile,
+	// only the profile's own are ever replaced, never another profile's.
 	device := req.Device
 	if device == "" {
 		device = "another device"
 	}
 	limit := caller.Account.Template.MaxStreams
 	var replaced []*playback.Stream
-	if limit > 0 {
+	if limit > 0 && caller.Account.Template.ReserveStreams {
+		profiles, err := l.Provisioner.Store.Profiles(ctx, p.AccountID)
+		if err != nil {
+			pb.Logger.Error("listing the account's profiles failed", "err", err)
+			problem.Send(w, problem.Internal, "")
+			return
+		}
+		var ok bool
+		replaced, ok = playback.Reserved(pb.Tickets.ForAccount(p.AccountID), p.ID, len(profiles), limit)
+		if !ok || (len(replaced) > 0 && pb.RefuseOverLimit) {
+			problem.Send(w, problem.StreamLimitReached, "")
+			return
+		}
+	} else if limit > 0 {
 		active := pb.Tickets.ForAccount(p.AccountID)
 		if len(active) >= limit {
 			if pb.RefuseOverLimit {
