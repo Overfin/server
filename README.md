@@ -140,6 +140,17 @@ there too, as `OVERFIN_TMDB_TOKEN`, or in the wizard. On Fedora, RHEL and
 other SELinux systems, add `,z` after `:ro` on the media line of
 `compose.yaml`, so Jellyfin may read the folder.
 
+Films and series in more than one place (another disk, a NAS share
+mounted on the machine): add a line for each under Jellyfin's `volumes`
+in `compose.yaml`, then `docker compose up -d`. In the control panel, a
+library's folders are then the paths after the colon:
+
+```yaml
+    volumes:
+      - ${MEDIA_DIR:?set MEDIA_DIR in .env (see .env.example)}:/media:ro
+      - /mnt/nas/films:/nas/films:ro
+```
+
 **2. Set it up in your browser.** Open `http://<the machine>`. The setup
 wizard first asks for a one-time code, so nobody else can set up your
 server before you do; this prints it:

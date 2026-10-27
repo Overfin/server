@@ -891,13 +891,10 @@ nothing beyond what that needs.
 - **A home page of one's own.** Each profile's home follows its tastes and
   habits. First step: the slideshow shows the titles that fit that profile
   (from Tastes and what it watches), instead of the same ones for everyone.
-- **Media in several places.** The bundle gives Jellyfin one `MEDIA_DIR`,
-  mounted at `/media`: everything must sit under one directory of one
-  machine. Overfin's libraries already take several folders, but an
-  operator with several disks, or shares on NAS boxes or other machines,
-  has to edit the Compose file or gather the mounts under one parent first.
-  Needed: several media folders without editing anything (and help for
-  network shares), kept as simple as the single one.
+- ~~**Media in several places.**~~ Done (0.5), in the README: one line
+  per folder under Jellyfin's `volumes` in the Compose file (anyone
+  running Docker edits one), and a library's folders are the paths after
+  the colon. `MEDIA_DIR` stays the first one, at `/media`.
 
 ## Companion projects
 
