@@ -245,6 +245,11 @@ Everything is off by default.
    action, kept only as hashes, and limited in attempts like PINs. No
    weaker in practice than the login itself, which the same mailbox can
    reset. Needs the provider's `email` claim, so not in forwardauth mode.
+   *Since 0.4:* the SMTP server is set in the panel (or the file), and
+   sends the emails of Overfin's own sign-in (confirming an address, a new
+   password, invitations) from templates the operator may replace; there,
+   step-up asks for the password again. Step-up by emailed code and the
+   notices aren't built.
 
 Later, perhaps: letting the configuration file pin a feature setting, for
 operators who manage servers as files.
@@ -374,7 +379,8 @@ own do), so a title looks the same wherever it is.
      discovery's text). Items carry it wherever they're shown, Jellyfin's
      own images only where TMDB has none (milestone 5 removes that), and an
      image is served only to a profile that may see a title it belongs to. Jellyfin's image fetchers
-     can then be off. Next: people's photos.
+     can then be off. ~~Next: people's photos.~~ Done: cast and people's
+     pages show TMDB's photos (milestone 5).
 2. ~~Storage and import~~ Done: each profile's data (positions,
    watched, play counts, last played, favorites) is kept by title (a film
    by its TMDB ID, an episode by its show's and its numbers) and brought
@@ -456,9 +462,10 @@ peer's copy is one more source.
    discovery's. Files matched only by an IMDb or TVDB ID are found on TMDB
    by that ID. *Kept, for the library's titles:* the keeper fetches each
    film's and series' page with its images in one call, and every season
-   TMDB lists (those the library lacks too) with its episodes. Next: titles
-   matched only by IMDb or TVDB, and seasons of titles not in a library,
-   when browsed.
+   TMDB lists (those the library lacks too) with its episodes. ~~Next:
+   titles matched only by IMDb or TVDB, and seasons of titles not in a
+   library, when browsed.~~ Done: the former are found on TMDB by that ID,
+   the latter fetched when someone opens them.
 2. **Titles in the API.** One kind of ID for titles across the public API
    (a film, a series, a season, an episode, by TMDB's IDs and numbers),
    with the same shape wherever a title is listed, and its availability:
@@ -766,7 +773,8 @@ nothing beyond what that needs.
   `/apps/v1/watch-stats`, which it replaces after a while), `availability`
   (on the server or not) and, later, `requests`. Filters and sorting
   (`inLibrary`, `sort=score`, `order`, `limit`), cursor paging, `since`
-  for what changed. Overtide asks for the score alone; dashboards, bots,
+  for what changed (not yet: `since` is only on `/apps/v1/watch-stats`
+  so far). Overtide asks for the score alone; dashboards, bots,
   collection makers and *arr import lists (the best-valued missing
   titles) use the same endpoint. One privacy rule for every field: counts
   below 2 are given as 0.
