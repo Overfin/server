@@ -1,10 +1,12 @@
 package tmdb
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -119,11 +121,22 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 		extra = "aggregate_credits,images,alternative_titles,translations,content_ratings,external_ids"
 	}
 	q := c.withLanguage(url.Values{"append_to_response": {extra}, "include_image_language": {imageLanguages(lang)}})
-	if err := c.get(ctx, "/"+k+"/"+strconv.Itoa(tmdbID), q, &raw); err != nil {
+	path := "/" + k + "/" + strconv.Itoa(tmdbID)
+	if err := c.get(ctx, path, q, &raw); err != nil {
 		return nil, err
 	}
 	if raw.ID != tmdbID {
 		return nil, ErrNotFound
+	}
+	if base := c.baseLanguage(); base != "" && (raw.lacks(base) || raw.Tagline == "") {
+		var b struct {
+			rawTitle
+			Tagline string `json:"tagline"`
+		}
+		if c.get(ctx, path, c.inBase(nil), &b) == nil && b.ID == tmdbID {
+			raw.fill(b.rawTitle)
+			raw.Tagline = cmp.Or(raw.Tagline, b.Tagline)
+		}
 	}
 	t, ok := raw.title(kind)
 	if !ok {
@@ -240,6 +253,12 @@ func (c *Client) Season(ctx context.Context, seriesID, season int) (*SeasonFull,
 	if err := c.get(ctx, path, c.withLanguage(nil), &raw); err != nil {
 		return nil, err
 	}
+	if base := c.baseLanguage(); base != "" && raw.lacks() {
+		var b rawSeason
+		if c.get(ctx, path, c.inBase(nil), &b) == nil {
+			raw.fill(b)
+		}
+	}
 	return raw.full(season)
 }
 
@@ -271,6 +290,8 @@ func (c *Client) Seasons(ctx context.Context, seriesID int, seasons []int) (map[
 		if err := c.get(ctx, "/tv/"+strconv.Itoa(seriesID), q, &raw); err != nil {
 			return nil, err
 		}
+		got := map[int]*rawSeason{}
+		lacking := false
 		for _, n := range batch {
 			msg, ok := raw["season/"+strconv.Itoa(n)]
 			if !ok {
@@ -279,6 +300,24 @@ func (c *Client) Seasons(ctx context.Context, seriesID int, seasons []int) (map[
 			var rs rawSeason
 			if err := json.Unmarshal(msg, &rs); err != nil {
 				return nil, err
+			}
+			got[n] = &rs
+			lacking = lacking || rs.lacks()
+		}
+		// What the region's translation lacks, from the language alone.
+		var inBase map[string]json.RawMessage
+		if lacking && c.baseLanguage() != "" && c.get(ctx, "/tv/"+strconv.Itoa(seriesID), c.inBase(q), &inBase) == nil {
+			for n, rs := range got {
+				var b rawSeason
+				if msg, ok := inBase["season/"+strconv.Itoa(n)]; ok && json.Unmarshal(msg, &b) == nil {
+					rs.fill(b)
+				}
+			}
+		}
+		for _, n := range batch {
+			rs, ok := got[n]
+			if !ok {
+				continue
 			}
 			if se, err := rs.full(n); err == nil {
 				out[n] = se
@@ -290,19 +329,45 @@ func (c *Client) Seasons(ctx context.Context, seriesID int, seasons []int) (map[
 
 // rawSeason is a season as TMDB sends it.
 type rawSeason struct {
-	SeasonNumber *int   `json:"season_number"`
-	Name         string `json:"name"`
-	Overview     string `json:"overview"`
-	AirDate      string `json:"air_date"`
-	PosterPath   string `json:"poster_path"`
-	Episodes     []struct {
-		EpisodeNumber int    `json:"episode_number"`
-		Name          string `json:"name"`
-		Overview      string `json:"overview"`
-		AirDate       string `json:"air_date"`
-		Runtime       int    `json:"runtime"`
-		StillPath     string `json:"still_path"`
-	} `json:"episodes"`
+	SeasonNumber *int         `json:"season_number"`
+	Name         string       `json:"name"`
+	Overview     string       `json:"overview"`
+	AirDate      string       `json:"air_date"`
+	PosterPath   string       `json:"poster_path"`
+	Episodes     []rawEpisode `json:"episodes"`
+}
+
+// rawEpisode is one of a season's episodes as TMDB sends it.
+type rawEpisode struct {
+	EpisodeNumber int    `json:"episode_number"`
+	Name          string `json:"name"`
+	Overview      string `json:"overview"`
+	AirDate       string `json:"air_date"`
+	Runtime       int    `json:"runtime"`
+	StillPath     string `json:"still_path"`
+}
+
+// lacks says whether a season, in a regional language, came without some
+// of that region's translation: no overview, its own or an episode's.
+func (raw rawSeason) lacks() bool {
+	return raw.Overview == "" || slices.ContainsFunc(raw.Episodes, func(e rawEpisode) bool { return e.Overview == "" })
+}
+
+// fill takes what the region's translation lacked from the language's: an
+// episode without an overview takes the language's name too, since TMDB
+// then names it by its number.
+func (raw *rawSeason) fill(b rawSeason) {
+	raw.Overview = cmp.Or(raw.Overview, b.Overview)
+	byNumber := map[int]rawEpisode{}
+	for _, e := range b.Episodes {
+		byNumber[e.EpisodeNumber] = e
+	}
+	for i, e := range raw.Episodes {
+		if be, ok := byNumber[e.EpisodeNumber]; ok && e.Overview == "" && be.Overview != "" {
+			raw.Episodes[i].Name = cmp.Or(be.Name, e.Name)
+			raw.Episodes[i].Overview = be.Overview
+		}
+	}
 }
 
 // full checks a season and keeps what Overfin uses of it.
@@ -478,6 +543,13 @@ func (c *Client) Search(ctx context.Context, query string) ([]Title, []PersonHit
 	if err := c.get(ctx, "/search/multi", q, &raw); err != nil {
 		return nil, nil, err
 	}
+	var found []*rawTitle
+	for i := range raw.Results {
+		if r := &raw.Results[i]; r.MediaType == "movie" || r.MediaType == "tv" {
+			found = append(found, &r.rawTitle)
+		}
+	}
+	c.fillTitles(ctx, "/search/multi", q, found)
 	var titles []Title
 	var people []PersonHit
 	for i, r := range raw.Results {
