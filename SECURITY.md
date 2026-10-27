@@ -53,9 +53,12 @@ Every rule not named here is a hard rule.
    profile may see, Overfin decides before anything is shown or played
    (rule 28), and what each profile does is Overfin's to keep (rule 40).
    Each playback runs on a Jellyfin device of its own, so playbacks never
-   share a session or a transcode. The Jellyfin admin key is used only by
-   provisioning code and the admin API (rule 58), never by the public API's
-   user routes. Seerr has no per-user tokens, so Seerr
+   share a session or a transcode. The one exception is a profile brought
+   over with a Jellyfin user of its own, from before Overfin's one account:
+   its token only reads that profile's history, once when it's brought over
+   and again for its data download (rule 52). The Jellyfin admin key is used
+   only by setup, provisioning code and the control panel (rule 58), never
+   by the public API's user routes. Seerr has no per-user tokens, so Seerr
    calls use its API key with the acting user named in the request; that user
    is always the account's own Seerr user, derived from the session.
 4. Upstream tokens never reach the browser, including inside stream URLs and
@@ -72,7 +75,9 @@ comes from the internet, and media files can be written by anyone.
    Overfin takes from TMDB data are image paths, checked against a strict
    format and fetched only from TMDB's fixed image host.
 6. Overfin never follows redirects from Jellyfin, Seerr or TMDB. Upstream responses
-   have size limits and timeouts.
+   have size limits and timeouts, except media streams: Jellyfin must start
+   answering within a minute, but once a stream flows it has no size or
+   time limit, so a film is never cut off.
 7. IDs that come from upstream are validated exactly like client input.
 8. HLS playlists are parsed, not searched and replaced. Only entries that match
    Jellyfin's known segment URLs are kept.
@@ -81,9 +86,8 @@ comes from the internet, and media files can be written by anyone.
 10. Images are decoded and re-encoded (JPEG, or PNG when transparency is
     needed), which strips embedded metadata. Their dimensions are checked
     before decoding, and oversized images are refused. SVG, HTML and anything
-    that fails to decode are never served. The one exception is trickplay
-    sheets: Jellyfin generates them itself from video frames, so they are
-    checked (real JPEG bytes, size and dimension limits) but not re-encoded.
+    that fails to decode are never served. Trickplay sheets get the same
+    treatment, re-encoded as JPEG.
     Branding pictures an admin uploads are kept as they are, 4 MB at most,
     any picture but SVG, and served with their image type under the API's
     headers (no script in them ever runs).
@@ -105,9 +109,9 @@ comes from the internet, and media files can be written by anyone.
     at all. Outside anonymous mode, a request to any non-public route that
     carries no identity is refused; routes are protected unless explicitly
     registered as public.
-14. The client IP is taken only from the trusted proxy (PROXY protocol or a
-    forwarded header the proxy sets). Forwarded headers from anyone else are
-    ignored.
+14. The client IP is taken only from the trusted proxy (the last address in
+    the `X-Forwarded-For` header it sets). Forwarded headers from anyone else
+    are ignored.
 15. Only identities matching the configured group or claim are provisioned, and
     provisioning is rate-limited.
 16. With Overfin's own sign-in, every request checks the person behind the
@@ -139,20 +143,20 @@ comes from the internet, and media files can be written by anyone.
     requests must be JSON, except image uploads, which must carry an image
     content type (plain HTML forms can send neither). There is no CORS unless
     the operator lists allowed origins, and those use token auth, not cookies.
-19. After a login or step-up, users are sent back only to the same origin or to
-    an origin the operator allows, never to an address taken unchecked from the
-    request.
+19. After a login or step-up, users are sent back only to a path on the same
+    origin, never to an address taken unchecked from the request.
 20. Upstream tokens are encrypted at rest, with the key kept outside the
     database. PINs are hashed with that key, so a leaked database alone can't
     be used to guess them.
 21. Rare, destructive actions (profile deletion, account deletion,
-    exporting the whole account, PIN reset, changing one's password, and
-    profile transfer, planned)
+    exporting the whole account, changing or removing a PIN, changing one's
+    password, and profile transfer, planned)
     require a fresh login: the password again with Overfin's own sign-in,
     a new login at the identity provider
-    otherwise. Frequent sensitive actions (switching to a
-    PIN-protected profile, changing a kids profile's rating ceiling or turning
-    it into a standard profile) require the PIN. A standard profile exporting
+    otherwise. Frequent sensitive actions require a PIN: switching to a
+    PIN-protected profile needs that profile's; setting another profile's
+    first PIN, and changing a profile's kind, rating ceilings, libraries or
+    hidden tags, need the owner profile's. A standard profile exporting
     only its own data needs its own PIN, if it has one: the people using
     other profiles don't know the account's login. Kids profiles can't export
     themselves; their data is in the owner's export. No session ever falls
