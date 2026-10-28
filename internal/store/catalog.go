@@ -522,9 +522,8 @@ func (q ListQuery) where() ([]string, []any) {
 		in("kind", q.Kinds)
 	}
 	if len(q.Genres) > 0 {
-		where = append(where, `EXISTS (SELECT 1 FROM catalog_titles t, json_each(t.details, '$.genres') g
-			WHERE t.kind = catalog_items.kind AND t.tmdb = catalog_items.tmdb AND t.details IS NOT NULL
-			AND g.value IN (`+marks(len(q.Genres))+`))`)
+		where = append(where, `EXISTS (SELECT 1 FROM catalog_details_genres g
+			WHERE g.kind = catalog_items.kind AND g.tmdb = catalog_items.tmdb AND g.name IN (`+marks(len(q.Genres))+`))`)
 		for _, v := range q.Genres {
 			args = append(args, v)
 		}
@@ -610,11 +609,10 @@ func (s *Store) CatalogGenres(ctx context.Context, libraryID string, category *C
 		cond, a := access.itemAllowed("catalog_items")
 		where, args = append(where, cond), append(args, a...)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT g.value, count(DISTINCT t.kind || t.tmdb)
-		FROM catalog_items JOIN catalog_titles t ON t.kind = catalog_items.kind AND t.tmdb = catalog_items.tmdb,
-			json_each(t.details, '$.genres') g
-		WHERE t.details IS NOT NULL AND g.value IS NOT NULL AND `+strings.Join(where, " AND ")+`
-		GROUP BY g.value`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT g.name, count(DISTINCT g.kind || g.tmdb)
+		FROM catalog_items JOIN catalog_details_genres g ON g.kind = catalog_items.kind AND g.tmdb = catalog_items.tmdb
+		WHERE `+strings.Join(where, " AND ")+`
+		GROUP BY g.name`, args...)
 	if err != nil {
 		return nil, err
 	}
