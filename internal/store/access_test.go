@@ -168,3 +168,66 @@ func TestAccessAndListings(t *testing.T) {
 		t.Errorf("cleared: %+v", p)
 	}
 }
+
+// The watched, not watched and in progress filters, for seasons as for
+// series, and for an episode in two copies (watched through either).
+func TestPlayedFilters(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
+	one, two := 1, 2
+	s.PutCatalog(ctx, []CatalogItem{
+		{ID: id(0), Kind: "series", Name: "Show", SortName: "a", TMDB: "1", LibraryID: "tv"},
+		{ID: id(1), Kind: "season", Name: "S1", SortName: "b", SeriesID: id(0), SeasonNumber: &one, LibraryID: "tv"},
+		{ID: id(2), Kind: "season", Name: "S2", SortName: "c", SeriesID: id(0), SeasonNumber: &two, LibraryID: "tv"},
+		{ID: id(3), Kind: "episode", Name: "E1", SortName: "d", SeriesID: id(0), SeasonID: id(1), SeasonNumber: &one, EpisodeNumber: &one, LibraryID: "tv"},
+		// The same episode again (another version).
+		{ID: id(4), Kind: "episode", Name: "E1", SortName: "e", SeriesID: id(0), SeasonID: id(1), SeasonNumber: &one, EpisodeNumber: &one, LibraryID: "tv"},
+		{ID: id(5), Kind: "episode", Name: "E1", SortName: "f", SeriesID: id(0), SeasonID: id(2), SeasonNumber: &two, EpisodeNumber: &one, LibraryID: "tv"},
+		// A season with no episode yet.
+		{ID: id(6), Kind: "season", Name: "S3", SortName: "g", SeriesID: id(0), SeasonNumber: new(int), LibraryID: "tv"},
+		{ID: id(7), Kind: "movie", Name: "Film", SortName: "h", TMDB: "2", LibraryID: "films"},
+	}, 1)
+	if err := s.RefreshTitleKeys(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, prof, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
+	keys, _ := s.TitleKeys(ctx, []string{id(4), id(5), id(7)})
+	at := time.Unix(1_000_000, 0)
+	yes, no := true, false
+	list := func(q ListQuery) []string {
+		t.Helper()
+		q.ProfileID, q.Sort, q.Limit = prof.ID, "name", 50
+		got, err := s.ListCatalog(ctx, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	kinds := []string{"series", "season", "movie"}
+	for _, step := range []struct {
+		do                         func()
+		watched, unwatched, inProg []string
+	}{
+		{func() {}, nil, []string{id(0), id(1), id(2), id(6), id(7)}, nil},
+		// Season 1's only episode, watched through its second copy.
+		{func() { s.SetPlayed(ctx, prof.ID, map[string]string{keys[id(4)]: id(4)}, true, at) },
+			[]string{id(1)}, []string{id(0), id(2), id(6), id(7)}, nil},
+		{func() { s.RecordPlay(ctx, prof.ID, keys[id(5)], id(5), 60_000, false, at) },
+			[]string{id(1)}, []string{id(0), id(2), id(6), id(7)}, []string{id(0), id(2)}},
+		{func() {
+			s.SetPlayed(ctx, prof.ID, map[string]string{keys[id(5)]: id(5), keys[id(7)]: id(7)}, true, at)
+		}, []string{id(0), id(1), id(2), id(7)}, []string{id(6)}, nil},
+	} {
+		step.do()
+		if got := list(ListQuery{Kinds: kinds, Played: &yes}); !slices.Equal(got, step.watched) {
+			t.Errorf("watched: %v, want %v", got, step.watched)
+		}
+		if got := list(ListQuery{Kinds: kinds, Played: &no}); !slices.Equal(got, step.unwatched) {
+			t.Errorf("not watched: %v, want %v", got, step.unwatched)
+		}
+		if got := list(ListQuery{Kinds: kinds, InProgress: true}); !slices.Equal(got, step.inProg) {
+			t.Errorf("in progress: %v, want %v", got, step.inProg)
+		}
+	}
+}
