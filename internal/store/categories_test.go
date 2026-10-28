@@ -23,6 +23,8 @@ func TestCategories(t *testing.T) {
 		{ID: id(2), Kind: "series", Name: "Bluey", SortName: "c", TMDB: "3", LibraryID: "series"},
 		{ID: id(3), Kind: "series", Name: "Frieren", SortName: "d", TMDB: "4", LibraryID: "anime"},
 		{ID: id(4), Kind: "series", Name: "The Wire", SortName: "e", TMDB: "5", LibraryID: "series"},
+		{ID: id(5), Kind: "episode", Name: "Ep 1", SortName: "f", SeriesID: id(3), LibraryID: "anime"},
+		{ID: id(6), Kind: "episode", Name: "Ep 2", SortName: "g", SeriesID: id(4), LibraryID: "series"},
 	}, 1)
 	for _, d := range []struct {
 		kind, tmdb, lang string
@@ -47,7 +49,8 @@ func TestCategories(t *testing.T) {
 	}
 	anime := save("Anime", CategoryRules{Genres: []int{16}, Languages: []string{"ja"}})
 	series := save("Series", CategoryRules{Kinds: []string{"series"}, Except: []string{anime.ID}})
-	kids := save("Kids", CategoryRules{MovieCeiling: "PG", SeriesCeiling: "TV-Y"})
+	eight := 8
+	kids := save("Kids", CategoryRules{MaxAge: &eight})
 	films := save("Films", CategoryRules{Kinds: []string{"movie"}})
 	classics := save("Classics", CategoryRules{Tags: []string{"classique"}, Libraries: []string{"films"}})
 	everything := save("All", CategoryRules{})
@@ -78,6 +81,37 @@ func TestCategories(t *testing.T) {
 			t.Errorf("%s: %v, want %v", tc.c.Names["en"], got, tc.want)
 		}
 	}
+	// A profile limited to categories: their titles, and their series'
+	// episodes; with its template's too, what both allow.
+	af, _ := s.CategoryFilterOf(ctx, anime.ID)
+	kf, _ := s.CategoryFilterOf(ctx, kids.ID)
+	limited := func(a *Access) []string {
+		got, err := s.ListCatalog(ctx, ListQuery{Sort: "name", Access: a, Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := limited(&Access{Categories: []*CategoryFilter{af}}); !slices.Equal(got, []string{id(1), id(3), id(5)}) {
+		t.Errorf("anime only: %v", got)
+	}
+	if got := limited(&Access{Categories: []*CategoryFilter{af, kf}}); !slices.Equal(got, []string{id(1), id(2), id(3), id(5)}) {
+		t.Errorf("anime or kids: %v", got)
+	}
+	if got := limited(&Access{Categories: []*CategoryFilter{af}, TemplateCategories: []*CategoryFilter{kf}}); !slices.Equal(got, []string{id(1)}) {
+		t.Errorf("anime and the template's kids: %v", got)
+	}
+	if got := limited(&Access{Categories: []*CategoryFilter{}}); len(got) != 0 {
+		t.Errorf("no category: %v", got)
+	}
+	if allowed, _, _ := s.AllowedItems(ctx, Access{Categories: []*CategoryFilter{af}}, []string{id(5), id(6)}); !allowed[id(5)] || allowed[id(6)] {
+		t.Errorf("episodes: %v", allowed)
+	}
+	// Deleted, a category leaves profiles' and templates' limits.
+	acct, _, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
+	kid, _ := s.AddProfile(ctx, acct.ID, NewProfile{Name: "Kid", Kind: "standard", Categories: []string{anime.ID, kids.ID}}, 0)
+	s.SetTemplateCategories(ctx, DefaultTemplate, []string{anime.ID})
+
 	// With the profile's own limits too.
 	f, _ := s.CategoryFilterOf(ctx, anime.ID)
 	if n, err := s.CountCatalog(ctx, ListQuery{Category: f, Access: &Access{Libraries: []string{"films"}}}); err != nil || n != 1 {
@@ -114,6 +148,12 @@ func TestCategories(t *testing.T) {
 	}
 	if _, err := s.CategoryByID(ctx, anime.ID); err != ErrNotFound {
 		t.Errorf("deleted: %v", err)
+	}
+	if p, _ := s.Profile(ctx, acct.ID, kid.ID); !slices.Equal(p.Categories, []string{kids.ID}) {
+		t.Errorf("profile's categories: %v", p.Categories)
+	}
+	if a, _ := s.AccountByID(ctx, acct.ID); a.Template.Categories == nil || len(a.Template.Categories) != 0 {
+		t.Errorf("template's categories: %v", a.Template.Categories)
 	}
 
 	// Names, by language.

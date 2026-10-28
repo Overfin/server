@@ -60,11 +60,11 @@ func (s *Store) SetRatingsCountry(ctx context.Context, country string) error {
 		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, []byte(country)); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE profiles SET movie_ceiling = NULL, series_ceiling = NULL
-		WHERE kind = 'kids'`); err != nil {
+	if err := tx.Commit(); err != nil {
 		return err
 	}
-	return tx.Commit()
+	// Titles' ages go by the ratings country first.
+	return s.RefreshTitleAges(ctx)
 }
 
 // SetRatingScales replaces the scales of a kind (movie, series), by
@@ -152,6 +152,10 @@ func (s *Store) TitlesToRate(ctx context.Context, before, pendingBefore time.Tim
 // SetTitleRatings replaces a title's certifications, by country (none:
 // TMDB has none), and when it came out (see TitleRelease; "" unknown).
 func (s *Store) SetTitleRatings(ctx context.Context, t RatedTitle, ratings map[string][]string, released, atHome string, at time.Time) error {
+	country, err := s.RatingsCountry(ctx)
+	if err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -167,6 +171,9 @@ func (s *Store) SetTitleRatings(ctx context.Context, t RatedTitle, ratings map[s
 				return err
 			}
 		}
+	}
+	if err := setTitleAge(ctx, tx, t.Kind, t.TMDB, ratings, country); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO title_ratings_fetched (kind, tmdb, fetched_at, released, at_home) VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT (kind, tmdb) DO UPDATE SET fetched_at = excluded.fetched_at, released = excluded.released,
@@ -193,6 +200,10 @@ func (s *Store) PurgeRatings(ctx context.Context, before time.Time) error {
 			return err
 		}
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM title_ages WHERE NOT EXISTS (SELECT 1 FROM title_ratings r
+		WHERE r.kind = title_ages.kind AND r.tmdb = title_ages.tmdb)`); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -206,29 +217,18 @@ func (s *Store) RatingProgress(ctx context.Context) (fetched, total int, err err
 	return fetched, total, err
 }
 
-// Ceiling is what a kids profile may see: titles whose every certification
-// in Country is within Movie (films) or Series (series, their seasons and
-// episodes). An empty ceiling allows nothing.
+// Ceiling is what a kids profile may see: titles whose age (TitleAge) is
+// MaxAge at most, films and series alike (seasons and episodes by their
+// series'). A title without an age is hidden.
 type Ceiling struct {
-	Country string
-	Movie   string
-	Series  string
+	MaxAge int
 }
 
-// allowed is the rule as SQL, for the title kindExpr and tmdbExpr name:
-// it has certifications in the country, and none is unrated, unknown to
-// the scale, or over the ceiling. Anything missing fails closed.
+// allowed is the rule as SQL, for the title kindExpr and tmdbExpr name.
+// Anything missing fails closed.
 func (c Ceiling) allowed(kindExpr, tmdbExpr string) (string, []any) {
-	cert := `FROM title_ratings r WHERE r.kind = ` + kindExpr + ` AND r.tmdb = ` + tmdbExpr + ` AND r.country = ?`
-	return `(` + tmdbExpr + ` IS NOT NULL
-		AND EXISTS (SELECT 1 ` + cert + `)
-		AND NOT EXISTS (SELECT 1 ` + cert + ` AND (r.certification = ?
-			OR coalesce((SELECT l.position FROM rating_scales l
-				WHERE l.kind = r.kind AND l.country = r.country AND l.certification = r.certification), 1000000)
-			> coalesce((SELECT m.position FROM rating_scales m
-				WHERE m.kind = r.kind AND m.country = r.country AND m.certification <> ?
-				AND m.certification = CASE r.kind WHEN 'movie' THEN ? ELSE ? END), -1))))`,
-		[]any{c.Country, c.Country, NotRated, NotRated, c.Movie, c.Series}
+	return `(` + tmdbExpr + ` IS NOT NULL AND EXISTS (SELECT 1 FROM title_ages a
+		WHERE a.kind = ` + kindExpr + ` AND a.tmdb = ` + tmdbExpr + ` AND a.age <= ?))`, []any{c.MaxAge}
 }
 
 // itemAllowed is the rule for the catalog_items row named table: a film

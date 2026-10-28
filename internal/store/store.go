@@ -174,6 +174,9 @@ type Template struct {
 	// the rest are shared. While it's on, an account has no more profiles
 	// than streams.
 	ReserveStreams bool
+	// Categories, when not nil, are the only categories its accounts'
+	// profiles see (any of them), by ID; empty, none.
+	Categories []string
 	// Accounts is how many accounts follow it (filled by Templates only).
 	Accounts int
 }
@@ -199,7 +202,7 @@ func (a *Account) Expired(now time.Time) bool {
 }
 
 const accountSelect = `SELECT a.id, a.subject, a.created_at, a.disabled_at, a.label, a.expires_at, a.language,
-		t.id, t.name, t.max_streams, t.max_profiles, t.reserve_streams
+		t.id, t.name, t.max_streams, t.max_profiles, t.reserve_streams, t.categories
 	FROM accounts a JOIN account_templates t ON t.id = COALESCE(a.template_id, 'tmpl_default')`
 
 func scanAccount(sc scanner) (*Account, error) {
@@ -207,8 +210,9 @@ func scanAccount(sc scanner) (*Account, error) {
 	var created int64
 	var disabled, expires sql.NullInt64
 	var label, language sql.NullString
+	var categories *string
 	err := sc.Scan(&a.ID, &a.Subject, &created, &disabled, &label, &expires, &language,
-		&a.Template.ID, &a.Template.Name, &a.Template.MaxStreams, &a.Template.MaxProfiles, &a.Template.ReserveStreams)
+		&a.Template.ID, &a.Template.Name, &a.Template.MaxStreams, &a.Template.MaxProfiles, &a.Template.ReserveStreams, &categories)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -218,6 +222,7 @@ func scanAccount(sc scanner) (*Account, error) {
 	a.Created = time.Unix(created, 0).UTC()
 	a.Disabled = disabled.Valid
 	a.Label, a.Language = label.String, language.String
+	a.Template.Categories = scanList(categories)
 	if expires.Valid {
 		a.Expires = time.Unix(expires.Int64, 0).UTC()
 	}
@@ -241,10 +246,12 @@ type Profile struct {
 	JellyfinUsername string
 	JellyfinToken    string
 	Language         string
-	// MovieCeiling and SeriesCeiling are a kids profile's highest allowed
-	// certifications, on the ratings country's scales; empty until chosen.
-	MovieCeiling  string
-	SeriesCeiling string
+	// MaxAge is a kids profile's age: it sees titles for that age at most
+	// (films and series alike); nil until chosen, when it sees nothing.
+	MaxAge *int
+	// Categories, when not nil, are the only categories the profile sees
+	// (any of them), by ID; empty, none.
+	Categories []string
 	// Libraries, when not nil, are the only libraries the profile gets
 	// (by Jellyfin ID); BlockedTags are hidden from it.
 	Libraries   []string
@@ -305,11 +312,11 @@ func insertProfile(ctx context.Context, tx *sql.Tx, box *seal.Box, p *Profile, n
 	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO profiles (id, account_id, name, kind, owner, jellyfin_user_id,
-			jellyfin_username, jellyfin_token, language, movie_ceiling, series_ceiling, libraries, blocked_tags, created_at)
+			jellyfin_username, jellyfin_token, language, max_age, libraries, blocked_tags, categories, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.AccountID, p.Name, p.Kind, boolInt(p.Owner), nullable(p.JellyfinUserID),
-		nullable(p.JellyfinUsername), sealed, nullable(p.Language), nullable(p.MovieCeiling), nullable(p.SeriesCeiling),
-		jsonList(p.Libraries), jsonList(p.BlockedTags), now.Unix())
+		nullable(p.JellyfinUsername), sealed, nullable(p.Language), p.MaxAge,
+		jsonList(p.Libraries), jsonList(p.BlockedTags), jsonList(p.Categories), now.Unix())
 	if err != nil {
 		return fmt.Errorf("store: creating profile: %w", err)
 	}
@@ -348,8 +355,8 @@ func (s *Store) Profiles(ctx context.Context, accountID string) ([]*Profile, err
 
 const profileSelect = `
 	SELECT id, account_id, name, kind, owner, jellyfin_user_id, jellyfin_username,
-		jellyfin_token, language, movie_ceiling, series_ceiling, libraries, blocked_tags, pin_hash IS NOT NULL, created_at,
-		subtitle_language, theme
+		jellyfin_token, language, max_age, libraries, blocked_tags, pin_hash IS NOT NULL, created_at,
+		subtitle_language, theme, categories
 	FROM profiles`
 
 // scanner is what *sql.Row and *sql.Rows have in common.
@@ -359,11 +366,12 @@ func (s *Store) scanProfile(sc scanner) (*Profile, error) {
 	var p Profile
 	var owner int
 	var sealed []byte
-	var language, movie, series, jfUser, jfName, subtitles, theme sql.NullString
-	var libraries, tags *string
+	var language, jfUser, jfName, subtitles, theme sql.NullString
+	var maxAge sql.NullInt64
+	var libraries, tags, categories *string
 	var created int64
 	err := sc.Scan(&p.ID, &p.AccountID, &p.Name, &p.Kind, &owner, &jfUser,
-		&jfName, &sealed, &language, &movie, &series, &libraries, &tags, &p.HasPIN, &created, &subtitles, &theme)
+		&jfName, &sealed, &language, &maxAge, &libraries, &tags, &p.HasPIN, &created, &subtitles, &theme, &categories)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -381,8 +389,11 @@ func (s *Store) scanProfile(sc scanner) (*Profile, error) {
 	}
 	p.Owner = owner == 1
 	p.Language, p.SubtitleLanguage, p.Theme = language.String, subtitles.String, theme.String
-	p.MovieCeiling, p.SeriesCeiling = movie.String, series.String
-	p.Libraries, p.BlockedTags = scanList(libraries), scanList(tags)
+	if maxAge.Valid {
+		age := int(maxAge.Int64)
+		p.MaxAge = &age
+	}
+	p.Libraries, p.BlockedTags, p.Categories = scanList(libraries), scanList(tags), scanList(categories)
 	p.Created = time.Unix(created, 0).UTC()
 	return &p, nil
 }
@@ -502,8 +513,8 @@ type NewProfile struct {
 	Name             string
 	Kind             string // "standard" or "kids"
 	Language         string
-	MovieCeiling     string
-	SeriesCeiling    string
+	MaxAge           *int     // a kids profile's
+	Categories       []string // nil: every category's titles
 	Libraries        []string // nil: every library
 	BlockedTags      []string
 	JellyfinUserID   string
@@ -534,7 +545,7 @@ func (s *Store) AddProfile(ctx context.Context, accountID string, np NewProfile,
 	p := &Profile{
 		ID: ids.New(ids.Profile), AccountID: accountID, Name: np.Name, Kind: np.Kind,
 		JellyfinUserID: np.JellyfinUserID, JellyfinUsername: np.JellyfinUsername, JellyfinToken: np.JellyfinToken,
-		Language: np.Language, MovieCeiling: np.MovieCeiling, SeriesCeiling: np.SeriesCeiling,
+		Language: np.Language, MaxAge: np.MaxAge, Categories: np.Categories,
 		Libraries: np.Libraries, BlockedTags: np.BlockedTags,
 	}
 	if err := insertProfile(ctx, tx, s.box, p, s.now().UTC()); err != nil {
@@ -687,11 +698,12 @@ func scanSession(sc scanner) (*Session, error) {
 // changing an existing PIN needs a fresh login (rule 21).
 var ErrPINExists = errors.New("store: profile already has a PIN")
 
-// SetKind changes a profile's kind and ceilings, within its account.
-func (s *Store) SetKind(ctx context.Context, accountID, profileID, kind, movieCeiling, seriesCeiling string) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE profiles SET kind = ?, movie_ceiling = ?, series_ceiling = ?
+// SetKind changes a profile's kind and age (a kids profile's; nil for
+// none), within its account.
+func (s *Store) SetKind(ctx context.Context, accountID, profileID, kind string, maxAge *int) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE profiles SET kind = ?, max_age = ?
 		WHERE id = ? AND account_id = ?`,
-		kind, nullable(movieCeiling), nullable(seriesCeiling), profileID, accountID)
+		kind, maxAge, profileID, accountID)
 	if err != nil {
 		return err
 	}
@@ -1395,7 +1407,7 @@ func (s *Store) templateNameTaken(ctx context.Context, name, exceptID string) (b
 // accounts follow each.
 func (s *Store) Templates(ctx context.Context) ([]*Template, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT t.id, t.name, t.max_streams, t.max_profiles, t.reserve_streams,
+		SELECT t.id, t.name, t.max_streams, t.max_profiles, t.reserve_streams, t.categories,
 			(SELECT count(*) FROM accounts a WHERE COALESCE(a.template_id, 'tmpl_default') = t.id)
 		FROM account_templates t ORDER BY t.id != 'tmpl_default', t.name`)
 	if err != nil {
@@ -1405,9 +1417,11 @@ func (s *Store) Templates(ctx context.Context) ([]*Template, error) {
 	var out []*Template
 	for rows.Next() {
 		var t Template
-		if err := rows.Scan(&t.ID, &t.Name, &t.MaxStreams, &t.MaxProfiles, &t.ReserveStreams, &t.Accounts); err != nil {
+		var categories *string
+		if err := rows.Scan(&t.ID, &t.Name, &t.MaxStreams, &t.MaxProfiles, &t.ReserveStreams, &categories, &t.Accounts); err != nil {
 			return nil, err
 		}
+		t.Categories = scanList(categories)
 		out = append(out, &t)
 	}
 	return out, rows.Err()
@@ -1465,4 +1479,25 @@ func (s *Store) SetAccountTemplate(ctx context.Context, accountID, templateID st
 	res, err := s.db.ExecContext(ctx, `UPDATE accounts SET template_id = ?
 		WHERE id = ? AND EXISTS (SELECT 1 FROM account_templates WHERE id = ?)`, v, accountID, templateID)
 	return oneRow(res, err)
+}
+
+// SetTemplateCategories limits a template's accounts' profiles to some
+// categories (nil: no limit).
+func (s *Store) SetTemplateCategories(ctx context.Context, id string, categories []string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE account_templates SET categories = ? WHERE id = ?`, jsonList(categories), id)
+	return oneRow(res, err)
+}
+
+// SetProfileCategories limits a profile to some categories (nil: no
+// limit), within its account.
+func (s *Store) SetProfileCategories(ctx context.Context, accountID, profileID string, categories []string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE profiles SET categories = ? WHERE id = ? AND account_id = ?`,
+		jsonList(categories), profileID, accountID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

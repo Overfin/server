@@ -33,7 +33,7 @@ func TestProfilesRebuildKeepsReferences(t *testing.T) {
 	for _, m := range []struct {
 		file string
 		n    int
-	}{{"031_subtitle_language.sql", 31}, {"040_profile_theme.sql", 40}} {
+	}{{"031_subtitle_language.sql", 31}, {"040_profile_theme.sql", 40}, {"053_profile_age.sql", 53}, {"054_profile_categories.sql", 54}} {
 		later, _ := migrations.ReadFile("migrations/" + m.file)
 		if err := s.apply(ctx, m.file+" again", string(later), m.n); err != nil {
 			t.Fatal(err)

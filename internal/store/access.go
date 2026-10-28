@@ -27,7 +27,7 @@ func init() {
 }
 
 // Access is what a profile may see of the library, when it's limited:
-// titles within its ratings ceiling (kids profiles), in the libraries it
+// titles for its age (kids profiles), in the libraries it
 // gets, and without the tags hidden from it (SECURITY.md rule 28).
 type Access struct {
 	// Ceiling, when set, holds a kids profile to its ratings.
@@ -38,14 +38,47 @@ type Access struct {
 	// BlockedTags are hidden from it, on a title or on its series or
 	// season; matched regardless of case.
 	BlockedTags []string
+	// Categories, when not nil, are the only categories it sees (a title
+	// in any of them; a season or an episode by its series); empty, none.
+	// TemplateCategories are its account template's, the same way: a title
+	// must pass both.
+	Categories, TemplateCategories []*CategoryFilter
+}
+
+// Limited says whether the access keeps the profile to what the
+// libraries have: no title that no library has.
+func (a *Access) Limited() bool {
+	return a != nil && (a.Libraries != nil || a.Categories != nil || a.TemplateCategories != nil)
+}
+
+// inAny is a list of categories as SQL, for the catalog_items row named
+// table: in any of them.
+func inAny(table string, cats []*CategoryFilter) (string, []any) {
+	if len(cats) == 0 {
+		return "0 = 1", nil
+	}
+	var conds []string
+	var args []any
+	for _, c := range cats {
+		own, a := c.itemIn(table)
+		ser, b := c.itemIn("ser")
+		conds = append(conds, `(CASE WHEN `+table+`.kind IN ('movie', 'series') THEN `+own+`
+			ELSE EXISTS (SELECT 1 FROM catalog_items ser WHERE ser.id = `+table+`.series_id AND `+ser+`) END)`)
+		args = append(append(args, a...), b...)
+	}
+	return "(" + strings.Join(conds, " OR ") + ")", args
 }
 
 // AccessOf returns what a profile may see, or nil when it may see
-// everything. country is the ratings country.
-func AccessOf(p *Profile, country string) *Access {
+// everything.
+func AccessOf(p *Profile) *Access {
 	a := &Access{Libraries: p.Libraries, BlockedTags: p.BlockedTags}
 	if p.Kind == "kids" {
-		a.Ceiling = &Ceiling{Country: country, Movie: p.MovieCeiling, Series: p.SeriesCeiling}
+		// No age chosen yet: nothing (no title's age is below 0).
+		a.Ceiling = &Ceiling{MaxAge: -1}
+		if p.MaxAge != nil {
+			a.Ceiling.MaxAge = *p.MaxAge
+		}
 	}
 	if a.Ceiling == nil && a.Libraries == nil && len(a.BlockedTags) == 0 {
 		return nil
@@ -105,6 +138,12 @@ func (a Access) itemAllowed(table string) (string, []any) {
 			AND fold(t.tag) IN (`+marks(len(a.BlockedTags))+`))`)
 		for _, t := range a.BlockedTags {
 			args = append(args, FoldTag(t))
+		}
+	}
+	for _, cats := range [][]*CategoryFilter{a.Categories, a.TemplateCategories} {
+		if cats != nil {
+			c, ca := inAny(table, cats)
+			conds, args = append(conds, c), append(args, ca...)
 		}
 	}
 	if len(conds) == 0 {

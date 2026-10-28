@@ -144,6 +144,16 @@ func run(logger *slog.Logger) error {
 	}
 	defer db.Close()
 	logger.Info("database ready", "path", cfg.Storage.Path)
+	// Titles' ages from their ratings (the table of ages comes with
+	// Overfin), and kids profiles' ceilings from before ages, as ages.
+	if err := db.RefreshTitleAges(context.Background()); err != nil {
+		return err
+	}
+	if n, err := db.AgesFromCeilings(context.Background()); err != nil {
+		return err
+	} else if n > 0 {
+		logger.Info("kids profiles' rating ceilings became ages", "profiles", n)
+	}
 	moduleDBs, err := openModules(context.Background(), db, cfg.Storage.Path, logger)
 	if err != nil {
 		return err

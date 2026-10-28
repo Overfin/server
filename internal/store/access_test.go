@@ -160,11 +160,11 @@ func TestAccessAndListings(t *testing.T) {
 	if !slices.Equal(p.Libraries, []string{"films"}) || !slices.Equal(p.BlockedTags, []string{"Horror"}) {
 		t.Errorf("access: %+v", p)
 	}
-	if a := AccessOf(p, "US"); a == nil || !a.GetsLibrary("films") || a.GetsLibrary("tv") || !a.Blocks([]string{"horror"}) {
+	if a := AccessOf(p); a == nil || !a.GetsLibrary("films") || a.GetsLibrary("tv") || !a.Blocks([]string{"horror"}) {
 		t.Errorf("access of: %+v", a)
 	}
 	s.SetProfileAccess(ctx, acct.ID, prof.ID, nil, nil)
-	if p, _ := s.Profile(ctx, acct.ID, prof.ID); p.Libraries != nil || AccessOf(p, "US") != nil {
+	if p, _ := s.Profile(ctx, acct.ID, prof.ID); p.Libraries != nil || AccessOf(p) != nil {
 		t.Errorf("cleared: %+v", p)
 	}
 }

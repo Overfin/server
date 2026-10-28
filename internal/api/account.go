@@ -82,16 +82,17 @@ type profileJSON struct {
 	Kind   string `json:"kind"`
 	Owner  bool   `json:"owner"`
 	HasPIN bool   `json:"hasPin"`
-	// MovieCeiling and SeriesCeiling are a kids profile's highest allowed
-	// certifications; CeilingsNeeded, that it has none yet (it sees
-	// nothing until its owner picks them).
-	MovieCeiling   string `json:"movieCeiling,omitempty"`
-	SeriesCeiling  string `json:"seriesCeiling,omitempty"`
-	CeilingsNeeded bool   `json:"ceilingsNeeded,omitempty"`
+	// MaxAge is a kids profile's age: it sees titles for that age at most,
+	// films and series alike; AgeNeeded, that it has none yet (it sees
+	// nothing until its owner picks one).
+	MaxAge    *int `json:"maxAge,omitempty"`
+	AgeNeeded bool `json:"ageNeeded,omitempty"`
 	// Libraries, when present, are the only libraries the profile gets;
 	// absent, it gets every library. BlockedTags are hidden from it.
 	Libraries   *[]string `json:"libraries,omitempty"`
 	BlockedTags []string  `json:"blockedTags,omitempty"`
+	// Categories, when present, are the only categories it sees.
+	Categories *[]string `json:"categories,omitempty"`
 	// Theme is its look: "light" or "dark"; absent, it follows the device.
 	Theme string `json:"theme,omitempty"`
 }
@@ -246,15 +247,18 @@ func decode(r *http.Request, v any) bool {
 
 func toProfileJSON(p *store.Profile) profileJSON {
 	out := profileJSON{ID: p.ID, Name: p.Name, Kind: p.Kind, Owner: p.Owner, HasPIN: p.HasPIN,
-		MovieCeiling: p.MovieCeiling, SeriesCeiling: p.SeriesCeiling,
-		CeilingsNeeded: p.Kind == "kids" && (p.MovieCeiling == "" || p.SeriesCeiling == ""),
-		BlockedTags:    p.BlockedTags, Theme: p.Theme}
+		MaxAge: p.MaxAge, AgeNeeded: p.Kind == "kids" && p.MaxAge == nil,
+		BlockedTags: p.BlockedTags, Theme: p.Theme}
 	if p.Libraries != nil {
 		libs := make([]string, 0, len(p.Libraries))
 		for _, id := range p.Libraries {
 			libs = append(libs, library.LibraryPrefix+id)
 		}
 		out.Libraries = &libs
+	}
+	if p.Categories != nil {
+		cats := p.Categories
+		out.Categories = &cats
 	}
 	return out
 }

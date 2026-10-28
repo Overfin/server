@@ -141,7 +141,7 @@ func TestDiscover(t *testing.T) {
 	// A kids profile sees only what's rated within its ceilings: 949 is G,
 	// 100 is PG, the series has no rating. Before any rating is fetched, it
 	// sees nothing.
-	_, body := post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","movieCeiling":"G","seriesCeiling":"TV-Y"}`)
+	_, body := post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","maxAge":0}`)
 	var kid struct{ ID string }
 	json.Unmarshal([]byte(body), &kid)
 	if code, body := post(t, srv, "/api/v1/profiles/"+kid.ID+"/activate", `{}`); code != 200 {

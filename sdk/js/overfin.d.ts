@@ -33,10 +33,12 @@ export interface Profile {
   owner: boolean;
   hasPin: boolean;
   /** A kids profile's highest allowed certifications, for films and series. */
-  movieCeiling?: string;
-  seriesCeiling?: string;
-  /** A kids profile without ceilings yet: it sees nothing until its owner picks them. */
-  ceilingsNeeded?: boolean;
+  /** A kids profile's age: it sees titles for that age at most, films and series alike (since 0.6). */
+  maxAge?: number;
+  /** A kids profile without an age yet: it sees nothing until its owner picks one. */
+  ageNeeded?: boolean;
+  /** The only categories it sees, when it's limited to some (since 0.6). */
+  categories?: string[];
   /** The only libraries the profile gets (their IDs); absent, every library. */
   libraries?: string[];
   /** Tags hidden from the profile. */
@@ -51,18 +53,6 @@ export interface Branding {
   name: string;
   logo?: string;
   banner: { dark?: string; light?: string };
-}
-
-export interface RatingLevel {
-  name: string;
-  meaning?: string;
-}
-
-/** The certifications a kids profile's ceilings can be, least mature first; empty while the server has no ratings. */
-export interface Ratings {
-  country: string;
-  movie: RatingLevel[];
-  series: RatingLevel[];
 }
 
 export interface Me {
@@ -411,15 +401,14 @@ export class Overfin {
 
   profiles(): Promise<Profile[]>;
   profile(id: string): Promise<Profile>;
-  createProfile(profile: { name: string; kind?: 'standard' | 'kids'; movieCeiling?: string; seriesCeiling?: string; language?: string; libraries?: string[] | null; blockedTags?: string[] | null }): Promise<Profile>;
+  createProfile(profile: { name: string; kind?: 'standard' | 'kids'; maxAge?: number; language?: string; libraries?: string[] | null; blockedTags?: string[] | null; categories?: string[] | null }): Promise<Profile>;
   /** `libraries: null` gives every library again; `blockedTags: null` hides no tag. */
   /** Each profile may change its own `theme` (`''` follows the device); the rest is the owner's. */
-  updateProfile(id: string, changes: { name?: string; language?: string; theme?: '' | 'light' | 'dark'; kind?: 'standard' | 'kids'; movieCeiling?: string; seriesCeiling?: string; libraries?: string[] | null; blockedTags?: string[] | null; pin?: string }): Promise<Profile>;
+  updateProfile(id: string, changes: { name?: string; language?: string; theme?: '' | 'light' | 'dark'; kind?: 'standard' | 'kids'; maxAge?: number; libraries?: string[] | null; blockedTags?: string[] | null; categories?: string[] | null; pin?: string }): Promise<Profile>;
   deleteProfile(id: string): Promise<null>;
   activateProfile(id: string, pin?: string): Promise<Profile>;
   setPin(id: string, pin: string, ownerPin?: string): Promise<null>;
   removePin(id: string): Promise<null>;
-  ratings(): Promise<Ratings>;
   /** The library's tags, to hide some from a profile (owner only). */
   tags(): Promise<string[]>;
   sessions(): Promise<Session[]>;

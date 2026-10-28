@@ -158,7 +158,7 @@ comes from the internet, and media files can be written by anyone.
     a new login at the identity provider
     otherwise. Frequent sensitive actions require a PIN: switching to a
     PIN-protected profile needs that profile's; setting another profile's
-    first PIN, and changing a profile's kind, rating ceilings, libraries or
+    first PIN, and changing a profile's kind, age, categories, libraries or
     hidden tags, need the owner profile's. A standard profile exporting
     only its own data needs its own PIN, if it has one: the people using
     other profiles don't know the account's login. Kids profiles can't export
@@ -196,16 +196,21 @@ comes from the internet, and media files can be written by anyone.
     what it belongs to (a library item or a catalog title), also when it
     comes from Overfin's cache. A person's own photo goes to any profile:
     people carry no rating, library or tag.
-28. Kids profiles can request only titles rated at or below their ceiling, in
-    the operator's chosen ratings country. The ratings are Overfin's own, from
-    TMDB, never the media server's; a title's every certification there must
-    be within the ceiling. A missing, unknown, unrated or expired rating means
-    the request is refused. Everywhere in the catalog (search, discover, lists,
-    title details, images, playback), titles above the ceiling are hidden.
-    The same holds for the libraries a profile gets and the tags hidden from
-    it, for any profile: Overfin applies them, not Jellyfin, and what it
-    can't place in a library, like every title no library has, is hidden
-    from a profile limited to some (so it can't request them either).
+28. Kids profiles see and request only titles for their age (one for films
+    and series alike), chosen by the account's owner. A title's age is
+    Overfin's own, from TMDB's ratings, never the media server's: its rating
+    in the operator's ratings country when it has one, else the middle of
+    its ratings in other countries, each converted to the youngest age it
+    allows by a table Overfin ships (ratings that only advise parents count
+    as 8). A title without such an age is hidden and can't be requested.
+    Everywhere in the catalog (search, discover, lists, title details,
+    images, playback), titles above the age are hidden. The same holds for
+    the libraries and the categories a profile gets (its own, and its
+    account template's) and the tags hidden from it, for any profile:
+    Overfin applies them, not Jellyfin, and what it can't place in a
+    library or a category, like every title no library has, is hidden from
+    a profile limited to some (so it can't request them either). A category
+    deleted counts for nothing: a profile limited to it alone sees nothing.
 29. Play queues aren't accepted yet; when they are, every entry is checked
     against the active profile, when the queue is set and again when it
     advances.

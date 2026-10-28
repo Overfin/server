@@ -51,32 +51,40 @@ func TestRatings(t *testing.T) {
 		}
 		return got
 	}
-	if got := allowed(Ceiling{"US", "PG", "TV-Y"}); !slices.Equal(got, []string{id(0), id(7), id(8)}) {
-		t.Errorf("PG: %v", got)
+	// By age: Pixar (G, 0), Nothing (France's U, 0: no US rating, so
+	// France's), Bluey and its episode (TV-Y, 0) for 8; Heat (R, 17) and Cut
+	// (PG and R: the higher, 17) too for 17. Unrated, Odd (not on any
+	// scale), No TMDB and Not yet have no age: hidden.
+	if got := allowed(Ceiling{8}); !slices.Equal(got, []string{id(0), id(3), id(7), id(8)}) {
+		t.Errorf("8: %v", got)
 	}
-	if got := allowed(Ceiling{"US", "R", ""}); !slices.Equal(got, []string{id(0), id(1), id(2)}) {
-		t.Errorf("R, no series ceiling: %v", got)
+	if got := allowed(Ceiling{17}); !slices.Equal(got, []string{id(0), id(1), id(2), id(3), id(7), id(8)}) {
+		t.Errorf("17: %v", got)
 	}
-	// Nothing for an empty ceiling, a ceiling of "NR", or a country with
-	// no scale.
-	for _, c := range []Ceiling{{"US", "", ""}, {"US", "NR", ""}, {"FR", "R", "TV-14"}} {
-		if got := allowed(c); len(got) != 0 {
-			t.Errorf("%+v: %v", c, got)
-		}
+	if got := allowed(Ceiling{-1}); len(got) != 0 {
+		t.Errorf("no age chosen: %v", got)
 	}
-	if n, err := s.CountCatalog(ctx, ListQuery{Access: &Access{Ceiling: &Ceiling{"US", "PG", "TV-Y"}}}); err != nil || n != 3 {
+	if n, err := s.CountCatalog(ctx, ListQuery{Access: &Access{Ceiling: &Ceiling{8}}}); err != nil || n != 4 {
 		t.Errorf("count: %d %v", n, err)
 	}
-	got, indexed, err := s.AllowedItems(ctx, Access{Ceiling: &Ceiling{"US", "PG", "TV-Y"}}, []string{id(1), id(8), "ffffffffffffffffffffffffffffffff"})
+	got, indexed, err := s.AllowedItems(ctx, Access{Ceiling: &Ceiling{8}}, []string{id(1), id(8), "ffffffffffffffffffffffffffffffff"})
 	if err != nil || len(got) != 1 || !got[id(8)] || len(indexed) != 2 {
 		t.Errorf("items: %v %v %v", got, indexed, err)
 	}
-	if ok, err := s.TitleAllowed(ctx, Ceiling{"US", "PG", "TV-Y"}, "movie", "1"); err != nil || !ok {
+	if ok, err := s.TitleAllowed(ctx, Ceiling{8}, "movie", "1"); err != nil || !ok {
 		t.Errorf("title 1: %v %v", ok, err)
 	}
-	if ok, _ := s.TitleAllowed(ctx, Ceiling{"US", "PG", "TV-Y"}, "movie", "2"); ok {
+	if ok, _ := s.TitleAllowed(ctx, Ceiling{8}, "movie", "2"); ok {
 		t.Error("title 2 allowed")
 	}
+	// The ratings country's own rating first: in France, Pixar is 18.
+	if err := s.SetRatingsCountry(ctx, "FR"); err != nil {
+		t.Fatal(err)
+	}
+	if got := allowed(Ceiling{8}); !slices.Equal(got, []string{id(3), id(7), id(8)}) {
+		t.Errorf("8, in France: %v", got)
+	}
+	s.SetRatingsCountry(ctx, "US")
 
 	// Titles still to fetch: the unfetched one, then none once fetched.
 	todo, err := s.TitlesToRate(ctx, now.Add(-time.Hour), now.Add(-time.Hour), "2026-10-22", 50)
@@ -98,28 +106,7 @@ func TestRatings(t *testing.T) {
 	if err := s.PurgeRatings(ctx, now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if got := allowed(Ceiling{"US", "R", "TV-14"}); len(got) != 0 {
+	if got := allowed(Ceiling{99}); len(got) != 0 {
 		t.Errorf("after the purge: %v", got)
-	}
-
-	// A new ratings country clears kids profiles' ceilings.
-	acct, _, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
-	kid, err := s.AddProfile(ctx, acct.ID, NewProfile{Name: "Kid", Kind: "kids", MovieCeiling: "PG", SeriesCeiling: "TV-Y",
-		JellyfinUserID: "u2", JellyfinUsername: "of-2", JellyfinToken: "t2"}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c, _ := s.RatingsCountry(ctx); c != "US" {
-		t.Errorf("default country: %s", c)
-	}
-	s.SetRatingsCountry(ctx, "US") // the same: nothing changes
-	if p, _ := s.Profile(ctx, acct.ID, kid.ID); p.MovieCeiling != "PG" || p.SeriesCeiling != "TV-Y" {
-		t.Errorf("same country: %+v", p)
-	}
-	if err := s.SetRatingsCountry(ctx, "FR"); err != nil {
-		t.Fatal(err)
-	}
-	if p, _ := s.Profile(ctx, acct.ID, kid.ID); p.MovieCeiling != "" || p.SeriesCeiling != "" {
-		t.Errorf("new country: %+v", p)
 	}
 }

@@ -179,7 +179,7 @@ func TestTitles(t *testing.T) {
 
 	// A kids profile sees a title no library has only once it's rated
 	// within its limits.
-	_, body := post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","movieCeiling":"G","seriesCeiling":"TV-Y"}`)
+	_, body := post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","maxAge":0}`)
 	var kid struct{ ID string }
 	json.Unmarshal([]byte(body), &kid)
 	if code, body := post(t, srv, "/api/v1/profiles/"+kid.ID+"/activate", `{}`); code != 200 {

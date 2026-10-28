@@ -92,8 +92,7 @@ type exportProfileJSON struct {
 	Language string `json:"language,omitempty"`
 	// SubtitleLanguage is the language it last chose for subtitles.
 	SubtitleLanguage string `json:"subtitleLanguage,omitempty"`
-	MovieCeiling     string `json:"movieCeiling,omitempty"`
-	SeriesCeiling    string `json:"seriesCeiling,omitempty"`
+	MaxAge           *int   `json:"maxAge,omitempty"`
 	HasPIN           bool   `json:"hasPin"`
 	CreatedAt        string `json:"createdAt"`
 	// OutOfContinue are the series it took out of Continue Watching (by
@@ -273,7 +272,7 @@ func (a Account) export(w http.ResponseWriter, r *http.Request) {
 		}
 		out.Profiles = append(out.Profiles, exportProfileJSON{
 			ID: p.ID, Name: p.Name, Kind: p.Kind, Owner: p.Owner, Language: p.Language, SubtitleLanguage: p.SubtitleLanguage,
-			MovieCeiling: p.MovieCeiling, SeriesCeiling: p.SeriesCeiling, HasPIN: p.HasPIN, CreatedAt: p.Created.Format(time.RFC3339),
+			MaxAge: p.MaxAge, HasPIN: p.HasPIN, CreatedAt: p.Created.Format(time.RFC3339),
 			WatchHistory: history, Titles: titles, Requests: requests, Modules: mods, OutOfContinue: hidden,
 		})
 	}

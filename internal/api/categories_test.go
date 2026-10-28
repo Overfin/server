@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -74,5 +75,53 @@ func TestCategoriesListing(t *testing.T) {
 		if code := get(t, srv, path, nil); code != want {
 			t.Errorf("%s: %d, want %d", path, code, want)
 		}
+	}
+}
+
+// A profile limited to categories sees only their titles, and nothing no
+// library has; the owner sets it like libraries, and a deleted category no
+// longer counts.
+func TestProfileLimitedToCategories(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{store: &st})
+	ctx := context.Background()
+	var items []store.CatalogItem
+	for i := 1; i <= 3; i++ {
+		it := store.CatalogItem{ID: fmt.Sprintf("%032x", i), Kind: "movie", Name: fmt.Sprint(i), SortName: fmt.Sprint(i), LibraryID: fmt.Sprintf("%032x", 0xf1)}
+		if i == 3 {
+			it.Tags = []string{"Noël"}
+		}
+		items = append(items, it)
+	}
+	st.PutCatalog(ctx, items, 1)
+	st.RefreshTitleKeys(ctx)
+	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
+	xmas := &store.Category{Names: map[string]string{"en": "Christmas"}, Rules: store.CategoryRules{Tags: []string{"noël"}}}
+	st.SaveCategory(ctx, xmas)
+
+	code, body := post(t, srv, "/api/v1/profiles", `{"name":"Partner","categories":["cat_`+strings.Repeat("a", 26)+`"]}`)
+	if code != 400 {
+		t.Errorf("unknown category: %d %s", code, body)
+	}
+	code, body = post(t, srv, "/api/v1/profiles", `{"name":"Partner","categories":["`+xmas.ID+`"]}`)
+	if code != 201 || !strings.Contains(body, `"categories":["`+xmas.ID+`"]`) {
+		t.Fatalf("create: %d %s", code, body)
+	}
+	var partner struct{ ID string }
+	json.Unmarshal([]byte(body), &partner)
+	post(t, srv, "/api/v1/profiles/"+partner.ID+"/activate", `{}`)
+	var page struct{ Items []struct{ ID string } }
+	get(t, srv, "/api/v1/titles?kind=movie", &page)
+	if len(page.Items) != 1 || !strings.HasSuffix(page.Items[0].ID, "3") {
+		t.Errorf("limited: %+v", page.Items)
+	}
+	if code := get(t, srv, fmt.Sprintf("/api/v1/titles/title_item_%032x", 1), nil); code != 404 {
+		t.Errorf("a title outside: %d", code)
+	}
+	// Its category deleted: nothing, until the owner chooses again.
+	st.DeleteCategory(ctx, xmas.ID)
+	get(t, srv, "/api/v1/titles?kind=movie", &page)
+	if len(page.Items) != 0 {
+		t.Errorf("after the category went: %+v", page.Items)
 	}
 }

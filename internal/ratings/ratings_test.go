@@ -71,7 +71,7 @@ func TestOneFailingTitleDoesntStopThePass(t *testing.T) {
 	if fetched, _, _ := st.RatingProgress(ctx); fetched != 4 || src.asked[1] != 1 || src.asked[2] != 2 {
 		t.Errorf("after the second pass: %d fetched, asked %v", fetched, src.asked)
 	}
-	c := store.Ceiling{Country: "US", Movie: "G", Series: "G"}
+	c := store.Ceiling{MaxAge: 0}
 	if ok, _ := st.TitleAllowed(ctx, c, "movie", "2"); !ok {
 		t.Error("film 2 not allowed once rated")
 	}
