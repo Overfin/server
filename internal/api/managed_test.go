@@ -347,6 +347,82 @@ func TestManagedSingleUseInvitation(t *testing.T) {
 	if _, code := confirm("cara@example.org"); code != 403 {
 		t.Errorf("Cara's account, her invitation deleted: %d", code)
 	}
+
+	// Someone removed before setting up their account gives the use back
+	// at once (the control panel does this, then deletes them).
+	_, link = invite("Dan")
+	dan := newBrowser(srv)
+	openPage(t, dan, srv, link)
+	if c, out := register(dan, "dan@example.org"); c != 200 {
+		t.Fatalf("Dan registering: %d %v", c, out)
+	}
+	if c, _ := register(dan, "dan2@example.org"); c != 403 {
+		t.Errorf("the link, held for Dan: %d", c)
+	}
+	u, _ = st.UserByEmail(ctx, "dan@example.org")
+	if err := m.ReleaseInvitation(ctx, u.Subject); err != nil {
+		t.Fatal(err)
+	}
+	st.DeleteUser(ctx, u.Subject)
+	if c, out := register(dan, "dan2@example.org"); c != 200 {
+		t.Errorf("the link, Dan removed: %d %v", c, out)
+	}
+}
+
+// Someone who registered and confirmed can set up their account later,
+// from another browser, without the invitation's cookie: the invitation
+// they registered with is on their record.
+func TestManagedRegistrantSetsUpLater(t *testing.T) {
+	box := &mailbox{}
+	var st *store.Store
+	var m *api.Managed
+	var tmpl string
+	panel := http.NewServeMux()
+	srv, _ := newServerWith(t, options{managed: true, mailbox: box, store: &st, signIn: &m, template: &tmpl, admin: panel,
+		modules: []feature.Feature{invites.Feature{}}, settings: map[string]map[string]string{"invites": {"required": "on"}}})
+	admin := func(method, path string, body any) map[string]any {
+		raw, _ := json.Marshal(body)
+		rec := httptest.NewRecorder()
+		panel.ServeHTTP(rec, httptest.NewRequest(method, "/admin/api/modules/invites"+path, bytes.NewReader(raw)))
+		var out map[string]any
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	it := admin("POST", "/templates", map[string]any{"name": "Once", "accountTemplate": tmpl, "accessDays": 0, "validDays": 0, "maxUses": 1})
+	link := strings.TrimPrefix(admin("POST", "/invites", map[string]any{"template": it["id"], "label": "Ann"})["link"].(string), "https://media.example.org")
+
+	b := newBrowser(srv)
+	openPage(t, b, srv, link)
+	if c, out := signinPost(t, b, srv, "/api/v1/register", checked(t, srv, map[string]any{"email": "ann@example.org", "password": "a long password 1"})); c != 200 {
+		t.Fatalf("registering: %d %v", c, out)
+	}
+	m.Wait()
+	token := linkIn(box.all()[0].body, "verify")
+	if c, out := signinPost(t, newBrowser(srv), srv, "/api/v1/signin/verify", map[string]any{"link": token}); c != 200 {
+		t.Fatalf("confirming: %d %v", c, out)
+	}
+	// Days later, in a browser with no invitation's cookie.
+	later := newBrowser(srv)
+	if c, out := signinPost(t, later, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "ann@example.org", "password": "a long password 1"})); c != 200 {
+		t.Fatalf("signing in: %d %v", c, out)
+	}
+	req, _ := http.NewRequest("POST", srv.URL+"/api/v1/me", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	res, err := later.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 201 {
+		t.Fatalf("the account: %d", res.StatusCode)
+	}
+	u, _ := st.UserByEmail(context.Background(), "ann@example.org")
+	if acct, err := st.AccountBySubject(context.Background(), u.Subject); err != nil || acct.Label != "Ann" || acct.Template.ID != tmpl {
+		t.Errorf("Ann's account: %+v %v", acct, err)
+	}
+	if items := admin("GET", "/invites", nil)["items"].([]any); items[0].(map[string]any)["uses"] != 1.0 {
+		t.Errorf("uses: %v", items)
+	}
 }
 
 // Without email, nobody registers, and there's no forgotten-password page:

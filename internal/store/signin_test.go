@@ -79,11 +79,16 @@ func TestRegistration(t *testing.T) {
 	if _, err := s.TakeEmailLink(ctx, "verify", []byte("L2")); !errors.Is(err, ErrNotFound) {
 		t.Errorf("used twice: %v", err)
 	}
-	if code, err := s.ConfirmUser(ctx, u.Subject); err != nil || code != "invite-code" {
-		t.Errorf("confirmed: %q %v", code, err)
+	if err := s.ConfirmUser(ctx, u.Subject); err != nil {
+		t.Errorf("confirming: %v", err)
 	}
-	if code, _ := s.ConfirmUser(ctx, u.Subject); code != "" {
-		t.Error("the invitation is kept after it's given")
+	// The invitation stays with the person, for their account.
+	if code, err := s.UserInvitation(ctx, u.Subject); err != nil || code != "invite-code" {
+		t.Errorf("the invitation: %q %v", code, err)
+	}
+	admin, _ := s.CreateUser(ctx, "added@example.org", false)
+	if code, err := s.UserInvitation(ctx, admin.Subject); err != nil || code != "" {
+		t.Errorf("someone added: %q %v", code, err)
 	}
 	if got, _ := s.UserByEmail(ctx, "new@example.org"); !got.Confirmed {
 		t.Error("not confirmed")

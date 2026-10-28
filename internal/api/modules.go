@@ -316,6 +316,9 @@ func creationHooks(r *http.Request, mounts []Mount, prov *provision.Provisioner)
 			if creation.IsAdmitted(r.Context()) {
 				ctx = creation.Admitted(ctx)
 			}
+			if load := creation.HeldBy(r.Context()); load != nil {
+				ctx = creation.Held(ctx, load)
+			}
 			for _, m := range mounts {
 				g, ok := m.Module.(feature.AccountGate)
 				if !ok {

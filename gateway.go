@@ -501,6 +501,15 @@ func (g *gateway) SendInvitation(ctx context.Context, to, link string) error {
 	return nil
 }
 
+// ReleaseInvitation gives back the use of an invitation held for someone
+// who registered, as the control panel removes them.
+func (g *gateway) ReleaseInvitation(ctx context.Context, subject string) error {
+	if m := g.current.Load().managed; m != nil {
+		return m.ReleaseInvitation(ctx, subject)
+	}
+	return nil
+}
+
 // AdminRoutes serves the switched-on modules' control panel routes.
 func (g *gateway) AdminRoutes() http.Handler { return g.current.Load().admin }
 

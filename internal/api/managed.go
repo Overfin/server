@@ -56,8 +56,8 @@ const (
 	// their address before they're removed.
 	UnconfirmedFor = 7 * 24 * time.Hour
 	// holdFor is how long a registration holds a use of its invitation:
-	// the time to confirm the address, then a day (the invitation cookie's
-	// life) to set up the account.
+	// the time to confirm the address, then a day more to set up the
+	// account.
 	holdFor = UnconfirmedFor + 24*time.Hour
 )
 
@@ -160,7 +160,8 @@ func (m *Managed) Register(r *plugin.Registrar) error {
 // has an account here, isn't disabled, confirmed their address, and has no
 // new password to choose first. Someone an admin added is also marked
 // admitted: their account needs no invitation of its own. Someone who
-// registered has the invitation they registered with, and needs it.
+// registered needs the invitation they registered with: it's read from
+// their record if their account is being set up.
 func (m *Managed) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, u := m.current(r); u != nil && u.Confirmed && !u.MustChange {
@@ -169,7 +170,12 @@ func (m *Managed) Middleware(next http.Handler) http.Handler {
 				id.Groups = []string{ManagedAdminGroup}
 			}
 			ctx := identity.With(r.Context(), id)
-			if !u.Registered {
+			if u.Registered {
+				subject := u.Subject
+				ctx = markHeld(ctx, func(ctx context.Context) (string, error) {
+					return m.Store.UserInvitation(ctx, subject)
+				})
+			} else {
 				ctx = markAdmitted(ctx)
 			}
 			r = r.WithContext(ctx)
@@ -536,7 +542,8 @@ func (m *Managed) invitation(r *http.Request) (string, bool, error) {
 }
 
 // verify takes the link confirming an address: the account works then,
-// and its person is signed in, with their invitation to shape it.
+// and its person is signed in. The invitation they registered with stays
+// on their record, to shape the account when they set it up.
 func (m *Managed) verify(w http.ResponseWriter, r *http.Request) {
 	req, ok := m.read(w, r)
 	if !ok {
@@ -546,23 +553,26 @@ func (m *Managed) verify(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	code, err := m.Store.ConfirmUser(r.Context(), u.Subject)
-	if err != nil {
+	if err := m.Store.ConfirmUser(r.Context(), u.Subject); err != nil {
 		m.fail(w, r, err)
 		return
 	}
-	m.keepInvitation(w, r, code)
 	u.Confirmed = true
 	m.startLogin(w, r, u, "/")
 }
 
-// keepInvitation leaves the invitation someone registered with (their hold
-// on a use of it) in this browser, where their account is about to be set
-// up.
-func (m *Managed) keepInvitation(w http.ResponseWriter, r *http.Request, code string) {
-	if code != "" {
-		cookie.Set(w, r, &http.Cookie{Name: feature.InviteCookie, Value: code, MaxAge: 24 * 60 * 60})
+// ReleaseInvitation gives back the use of an invitation held for someone
+// who registered, when they're removed before their account is set up.
+func (m *Managed) ReleaseInvitation(ctx context.Context, subject string) error {
+	hold, err := m.Store.UserInvitation(ctx, subject)
+	if err != nil || hold == "" {
+		return err
 	}
+	inviter, h := inviterOf(m.Mounts)
+	if inviter == nil {
+		return nil
+	}
+	return inviter.Release(ctx, h, hold)
 }
 
 // resend sends the link confirming an address again, to someone waiting
@@ -633,9 +643,8 @@ func (m *Managed) reset(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		err = m.Store.SetMustChange(ctx, u.Subject, false)
 	}
-	var code string
 	if err == nil && !u.Confirmed {
-		code, err = m.Store.ConfirmUser(ctx, u.Subject)
+		err = m.Store.ConfirmUser(ctx, u.Subject)
 	}
 	if err == nil {
 		err = m.Store.DeleteLogins(ctx, u.Subject)
@@ -644,7 +653,6 @@ func (m *Managed) reset(w http.ResponseWriter, r *http.Request) {
 		m.fail(w, r, err)
 		return
 	}
-	m.keepInvitation(w, r, code)
 	u.Confirmed, u.MustChange = true, false
 	m.startLogin(w, r, u, "/")
 }

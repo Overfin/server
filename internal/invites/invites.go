@@ -170,28 +170,23 @@ func (Feature) Hold(ctx context.Context, h feature.Host, code string, until time
 
 // Release gives back a use held for a registration.
 func (Feature) Release(ctx context.Context, h feature.Host, hold string) error {
+	if !holdPattern.MatchString(hold) {
+		return nil // a code kept by a registration from before holds
+	}
 	_, err := h.DB().ExecContext(ctx, `DELETE FROM invites_uses WHERE hold_hash = ?`, hash(hold))
 	return err
 }
 
 // NewAccount shapes a new account by the visitor's invitation, or refuses
-// it when invitations are required and there's none. The invitation's
-// cookie carries either a code, whose invitation must still work, or a
-// registration's hold, whose use was taken when it registered: that one's
-// invitation shapes the account even if its link has expired since.
+// it when invitations are required and there's none. Someone who
+// registered brings the hold their registration took (feature.Held): its
+// invitation shapes the account, even if its link has expired since.
+// Otherwise the invitation's cookie carries a code, whose invitation must
+// still work.
 func (Feature) NewAccount(ctx context.Context, h feature.Host, r *http.Request) (*feature.AccountPlan, error) {
-	var inv *invite
-	held := ""
-	if c, err := cookie.Get(r, cookieName); err == nil {
-		if holdPattern.MatchString(c.Value) {
-			held = hash(c.Value)
-			inv, err = heldBy(ctx, h.DB(), held)
-		} else {
-			inv, err = usable(ctx, h.DB(), c.Value)
-		}
-		if err != nil {
-			return nil, err
-		}
+	inv, held, err := invitationOf(ctx, h.DB(), r)
+	if err != nil {
+		return nil, err
 	}
 	if inv != nil {
 		ok, err := templateExists(ctx, h, inv.AccountTemplate)
@@ -308,6 +303,32 @@ func usable(ctx context.Context, db *sql.DB, code string) (*invite, error) {
 		return nil, nil
 	}
 	return inv, nil
+}
+
+// invitationOf is the invitation that shapes the visitor's new account,
+// nil for none, with the hash of the hold that brings it ("" when it came
+// by a code).
+func invitationOf(ctx context.Context, db *sql.DB, r *http.Request) (inv *invite, held string, err error) {
+	stored, err := feature.Held(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	switch {
+	case holdPattern.MatchString(stored):
+		if inv, err = heldBy(ctx, db, hash(stored)); inv != nil || err != nil {
+			return inv, hash(stored), err
+		}
+	case stored != "":
+		// A registration from before holds kept the code itself.
+		if inv, err = usable(ctx, db, stored); inv != nil || err != nil {
+			return inv, "", err
+		}
+	}
+	if c, err := cookie.Get(r, cookieName); err == nil {
+		inv, err := usable(ctx, db, c.Value)
+		return inv, "", err
+	}
+	return nil, "", nil
 }
 
 // heldBy returns the invitation whose use a registration holds, by the

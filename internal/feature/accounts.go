@@ -74,6 +74,18 @@ type AccountTemplate struct {
 // comes from the use of an invitation held for them (Inviter.Hold).
 func Admitted(ctx context.Context) bool { return creation.IsAdmitted(ctx) }
 
+// Held is, in an AccountGate's methods, the invitation the person
+// registered with, when they registered with Overfin's own sign-in: their
+// hold on a use of it (Inviter.Hold), or, for a registration from before
+// holds, its code. "" for anyone else.
+func Held(ctx context.Context) (string, error) {
+	load := creation.HeldBy(ctx)
+	if load == nil {
+		return "", nil
+	}
+	return load(ctx)
+}
+
 // InviteCookie carries an opened invitation's code to the account's
 // creation (a base name, as package cookie takes it).
 const InviteCookie = "overfin-invite"
@@ -87,8 +99,8 @@ type Inviter interface {
 	Invitation(ctx context.Context, h Host, code string) (ok bool, signUp string, err error)
 	// Hold takes a use of the invitation code opens, for someone
 	// registering with Overfin's own sign-in: it counts as used from now
-	// on, until the account set up with the hold (the invitation's cookie
-	// carries it then) makes it the account's, or until the hold lapses.
+	// on, until their account is set up with the hold (Held gives it
+	// then) and makes it the account's, or until the hold lapses.
 	// hold is "" when the invitation no longer works.
 	Hold(ctx context.Context, h Host, code string, until time.Time) (hold string, err error)
 	// Release gives back the use held for a registration that wasn't made.

@@ -236,26 +236,29 @@ func (s *Store) RegisterUser(ctx context.Context, email, passwordHash, inviteCod
 	return p, nil
 }
 
-// ConfirmUser marks a person's email confirmed, and gives the invitation
-// they registered with ("" without one), forgetting it.
-func (s *Store) ConfirmUser(ctx context.Context, subject string) (inviteCode string, err error) {
+// ConfirmUser marks a person's email confirmed.
+func (s *Store) ConfirmUser(ctx context.Context, subject string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET confirmed = 1 WHERE subject = ?`, subject)
+	return oneRow(res, err)
+}
+
+// UserInvitation is the invitation a person registered with: their hold
+// on a use of it (or, registered before holds, its code); "" for someone
+// an admin added.
+func (s *Store) UserInvitation(ctx context.Context, subject string) (string, error) {
 	var sealed []byte
-	err = s.db.QueryRowContext(ctx, `SELECT invite_code FROM users WHERE subject = ?`, subject).Scan(&sealed)
+	err := s.db.QueryRowContext(ctx, `SELECT invite_code FROM users WHERE subject = ?`, subject).Scan(&sealed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
-	if err != nil {
+	if err != nil || sealed == nil {
 		return "", err
 	}
-	if sealed != nil {
-		code, err := s.box.Open(sealed, inviteContext(subject))
-		if err != nil {
-			return "", fmt.Errorf("store: an invitation: %w", err)
-		}
-		inviteCode = string(code)
+	code, err := s.box.Open(sealed, inviteContext(subject))
+	if err != nil {
+		return "", fmt.Errorf("store: an invitation: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE users SET confirmed = 1, invite_code = NULL WHERE subject = ?`, subject)
-	return inviteCode, err
+	return string(code), nil
 }
 
 // SetMustChange says whether a person must choose a new password at their
