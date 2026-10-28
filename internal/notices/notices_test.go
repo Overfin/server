@@ -167,6 +167,36 @@ func TestExpiry(t *testing.T) {
 	}
 }
 
+// Notices that go by email wait for email to be set up: switched on before
+// it, they're sent once it is, not lost.
+func TestExpiryWaitsForEmail(t *testing.T) {
+	ctx := context.Background()
+	n, db, m, _, _ := setup(t)
+	var on bool
+	n.Mail = func() Sender {
+		if on {
+			return m
+		}
+		return nil
+	}
+	now := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	db.CreateUser(ctx, "admin@example.org", true)
+	person, _ := db.CreateUser(ctx, "alex@example.org", false)
+	acct, _, _ := db.CreateAccount(ctx, person.Subject, store.NewOwner{Name: "Alex", JellyfinUserID: strings.Repeat("a", 32), JellyfinUsername: "of-1", JellyfinToken: "t"})
+	db.SetAccountExpiry(ctx, acct.ID, now.Add(3*24*time.Hour))
+	db.SetNoticeSettings(ctx, store.NoticeSettings{Expiring: true, Days: 7, Admins: true, Person: true})
+	if err := n.Check(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	on = true
+	if err := n.Check(ctx, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if mails := m.all(); len(mails) != 2 {
+		t.Errorf("once email is set up: %+v", mails)
+	}
+}
+
 // A new account is noticed when the settings say so.
 func TestJoined(t *testing.T) {
 	ctx := context.Background()
