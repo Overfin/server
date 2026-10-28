@@ -174,7 +174,10 @@ var (
 func parse(s string) named {
 	var n named
 	if m := tmdbTag.FindStringSubmatch(s); m != nil {
-		n.tmdb = m[1]
+		// As TMDB writes it: "0949" is 949, and 0 is none.
+		if id, _ := strconv.Atoi(m[1]); id > 0 {
+			n.tmdb = strconv.Itoa(id)
+		}
 	}
 	s = brackets.ReplaceAllString(s, " ")
 	s = extension.ReplaceAllString(s, "")
