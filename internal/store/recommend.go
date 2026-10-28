@@ -95,49 +95,38 @@ const watchedTitles = `SELECT CASE WHEN title LIKE 'movie/tmdb/%' THEN 'movie' E
 // watched (to the end, or started; a series by any of its episodes), the
 // recent more than the old, and gives those titles' keys.
 func (s *Store) WatchedGenres(ctx context.Context, profileID string, now time.Time) (map[int]float64, map[string]bool, error) {
-	type seen struct {
-		kind, tmdb string
-		weight     float64
-	}
-	var titles []seen
-	err := s.each(ctx, func(rows *sql.Rows) error {
-		var t seen
-		var at int64
-		if err := rows.Scan(&t.kind, &t.tmdb, &at); err != nil {
-			return err
-		}
-		age := now.Sub(time.Unix(at, 0))
-		t.weight = math.Pow(0.5, max(age.Hours(), 0)/halfLife.Hours())
-		titles = append(titles, t)
-		return nil
-	}, `SELECT w.kind, w.tmdb, max(w.at) FROM (`+watchedTitles+`) w GROUP BY w.kind, w.tmdb`, profileID)
-	if err != nil {
-		return nil, nil, err
-	}
-	// Their genres, all at once: a query for each title took a fifth of
-	// a second for a profile that watched thousands.
-	genres := map[string][]int{}
-	err = s.each(ctx, func(rows *sql.Rows) error {
-		var kind, tmdb string
-		var g int
-		if err := rows.Scan(&kind, &tmdb, &g); err != nil {
-			return err
-		}
-		genres[kind+"/tmdb/"+tmdb] = append(genres[kind+"/tmdb/"+tmdb], g)
-		return nil
-	}, `SELECT g.kind, g.tmdb, g.genre FROM catalog_title_genres g
-		WHERE (g.kind, g.tmdb) IN (SELECT w.kind, w.tmdb FROM (`+watchedTitles+`) w)
-		ORDER BY g.kind, g.tmdb, g.genre`, profileID)
-	if err != nil {
-		return nil, nil, err
-	}
+	// Each title once, with its genres, in one query: the history is read
+	// once (a query for each title took a fifth of a second for a profile
+	// that watched thousands, and a second query for the genres read the
+	// history again). Ordered by title then genre, so the weights add up
+	// in the same order every time.
 	out, keys := map[int]float64{}, map[string]bool{}
-	for _, t := range titles {
-		key := t.kind + "/tmdb/" + t.tmdb
-		keys[key] = true
-		for _, g := range genres[key] {
-			out[g] += t.weight
+	var last string
+	var weight float64
+	err := s.each(ctx, func(rows *sql.Rows) error {
+		var kind, tmdb string
+		var at int64
+		var g *int
+		if err := rows.Scan(&kind, &tmdb, &at, &g); err != nil {
+			return err
 		}
+		key := kind + "/tmdb/" + tmdb
+		if key != last {
+			last = key
+			keys[key] = true
+			age := now.Sub(time.Unix(at, 0))
+			weight = math.Pow(0.5, max(age.Hours(), 0)/halfLife.Hours())
+		}
+		if g != nil {
+			out[*g] += weight
+		}
+		return nil
+	}, `SELECT w.kind, w.tmdb, w.at, g.genre
+		FROM (SELECT kind, tmdb, max(at) AS at FROM (`+watchedTitles+`) GROUP BY kind, tmdb) w
+		LEFT JOIN catalog_title_genres g ON g.kind = w.kind AND g.tmdb = w.tmdb
+		ORDER BY w.kind, w.tmdb, g.genre`, profileID)
+	if err != nil {
+		return nil, nil, err
 	}
 	return out, keys, nil
 }
