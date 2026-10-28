@@ -69,8 +69,9 @@ type AccountTemplate struct {
 }
 
 // Admitted reports, in an AccountGate's methods, whether Overfin's own
-// sign-in already let the person in (an admin made them, or they
-// registered with an invitation): no invitation is required then.
+// sign-in already let the person in (an admin made them): no invitation is
+// required then. Someone who registered isn't admitted: their account
+// comes from the use of an invitation held for them (Inviter.Hold).
 func Admitted(ctx context.Context) bool { return creation.IsAdmitted(ctx) }
 
 // InviteCookie carries an opened invitation's code to the account's
@@ -84,4 +85,12 @@ type Inviter interface {
 	// and, with an identity provider that makes them, its sign-up link
 	// there ("" otherwise).
 	Invitation(ctx context.Context, h Host, code string) (ok bool, signUp string, err error)
+	// Hold takes a use of the invitation code opens, for someone
+	// registering with Overfin's own sign-in: it counts as used from now
+	// on, until the account set up with the hold (the invitation's cookie
+	// carries it then) makes it the account's, or until the hold lapses.
+	// hold is "" when the invitation no longer works.
+	Hold(ctx context.Context, h Host, code string, until time.Time) (hold string, err error)
+	// Release gives back the use held for a registration that wasn't made.
+	Release(ctx context.Context, h Host, hold string) error
 }

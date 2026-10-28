@@ -448,7 +448,11 @@ comes from the internet, and media files can be written by anyone.
     when they ask). Opening one keeps it in an HttpOnly cookie for a day:
     with Overfin's own sign-in, the page shows the registration form (rule
     66), and a registration keeps its invitation sealed, like a token,
-    only until it's confirmed; otherwise it leads on to the site. An
+    only until it's confirmed; otherwise it leads on to the site. A
+    registration takes a use of its invitation at once, held for it until
+    its account is set up (or for a week and a day), so a single-use
+    invitation lets one person register; someone who registered gets an
+    account only with the invitation they registered with. Otherwise, an
     account is set up with it only after a login, under the account-creation lock, so a
     single-use invitation is used once. Uses stay counted when the account
     is deleted. With an identity provider, an invitation decides what an

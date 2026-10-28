@@ -61,7 +61,7 @@ func TestRegistration(t *testing.T) {
 	if _, err := s.RegisterUser(ctx, "NEW@example.org", "hash", ""); !errors.Is(err, ErrEmailTaken) {
 		t.Errorf("twice: %v", err)
 	}
-	if got, _ := s.UserByEmail(ctx, "new@example.org"); got.Confirmed || got.PasswordHash != "hash" {
+	if got, _ := s.UserByEmail(ctx, "new@example.org"); got.Confirmed || got.PasswordHash != "hash" || !got.Registered {
 		t.Errorf("registered: %+v", got)
 	}
 	s.AddEmailLink(ctx, EmailLink{Subject: u.Subject, LinkHash: []byte("L1"), Purpose: "verify", Expires: time.Now().Add(time.Hour)})

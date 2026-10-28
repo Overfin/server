@@ -1001,9 +1001,12 @@ paths:
         keeps the invitation in this browser: an email and a password
         following the password rules, with the check against scripts
         solved. Only when the server sends emails: a link to confirm the
-        address goes there, and the account works once it's opened. An email
-        that has an account here gets a notice instead; the answer is the
-        same.
+        address goes there, and the account works once it's opened.
+        Registering takes a use of the invitation at once, so a single-use
+        invitation lets one person register; the account set up after
+        confirming gets that invitation's plan. An email that has an
+        account here gets a notice instead, and takes no use; the answer is
+        the same.
       tags: [account]
       security: []
       requestBody:

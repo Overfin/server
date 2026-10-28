@@ -28,18 +28,21 @@ type User struct {
 	// password at their next sign-in.
 	Confirmed  bool
 	MustChange bool
+	// Registered is true for someone who registered themselves with an
+	// invitation, false for someone an admin added.
+	Registered bool
 }
 
 // ErrEmailTaken: another person has that email.
 var ErrEmailTaken = errors.New("store: email already used")
 
 const userColumns = `subject, email, coalesce(password_hash, ''), admin, disabled_at IS NOT NULL, created_at,
-	confirmed, must_change`
+	confirmed, must_change, registered`
 
 func scanUser(sc interface{ Scan(...any) error }) (*User, error) {
 	var p User
 	var created int64
-	err := sc.Scan(&p.Subject, &p.Email, &p.PasswordHash, &p.Admin, &p.Disabled, &created, &p.Confirmed, &p.MustChange)
+	err := sc.Scan(&p.Subject, &p.Email, &p.PasswordHash, &p.Admin, &p.Disabled, &created, &p.Confirmed, &p.MustChange, &p.Registered)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -215,12 +218,14 @@ func (s *Store) DeleteUser(ctx context.Context, subject string) error {
 func inviteContext(subject string) string { return "invite " + subject }
 
 // RegisterUser adds someone who registered themselves, with an
-// invitation: their password's hash, the invitation's code (sealed), and
-// not confirmed until they open the link sent to their email.
+// invitation: their password's hash, their invitation (sealed: the hold on
+// a use of it), and not confirmed until they open the link sent to their
+// email.
 func (s *Store) RegisterUser(ctx context.Context, email, passwordHash, inviteCode string) (*User, error) {
-	p := &User{Subject: ids.New(ids.User), Email: email, PasswordHash: passwordHash, Created: s.now().UTC()}
+	p := &User{Subject: ids.New(ids.User), Email: email, PasswordHash: passwordHash, Created: s.now().UTC(), Registered: true}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO users (subject, email, password_hash, created_at, confirmed, invite_code) VALUES (?, ?, ?, ?, 0, ?)`,
+		INSERT INTO users (subject, email, password_hash, created_at, confirmed, invite_code, registered)
+		VALUES (?, ?, ?, ?, 0, ?, 1)`,
 		p.Subject, p.Email, passwordHash, p.Created.Unix(), s.box.Seal([]byte(inviteCode), inviteContext(p.Subject)))
 	if err != nil && strings.Contains(err.Error(), "UNIQUE") {
 		return nil, ErrEmailTaken
