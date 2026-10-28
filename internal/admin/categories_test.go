@@ -16,7 +16,8 @@ func TestCategoriesPanel(t *testing.T) {
 	_, b, db, _ := signedInPanel(t)
 	// A new server, its library not read yet: every list is a list, as the
 	// panel's editor reads them.
-	if rec := b.do("GET", "/admin/api/categories", "", nil); rec.Code != 200 || strings.Contains(rec.Body.String(), "null") {
+	if rec := b.do("GET", "/admin/api/categories", "", nil); rec.Code != 200 || strings.Contains(rec.Body.String(), "null") ||
+		!strings.Contains(rec.Body.String(), `"defaultLanguage":"`) {
 		t.Errorf("empty server: %d %s", rec.Code, rec.Body)
 	}
 	db.PutCatalog(ctx, []store.CatalogItem{

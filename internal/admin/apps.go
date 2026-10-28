@@ -107,7 +107,7 @@ func (p *Panel) deleteAppKey(w http.ResponseWriter, r *http.Request, s *session)
 	id := r.PathValue("id")
 	switch err := p.Store.DeleteAppKey(r.Context(), id); {
 	case errors.Is(err, store.ErrNotFound):
-		writeJSON(w, http.StatusNotFound, map[string]string{"type": "not-found"})
+		notFound(w, "No such app key")
 		return
 	case err != nil:
 		p.fail(w, "revoking an app key", err)

@@ -69,6 +69,12 @@ func TestIdentification(t *testing.T) {
 	if o, _ := db.Overrides(ctx); len(o) != 0 {
 		t.Errorf("overrides left: %v", o)
 	}
+	// Not found, in words.
+	for _, path := range []string{"/admin/api/identification/not-an-id", "/admin/api/identification/" + strings.Repeat("f", 32)} {
+		if rec := b.do("DELETE", path, "", nil); rec.Code != 404 || !strings.Contains(rec.Body.String(), `"detail":"No such title in the libraries"`) {
+			t.Errorf("undo %s: %d %s", path, rec.Code, rec.Body)
+		}
+	}
 	for _, bad := range []struct{ path, body string }{
 		{"/admin/api/identification/" + id(1), `{"tmdb":"0"}`},
 		{"/admin/api/identification/" + id(1), `{"tmdb":"12a"}`},

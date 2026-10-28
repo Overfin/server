@@ -148,7 +148,7 @@ func (p *Panel) identify(w http.ResponseWriter, r *http.Request, s *session) {
 func (p *Panel) unidentify(w http.ResponseWriter, r *http.Request, s *session) {
 	id := r.PathValue("id")
 	if !itemIDPattern.MatchString(id) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"type": "not-found"})
+		notFound(w, "No such title in the libraries")
 		return
 	}
 	p.retitled(w, r, s, id, "", p.Store.ClearOverride(r.Context(), id))
@@ -157,7 +157,7 @@ func (p *Panel) unidentify(w http.ResponseWriter, r *http.Request, s *session) {
 func (p *Panel) retitled(w http.ResponseWriter, r *http.Request, s *session, id, tmdbID string, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		writeJSON(w, http.StatusNotFound, map[string]string{"type": "not-found"})
+		notFound(w, "No such title in the libraries")
 		return
 	case err != nil:
 		p.fail(w, "identifying a title", err)
@@ -180,12 +180,12 @@ func (p *Panel) retitled(w http.ResponseWriter, r *http.Request, s *session, id,
 func (p *Panel) poster(w http.ResponseWriter, r *http.Request, _ *session) {
 	ref, err := images.ParseArtwork(r.PathValue("id"))
 	if err != nil || ref.Type != "poster" || p.Images == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"type": "not-found"})
+		notFound(w, "No such poster")
 		return
 	}
 	data, contentType, err := p.Images.TMDB(r.Context(), ref, "small", func(context.Context) error { return nil })
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"type": "not-found"})
+		notFound(w, "No such poster")
 		return
 	}
 	w.Header().Set("Content-Type", contentType)

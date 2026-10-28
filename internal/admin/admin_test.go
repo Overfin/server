@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"math/big"
@@ -377,5 +378,16 @@ func TestPanelOnSite(t *testing.T) {
 		if rec.Code != 404 {
 			t.Errorf("private panel, from the internet: %d", rec.Code)
 		}
+	}
+}
+
+// Configuration errors reach admins in the panel's words: no "config:",
+// no keys, one sentence each.
+func TestInWords(t *testing.T) {
+	err := errors.Join(errors.New("config: limits.pin_attempts must be between 3 and 10"),
+		errors.New("config: limits.max_bitrate_kbps must not be negative"))
+	want := "Wrong PINs before a lock must be between 3 and 10. The bitrate cap must not be negative."
+	if got := inWords(err); got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

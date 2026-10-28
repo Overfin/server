@@ -95,7 +95,9 @@ func (p *Panel) categories(w http.ResponseWriter, r *http.Request, _ *session) {
 			bases = append(bases, b)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out, "librariesShown": shown, "languages": bases,
+	// defaultLanguage names each category in the list, as the site does
+	// for those who read the default.
+	writeJSON(w, http.StatusOK, map[string]any{"items": out, "librariesShown": shown, "languages": bases, "defaultLanguage": base(def),
 		"genres": gs, "originalLanguages": orEmpty(langs), "libraries": ls, "tags": orEmpty(tags)})
 }
 
