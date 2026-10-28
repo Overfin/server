@@ -207,6 +207,7 @@ func (s *socket) write(opcode byte, payload []byte) error {
 // read returns the next whole text message, answering pings on the way.
 func (s *socket) read() ([]byte, error) {
 	var msg []byte
+	started := false // a text frame came, its message not yet whole
 	for {
 		var head [2]byte
 		if _, err := io.ReadFull(s.r, head[:]); err != nil {
@@ -237,9 +238,22 @@ func (s *socket) read() ([]byte, error) {
 		if n > maxMessage || uint64(len(msg))+n > maxMessage {
 			return nil, errors.New("a message too large")
 		}
-		payload := make([]byte, n)
-		if _, err := io.ReadFull(s.r, payload); err != nil {
+		// Control frames are small and whole (RFC 6455, 5.5); a message's
+		// frames start with text and go on with continuations.
+		if opcode >= 0x8 && (n > 125 || !fin) {
+			return nil, errors.New("a malformed control frame")
+		}
+		if opcode < 0x8 && (opcode == 0x0) != started {
+			return nil, errors.New("a frame out of order")
+		}
+		// Read as it comes, not set aside at the size announced: a few
+		// bytes announcing 16 MB cost no more than they bring.
+		payload, err := io.ReadAll(io.LimitReader(s.r, int64(n)))
+		if err != nil {
 			return nil, err
+		}
+		if uint64(len(payload)) != n {
+			return nil, io.ErrUnexpectedEOF
 		}
 		switch opcode {
 		case 0x8: // close
@@ -253,7 +267,7 @@ func (s *socket) read() ([]byte, error) {
 		case 0xA: // pong
 			continue
 		case 0x1, 0x0: // text, continuation
-			msg = append(msg, payload...)
+			msg, started = append(msg, payload...), true
 		default: // binary, or unknown: Jellyfin sends neither
 			return nil, fmt.Errorf("an unexpected frame (opcode %d)", opcode)
 		}
