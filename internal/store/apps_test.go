@@ -38,7 +38,7 @@ func TestWatchStats(t *testing.T) {
 	for _, w := range all {
 		got[w.Kind+"/"+w.TMDB] = w
 	}
-	if w := got["series/1399"]; w.Plays != 3 || w.Viewers != 2 || w.Favorites != 1 || w.TVDB != "121361" || w.IMDb != "tt0944947" ||
+	if w := got["series/1399"]; w.Plays != 3 || w.Viewers != 2 || w.Favorites != 1 || w.FavoriteAccounts != 1 || w.TVDB != "121361" || w.IMDb != "tt0944947" ||
 		!w.LastPlayed.Equal(day.Add(time.Hour)) {
 		t.Errorf("series: %+v", w)
 	}

@@ -291,19 +291,21 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 
 // titleStats totals, per film and season, what every profile did: plays
 // to the end, viewers (accounts), favorites (profiles; a series' count for
-// each of its seasons), the day last played. Counts below 2 become 0.
+// each of its seasons), the day last played. Counts below 2 become 0, and
+// so do plays and favorites when fewer than two people account for them.
 func titleStats(f *store.ValuationFacts) map[string]*titleStatsJSON {
 	type total struct {
 		plays     int
 		viewers   map[string]bool
 		favorites int
+		fans      map[string]bool // the accounts behind favorites
 		last      time.Time
 	}
 	totals := map[string]*total{}
 	get := func(key string) *total {
 		t := totals[key]
 		if t == nil {
-			t = &total{viewers: map[string]bool{}}
+			t = &total{viewers: map[string]bool{}, fans: map[string]bool{}}
 			totals[key] = t
 		}
 		return t
@@ -336,16 +338,24 @@ func titleStats(f *store.ValuationFacts) map[string]*titleStatsJSON {
 		}
 	}
 	for _, fav := range f.Favorites {
+		p, known := f.Profiles[fav.ProfileID]
+		add := func(t *total) {
+			t.favorites++
+			if known {
+				t.fans[p.AccountID] = true
+			}
+		}
 		if f.Titles[fav.Title] != nil {
-			get(fav.Title).favorites++
+			add(get(fav.Title))
 		}
 		for _, key := range seasons[fav.Title] {
-			get(key).favorites++
+			add(get(key))
 		}
 	}
 	out := make(map[string]*titleStatsJSON, len(totals))
 	for key, t := range totals {
-		s := &titleStatsJSON{Plays: atLeast2(t.plays), Viewers: atLeast2(len(t.viewers)), Favorites: atLeast2(t.favorites)}
+		s := &titleStatsJSON{Plays: byTwo(t.plays, len(t.viewers)), Viewers: atLeast2(len(t.viewers)),
+			Favorites: byTwo(t.favorites, len(t.fans))}
 		if !t.last.IsZero() && len(t.viewers) >= 2 {
 			s.LastPlayed = t.last.UTC().Format(time.DateOnly)
 		}

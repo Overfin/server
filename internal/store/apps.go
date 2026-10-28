@@ -92,8 +92,9 @@ type WatchStats struct {
 	TMDB, IMDb, TVDB string
 	// Plays are the times it was played to the end; Viewers, the accounts
 	// that watched some of it; Favorites, the profiles that keep it as a
-	// favorite.
+	// favorite, and FavoriteAccounts, the accounts those profiles belong to.
 	Plays, Viewers, Favorites int
+	FavoriteAccounts          int
 	LastPlayed                time.Time // zero: never
 	Changed                   time.Time
 }
@@ -111,7 +112,7 @@ func (s *Store) AllWatchStats(ctx context.Context, since time.Time) ([]WatchStat
 	}
 	type total struct {
 		WatchStats
-		viewers map[string]bool
+		viewers, fans map[string]bool
 	}
 	byKey := map[string]*total{}
 	var order []string
@@ -134,7 +135,7 @@ func (s *Store) AllWatchStats(ctx context.Context, since time.Time) ([]WatchStat
 		key := top.Key()
 		t := byKey[key]
 		if t == nil {
-			t = &total{WatchStats: WatchStats{Kind: top.Kind}, viewers: map[string]bool{}}
+			t = &total{WatchStats: WatchStats{Kind: top.Kind}, viewers: map[string]bool{}, fans: map[string]bool{}}
 			if top.Source == "tmdb" {
 				t.TMDB = top.ID
 			}
@@ -147,6 +148,7 @@ func (s *Store) AllWatchStats(ctx context.Context, since time.Time) ([]WatchStat
 		}
 		if favorite == 1 && r.Kind == top.Kind {
 			t.Favorites++
+			t.fans[account] = true
 		}
 		if last > 0 && time.Unix(last, 0).After(t.LastPlayed) {
 			t.LastPlayed = time.Unix(last, 0).UTC()
@@ -179,7 +181,7 @@ func (s *Store) AllWatchStats(ctx context.Context, since time.Time) ([]WatchStat
 		if t.IMDb == "" && strings.HasPrefix(key, t.Kind+"/imdb/") {
 			t.IMDb = strings.TrimPrefix(key, t.Kind+"/imdb/")
 		}
-		t.Viewers = len(t.viewers)
+		t.Viewers, t.FavoriteAccounts = len(t.viewers), len(t.fans)
 		out = append(out, t.WatchStats)
 	}
 	return out, nil

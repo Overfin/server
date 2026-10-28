@@ -1280,7 +1280,7 @@ async function appsView() {
       h('td', { class: 'actions' }, revoke));
   });
   made.id = 'made-key';
-  show(pageHead('Apps', 'Other apps (Overtide…) can read each film\'s and season\'s value, how much it\'s watched (plays, viewers, favorites, the day last played) and whether the libraries have it, as each key allows. Totals per title only, never anything about a person; counts below 2 are given as 0.'),
+  show(pageHead('Apps', 'Other apps (Overtide…) can read each film\'s and season\'s value, how much it\'s watched (plays, viewers, favorites, the day last played) and whether the libraries have it, as each key allows. Totals per title only, never anything about a person; counts below 2 are given as 0, and so are plays and favorites unless two people account for them.'),
     made,
     card({ title: 'Keys' },
       h('div', { class: 'table-wrap' }, h('table', {},
