@@ -174,8 +174,8 @@ func TestSimilarTitles(t *testing.T) {
 	}
 }
 
-// Recommendations follow what the profile watches; kids titles come with
-// the switch (the account's wish until the profile chooses).
+// Recommendations follow what the profile watches; children's content
+// comes with the profile's own "Contenu pour enfants".
 func TestRecommended(t *testing.T) {
 	var st *store.Store
 	srv, _ := newServerWith(t, options{store: &st})
@@ -228,15 +228,12 @@ func TestRecommended(t *testing.T) {
 	if got := names(); !slices.Contains(got, "Bluey film") {
 		t.Errorf("with the switch on: %v", got)
 	}
-	// An account with a kids profile wants them, until the profile says no.
+	// A kids profile in the account changes nothing for the others' own
+	// recommendations: only their own "Contenu pour enfants" does.
 	put(t, srv, "PATCH", "/api/v1/profiles/"+owner, `{"kidsTitles":null}`)
 	post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","maxAge":8}`)
-	if got := names(); !slices.Contains(got, "Bluey film") {
-		t.Errorf("with a kids profile: %v", got)
-	}
-	put(t, srv, "PATCH", "/api/v1/profiles/"+owner, `{"kidsTitles":false}`)
 	if got := names(); slices.Contains(got, "Bluey film") {
-		t.Errorf("opted out: %v", got)
+		t.Errorf("with a kids profile, switch off: %v", got)
 	}
 	if code := get(t, srv, "/api/v1/titles/recommended?scope=recent", nil); code != 200 {
 		t.Errorf("recent: %d", code)

@@ -353,9 +353,11 @@ func tastes(f *store.ValuationFacts, views map[string]map[string]float64, active
 			}
 		}
 	}
+	// An account wants children's content when it has a kids profile, or
+	// another of its profiles set "Contenu pour enfants".
 	kidsProfile := map[string]bool{}
 	for _, p := range f.Profiles {
-		if p.Active && p.Kids {
+		if p.Active && (p.Kids || p.ChildrensContent) {
 			kidsProfile[p.AccountID] = true
 		}
 	}
@@ -380,7 +382,7 @@ func tastes(f *store.ValuationFacts, views map[string]map[string]float64, active
 		for _, g := range said.Genres {
 			liked[g] = true
 		}
-		if said.Kids || kidsProfile[account] {
+		if kidsProfile[account] {
 			for _, g := range kidsGenres {
 				liked[g] = true
 			}

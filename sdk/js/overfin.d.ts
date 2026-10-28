@@ -32,14 +32,13 @@ export interface Profile {
   kind: 'standard' | 'kids' | string;
   owner: boolean;
   hasPin: boolean;
-  /** A kids profile's highest allowed certifications, for films and series. */
   /** A kids profile's age: it sees titles for that age at most, films and series alike (since 0.6). */
   maxAge?: number;
   /** A kids profile without an age yet: it sees nothing until its owner picks one. */
   ageNeeded?: boolean;
   /** The only categories it sees, when it's limited to some (since 0.6). */
   categories?: string[];
-  /** Whether it wants kids titles in its recommendations; absent, as its account does (since 0.6). */
+  /** "Contenu pour enfants": its recommendations include children's content (since 0.6). */
   kidsTitles?: boolean;
   /** The only libraries the profile gets (their IDs); absent, every library. */
   libraries?: string[];
@@ -86,7 +85,6 @@ export interface Tastes {
   prefer?: 'series' | 'movies' | 'both';
   /** TMDB genre IDs. */
   genres: number[];
-  kids: boolean;
   updatedAt?: string;
 }
 
@@ -94,7 +92,7 @@ export interface TastesPage extends Tastes {
   answered: boolean;
   /** The genres to choose among, named in the server's language. */
   choices: { id: number; name: string }[];
-  /** The account has a kids profile: it gets kids' content without saying so. */
+  /** The account has a kids profile: it counts as wanting children's content. */
   kidsProfile: boolean;
 }
 
@@ -387,7 +385,7 @@ export class Overfin {
   setLanguage(language: string): Promise<Me>;
   /** Owner profile only, when the operator asks accounts what they like. */
   tastes(): Promise<TastesPage>;
-  setTastes(tastes: { prefer?: 'series' | 'movies' | 'both'; genres?: number[]; kids?: boolean }): Promise<Tastes>;
+  setTastes(tastes: { prefer?: 'series' | 'movies' | 'both'; genres?: number[] }): Promise<Tastes>;
   /** Migration only: whether the active profile may bring its history. */
   historyCopy(): Promise<{ available: boolean }>;
   copyHistory(username: string, password: string): Promise<void>;
