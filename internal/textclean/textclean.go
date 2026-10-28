@@ -15,11 +15,13 @@ import (
 // collapses runs of whitespace (keeping paragraph breaks), and cuts the
 // result to at most max bytes without splitting a character.
 func Plain(s string, max int) string {
-	s = stripTags(s)
+	// Invisible characters go before tags are looked for: dropped later,
+	// "<\u202Escript>" would close up into "<script>".
+	s = stripTags(dropInvisible(s))
 	s = html.UnescapeString(s) // &amp; becomes &, after the tags are gone
 	// Again: "&lt;script&gt;" decodes to a tag, which a careless site
 	// rendering text as HTML would run.
-	s = stripTags(s)
+	s = stripTags(dropInvisible(s))
 
 	var b strings.Builder
 	space, newlines := false, 0
@@ -78,6 +80,16 @@ func stripTags(s string) string {
 func startsTag(rest string) bool {
 	r, _ := utf8.DecodeRuneInString(rest)
 	return unicode.IsLetter(r) || r == '/' || r == '!' || r == '?'
+}
+
+// dropInvisible removes direction controls and invalid UTF-8.
+func dropInvisible(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == utf8.RuneError || isBidiControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // isBidiControl reports the invisible characters that change text direction
