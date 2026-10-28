@@ -85,6 +85,16 @@ func TestLibraries(t *testing.T) {
 		t.Fatalf("before signing in: %d", rec.Code)
 	}
 	signIn(t, b, idp, []string{"overfin-admins"})
+	// None yet, and one Jellyfin lists without folders: lists, as the
+	// panel reads them.
+	if rec := b.do("GET", "/admin/api/libraries", "", nil); rec.Body.String() != `{"items":[]}`+"\n" {
+		t.Errorf("no library: %s", rec.Body)
+	}
+	libs.libs = []MediaLibrary{{Name: "Empty", Kind: "films"}}
+	if rec := b.do("GET", "/admin/api/libraries", "", nil); !strings.Contains(rec.Body.String(), `"folders":[]`) {
+		t.Errorf("no folder: %s", rec.Body)
+	}
+	libs.libs = nil
 
 	for body, want := range map[string]string{
 		`{"name":"","kind":"films","folders":["/media/films"]}`:            "1 to 100 characters",

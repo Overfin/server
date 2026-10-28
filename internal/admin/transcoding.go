@@ -37,6 +37,19 @@ type GPUTest struct {
 	Error   string       `json:"error,omitempty"`
 }
 
+// gpuTestOf is a test as the panel reads it: before any, one not running;
+// its results a list, even empty.
+func gpuTestOf(t *GPUTest) GPUTest {
+	var out GPUTest
+	if t != nil {
+		out = *t
+	}
+	if out.Results == nil {
+		out.Results = []gpu.Result{}
+	}
+	return out
+}
+
 // renderDevice is a GPU's render device on Linux.
 var renderDevice = regexp.MustCompile(`^/dev/dri/renderD[0-9]{3}$`)
 
@@ -93,7 +106,7 @@ func (p *Panel) testTranscoding(w http.ResponseWriter, r *http.Request, s *sessi
 		return
 	}
 	p.Logger.Info("a GPU is being tested in the control panel", "gpu", f.ID, "by", s.logID)
-	writeJSON(w, http.StatusAccepted, p.Transcoding.TranscodingTest())
+	writeJSON(w, http.StatusAccepted, gpuTestOf(p.Transcoding.TranscodingTest()))
 }
 
 // transcodingTest is how the last test went, or goes.
@@ -102,7 +115,7 @@ func (p *Panel) transcodingTest(w http.ResponseWriter, r *http.Request, s *sessi
 		http.NotFound(w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, p.Transcoding.TranscodingTest())
+	writeJSON(w, http.StatusOK, gpuTestOf(p.Transcoding.TranscodingTest()))
 }
 
 func (p *Panel) setTranscoding(w http.ResponseWriter, r *http.Request, s *session) {
