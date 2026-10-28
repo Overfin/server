@@ -162,6 +162,9 @@ type TitleInfo struct {
 	// a season or an episode): the most mature of its releases'; "" when it
 	// has none there.
 	Certification string
+	// Age is its age as Overfin works it out from its ratings (TitleAge;
+	// its series', for a season or an episode); nil when unknown.
+	Age *int
 	// Score is TMDB's users' rating of a film or a series, 0 to 10, from
 	// Votes of them; 0 when it has none.
 	Score float64
@@ -205,6 +208,9 @@ func (s *Store) TitleInfos(ctx context.Context, keys []string, today, language s
 				kind = "series"
 			}
 			if t.Certification, err = s.certification(ctx, kind, tmdb, country); err != nil {
+				return nil, err
+			}
+			if t.Age, err = s.titleAge(ctx, kind, tmdb); err != nil {
 				return nil, err
 			}
 		}
@@ -609,6 +615,19 @@ func (s *Store) certification(ctx context.Context, kind, tmdb, country string) (
 		return "", nil
 	}
 	return c, err
+}
+
+// titleAge is a film's or a series' age (title_ages), nil when unknown.
+func (s *Store) titleAge(ctx context.Context, kind, tmdb string) (*int, error) {
+	var age int
+	err := s.db.QueryRowContext(ctx, `SELECT age FROM title_ages WHERE kind = ? AND tmdb = ?`, kind, tmdb).Scan(&age)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &age, nil
 }
 
 // LibraryTitleKeys lists the titles the libraries have, by key: films,

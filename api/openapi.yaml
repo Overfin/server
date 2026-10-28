@@ -3950,6 +3950,17 @@ components:
           description: >-
             Its rating in the server's ratings country, the most mature of
             its releases' there (its series', for a season or an episode).
+            Kept for older clients; `age` says the same for everyone.
+        age:
+          type: integer
+          minimum: 0
+          description: >-
+            Its age: the youngest age it's for, as Overfin works it out from
+            its ratings (the ratings country's when it has one there, else
+            the middle of the other countries'), the same scale kids
+            profiles go by; its series', for a season or an episode. Absent
+            when unknown. Since 0.6.
+          examples: [12]
         ratings:
           type: array
           description: >-
