@@ -39,9 +39,12 @@ identity provider: see [Running it](#running-it).
 - **Signing in with their email** and a password. No Jellyfin account, no
   app to install.
 - **Profiles**, each with its own history and an optional PIN. **Kids
-  profiles** see only titles rated within their limits, on real age
-  ratings from TMDB for the country you choose: everything else is hidden
-  everywhere, not just greyed out, and can't be played.
+  profiles** see only titles for their age, which the account's owner
+  sets: a title's age comes from TMDB's ratings, those of the country you
+  choose first, else the middle of other countries'. Everything else is
+  hidden everywhere, not just greyed out, and can't be played. The owner
+  can also keep any profile to some categories or libraries, or hide tags
+  from it.
 - **A catalog that looks the part**: posters, logos and backdrops from
   TMDB, cast pages, users' scores, search, trending and upcoming titles. A
   title your libraries don't have can be requested (with Seerr).
@@ -52,8 +55,14 @@ identity provider: see [Running it](#running-it).
 - **Their language and their look**: each account picks its language among
   those you offer (the site, titles' names and synopses, emails), and each
   profile light, dark, or the device's.
-- **Continue watching, a watchlist, favorites and watched marks** per
-  profile; and the right to download what's kept about them, or delete it.
+- **Recommendations** for each profile on the home page, from what it
+  watches and what its account said it likes, and **similar titles** on
+  each title's page. Children's content shows in a profile's
+  recommendations only when it's a kids profile or chose it ("Content for
+  children").
+- **Continue watching, a list (with a page of its own), favorites and
+  watched marks** per profile; and the right to download what's kept about
+  them, or delete it.
 
 **For you, running it**
 
@@ -64,13 +73,16 @@ identity provider: see [Running it](#running-it).
 - **A setup wizard**, one step at a time: the default language, TMDB,
   Intro Skipper, Seerr, and you, its first admin.
 - **Categories** of your own (Films, Series, Anime, Kids…), made from
-  rules (genres, language, library, tags, ratings), each in the site's
-  menu with its page, and on the home page if you like; the libraries can
-  leave the menu.
+  rules (films or series, genres, original language, library, tags, for
+  ages up to, except other categories), each in the site's menu with its
+  page, and on the home page if you like; the libraries can leave the
+  menu. A template, or an account's owner, can keep profiles to some
+  categories.
 - **A control panel**: what's playing now (and stopping it), people and
   their accounts, notices (an account made, access ending, by email or
-  webhook), invitations, templates (how many streams and profiles an account gets, and whether each profile
-  keeps a stream of its own), limits, languages,
+  webhook), invitations, templates (how many streams and profiles an
+  account gets, whether each profile keeps a stream of its own, and the
+  categories its profiles see), limits, languages,
   libraries, the GPU that converts videos (tested on your own files),
   seek-bar previews (off by default: they take time and disk space), email, Seerr, fixing titles Jellyfin matched wrong, what each title is
   worth to your server (Valuation).
@@ -122,9 +134,8 @@ yet.
 The main gaps (details in [ROADMAP.md](ROADMAP.md)):
 
 - TV and phone apps, and a sign-in for native apps.
-- A live view of who's watching.
-- Emails beyond accounts (confirming an address, a new password and
-  invitations are there).
+- Emails beyond accounts (confirming an address, a new password,
+  invitations and notices about accounts are there).
 - SDKs other than JavaScript.
 
 The API specification also describes endpoints that aren't served yet; they
@@ -387,6 +398,64 @@ Overfin's are the place to start, at the release you run:
   the log, and Overfin's is used instead. The panel's Emails card says
   whose each one is, and sends you a sample.
 
+### Notices
+
+Overfin can tell you about accounts: one made, one whose access ends soon,
+one whose access ended. Never what anyone watches. All off until you
+switch them on in the control panel (People, Notices): tick the events,
+how many days before an end date to tell (7 by default), and where they
+go: the admins' email, a webhook, or both. "Email the person" also warns
+someone, in their language, before their access ends. Emails need
+Overfin's own sign-in and an email server (Server, Email). "Send a test"
+sends one where the page says, saved or not. End dates are checked every
+hour; a notice about one is sent once per end date, and one that fails is
+logged, not sent again.
+
+The webhook gets a JSON `POST` (no redirects followed, 10 seconds at most),
+with the event in an `X-Overfin-Event` header too:
+
+```json
+{"event": "account.expiring",
+ "content": "…", "text": "…", "allowed_mentions": {"parse": []},
+ "account": {"id": "acct_…", "name": "…"},
+ "expiresAt": "2026-11-30T00:00:00Z", "at": "2026-11-23T14:00:00Z"}
+```
+
+`event` is `account.joined`, `account.expiring`, `account.expired`, or
+`test` (with no `account`). `content` and `text` are the notice in words,
+what Discord's and Slack's webhooks show, so their webhook addresses work
+as they are; `allowed_mentions` keeps Discord from pinging anyone.
+`account.name` is the label you gave the account, else the person's email
+(with Overfin's own sign-in), else its owner profile's name. `expiresAt`
+is there when the account has an end date.
+
+**Signing**: "Sign the posts" makes a key, shown once. Each post then
+carries `X-Overfin-Signature: sha256=` and the HMAC-SHA256 of the body, in
+hex, with that key (the bytes its hex stands for). Check it against the
+body exactly as received. In a shell, with the body in `body.json`:
+
+```sh
+KEY=…   # the key the panel showed
+echo "sha256=$(openssl dgst -sha256 -mac HMAC -macopt hexkey:$KEY < body.json | sed 's/.*= //')"
+```
+
+In Go:
+
+```go
+func signed(body []byte, header, key string) bool {
+	k, err := hex.DecodeString(key)
+	if err != nil {
+		return false
+	}
+	mac := hmac.New(sha256.New, k)
+	mac.Write(body)
+	want := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(header), []byte(want))
+}
+```
+
+"Make a new key" replaces it: the old one stops matching at once.
+
 ### Moving people over from Jellyfin
 
 Switch migration on in the control panel and give it your other Jellyfin's
@@ -424,7 +493,7 @@ how to get one), given in the wizard, the control panel (Server, TMDB) or
 `OVERFIN_TMDB_TOKEN`. No token is shipped with Overfin: each server uses
 its own. For now, Overfin can't do without one: titles show with no name
 or picture, Home stays empty, there's no discovery, and kids profiles see
-nothing, since their limits need TMDB's age ratings. Running on what
+nothing, since titles' ages come from TMDB's ratings. Running on what
 Jellyfin knows alone is planned.
 
 Overfin asks TMDB by itself, by title, never saying who's asking; browsers
@@ -547,7 +616,9 @@ routes.
 Useful to know: `overfin -check` tests the configuration and what it points
 to (the secret key, Jellyfin, the identity provider) and says in plain words
 what's wrong, changing nothing; `SIGHUP` reloads the configuration without dropping
-playbacks; `-recover-tokens` gets you going again if the secret key is lost
+playbacks; API requests that take over 300 ms (streams aside) are logged (`a slow request`,
+with the route's pattern and the time only, never who asked or for what),
+to see where speed is lost; `-recover-tokens` gets you going again if the secret key is lost
 (PINs and logins are reset, history is kept; TMDB's token, Seerr's key and
 the SMTP password set in the panel are given again there, and pending
 registrations start over). It asks you to hand Overfin's Jellyfin over
