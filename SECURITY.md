@@ -497,7 +497,8 @@ comes from the internet, and media files can be written by anyone.
     week is deleted. Forms anyone can send first solve a check against
     scripts (a signed challenge, used once, within 10 minutes, whose SHA-256
     with the answer starts with 17 zero bits), and tries are limited per IP
-    address and per email. Wrong passwords are limited per email and
+    address (an IPv6 /64 counting as one) and per email, in memory of
+    bounded size. Wrong passwords are limited per email and
     client address, so someone else's guesses never lock a person out,
     with a much higher cap per email from anywhere. The links Overfin emails carry 256 random bits
     and work once (confirming an address within a day, choosing a new

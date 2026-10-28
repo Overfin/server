@@ -1,6 +1,7 @@
 package api
 
 import (
+	"container/list"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -764,7 +765,7 @@ func (m *Managed) freshUser(w http.ResponseWriter, r *http.Request) (*store.Logi
 // rate limit.
 func (m *Managed) read(w http.ResponseWriter, r *http.Request) (signinRequest, bool) {
 	var req signinRequest
-	if !m.byIP.allow(identity.ClientIP(r.Context()).String(), time.Now()) {
+	if !m.byIP.allow(clientFrom(identity.ClientIP(r.Context())), time.Now()) {
 		m.refuse(w, r, problem.RateLimited, "tooManyTries")
 		return req, false
 	}
@@ -1047,45 +1048,76 @@ func pageLang(r *http.Request, st *store.Store) string {
 	return "en"
 }
 
-// windowLimiter allows each key max events per window.
+// limiterKeys caps how many keys a windowLimiter keeps. Past it, the key
+// quiet for longest is forgotten: a flood of new keys (from many IPv6
+// networks, say) can't grow memory or slow every call, and it never
+// refuses a newcomer, which would lock everyone out during one.
+const limiterKeys = 10_000
+
+// windowLimiter allows each key max events per window. Keys are kept in
+// the order of their last event, oldest first, so those quiet for a whole
+// window are forgotten from the front, without looking at the others.
 type windowLimiter struct {
 	max    int
 	window time.Duration
 	mu     sync.Mutex
-	recent map[string][]time.Time
+	keys   map[string]*list.Element // of *limited, in order
+	order  list.List
+}
+
+// limited is one key's events within the window, oldest first.
+type limited struct {
+	key    string
+	events []time.Time
 }
 
 // forget clears key's tries.
 func (l *windowLimiter) forget(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	delete(l.recent, key)
+	if e, ok := l.keys[key]; ok {
+		l.order.Remove(e)
+		delete(l.keys, key)
+	}
 }
 
 func (l *windowLimiter) allow(key string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.recent == nil {
-		l.recent = map[string][]time.Time{}
+	if l.keys == nil {
+		l.keys = map[string]*list.Element{}
 	}
-	kept := l.recent[key][:0]
-	for _, t := range l.recent[key] {
+	// Forget the keys quiet for a window: they're at the front.
+	for e := l.order.Front(); e != nil; e = l.order.Front() {
+		k := e.Value.(*limited)
+		if now.Sub(k.events[len(k.events)-1]) < l.window {
+			break
+		}
+		l.order.Remove(e)
+		delete(l.keys, k.key)
+	}
+	e, ok := l.keys[key]
+	if !ok {
+		if len(l.keys) >= limiterKeys {
+			oldest := l.order.Front()
+			l.order.Remove(oldest)
+			delete(l.keys, oldest.Value.(*limited).key)
+		}
+		e = l.order.PushBack(&limited{key: key})
+		l.keys[key] = e
+	}
+	k := e.Value.(*limited)
+	kept := k.events[:0]
+	for _, t := range k.events {
 		if now.Sub(t) < l.window {
 			kept = append(kept, t)
 		}
 	}
+	k.events = kept
 	if len(kept) >= l.max {
-		l.recent[key] = kept
 		return false
 	}
-	l.recent[key] = append(kept, now)
-	// Forget quiet keys now and then.
-	if len(l.recent) > 10_000 {
-		for k, times := range l.recent {
-			if len(times) == 0 || now.Sub(times[len(times)-1]) >= l.window {
-				delete(l.recent, k)
-			}
-		}
-	}
+	k.events = append(kept, now)
+	l.order.MoveToBack(e)
 	return true
 }
