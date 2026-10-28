@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Plugin is one feature of the gateway, such as library browsing or playback.
@@ -34,6 +35,10 @@ type Registrar struct {
 	nav     map[string]bool   // paths registered with HandleNavigation
 	codes   map[string]bool   // their prefixes, for those ending in a code
 	cross   map[string]bool   // paths registered with HandleCrossSite
+	// Slow, when set, is told of every request a route took longer than
+	// SlowAfter to answer, by its pattern (streams aside: they last).
+	Slow      func(pattern string, took time.Duration)
+	SlowAfter time.Duration
 }
 
 // NewRegistrar returns a Registrar that adds routes to mux, wrapping every
@@ -158,8 +163,23 @@ func (r *Registrar) add(pattern string, h http.Handler, public bool) error {
 	}
 	r.routes[pattern] = r.owner
 	r.public[pattern] = public
-	r.mux.Handle(pattern, h)
+	r.mux.Handle(pattern, r.timed(pattern, h))
 	return nil
+}
+
+// timed tells Slow of the requests h answers slowly.
+func (r *Registrar) timed(pattern string, h http.Handler) http.Handler {
+	if r.Slow == nil || strings.Contains(pattern, "/stream/") {
+		return h
+	}
+	slow, after := r.Slow, r.SlowAfter
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		start := time.Now()
+		h.ServeHTTP(w, req)
+		if took := time.Since(start); took > after {
+			slow(pattern, took)
+		}
+	})
 }
 
 // IsPublic reports whether pattern was registered with HandlePublic.
