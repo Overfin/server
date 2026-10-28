@@ -376,6 +376,8 @@ func (p *Provider) verify(ctx context.Context, m *metadata, token, nonce string)
 		return nil, fmt.Errorf("oidc: token issued by %q, expected %q", c.Iss, m.Issuer)
 	case !slices.Contains(aud, p.ClientID), len(aud) > 1 && c.Azp != p.ClientID:
 		return nil, errors.New("oidc: token is for another client")
+	case !sane(c.Exp) || !sane(c.Iat) || !sane(c.AuthTime):
+		return nil, errors.New("oidc: a time in the token is out of range")
 	case c.Exp == nil || now.After(time.Unix(*c.Exp, 0).Add(skew)):
 		return nil, errors.New("oidc: token expired")
 	case c.Iat == nil || time.Unix(*c.Iat, 0).After(now.Add(skew)):
@@ -384,6 +386,8 @@ func (p *Provider) verify(ctx context.Context, m *metadata, token, nonce string)
 		return nil, errors.New("oidc: wrong nonce")
 	case nonce != "" && c.AuthTime == nil:
 		return nil, errors.New("oidc: no login time in token")
+	case c.AuthTime != nil && time.Unix(*c.AuthTime, 0).After(now.Add(skew)):
+		return nil, errors.New("oidc: login time in the future")
 	case c.Sub == "":
 		return nil, errors.New("oidc: no subject")
 	}
@@ -498,4 +502,10 @@ func (p *Provider) key(ctx context.Context, m *metadata, kid string) (crypto.Pub
 		return k, nil
 	}
 	return nil, errors.New("oidc: unknown signing key")
+}
+
+// sane says whether a token's time, when there, is one time.Unix reads as
+// it is: after 1970 and before the year 36,000, not one that wraps around.
+func sane(t *int64) bool {
+	return t == nil || (*t > 0 && *t < 1<<40)
 }

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -147,6 +148,8 @@ func TestExchange(t *testing.T) {
 		"no login time":   func(c map[string]any) { delete(c, "auth_time") },
 		"no subject":      func(c map[string]any) { c["sub"] = "" },
 		"issued in later": func(c map[string]any) { c["iat"] = now.Add(time.Hour).Unix() },
+		"iat wrapping":    func(c map[string]any) { c["iat"] = int64(math.MaxInt64) },
+		"login later":     func(c map[string]any) { c["auth_time"] = now.Add(time.Hour).Unix() },
 	}
 	for name, change := range bad {
 		c := f.claims(now)
