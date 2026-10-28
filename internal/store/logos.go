@@ -33,9 +33,9 @@ func (s *Store) TextLanguages(ctx context.Context, kind, tmdb string) ([]string,
 // SetCheckedLogo keeps a title's logos as checked, and takes it off the
 // list, at once: logo is its logo in the default language ("" when TMDB
 // has none: the one kept is deleted, and its name is shown instead);
-// others, its logo in other languages its texts are kept in. Only logos
-// already kept are changed: a title whose artwork was deleted meanwhile
-// gets none back.
+// others, its logo in other languages its texts are kept in. A title whose
+// artwork is kept gets its logo even if it had none; one whose artwork was
+// deleted meanwhile gets none back.
 func (s *Store) SetCheckedLogo(ctx context.Context, t ArtworkTarget, logo string, others map[string]string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -45,7 +45,9 @@ func (s *Store) SetCheckedLogo(ctx context.Context, t ArtworkTarget, logo string
 	if logo == "" {
 		_, err = tx.ExecContext(ctx, `DELETE FROM artwork WHERE key = ? AND type = 'logo'`, t.Key())
 	} else {
-		_, err = tx.ExecContext(ctx, `UPDATE artwork SET path = ? WHERE key = ? AND type = 'logo'`, logo, t.Key())
+		_, err = tx.ExecContext(ctx, `INSERT INTO artwork (key, type, path)
+			SELECT ?, 'logo', ? WHERE EXISTS (SELECT 1 FROM artwork_fetched WHERE key = ?)
+			ON CONFLICT (key, type) DO UPDATE SET path = excluded.path`, t.Key(), logo, t.Key())
 	}
 	if err != nil {
 		return err

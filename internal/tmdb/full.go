@@ -60,17 +60,6 @@ type Full struct {
 // maxNames caps how many other names a title keeps.
 const maxNames = 60
 
-// imageLanguages is which images to ask for: those in the language (TMDB
-// files images under the two-letter code), those without text, and English
-// ones.
-func imageLanguages(lang string) string {
-	lang, _, _ = strings.Cut(lang, "-")
-	if lang != "" && lang != "en" {
-		return lang + ",null,en"
-	}
-	return "null,en"
-}
-
 // Title returns everything about a film ("movie") or a series ("series"),
 // in the client's language.
 func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, error) {
@@ -132,7 +121,7 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 	if kind == "series" {
 		extra = "aggregate_credits,images,alternative_titles,translations,content_ratings,external_ids,recommendations"
 	}
-	q := c.withLanguage(url.Values{"append_to_response": {extra}, "include_image_language": {imageLanguages(lang)}})
+	q := c.withLanguage(url.Values{"append_to_response": {extra}, "include_image_language": {c.imageLanguages(lang, true)}})
 	path := "/" + k + "/" + strconv.Itoa(tmdbID)
 	if err := c.get(ctx, path, q, &raw); err != nil {
 		return nil, err
@@ -219,7 +208,12 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 		add(tr.Data.Name)
 	}
 	// The poster TMDB picks for the language, else the best one listed.
-	out.Artwork = Artwork{Poster: t.Poster, Backdrop: t.Backdrop, Logo: pickLogo(raw.Images.Logos, lang)}
+	out.Artwork = Artwork{Poster: t.Poster, Backdrop: t.Backdrop, Logo: pickLogo(raw.Images.Logos, lang, c.languages()...)}
+	if out.Artwork.Logo == "" {
+		// None in the languages asked: one in its original language. A
+		// failure leaves it without: its name is shown, until next time.
+		out.Artwork.Logo, _ = c.originalLogo(ctx, path, lang, t.Language)
+	}
 	if out.Artwork.Poster == "" {
 		out.Artwork.Poster = pick(raw.Images.Posters, lang)
 	}
