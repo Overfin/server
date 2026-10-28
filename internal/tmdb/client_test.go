@@ -33,13 +33,20 @@ func fakeTMDB(t *testing.T) *Client {
 			io.WriteString(w, `{"page":1,"total_pages":3,"results":[{"id":680,"title":"Pulp Fiction"},{"id":1399,"media_type":"tv","name":"A series"}]}`)
 		case "/3/discover/tv":
 			q := r.URL.Query()
+			if q.Has("first_air_date.gte") {
+				// Upcoming series: those starting today (UTC) or later.
+				if q.Get("first_air_date.gte") != time.Now().UTC().Format(time.DateOnly) || q.Get("sort_by") != "popularity.desc" || q.Get("page") != "2" {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				io.WriteString(w, `{"page":2,"total_pages":2,"results":[{"id":1399,"name":"Thrones","first_air_date":"2011-04-17"}]}`)
+				return
+			}
 			if q.Get("with_genres") != "18" || q.Get("sort_by") != "popularity.desc" || q.Get("vote_count.gte") != "50" || q.Get("page") != "2" {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 			io.WriteString(w, `{"page":2,"total_pages":2,"results":[{"id":1399,"name":"Thrones"}]}`)
-		case "/3/tv/on_the_air":
-			io.WriteString(w, `{"page":2,"total_pages":2,"results":[{"id":1399,"name":"Thrones","first_air_date":"2011-04-17"}]}`)
 		case "/3/movie/949":
 			if r.URL.Query().Get("append_to_response") != "credits,release_dates" {
 				w.WriteHeader(http.StatusBadRequest)
