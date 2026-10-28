@@ -207,8 +207,9 @@ func (s *Sessions) setCookie(w http.ResponseWriter, r *http.Request, token strin
 
 func clearCookie(w http.ResponseWriter, r *http.Request) { cookie.Clear(w, r, CookieName) }
 
-// deviceName summarizes a User-Agent as "Browser on System". Only this
-// summary is stored, never the User-Agent itself (rule 40).
+// deviceName summarizes a User-Agent as "Browser · System", with no word
+// of any language. Only this summary is stored, never the User-Agent
+// itself (rule 40).
 func deviceName(ua string) string {
 	browser := ""
 	switch {
@@ -240,7 +241,7 @@ func deviceName(ua string) string {
 	}
 	switch {
 	case browser != "" && system != "":
-		return browser + " on " + system
+		return browser + " · " + system
 	case browser != "":
 		return browser
 	case system != "":
