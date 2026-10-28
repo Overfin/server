@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestCheckPattern(t *testing.T) {
@@ -105,5 +106,23 @@ func TestNavigationCodes(t *testing.T) {
 		if r.IsNavigation(path) != want {
 			t.Errorf("IsNavigation(%s) = %v", path, !want)
 		}
+	}
+}
+
+// Slow requests are told by route, streams aside.
+func TestSlowRequests(t *testing.T) {
+	mux := http.NewServeMux()
+	reg := NewRegistrar(mux, func(h http.Handler) http.Handler { return h })
+	var told []string
+	reg.Slow, reg.SlowAfter = func(pattern string, _ time.Duration) { told = append(told, pattern) }, 5*time.Millisecond
+	slow := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { time.Sleep(10 * time.Millisecond) })
+	reg.HandlePublic("GET /api/v1/slow/{id}", slow)
+	reg.HandlePublic("GET /api/v1/stream/{ticket}/file", slow)
+	reg.HandlePublic("GET /api/v1/fast", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	for _, path := range []string{"/api/v1/slow/secret-title", "/api/v1/stream/t/file", "/api/v1/fast"} {
+		mux.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", path, nil))
+	}
+	if len(told) != 1 || told[0] != "GET /api/v1/slow/{id}" {
+		t.Errorf("told: %v", told)
 	}
 }

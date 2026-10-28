@@ -8,12 +8,16 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/overfin/server/internal/identity"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/theme"
 )
+
+// slowAfter is how long a request may take before it's logged as slow.
+const slowAfter = 300 * time.Millisecond
 
 // maxBodyBytes caps request bodies. The API takes small JSON bodies only.
 const maxBodyBytes = 64 << 10 // 64 KiB
@@ -25,6 +29,12 @@ const maxBodyBytes = 64 << 10 // 64 KiB
 func New(logger *slog.Logger, identify func(http.Handler) http.Handler, site http.Handler, plugins ...plugin.Plugin) (http.Handler, error) {
 	mux := http.NewServeMux()
 	reg := plugin.NewRegistrar(mux, requireIdentity)
+	// Which routes are slow, to know where speed is lost: the route alone,
+	// never who asked or for what (rule 54).
+	reg.SlowAfter = slowAfter
+	reg.Slow = func(pattern string, took time.Duration) {
+		logger.Info("a slow request", "route", pattern, "ms", took.Milliseconds())
+	}
 
 	if err := reg.HandlePublic("GET /api/v1/health", http.HandlerFunc(health)); err != nil {
 		return nil, err
