@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -848,5 +849,23 @@ func TestSigninLimitPerClient(t *testing.T) {
 	}
 	if c := try("a long password 1", "198.51.100.7"); c != 200 {
 		t.Errorf("Ann from her own address: %d", c)
+	}
+}
+
+// The pages' limit per address counts an IPv6 /64 as one address: one
+// connection usually gets a whole /64 to pick from.
+func TestSigninLimitPerNetwork(t *testing.T) {
+	srv, _ := newServerWith(t, options{managed: true})
+	b := newBrowser(srv)
+	for i := range 20 {
+		if c, _ := signinPostFrom(t, b, srv, "/api/v1/signin", map[string]any{}, fmt.Sprintf("2001:db8:1:2::%x", i+1)); c != 400 {
+			t.Fatalf("try %d: %d", i+1, c)
+		}
+	}
+	if c, _ := signinPostFrom(t, b, srv, "/api/v1/signin", map[string]any{}, "2001:db8:1:2:ffff::1"); c != 429 {
+		t.Errorf("another address of the same /64: %d", c)
+	}
+	if c, _ := signinPostFrom(t, b, srv, "/api/v1/signin", map[string]any{}, "2001:db8:1:3::1"); c != 400 {
+		t.Errorf("another /64: %d", c)
 	}
 }

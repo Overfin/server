@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http/httptest"
+	"net/netip"
 	"testing"
 	"time"
 )
@@ -81,5 +82,54 @@ func TestPasswordTries(t *testing.T) {
 	}
 	if !m.mayTry("ann@example.org", "203.0.113.1", now.Add(15*time.Minute)) {
 		t.Error("still refused a quarter hour later")
+	}
+}
+
+// A flood of addresses, each in its own IPv6 /64, keeps the per-address
+// limit fast and its memory bounded; one /64 counts as one address.
+func TestLimiterFlood(t *testing.T) {
+	m := &Managed{}
+	m.init()
+	now := time.Now()
+	addr := func(network, host uint64) netip.Addr {
+		var b [16]byte
+		b[0], b[1] = 0x20, 0x01 // 2001:db8::/32, for documentation
+		b[2], b[3] = 0x0d, 0xb8
+		for i := range 4 {
+			b[4+i] = byte(network >> (24 - 8*i))
+			b[12+i] = byte(host >> (24 - 8*i))
+		}
+		return netip.AddrFrom16(b)
+	}
+	start := time.Now()
+	for n := range uint64(100_000) {
+		if !m.byIP.allow(clientFrom(addr(n, 1)), now) {
+			t.Fatalf("network %d refused", n)
+		}
+	}
+	took := time.Since(start)
+	t.Logf("100,000 networks: %v, %v a call", took, took/100_000)
+	if len(m.byIP.keys) > limiterKeys || m.byIP.order.Len() != len(m.byIP.keys) {
+		t.Errorf("%d keys kept (%d in order), cap %d", len(m.byIP.keys), m.byIP.order.Len(), limiterKeys)
+	}
+	// Generous, for slow machines and the race detector: scanning every
+	// key on each call took minutes.
+	if took > 10*time.Second {
+		t.Errorf("100,000 networks took %v", took)
+	}
+	// Many addresses of one /64 are one client.
+	allowed := 0
+	for h := range uint64(1000) {
+		if m.byIP.allow(clientFrom(addr(1_000_000, h)), now) {
+			allowed++
+		}
+	}
+	if allowed != m.byIP.max {
+		t.Errorf("one /64: %d allowed, want %d", allowed, m.byIP.max)
+	}
+	// A window later, everything quiet is forgotten.
+	m.byIP.allow("192.0.2.1", now.Add(time.Minute))
+	if len(m.byIP.keys) != 1 {
+		t.Errorf("%d keys after a quiet window", len(m.byIP.keys))
 	}
 }
