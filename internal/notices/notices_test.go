@@ -115,6 +115,9 @@ func TestExpiry(t *testing.T) {
 		!strings.Contains(posts[0].Text, "November 4, 2026") || posts[0].Text != posts[0].Content {
 		t.Fatalf("webhook: %+v", posts)
 	}
+	if !bytes.Contains(h.raw[0], []byte(`"allowed_mentions":{"parse":[]}`)) {
+		t.Errorf("mentions allowed: %s", h.raw[0])
+	}
 	mac := hmac.New(sha256.New, key)
 	mac.Write(h.raw[0])
 	if h.sigs[0] != "sha256="+hex.EncodeToString(mac.Sum(nil)) {
