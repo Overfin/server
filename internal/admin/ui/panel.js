@@ -214,6 +214,66 @@ function secret(intro, value, after) {
   return h('div', { class: 'notice secret' }, h('div', {}, intro), h('div', { class: 'row' }, input, copy), after && h('div', { class: 'hint' }, after));
 }
 
+// ---- Windows ---------------------------------------------------------------------
+// Nothing is edited in place: a list shows the things, each with its Edit
+// (and Delete) button, and a form opens in a window over the page; a new
+// one too. Confirmations are windows of their own, never the browser's.
+
+// modal opens a window: its title and description, then body (a card's
+// content), then its actions. Escape, the close button or a click outside
+// it close it (unless it's busy: a save under way). It returns close().
+let modalCount = 0;
+function modal({ title, description, wide = false }, body, ...actions) {
+  const id = `modal-${++modalCount}`;
+  const close = () => dialog.open && dialog.close();
+  const dialog = h('dialog', { class: wide ? 'modal wide' : 'modal', 'aria-labelledby': `${id}-title` },
+    h('div', { class: 'card-head' },
+      h('div', {}, h('h2', { id: `${id}-title` }, title), description && h('p', {}, description)),
+      h('button', { type: 'button', class: 'close', 'aria-label': 'Close', title: 'Close', onclick: close }, '×')),
+    h('div', { class: 'modal-body' }, body),
+    actions.length > 0 && h('div', { class: 'card-foot' }, actions));
+  dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+  // Busy: its own buttons (Save…) wait for the server.
+  dialog.addEventListener('cancel', (e) => { if (dialog.querySelector(':scope > .card-foot button:disabled')) e.preventDefault(); });
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  dialog.querySelector('.modal-body input:not([type=checkbox]):not([readonly]), .modal-body select, .modal-body textarea')?.focus();
+  return close;
+}
+
+// ask asks before something is done, in a window: true once confirmed.
+// danger: it deletes or stops something.
+function ask(message, { yes = 'Confirm', danger = false, title = 'Are you sure?' } = {}) {
+  return new Promise((resolve) => {
+    let answer = false;
+    const ok = h('button', { type: 'button', class: danger ? 'danger' : 'primary', onclick: () => { answer = true; close(); } }, yes);
+    const no = h('button', { type: 'button', onclick: () => close() }, 'Cancel');
+    const close = modal({ title }, h('p', { class: 'ask' }, message), h('span', { class: 'grow' }), no, ok);
+    const dialog = ok.closest('dialog');
+    dialog.setAttribute('role', 'alertdialog');
+    dialog.classList.add('small');
+    dialog.addEventListener('close', () => resolve(answer));
+    (danger ? no : ok).focus();
+  });
+}
+
+// formModal opens a form in a window: fields, then a status line and its
+// buttons; save runs when it's sent, with the button busy, and closes the
+// window once it's done (a failure is said in the window, which stays).
+function formModal({ title, description, wide, saveLabel = 'Save' }, fields, save, ...more) {
+  const st = status('');
+  const send = h('button', { class: 'primary', type: 'submit' }, saveLabel);
+  const cancel = h('button', { type: 'button', onclick: () => close() }, 'Cancel');
+  const form = h('form', { class: 'modal-form', onsubmit: (e) => {
+    e.preventDefault();
+    busy(send, async () => { await save(st); close(); }, (err) => st.set(err.message, 'error'));
+  } }, fields);
+  const close = modal({ title, description, wide }, form, st, more, cancel, send);
+  send.setAttribute('form', form.id = `${form.closest('dialog').getAttribute('aria-labelledby')}-form`);
+  return close;
+}
+
 const when = (iso) => (iso ? new Date(iso).toLocaleString() : '');
 const day = (iso) => (iso ? new Date(iso).toLocaleDateString() : '');
 
@@ -246,50 +306,43 @@ const kindNames = { films: 'Films', series: 'Series' };
 async function librariesView() {
   const { items } = await api('GET', '/admin/api/libraries');
   const reload = () => librariesView();
-  const adding = h('div', {});
-  const add = h('button', { class: 'primary', type: 'button', onclick: () => {
-    fill(adding, libraryForm(null, reload, () => fill(adding)));
-    adding.querySelector('input')?.focus();
-  } }, 'Add a library');
+  const add = h('button', { class: 'primary', type: 'button', onclick: () => libraryForm(null, reload) }, 'Add a library');
   const scan = h('button', { type: 'button', onclick: () => busy(scan, async () => {
     await api('POST', '/admin/api/libraries/scan', {});
     toast('Jellyfin is reading every folder again.');
     setTimeout(reload, 1500);
   }) }, 'Scan now');
   show(pageHead('Libraries', 'Where your films and series are, folder by folder, as Jellyfin sees them. New files show up by themselves; a scan reads everything again.', scan, add),
-    adding,
     items.length
       ? h('div', { class: 'cards' }, items.map((lib) => libraryCard(lib, reload)))
       : h('p', { class: 'notice' }, 'No library yet. Add one with the folders where your films or series are.'));
   // While Jellyfin scans, its progress, unless a form is open.
   if (items.some((l) => l.scanning)) {
-    setTimeout(() => { if (location.hash === '#/libraries' && !$('#main form')) reload(); }, 3000);
+    setTimeout(() => { if (location.hash === '#/libraries' && !$('#main form') && !$('dialog[open]')) reload(); }, 3000);
   }
 }
 
 function libraryCard(lib, reload) {
-  const body = h('div', {});
-  const view = () => fill(body,
-    h('ul', { class: 'list' }, lib.folders.map((f) => h('li', {}, icon(icons.folder), h('div', { class: 'mono' }, f)))),
-    h('div', { class: 'actions-row' }, edit, remove));
-  const edit = h('button', { type: 'button', class: 'small', onclick: () => fill(body, libraryForm(lib, reload, view)) }, 'Change');
-  const remove = h('button', { type: 'button', class: 'small danger', onclick: () => {
-    if (!confirm(`Remove the library ${lib.name}? Its files stay where they are; Overfin and its apps stop showing them.`)) return;
+  const edit = h('button', { type: 'button', class: 'small', onclick: () => libraryForm(lib, reload) }, 'Edit');
+  const remove = h('button', { type: 'button', class: 'small danger', onclick: async () => {
+    if (!(await ask(`Remove the library ${lib.name}? Its files stay where they are; Overfin and its apps stop showing them.`, { yes: 'Remove', danger: true }))) return;
     busy(remove, async () => {
       await api('DELETE', `/admin/api/libraries/${encodeURIComponent(lib.name)}`);
       toast(`${lib.name} removed.`);
       reload();
     });
   } }, 'Remove');
-  view();
+  const body = [h('ul', { class: 'list' }, lib.folders.map((f) => h('li', {}, icon(icons.folder), h('div', { class: 'mono' }, f)))),
+    h('div', { class: 'actions-row' }, edit, remove)];
   const b = lib.scanning ? badge(`Scanning ${Math.round(lib.progress)}%`, 'info') : badge(kindNames[lib.kind] || lib.kind, 'plain');
   return card({ title: lib.name, badge: b }, body);
 }
 
-// libraryForm adds a library (lib null) or changes one: its name, its
-// kind when it's new, and its folders, picked as Jellyfin sees them.
-function libraryForm(lib, done, cancel) {
-  const name = h('input', { value: lib?.name || '', autocomplete: 'off', placeholder: 'Films' });
+// libraryForm adds a library (lib null) or changes one, in a window: its
+// name, its kind when it's new, and its folders, picked as Jellyfin sees
+// them.
+function libraryForm(lib, done) {
+  const name = h('input', { value: lib?.name || '', autocomplete: 'off', placeholder: 'Films', required: true });
   const kind = h('select', {}, h('option', { value: 'films' }, 'Films'), h('option', { value: 'series' }, 'Series'));
   const folders = [...(lib?.folders || [])];
   const list = h('ul', { class: 'list' });
@@ -302,26 +355,21 @@ function libraryForm(lib, done, cancel) {
     draw();
     fill(picker);
   }, () => fill(picker))) }, 'Add a folder');
-  const save = h('button', { class: 'primary', type: 'submit' }, lib ? 'Save' : 'Add');
-  const submit = (e) => {
-    e.preventDefault();
-    busy(save, async () => {
-      if (lib) {
-        await api('PATCH', `/admin/api/libraries/${encodeURIComponent(lib.name)}`, { name: name.value, folders });
-        toast(`${name.value} saved.`);
-      } else {
-        await api('POST', '/admin/api/libraries', { name: name.value, kind: kind.value, folders });
-        toast(`${name.value} added; Jellyfin is reading it.`);
-      }
-      done();
-    });
-  };
   draw();
-  const form = h('form', { onsubmit: submit },
-    h('div', { class: 'fields' }, field('Name', name), !lib && field('Holds', kind)),
-    h('h3', {}, 'Folders'), list, h('div', { class: 'actions-row' }, addFolder), picker,
-    h('div', { class: 'actions-row' }, h('button', { type: 'button', class: 'ghost', onclick: cancel }, 'Cancel'), save));
-  return lib ? form : card({ title: 'Add a library', description: 'Films and series go in libraries of their own. Folders are as Jellyfin sees them: in a container, its paths, not the host\'s.' }, form);
+  formModal({ title: lib ? `Edit ${lib.name}` : 'Add a library', wide: true, saveLabel: lib ? 'Save' : 'Add',
+    description: 'Films and series go in libraries of their own. Folders are as Jellyfin sees them: in a container, its paths, not the host\'s.' },
+  [h('div', { class: 'fields' }, field('Name', name), !lib && field('Holds', kind)),
+    h('h3', {}, 'Folders'), list, h('div', { class: 'actions-row' }, addFolder), picker],
+  async () => {
+    if (lib) {
+      await api('PATCH', `/admin/api/libraries/${encodeURIComponent(lib.name)}`, { name: name.value, folders });
+      toast(`${name.value} saved.`);
+    } else {
+      await api('POST', '/admin/api/libraries', { name: name.value, kind: kind.value, folders });
+      toast(`${name.value} added; Jellyfin is reading it.`);
+    }
+    done();
+  });
 }
 
 // folderPicker browses folders as Jellyfin sees them, and picks one.
@@ -405,6 +453,7 @@ async function brandingView() {
         draw();
       }, (err) => rst.set(err.message, 'error')));
       const remove = url && h('button', { type: 'button', class: 'danger', onclick: () => busy(remove, async () => {
+        if (!(await ask(`Remove this file (${label})? It's deleted from the server.`, { yes: 'Remove', danger: true }))) return;
         b = await api('DELETE', `/admin/api/branding/files/${kind}`);
         draw();
       }, (err) => rst.set(err.message, 'error')) }, 'Remove');
@@ -484,13 +533,13 @@ function introSkipperCard(sk) {
       await new Promise((r) => setTimeout(r, 2000));
     }
   };
-  const install = !installed && h('button', { class: 'primary', type: 'button', onclick: () => busy(install, async () => {
-    if (!confirm(`Overfin adds Intro Skipper's repository to its Jellyfin, installs version ${sk.version}, and restarts Jellyfin: playback stops for a few seconds. Install it?`)) return;
+  const install = !installed && h('button', { class: 'primary', type: 'button', onclick: async () => busy(install, async () => {
+    if (!(await ask(`Overfin adds Intro Skipper's repository to its Jellyfin, installs version ${sk.version}, and restarts Jellyfin: playback stops for a few seconds. Install it?`, { yes: 'Install' }))) return;
     await api('POST', '/admin/api/intro-skipper', {});
     await watch();
   }, (err) => st.set(err.message, 'error')) }, 'Install');
-  const remove = installed && h('button', { class: 'danger', type: 'button', onclick: () => busy(remove, async () => {
-    if (!confirm('Overfin uninstalls Intro Skipper, removes its repository from its Jellyfin, and restarts Jellyfin: playback stops for a few seconds, and the player no longer offers to skip intros and credits. Remove it?')) return;
+  const remove = installed && h('button', { class: 'danger', type: 'button', onclick: async () => busy(remove, async () => {
+    if (!(await ask('Overfin uninstalls Intro Skipper, removes its repository from its Jellyfin, and restarts Jellyfin: playback stops for a few seconds, and the player no longer offers to skip intros and credits. Remove it?', { yes: 'Remove', danger: true }))) return;
     await api('DELETE', '/admin/api/intro-skipper');
     await watch();
   }, (err) => st.set(err.message, 'error')) }, 'Remove');
@@ -535,8 +584,8 @@ function jellyfinCard(j) {
 function jellyfinAccess(a) {
   const box = h('div', {});
   const draw = (open, since) => {
-    const button = h('button', { type: 'button', class: open ? 'small' : 'small danger', onclick: () => {
-      if (!open && !confirm('Open access to Jellyfin itself? Changes made there may break Overfin, and Overfin sets the settings it needs back when it starts.')) return;
+    const button = h('button', { type: 'button', class: open ? 'small' : 'small danger', onclick: async () => {
+      if (!open && !(await ask('Open access to Jellyfin itself? Changes made there may break Overfin, and Overfin sets the settings it needs back when it starts.', { yes: 'Open access', danger: true }))) return;
       busy(button, async () => {
         const out = await api('PUT', '/admin/api/jellyfin/access', { open: !open });
         if (open) {
@@ -623,9 +672,9 @@ function transcodingCard(t) {
         : slow ? 'It works, but slowly for some videos: see the table.' : 'It works.', ok && !slow ? 'ok' : 'error');
     }, (err) => st.set(err.message, 'error'));
   } }, 'Test');
-  const use = h('button', { class: 'primary', type: 'button', onclick: () => {
+  const use = h('button', { class: 'primary', type: 'button', onclick: async () => {
     if (!choose.value) return st.set('Choose a GPU first.', 'error');
-    if (tested !== choose.value + ' ' + device.value && !confirm('Use it without a test that worked? Playbacks may fail if it doesn\'t suit your GPU.')) return;
+    if (tested !== choose.value + ' ' + device.value && !(await ask('Use it without a test that worked? Playbacks may fail if it doesn\'t suit your GPU.', { yes: 'Use it' }))) return;
     busy(use, async () => {
       await api('PUT', '/admin/api/transcoding', body());
       st.set('In use.', 'ok');
@@ -705,8 +754,8 @@ function mailCard(m) {
   }, (err) => st.set(err.message, 'error'));
   const save = h('button', { class: 'primary', type: 'button', onclick: () => send({ host: host.value, port: Number(port.value) || 0, tls: tls.value,
     from: from.value, username: username.value, password: password.value }, save) }, 'Send a test and save');
-  const off = on && h('button', { type: 'button', onclick: () => {
-    if (confirm('Turn email off? Invitations and forgotten-password emails stop; you will set passwords yourself.')) {
+  const off = on && h('button', { type: 'button', onclick: async () => {
+    if ((await ask('Turn email off? Invitations and forgotten-password emails stop; you will set passwords yourself.', { yes: 'Turn off', danger: true }))) {
       send({ host: '', port: 0, tls: '', from: '', username: '', password: '' }, off);
     }
   } }, 'Turn off');
@@ -761,8 +810,8 @@ function seerrCard(sr) {
     route();
   }, (err) => st.set(err.message, 'error'));
   const save = h('button', { class: 'primary', type: 'button', onclick: () => send({ url: url.value, key: key.value }, save) }, 'Test and save');
-  const off = sr.url && h('button', { type: 'button', onclick: () => {
-    if (confirm('Disconnect Seerr? Requests stop until it\'s connected again.')) send({ url: '', key: '' }, off);
+  const off = sr.url && h('button', { type: 'button', onclick: async () => {
+    if ((await ask('Disconnect Seerr? Requests stop until it\'s connected again.', { yes: 'Disconnect', danger: true }))) send({ url: '', key: '' }, off);
   } }, 'Disconnect');
   return card({ title: 'Seerr', badge: sr.url ? badge('Connected', 'ok') : badge('Not connected'),
     description: 'Optional: where requests go. Keep it off the internet; only Overfin needs to reach it.' },
@@ -792,10 +841,10 @@ function languagesCard(l) {
   };
   drawDefault();
   def.value = l.default;
-  const save = h('button', { class: 'primary', type: 'button', onclick: () => busy(save, async () => {
+  const save = h('button', { class: 'primary', type: 'button', onclick: async () => busy(save, async () => {
     const offered = boxes.filter(([, b]) => b.checked).map(([c]) => c.tag);
     const changed = def.value !== l.default;
-    if (changed && !confirm('Titles\' texts and artwork are fetched again in the new default language. Change it?')) return;
+    if (changed && !(await ask('Titles\' texts and artwork are fetched again in the new default language. Change it?', { yes: 'Change' }))) return;
     const out = await api('PUT', '/admin/api/languages', { offered, default: def.value });
     Object.assign(l, out);
     st.set('Saved.', 'ok');
@@ -825,8 +874,8 @@ function tmdbCard(rt) {
     if (!key.value.trim()) return keySt.set('Paste the token first.', 'error');
     setKey(testKey, key.value, (state) => { Object.assign(rt, state); redraw(); });
   } }, 'Test and save');
-  const removeKey = rt.token.set && !rt.token.inEnv && h('button', { type: 'button', class: 'danger', onclick: () => {
-    if (!confirm('Without a token, the site can\'t be used for now: titles lose their names and pictures, and TMDB\'s data kept so far is removed unless Seerr gives it. Remove the token?')) return;
+  const removeKey = rt.token.set && !rt.token.inEnv && h('button', { type: 'button', class: 'danger', onclick: async () => {
+    if (!(await ask('Without a token, the site can\'t be used for now: titles lose their names and pictures, and TMDB\'s data kept so far is removed unless Seerr gives it. Remove the token?', { yes: 'Remove', danger: true }))) return;
     setKey(removeKey, '', (state) => { Object.assign(rt, state); redraw(); });
   } }, 'Remove');
   const keyHint = rt.token.inEnv
@@ -853,10 +902,10 @@ function tmdbCard(rt) {
   };
   const st = status('');
   st.set(...describe(rt));
-  const save = h('button', { class: 'primary', type: 'button', disabled: !rt.countries.length, onclick: () => busy(save, async () => {
+  const save = h('button', { class: 'primary', type: 'button', disabled: !rt.countries.length, onclick: async () => busy(save, async () => {
     if (country.value === rt.country && shown.value === rt.shown) return;
     if (country.value !== rt.country &&
-      !confirm('Every kids profile will need new limits from its account\'s owner, and sees nothing until then. Change the country?')) {
+      !(await ask('Every kids profile will need new limits from its account\'s owner, and sees nothing until then. Change the country?', { yes: 'Change' }))) {
       country.value = rt.country;
       return;
     }
@@ -1079,17 +1128,12 @@ async function peopleView(selected = '') {
     unreachable: 'The identity provider\'s connector didn\'t answer, so names are missing for now. The log says why.',
   }[directory];
   const waiting = people ? people.filter((x) => !x.accountId) : [];
-  const adding = h('div', {});
-  const addButton = people && h('button', { class: 'primary', type: 'button', onclick: () => {
-    fill(adding, addPerson(() => reload(), () => fill(adding)));
-    adding.querySelector('input')?.focus();
-  } }, 'Add a person');
+  const addButton = people && h('button', { class: 'primary', type: 'button', onclick: () => addPerson(() => reload()) }, 'Add a person');
 
   show(
     pageHead('People', people
       ? 'Everyone who can sign in, and their accounts. People sign in with their email and their password.'
       : 'Everyone with an account here.', addButton),
-    adding,
     h('div', { class: 'split' },
       h('div', {},
         h('div', { class: 'toolbar' }, search, filter),
@@ -1107,60 +1151,51 @@ async function peopleView(selected = '') {
   draw();
 }
 
-// addPerson is the form to make someone's account here: their email and a
-// first password, which they choose again at their first sign-in unless
-// told otherwise.
-function addPerson(reload, close) {
-  const email = h('input', { type: 'email', placeholder: 'name@example.org', autocomplete: 'off' });
-  const password = h('input', { type: 'password', autocomplete: 'new-password' });
+// addPerson is the form to make someone's account here, in a window: their
+// email and a first password, which they choose again at their first
+// sign-in unless told otherwise.
+function addPerson(reload) {
+  const email = h('input', { type: 'email', placeholder: 'name@example.org', autocomplete: 'off', required: true });
+  const password = h('input', { type: 'password', autocomplete: 'new-password', required: true });
   const mustChange = h('input', { type: 'checkbox', checked: true });
   const admin = h('input', { type: 'checkbox' });
-  const add = h('button', { class: 'primary', type: 'submit' }, 'Add');
-  const st = status('');
-  const submit = (e) => {
-    e.preventDefault();
-    busy(add, async () => {
+  formModal({ title: 'Add a person', description: 'Their account is ready at once: hand them their email and this password, privately.', saveLabel: 'Add' },
+    h('div', { class: 'fields' },
+      field('Email', email, null, true),
+      field('Password', password, 'The rules are on People → Registration.', true),
+      h('label', { class: 'inline full' }, mustChange, 'Ask for a new password at the first sign-in'),
+      h('label', { class: 'inline full' }, admin, 'Admin')),
+    async () => {
       await api('POST', '/admin/api/people', { email: email.value, password: password.value, mustChange: mustChange.checked, admin: admin.checked });
       toast(`${email.value} can sign in now.`);
       reload();
-    }, (err) => st.set(err.message, 'error'));
-  };
-  return card({ title: 'Add a person', description: 'Their account is ready at once: hand them their email and this password, privately.' },
-    h('form', { class: 'fields', onsubmit: submit },
-      field('Email', email),
-      field('Password', password, 'The rules are on People → Registration.'),
-      h('label', { class: 'inline full' }, mustChange, 'Ask for a new password at the first sign-in'),
-      h('label', { class: 'inline full' }, admin, 'Admin'),
-      h('div', { class: 'row full' }, st, h('button', { type: 'button', class: 'ghost', onclick: close }, 'Cancel'), add)));
+    });
 }
 
 // personControls are what an admin can do about someone who signs in here:
 // a new password (they forgot theirs), the admin mark, and, before they
 // have an account, removing them.
 function personControls(x, reload) {
-  const box = h('div', {});
   const passwordButton = h('button', { type: 'button', class: 'small', onclick: () => {
-    const password = h('input', { type: 'password', autocomplete: 'new-password', 'aria-label': 'New password' });
+    const password = h('input', { type: 'password', autocomplete: 'new-password', required: true });
     const mustChange = h('input', { type: 'checkbox', checked: true });
-    const st = status('');
-    const save = h('button', { type: 'button', class: 'primary small', onclick: () => busy(save, async () => {
-      await api('PUT', `/admin/api/people/${x.id}/password`, { password: password.value, mustChange: mustChange.checked });
-      toast(`${x.email} has a new password; their logins ended.`);
-      reload();
-    }, (err) => st.set(err.message, 'error')) }, 'Set it');
-    fill(box, h('div', { class: 'fields' },
-      field('New password', password, 'Hand it over privately. Their logins end.'),
-      h('label', { class: 'inline full' }, mustChange, 'Ask for a new password at the next sign-in'),
-      h('div', { class: 'row full' }, st, save)));
-    password.focus();
+    formModal({ title: `A new password for ${x.email}`, description: 'Hand it over privately. Their logins end.', saveLabel: 'Set it' },
+      h('div', { class: 'fields' },
+        field('New password', password, null, true),
+        h('label', { class: 'inline full' }, mustChange, 'Ask for a new password at the next sign-in')),
+      async () => {
+        await api('PUT', `/admin/api/people/${x.id}/password`, { password: password.value, mustChange: mustChange.checked });
+        toast(`${x.email} has a new password; their logins ended.`);
+        reload();
+      });
   } }, 'Set a new password');
   const adminButton = !x.you && h('button', { type: 'button', class: 'small', onclick: () => busy(adminButton, async () => {
     await api('PATCH', `/admin/api/people/${x.id}`, { admin: !x.admin });
     toast(x.admin ? `${x.email} is no longer an admin.` : `${x.email} is an admin now.`);
     reload();
   }) }, x.admin ? 'Remove admin' : 'Make admin');
-  const removeButton = !x.accountId && !x.you && h('button', { type: 'button', class: 'small danger', onclick: () => {
-    if (!confirm(`Remove ${x.email}? They can't sign in any more.`)) return;
+  const removeButton = !x.accountId && !x.you && h('button', { type: 'button', class: 'small danger', onclick: async () => {
+    if (!(await ask(`Remove ${x.email}? They can't sign in any more.`, { yes: 'Remove', danger: true }))) return;
     busy(removeButton, async () => {
       await api('DELETE', `/admin/api/people/${x.id}`);
       toast(`${x.email} removed.`);
@@ -1173,7 +1208,6 @@ function personControls(x, reload) {
     h('div', { class: 'name' }, x.email, ' ', x.admin && badge('Admin', 'info'), ' ', x.you && badge('You', 'plain'), ' ', x.disabled && badge('Disabled', 'err')),
     state && h('div', { class: 'hint' }, state),
     h('div', { class: 'actions-row' }, passwordButton, adminButton, removeButton),
-    box,
   ];
 }
 
@@ -1186,15 +1220,28 @@ function accountDetail(a, templates, reload, people) {
     toast(done);
     reload(a.id);
   });
-  const label = h('input', { value: a.label || '', maxlength: '64', placeholder: 'e.g. Bob' });
-  const expires = h('input', { type: 'datetime-local', value: toLocalInput(a.expiresAt) });
-  const template = h('select', {}, templates.map((t) => h('option', { value: t.id, selected: t.id === a.template.id },
-    `${t.name} · ${plural(t.maxStreams, 'stream')}, ${plural(t.maxProfiles, 'profile')}${t.reserveStreams ? ', one each' : ''}`)));
-  const save = h('button', { class: 'primary', type: 'button', onclick: () => patch(save, {
-    ...(a.person ? {} : { label: label.value }),
-    expiresAt: expires.value ? new Date(expires.value).toISOString() : '',
-    templateId: template.value,
-  }, 'Access saved.') }, 'Save access');
+  // Its access, in a window: its label (without the identity provider's
+  // name), its template, when it ends.
+  const editAccess = () => {
+    const label = h('input', { value: a.label || '', maxlength: '64', placeholder: 'e.g. Bob' });
+    const expires = h('input', { type: 'datetime-local', value: toLocalInput(a.expiresAt) });
+    const template = h('select', {}, templates.map((t) => h('option', { value: t.id, selected: t.id === a.template.id },
+      `${t.name} · ${plural(t.maxStreams, 'stream')}, ${plural(t.maxProfiles, 'profile')}${t.reserveStreams ? ', one each' : ''}`)));
+    formModal({ title: `${nameOf(a)}'s access` },
+      h('div', { class: 'fields' },
+        !a.person && field('Label', label, 'A name for it, until the identity provider gives one.', true),
+        field('Template', template, 'What the account may do.', true),
+        field('Access ends', expires, 'Empty: never.', true)),
+      async () => {
+        await api('PATCH', `/admin/api/accounts/${a.id}`, {
+          ...(a.person ? {} : { label: label.value }),
+          expiresAt: expires.value ? new Date(expires.value).toISOString() : '',
+          templateId: template.value,
+        });
+        toast('Access saved.');
+        reload(a.id);
+      });
+  };
 
   const profiles = a.profiles.map((p) => {
     const unlock = p.pinLocked && h('button', { type: 'button', class: 'small', onclick: () => busy(unlock, async () => {
@@ -1219,8 +1266,8 @@ function accountDetail(a, templates, reload, people) {
   });
   const toggleAccess = h('button', { type: 'button', onclick: () => patch(toggleAccess, { disabled: a.status !== 'disabled' },
     a.status === 'disabled' ? 'Account enabled.' : 'Account disabled.') }, a.status === 'disabled' ? 'Enable account' : 'Disable account');
-  const remove = h('button', { type: 'button', class: 'danger', onclick: () => {
-    if (!confirm(`Delete ${nameOf(a)}'s account, its profiles and what they hold? This can't be undone.`)) return;
+  const remove = h('button', { type: 'button', class: 'danger', onclick: async () => {
+    if (!(await ask(`Delete ${nameOf(a)}'s account, its profiles and what they hold? This can't be undone.`, { yes: 'Delete', danger: true }))) return;
     busy(remove, async () => {
       await api('DELETE', `/admin/api/accounts/${a.id}`);
       toast('Account deleted.');
@@ -1240,11 +1287,11 @@ function accountDetail(a, templates, reload, people) {
       h('dt', {}, 'Sign-in ID'), h('dd', { class: 'hint' }, a.subject)),
     signsIn && [h('h3', {}, 'Signing in'), h('div', { class: 'box' }, personControls(signsIn, () => reload(a.id)))],
     h('h3', {}, 'Access'),
-    h('div', { class: 'fields' },
-      !a.person && field('Label', label, 'A name for it, until the identity provider gives one.', true),
-      field('Template', template, 'What the account may do.', true),
-      field('Access ends', expires, 'Empty: never.', true)),
-    h('div', { class: 'actions-row' }, save),
+    h('dl', { class: 'facts' },
+      !a.person && [h('dt', {}, 'Label'), h('dd', {}, a.label || '—')],
+      h('dt', {}, 'Template'), h('dd', {}, a.template.name),
+      h('dt', {}, 'Access ends'), h('dd', {}, a.expiresAt ? when(a.expiresAt) : 'Never')),
+    h('div', { class: 'actions-row' }, h('button', { type: 'button', class: 'small', onclick: editAccess }, 'Edit access')),
     h('h3', {}, `Profiles (${a.profiles.length})`), h('ul', { class: 'list' }, profiles),
     a.historyCopiedAt && historyCopy(a, reload),
     h('h3', {}, `Signed-in devices (${a.sessions.length})`),
@@ -1257,8 +1304,8 @@ function accountDetail(a, templates, reload, people) {
 // and lets it bring one again: if the wrong one came, or the wrong person
 // took someone's.
 function historyCopy(a, reload) {
-  const again = h('button', { type: 'button', class: 'small', onclick: () => {
-    if (!confirm('Let this account bring a history again? What was copied stays; the account it came from can be copied again, by anyone with its login.')) return;
+  const again = h('button', { type: 'button', class: 'small', onclick: async () => {
+    if (!(await ask('Let this account bring a history again? What was copied stays; the account it came from can be copied again, by anyone with its login.', { yes: 'Allow' }))) return;
     busy(again, async () => {
       await api('DELETE', `/admin/api/accounts/${a.id}/history-copy`);
       toast('This account may bring a history again.');
@@ -1277,8 +1324,10 @@ function historyCopy(a, reload) {
 async function templatesView() {
   const [{ items }, cats] = await Promise.all([api('GET', '/admin/api/templates'), api('GET', '/admin/api/categories')]);
   const catName = (c) => c.names[cats.defaultLanguage] || Object.values(c.names)[0] || 'Unnamed';
-  const templateCard = (t) => {
-    const name = h('input', { value: t?.name || '', maxlength: '40', placeholder: 'e.g. Family, Friends' });
+  const catNames = (ids) => (ids || []).map((id) => cats.items.find((c) => c.id === id)).filter(Boolean).map(catName);
+  // A template's form, in a window: a new one when t is null.
+  const edit = (t) => {
+    const name = h('input', { value: t?.name || '', maxlength: '40', placeholder: 'e.g. Family, Friends', required: true });
     const streams = h('input', { type: 'number', min: '1', max: '100', value: String(t?.maxStreams ?? 1) });
     const profiles = h('input', { type: 'number', min: '1', max: '20', value: String(t?.maxProfiles ?? 1) });
     const reserve = h('input', { type: 'checkbox', checked: !!t?.reserveStreams, 'aria-label': 'A stream for each profile' });
@@ -1290,35 +1339,51 @@ async function templatesView() {
       return h('label', { class: 'inline' }, box, catName(c));
     });
     const picked = () => catBoxes.map((l) => l.querySelector('input')).filter((b) => b.checked).map((b) => b.dataset.v);
-    const body = () => ({ name: name.value, maxStreams: numberIn(streams, 'Streams'), maxProfiles: numberIn(profiles, 'Profiles'),
-      reserveStreams: reserve.checked, categories: picked().length ? picked() : null });
-    // A template kept to categories (deleted since, maybe: then it sees
-    // nothing) loses its limit only when the admin says so.
-    const save = h('button', { class: 'primary', type: 'button', onclick: () => t?.categories && !picked().length
-      && !confirm(`No category is ticked: every account on "${t.name}" will see every title. Save anyway?`) ? undefined : busy(save, async () => {
-      await (t ? api('PUT', `/admin/api/templates/${t.id}`, body()) : api('POST', '/admin/api/templates', body()));
-      toast(t ? 'Template saved.' : 'Template made.');
-      templatesView();
-    }) }, t ? 'Save' : 'Make it');
-    const remove = t && !t.default && h('button', { class: 'danger', type: 'button', onclick: () => {
-      if (confirm(`Delete the template "${t.name}"?`)) {
-        busy(remove, async () => { await api('DELETE', `/admin/api/templates/${t.id}`); toast('Template deleted.'); templatesView(); });
-      }
-    } }, 'Delete');
-    return card({
-      title: t ? t.name : 'A new template',
-      badge: t?.default ? badge('Default', 'info') : null,
+    formModal({
+      title: t ? `Edit ${t.name}` : 'New template',
       description: t ? `${plural(t.accounts, 'account')} on it${t.accounts ? '; changes apply to them at once' : ''}.` : 'For a group of accounts that may do more, or less.',
-    },
-    [h('div', { class: 'fields' }, field('Name', name, null, true), field('Streams at once', streams), field('Profiles', profiles, 'The owner\'s included.')),
+      saveLabel: t ? 'Save' : 'Create',
+    }, [h('div', { class: 'fields' }, field('Name', name, null, true), field('Streams at once', streams), field('Profiles', profiles, 'The owner\'s included.')),
       setting('A stream for each profile', 'Each profile keeps one of the streams for itself; the rest are shared. Nobody is cut off to make room. No more profiles than streams.', reserve),
       catBoxes.length > 0 && h('div', { class: 'setting stack' }, h('div', {}, h('div', { class: 'label' }, 'Only these categories'),
         h('div', { class: 'hint' }, 'Every profile of its accounts, the owner\'s too, sees only their titles (and none that no library has). None ticked: no limit.')),
       h('div', { class: 'checks' }, catBoxes))],
-    [h('span', { class: 'grow' }), remove, save]);
+    async () => {
+      const body = { name: name.value, maxStreams: numberIn(streams, 'Streams'), maxProfiles: numberIn(profiles, 'Profiles'),
+        reserveStreams: reserve.checked, categories: picked().length ? picked() : null };
+      // A template kept to categories (deleted since, maybe: then it sees
+      // nothing) loses its limit only when the admin says so.
+      if (t?.categories && !picked().length
+        && !(await ask(`No category is ticked: every account on "${t.name}" will see every title. Save anyway?`, { yes: 'Save' }))) {
+        throw new Error('Not saved: tick the categories it keeps to, or save it without any.');
+      }
+      await (t ? api('PUT', `/admin/api/templates/${t.id}`, body) : api('POST', '/admin/api/templates', body));
+      toast(t ? 'Template saved.' : 'Template created.');
+      templatesView();
+    });
   };
-  show(pageHead('Templates', 'What accounts may do. Every account follows one: Default, unless you choose another for it in People.'),
-    h('div', { class: 'cards' }, items.map(templateCard), templateCard(null)));
+  const rows = items.map((t) => {
+    // Only one no account follows: move them first, in People.
+    const remove = !t.default && h('button', { type: 'button', class: 'small danger', disabled: t.accounts > 0,
+      title: t.accounts > 0 ? `${plural(t.accounts, 'account')} follow it: move them to another template first, in People.` : undefined,
+      onclick: async () => {
+        if (!(await ask(`Delete the template "${t.name}"?`, { yes: 'Delete', danger: true }))) return;
+        busy(remove, async () => { await api('DELETE', `/admin/api/templates/${t.id}`); toast('Template deleted.'); templatesView(); });
+      } }, 'Delete');
+    const only = catNames(t.categories);
+    return h('tr', {},
+      h('td', {}, h('div', { class: 'name' }, t.name, t.default && ' ', t.default && badge('Default', 'info')),
+        h('div', { class: 'hint' }, only.length ? `Only ${only.join(', ')}` : 'Every category')),
+      h('td', {}, String(t.maxStreams), t.reserveStreams && h('div', { class: 'hint' }, 'one per profile')),
+      h('td', {}, String(t.maxProfiles)),
+      h('td', {}, String(t.accounts)),
+      h('td', { class: 'row-actions' }, h('button', { type: 'button', class: 'small', onclick: () => edit(t) }, 'Edit'), remove));
+  });
+  show(pageHead('Templates', 'What accounts may do. Every account follows one: Default, unless you choose another for it in People.',
+    h('button', { type: 'button', class: 'primary', onclick: () => edit(null) }, 'New template')),
+    card({ title: 'Templates' }, h('div', { class: 'table-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, h('th', {}, 'Template'), h('th', {}, 'Streams'), h('th', {}, 'Profiles'), h('th', {}, 'Accounts'), h('th', {}))),
+      h('tbody', {}, rows)))));
 }
 
 // ---- Apps ----------------------------------------------------------------------
@@ -1330,23 +1395,29 @@ const appScopeNames = { score: 'Values', stats: 'Watch statistics', availability
 // revoked here.
 async function appsView() {
   const { items } = await api('GET', '/admin/api/apps');
-  const name = h('input', { type: 'text', placeholder: 'e.g. Overtide', maxlength: '64' });
-  const scopes = Object.fromEntries(['score', 'stats', 'availability'].map((s) => [s, h('input', { type: 'checkbox', checked: true })]));
-  const made = h('div', {});
-  const make = h('button', { type: 'submit', class: 'primary' }, 'Make a key');
-  const create = (e) => {
-    e.preventDefault();
-    busy(make, async () => {
-      const picked = Object.keys(scopes).filter((s) => scopes[s].checked);
-      const k = await api('POST', '/admin/api/apps', { name: name.value, scopes: picked });
-      await appsView();
-      fill($('#made-key'), secret(`The key for ${k.name}. Copy it now: it won't be shown again.`, k.key,
-        'The app sends it as "Authorization: Bearer <key>" to GET /apps/v1/titles on this address.'));
-    });
+  // A new key, in a window; then the key itself, once, in another.
+  const newKey = () => {
+    const name = h('input', { type: 'text', placeholder: 'e.g. Overtide', maxlength: '64', required: true });
+    const scopes = Object.fromEntries(['score', 'stats', 'availability'].map((s) => [s, h('input', { type: 'checkbox', checked: true })]));
+    formModal({ title: 'New key', description: 'For one app: what it may read.', saveLabel: 'Make the key' },
+      [field('For', name, null, true),
+        h('div', { class: 'setting stack' }, h('div', {}, h('div', { class: 'label' }, 'It may read')),
+          h('div', { class: 'checks' }, Object.entries(scopes).map(([s, box]) => h('label', { class: 'inline' }, box, appScopeNames[s]))))],
+      async () => {
+        const picked = Object.keys(scopes).filter((s) => scopes[s].checked);
+        const k = await api('POST', '/admin/api/apps', { name: name.value, scopes: picked });
+        appsView();
+        setTimeout(() => {
+          const close = modal({ title: `${k.name}'s key` },
+            secret('Copy it now: it won\'t be shown again.', k.key,
+              'The app sends it as "Authorization: Bearer <key>" to GET /apps/v1/titles on this address.'),
+            h('span', { class: 'grow' }), h('button', { type: 'button', class: 'primary', onclick: () => close() }, 'Done'));
+        }, 0);
+      });
   };
   const rows = items.map((k) => {
-    const revoke = h('button', { type: 'button', class: 'small danger', onclick: () => {
-      if (!confirm(`Revoke ${k.name}'s key? The app stops getting anything.`)) return;
+    const revoke = h('button', { type: 'button', class: 'small danger', onclick: async () => {
+      if (!(await ask(`Revoke ${k.name}'s key? The app stops getting anything.`, { yes: 'Revoke', danger: true }))) return;
       busy(revoke, async () => { await api('DELETE', `/admin/api/apps/${k.id}`); toast('Key revoked.'); appsView(); });
     } }, 'Revoke');
     return h('tr', {},
@@ -1354,24 +1425,20 @@ async function appsView() {
         h('div', { class: 'hint' }, [...new Set(k.scope.split(' ').map((s) => appScopeNames[s] || s))].join(', '))),
       h('td', { class: 'hint' }, day(k.createdAt)),
       h('td', { class: 'hint' }, k.lastUsedAt ? ago(k.lastUsedAt) : 'never'),
-      h('td', { class: 'actions' }, revoke));
+      h('td', { class: 'row-actions' }, revoke));
   });
-  made.id = 'made-key';
   show(pageHead('Apps', 'Other apps (Overtide…) can read each film\'s and season\'s value, how much it\'s watched (plays, viewers, favorites, the day last played) and whether the libraries have it, as each key allows. Totals per title only, never anything about a person; counts below 2 are given as 0, and so are plays and favorites unless two people account for them.'),
-    made,
-    card({ title: 'Keys' },
+    card({ title: 'Keys', badge: h('button', { type: 'button', class: 'primary', onclick: newKey }, 'New key') },
       h('div', { class: 'table-wrap' }, h('table', {},
         h('thead', {}, h('tr', {}, h('th', {}, 'App'), h('th', {}, 'Made'), h('th', {}, 'Last used'), h('th', {}))),
-        h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { colspan: '4', class: 'empty' }, 'No app has a key yet.'))))),
-      h('form', { class: 'toolbar spaced', onsubmit: create }, field('A new key, for', name),
-        h('div', { class: 'checks' }, Object.entries(scopes).map(([s, box]) => h('label', { class: 'inline' }, box, appScopeNames[s]))), make)));
+        h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { colspan: '4', class: 'empty' }, 'No app has a key yet.')))))));
 }
 
 // ---- Categories ----------------------------------------------------------------
 
 // categoriesView lists the site's categories in their order, edits them,
 // and says whether the site's menu shows the libraries too.
-async function categoriesView(editing) {
+async function categoriesView() {
   const data = await api('GET', '/admin/api/categories');
   const langName = (code) => { try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code; } catch { return code; } };
   const nameOf = (c) => c.names[data.defaultLanguage] || Object.values(c.names)[0] || 'Unnamed';
@@ -1402,24 +1469,22 @@ async function categoriesView(editing) {
     categoriesView();
   });
   const rows = data.items.map((c, i) => {
-    const del = h('button', { type: 'button', class: 'small danger', onclick: () => {
-      if (!confirm(`Delete ${nameOf(c)}? Nothing moves on disk: only the category goes.`)) return;
+    const del = h('button', { type: 'button', class: 'small danger', onclick: async () => {
+      if (!(await ask(`Delete ${nameOf(c)}? Nothing moves on disk: only the category goes.`, { yes: 'Delete', danger: true }))) return;
       busy(del, async () => { await api('DELETE', `/admin/api/categories/${c.id}`); toast('Category deleted.'); categoriesView(); });
     } }, 'Delete');
     return h('tr', {},
       h('td', {}, h('div', { class: 'name' }, nameOf(c)), h('div', { class: 'hint' }, summary(c.rules))),
       h('td', { class: 'hint' }, plural(c.count, 'title')),
       h('td', {}, c.home ? badge('Home row', 'info') : null),
-      h('td', { class: 'actions' },
+      h('td', { class: 'row-actions' },
         h('button', { type: 'button', class: 'small', disabled: i === 0, 'aria-label': 'Up', onclick: () => move(i, -1) }, '↑'),
         h('button', { type: 'button', class: 'small', disabled: i === data.items.length - 1, 'aria-label': 'Down', onclick: () => move(i, 1) }, '↓'),
-        h('button', { type: 'button', class: 'small', onclick: () => categoriesView(c.id) }, 'Edit'), del));
+        h('button', { type: 'button', class: 'small', onclick: () => categoryEditor(data, c, langName, nameOf) }, 'Edit'), del));
   });
 
-  const editor = editing !== undefined ? categoryEditor(data, data.items.find((c) => c.id === editing), langName, nameOf) : null;
   show(pageHead('Categories', 'Sections of the site, made from rules: Films, Series, Anime, Kids… A title is in every category it fits. Nothing moves on disk.',
-    h('button', { class: 'primary', type: 'button', onclick: () => categoriesView(null) }, 'New category')),
-  editor,
+    h('button', { class: 'primary', type: 'button', onclick: () => categoryEditor(data, null, langName, nameOf) }, 'New category')),
   card({ title: 'Categories', description: 'In the site\'s menu in this order, each with its page; a category with a home row also shows on the home page.' },
     h('div', { class: 'table-wrap' }, h('table', {},
       h('thead', {}, h('tr', {}, h('th', {}, 'Category'), h('th', {}, 'Titles'), h('th', {}), h('th', {}))),
@@ -1427,8 +1492,8 @@ async function categoriesView(editing) {
   card({ title: 'The site\'s menu' }, [setting('Libraries in the menu', 'With categories, you may want them alone: off, the menu shows only the categories.', shown)]));
 }
 
-// categoryEditor edits a category (c), or makes one (none given), with a
-// live count of the titles it would have.
+// categoryEditor edits a category (c), or makes one (none given), in a
+// window, with a live count of the titles it would have.
 function categoryEditor(data, c, langName, nameOf) {
   const r = c?.rules || {};
   // The languages offered, and any other it has a name in (offered before):
@@ -1471,16 +1536,8 @@ function categoryEditor(data, c, langName, nameOf) {
       preview.textContent = `${plural(p.count, 'title')}${p.sample.length ? `: ${p.sample.join(', ')}${p.count > p.sample.length ? '…' : ''}` : ''}`;
     } catch (err) { preview.textContent = err.message; }
   }, 300); };
-  const st = status('');
-  const save = h('button', { class: 'primary', type: 'button', onclick: () => busy(save, async () => {
-    const body = { names: Object.fromEntries(Object.entries(names).map(([l, i]) => [l, i.value.trim()])), rules: rules(), home: home.checked };
-    await (c ? api('PUT', `/admin/api/categories/${c.id}`, body) : api('POST', '/admin/api/categories', body));
-    toast(c ? 'Category saved.' : 'Category made.');
-    categoriesView();
-  }, (err) => st.set(err.message, 'error')) }, c ? 'Save' : 'Make it');
-  const cancel = h('button', { type: 'button', onclick: () => categoriesView() }, 'Cancel');
   const group = (label, hint, el) => h('div', { class: 'setting stack' }, h('div', {}, h('div', { class: 'label' }, label), hint && h('div', { class: 'hint' }, hint)), el);
-  const form = card({ title: c ? `Edit ${nameOf(c)}` : 'A new category', description: 'A title is in it when it fits every rule you set; within a rule, any of what you tick. Nothing ticked: no limit.' }, [
+  const fields = h('div', { class: 'modal-fields', onchange: refresh }, [
     Object.entries(names).map(([l, i]) => field(`Name in ${langName(l)}`, i)),
     group('Films or series', null, kinds),
     group('Genres', 'TMDB\'s.', genres),
@@ -1491,11 +1548,16 @@ function categoryEditor(data, c, langName, nameOf) {
     data.items.some((x) => x.id !== c?.id) && group('Leave out', 'Titles of these categories aren\'t in this one: Series except Anime, say.', except),
     setting('A row on the home page', null, home),
     h('div', { class: 'setting' }, h('div', {}, h('div', { class: 'label' }, 'What it holds'), preview)),
-  ], [st, cancel, save]);
-  form.addEventListener('change', refresh);
+  ]);
+  formModal({ title: c ? `Edit ${nameOf(c)}` : 'New category', wide: true, saveLabel: c ? 'Save' : 'Create',
+    description: 'A title is in it when it fits every rule you set; within a rule, any of what you tick. Nothing ticked: no limit.' },
+  fields, async () => {
+    const body = { names: Object.fromEntries(Object.entries(names).map(([l, i]) => [l, i.value.trim()])), rules: rules(), home: home.checked };
+    await (c ? api('PUT', `/admin/api/categories/${c.id}`, body) : api('POST', '/admin/api/categories', body));
+    toast(c ? 'Category saved.' : 'Category created.');
+    categoriesView();
+  });
   refresh();
-  setTimeout(() => (Object.values(names)[0])?.focus(), 0);
-  return form;
 }
 
 // ---- Notices -------------------------------------------------------------------
@@ -1525,8 +1587,8 @@ async function noticesView() {
     st.set((await api('POST', '/admin/api/notices/test', values())).summary, 'ok');
   }, (err) => st.set(err.message, 'error')) }, 'Send a test');
   const made = h('div', {});
-  const key = h('button', { type: 'button', onclick: () => {
-    if (n.signed && !confirm('Make a new key? The old one stops matching: whatever checks the signatures needs the new one.')) return;
+  const key = h('button', { type: 'button', onclick: async () => {
+    if (n.signed && !(await ask('Make a new key? The old one stops matching: whatever checks the signatures needs the new one.', { yes: 'Make a new key' }))) return;
     busy(key, async () => {
       const { secret: k } = await api('POST', '/admin/api/notices/secret', {});
       n.signed = true;
@@ -1590,8 +1652,8 @@ async function playingView() {
     const [method, kind] = methodNames[pb.method] || [pb.method, 'plain'];
     const why = (pb.reasons || []).map((r) => convertReasons[r] || r).join('; ');
     const quality = [pb.height && `${pb.height}p`, pb.bitrateKbps && `${(pb.bitrateKbps / 1000).toFixed(1)} Mb/s`].filter(Boolean).join(', ');
-    const stop = h('button', { type: 'button', class: 'small danger', onclick: () => {
-      if (!confirm(`Stop ${pb.title || 'this playback'} for ${pb.account.name}? Their player says the server's administrator stopped it.`)) return;
+    const stop = h('button', { type: 'button', class: 'small danger', onclick: async () => {
+      if (!(await ask(`Stop ${pb.title || 'this playback'} for ${pb.account.name}? Their player says the server's administrator stopped it.`, { yes: 'Stop', danger: true }))) return;
       busy(stop, async () => {
         await api('POST', `/admin/api/playing/${pb.id}/stop`, {}).catch((err) => { if (!/ended/.test(err.message)) throw err; });
         toast('Playback stopped.');
@@ -1892,7 +1954,7 @@ async function mountTab(name, root, extra) {
     api: (method, path, body) => api(method, `/admin/api/modules/${encodeURIComponent(name)}${path}`, body),
     h,
     // The panel's own building blocks, so a tab looks like the rest.
-    ui: { card, field, setting, badge, toast, busy, secret, status, fill, plural, day, ago },
+    ui: { card, field, setting, badge, toast, busy, secret, status, fill, plural, day, ago, modal, formModal, ask },
     ...extra,
   });
 }
