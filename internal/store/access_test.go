@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -228,6 +229,79 @@ func TestPlayedFilters(t *testing.T) {
 		}
 		if got := list(ListQuery{Kinds: kinds, InProgress: true}); !slices.Equal(got, step.inProg) {
 			t.Errorf("in progress: %v, want %v", got, step.inProg)
+		}
+	}
+}
+
+// A series' watched and in-progress filters, which look its episodes up
+// in the profile's history by the series' key: a series named like
+// another's start, one the index can't name (its episodes keyed by their
+// own IDs), an episode without numbers, two copies, and history for
+// episodes the libraries don't have.
+func TestSeriesPlayedFilters(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	id := func(n int) string { return strings.Repeat("0", 30) + fmt.Sprintf("%02d", n) }
+	one, two := 1, 2
+	ep := func(n int, series string, season, number *int) CatalogItem {
+		return CatalogItem{ID: id(n), Kind: "episode", Name: "E", SortName: "e", SeriesID: series, SeasonNumber: season,
+			EpisodeNumber: number, LibraryID: "tv"}
+	}
+	s.PutCatalog(ctx, []CatalogItem{
+		{ID: id(0), Kind: "series", Name: "A", SortName: "a", TMDB: "1", LibraryID: "tv"},
+		ep(1, id(0), &one, &one), ep(2, id(0), &one, &two),
+		{ID: id(3), Kind: "series", Name: "B", SortName: "b", TMDB: "13", LibraryID: "tv"},
+		ep(4, id(3), &one, &one),
+		// No ID: its episode's key is its own.
+		{ID: id(5), Kind: "series", Name: "C", SortName: "c", LibraryID: "tv"},
+		ep(6, id(5), &one, &one),
+		// An episode without its number.
+		{ID: id(7), Kind: "series", Name: "D", SortName: "d", TMDB: "4", LibraryID: "tv"},
+		ep(8, id(7), &one, nil),
+		// Two copies.
+		{ID: id(9), Kind: "series", Name: "E", SortName: "e1", TMDB: "5", LibraryID: "tv"},
+		ep(10, id(9), &one, &one),
+		{ID: id(11), Kind: "series", Name: "E", SortName: "e2", TMDB: "5", LibraryID: "tv4k"},
+		ep(12, id(11), &one, &one),
+		// No episode.
+		{ID: id(13), Kind: "series", Name: "F", SortName: "f", TMDB: "6", LibraryID: "tv"},
+		// Two copies, one without the episode.
+		{ID: id(14), Kind: "series", Name: "G", SortName: "g1", TMDB: "7", LibraryID: "tv"},
+		ep(15, id(14), &one, &one),
+		{ID: id(16), Kind: "series", Name: "G", SortName: "g2", TMDB: "7", LibraryID: "tv4k"},
+	}, 1)
+	if err := s.RefreshTitleKeys(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, prof, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
+	keys, _ := s.TitleKeys(ctx, []string{id(1), id(2), id(4), id(6), id(8), id(10), id(15)})
+	at := time.Unix(1_000_000, 0)
+	s.SetPlayed(ctx, prof.ID, map[string]string{keys[id(1)]: id(1), keys[id(2)]: id(2), keys[id(6)]: id(6),
+		keys[id(8)]: id(8), keys[id(10)]: id(10), "series/tmdb/6/s1/e1": ""}, true, at)
+	s.RecordPlay(ctx, prof.ID, keys[id(4)], id(4), 60_000, false, at)
+	s.RecordPlay(ctx, prof.ID, keys[id(15)], id(15), 60_000, false, at)
+	s.RecordPlay(ctx, prof.ID, "series/tmdb/6/s1/e2", "", 60_000, false, at)
+	if !strings.HasPrefix(keys[id(6)], "item/") || !strings.HasPrefix(keys[id(8)], "item/") {
+		t.Fatalf("keys: %v", keys)
+	}
+	yes, no := true, false
+	for _, c := range []struct {
+		q    ListQuery
+		want []string
+	}{
+		{ListQuery{Played: &yes}, []string{id(0), id(5), id(7), id(9), id(11)}},
+		{ListQuery{Played: &no}, []string{id(3), id(13), id(14), id(16)}},
+		{ListQuery{InProgress: true}, []string{id(3), id(14)}},
+	} {
+		// Every copy (a listing shows one).
+		c.q.Kinds, c.q.ProfileID = []string{"series"}, prof.ID
+		got, err := s.CatalogIDs(ctx, c.q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		slices.Sort(got)
+		if !slices.Equal(got, c.want) {
+			t.Errorf("%+v: %v, want %v", c.q, got, c.want)
 		}
 	}
 }
