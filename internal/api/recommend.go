@@ -78,12 +78,10 @@ func (l Library) recommend(ctx context.Context, p *store.Profile, recent bool, n
 	if err != nil {
 		return nil, err
 	}
-	unwatched := false
-	lq := store.ListQuery{Kinds: []string{"movie", "series"}, Access: a, ProfileID: p.ID, Played: &unwatched, Sort: "name", Limit: -1}
-	if recent {
-		lq.Sort, lq.Descending, lq.Limit = "latest", true, recentPool
-	}
-	ids, err := st.ListCatalog(ctx, lq)
+	// Every film and series it may see (the cheapest listing: the SQL
+	// for "unwatched" and "latest" is slow on a large library); what it
+	// watched or started comes from its own history.
+	ids, err := st.ListCatalog(ctx, store.ListQuery{Kinds: []string{"movie", "series"}, Access: a, Sort: "addedAt", Limit: -1})
 	if err != nil || len(ids) == 0 {
 		return nil, err
 	}
@@ -91,19 +89,20 @@ func (l Library) recommend(ctx context.Context, p *store.Profile, recent bool, n
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
+	watched, seen, err := st.WatchedGenres(ctx, p.ID, now)
+	if err != nil {
+		return nil, err
+	}
 	keys := make([]string, 0, len(facts))
 	for k := range facts {
-		keys = append(keys, k)
+		if !seen[k] {
+			keys = append(keys, k)
+		}
 	}
-	// Started ones are in Continue Watching already.
-	states, err := st.PersonalStates(ctx, p.ID, keys)
-	if err != nil {
-		return nil, err
-	}
-	now := time.Now()
-	watched, _, err := st.WatchedGenres(ctx, p.ID, now)
-	if err != nil {
-		return nil, err
+	if recent {
+		slices.SortFunc(keys, func(x, y string) int { return facts[y].Latest.Compare(facts[x].Latest) })
+		keys = keys[:min(len(keys), recentPool)]
 	}
 	tastes, err := st.AccountTastes(ctx, p.AccountID)
 	if err != nil {
@@ -120,9 +119,6 @@ func (l Library) recommend(ctx context.Context, p *store.Profile, recent bool, n
 	}
 	var list []scored
 	for _, k := range keys {
-		if s, ok := states[k]; ok && (s.Played || s.PositionMs > 0) {
-			continue
-		}
 		if score, ok := fit.score(facts[k]); ok {
 			list = append(list, scored{k, score})
 		}
