@@ -55,8 +55,18 @@ func linkIn(body, name string) string {
 // signinPost posts JSON to one of the pages' routes as browser b.
 func signinPost(t *testing.T, b *http.Client, srv *httptest.Server, path string, body map[string]any) (int, map[string]any) {
 	t.Helper()
+	return signinPostFrom(t, b, srv, path, body, "")
+}
+
+// signinPostFrom is signinPost from a client address, as the (trusted)
+// proxy in front says; "" for the test's own.
+func signinPostFrom(t *testing.T, b *http.Client, srv *httptest.Server, path string, body map[string]any, client string) (int, map[string]any) {
+	t.Helper()
 	raw, _ := json.Marshal(body)
 	req, _ := http.NewRequest("POST", srv.URL+path, bytes.NewReader(raw))
+	if client != "" {
+		req.Header.Set("X-Forwarded-For", client)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	req.Header.Set("Accept-Language", "fr-CA,fr;q=0.9,en;q=0.8")
@@ -813,5 +823,30 @@ func TestManagedExportHasEmail(t *testing.T) {
 	account, _ := out["account"].(map[string]any)
 	if c != 200 || account["email"] != "ann@example.org" || account["admin"] != true || account["limits"] == nil {
 		t.Fatalf("export: %d %v", c, out)
+	}
+}
+
+// Wrong passwords from one address don't lock out the person signing in
+// from another: the limit is per email and client address.
+func TestSigninLimitPerClient(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{managed: true, store: &st})
+	ctx := context.Background()
+	ann, _ := st.CreateUser(ctx, "ann@example.org", false)
+	hash, _ := password.Hash("a long password 1")
+	st.SetPassword(ctx, ann.Subject, hash)
+	try := func(pw, client string) int {
+		c, _ := signinPostFrom(t, newBrowser(srv), srv, "/api/v1/signin",
+			checked(t, srv, map[string]any{"email": "ann@example.org", "password": pw}), client)
+		return c
+	}
+	for range 10 {
+		try("a wrong one", "192.0.2.10")
+	}
+	if c := try("a long password 1", "192.0.2.10"); c != 429 {
+		t.Errorf("the guessing address, after 10 wrong: %d", c)
+	}
+	if c := try("a long password 1", "198.51.100.7"); c != 200 {
+		t.Errorf("Ann from her own address: %d", c)
 	}
 }

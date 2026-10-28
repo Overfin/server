@@ -38,8 +38,13 @@ const (
 	// provisioner's admin group in managed mode.
 	ManagedAdminGroup = "admins"
 
-	// passwordTries caps wrong passwords for one email per quarter hour.
-	passwordTries = 10
+	// passwordTries caps wrong passwords for one email from one client
+	// address per quarter hour; passwordTriesAll, for one email from
+	// anywhere, against guessing from many addresses. The first is the one
+	// people meet: someone else's wrong tries never lock them out, unless
+	// they come from many addresses.
+	passwordTries    = 10
+	passwordTriesAll = 100
 	// slideEvery is how often a login's lifetime slides with activity.
 	slideEvery = 10 * time.Minute
 	// verifyFor is how long a link confirming an address works; resetFor,
@@ -92,6 +97,8 @@ type Managed struct {
 	once     sync.Once
 	byIP     *windowLimiter
 	byEmail  *windowLimiter
+	tries    *windowLimiter
+	triesAll *windowLimiter
 	hashing  chan struct{}
 	sendings sync.WaitGroup
 }
@@ -102,6 +109,8 @@ func (m *Managed) init() {
 	m.once.Do(func() {
 		m.byIP = &windowLimiter{max: 20, window: time.Minute}
 		m.byEmail = &windowLimiter{max: passwordTries, window: 15 * time.Minute}
+		m.tries = &windowLimiter{max: passwordTries, window: 15 * time.Minute}
+		m.triesAll = &windowLimiter{max: passwordTriesAll, window: 15 * time.Minute}
 		// Password checks are slow on purpose: a few at a time.
 		m.hashing = make(chan struct{}, 2)
 	})
@@ -305,7 +314,8 @@ func (m *Managed) signIn(w http.ResponseWriter, r *http.Request) {
 	} else if !m.checked(w, r, req) || !m.cleanEmail(w, r, &req) {
 		return
 	}
-	if !m.byEmail.allow(strings.ToLower(req.Email), time.Now()) {
+	client := clientFrom(identity.ClientIP(r.Context()))
+	if !m.mayTry(req.Email, client, time.Now()) {
 		m.refuse(w, r, problem.RateLimited, "tooManyTries")
 		return
 	}
@@ -330,8 +340,10 @@ func (m *Managed) signIn(w http.ResponseWriter, r *http.Request) {
 		m.refuse(w, r, problem.SigninFailed, "wrongPassword")
 		return
 	}
-	// Only wrong passwords count: signing in often isn't trying.
-	m.byEmail.forget(strings.ToLower(req.Email))
+	// Only wrong passwords count: signing in often isn't trying. The cap
+	// for the email from anywhere keeps counting, so the person signing in
+	// doesn't clear the way for someone guessing from elsewhere.
+	m.tries.forget(triesKey(req.Email, client))
 	if !u.Confirmed {
 		// Only with the right password: it tells nothing to anyone else.
 		writeOK(w, map[string]bool{"unconfirmed": true})
@@ -343,6 +355,18 @@ func (m *Managed) signIn(w http.ResponseWriter, r *http.Request) {
 	}
 	m.startLogin(w, r, u, req.Return)
 }
+
+// mayTry says whether one more password may be tried for email from client
+// (clientFrom's form), counting this try.
+func (m *Managed) mayTry(email, client string, now time.Time) bool {
+	if !m.tries.allow(triesKey(email, client), now) {
+		return false
+	}
+	return m.triesAll.allow(strings.ToLower(email), now)
+}
+
+// triesKey is the key of an email's tries from one client address.
+func triesKey(email, client string) string { return strings.ToLower(email) + " " + client }
 
 // startLogin signs someone in, here; one with a new password to choose is
 // sent to choose it first.
