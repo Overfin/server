@@ -17,9 +17,9 @@ func TestTextsRetention(t *testing.T) {
 		return n
 	}
 	season := Season{Number: 1, Name: "Season 1", Episodes: []Episode{{Number: 1, Name: "Pilot"}}}
-	s.SetTitleTexts(ctx, "en-CA", Title{Kind: "series", TMDB: "1", Name: "Old"}, []byte(`{}`), now.Add(-200*24*time.Hour))
+	s.SetTitleTexts(ctx, "en-CA", Title{Kind: "series", TMDB: "1", Name: "Old"}, []byte(`{}`), "", now.Add(-200*24*time.Hour))
 	s.SetSeasonTexts(ctx, "en-CA", "1", season)
-	s.SetTitleTexts(ctx, "en-CA", Title{Kind: "series", TMDB: "2", Name: "Fresh"}, []byte(`{}`), now)
+	s.SetTitleTexts(ctx, "en-CA", Title{Kind: "series", TMDB: "2", Name: "Fresh"}, []byte(`{}`), "", now)
 	s.SetSeasonTexts(ctx, "en-CA", "2", season)
 	if _, err := s.PurgeTitles(ctx, now.Add(-150*24*time.Hour)); err != nil {
 		t.Fatal(err)

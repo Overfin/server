@@ -10,18 +10,18 @@ import (
 
 // SetTitleTexts keeps a film's or a series' texts in language (a language
 // offered besides the default): its name, overview and details, as TMDB
-// gives them in it.
-func (s *Store) SetTitleTexts(ctx context.Context, language string, t Title, details []byte, at time.Time) error {
+// gives them in it, and its logo there ("" for none).
+func (s *Store) SetTitleTexts(ctx context.Context, language string, t Title, details []byte, logo string, at time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_title_texts (kind, tmdb, language, name, overview, details, fetched_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_title_texts (kind, tmdb, language, name, overview, details, logo, fetched_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (kind, tmdb, language) DO UPDATE SET name = excluded.name, overview = excluded.overview,
-			details = excluded.details, fetched_at = excluded.fetched_at`,
-		t.Kind, t.TMDB, language, t.Name, t.Overview, string(details), at.Unix()); err != nil {
+			details = excluded.details, logo = excluded.logo, fetched_at = excluded.fetched_at`,
+		t.Kind, t.TMDB, language, t.Name, t.Overview, string(details), logo, at.Unix()); err != nil {
 		return err
 	}
 	// Its genres' names in that language, for choosing tastes in it.
@@ -33,6 +33,28 @@ func (s *Store) SetTitleTexts(ctx context.Context, language string, t Title, det
 		}
 	}
 	return tx.Commit()
+}
+
+// translateLogo gives a title its film's or series' logo in language, where
+// its texts there are kept: a logo is text too, so it's that language's
+// or none (the name is then shown), never the default language's.
+func (s *Store) translateLogo(ctx context.Context, t *TitleInfo, language string) error {
+	tmdb := t.Ref.TMDB()
+	if tmdb == "" {
+		return nil
+	}
+	kind := t.Ref.Kind
+	if kind != "movie" {
+		kind = "series"
+	}
+	var logo string
+	err := s.db.QueryRowContext(ctx, `SELECT logo FROM catalog_title_texts WHERE kind = ? AND tmdb = ? AND language = ?`,
+		kind, tmdb, language).Scan(&logo)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	t.Logo = logo
+	return err
 }
 
 // SetSeasonTexts keeps a season's texts in language, its episodes'

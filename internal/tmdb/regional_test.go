@@ -109,3 +109,24 @@ func TestPickImage(t *testing.T) {
 		}
 	}
 }
+
+// A logo is the title written as art: in the language, else without text,
+// else none; never in another language.
+func TestPickLogo(t *testing.T) {
+	logos := []rawImage{{"/enlogo1234.png", "en", "US"}, {"/frlogo1234.png", "fr", "FR"}, {"/nolang1234.png", "", ""}}
+	for _, tc := range []struct {
+		lang   string
+		images []rawImage
+		want   string
+	}{
+		{"fr-CA", logos, "/frlogo1234.png"},
+		{"de-DE", logos, "/nolang1234.png"},
+		{"de-DE", logos[:2], ""},
+		{"", logos, "/enlogo1234.png"},
+		{"en-GB", logos[1:], "/nolang1234.png"},
+	} {
+		if got := pickLogo(tc.images, tc.lang); got != tc.want {
+			t.Errorf("logo in %q: %q, want %q", tc.lang, got, tc.want)
+		}
+	}
+}

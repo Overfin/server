@@ -515,7 +515,8 @@ func (c *Client) Certifications(ctx context.Context, kind string) (map[string][]
 
 // Artwork is a title's images, as TMDB paths (checked; "" when there's
 // none): its poster and backdrop, and its logo (the title as art), in the
-// client's language when TMDB has them.
+// client's language when TMDB has them; the logo only in it or without
+// text.
 type Artwork struct {
 	Poster   string
 	Backdrop string
@@ -535,6 +536,25 @@ type rawImage struct {
 func pick(images []rawImage, lang string) string {
 	language, region, _ := strings.Cut(lang, "-")
 	for _, want := range []rawImage{{Language: language, Region: region}, {Language: language}, {}, {Language: "en"}} {
+		for _, im := range images {
+			if im.Language == want.Language && (want.Region == "" || im.Region == want.Region) && imagePath.MatchString(im.FilePath) {
+				return im.FilePath
+			}
+		}
+	}
+	return ""
+}
+
+// pickLogo chooses a title's logo, the title written as art: one in the
+// language, as pick does, else one without a language, else none (the
+// title's name is then shown as text), never one in another language.
+// "" is TMDB's default language, English.
+func pickLogo(images []rawImage, lang string) string {
+	if lang == "" {
+		lang = "en"
+	}
+	language, region, _ := strings.Cut(lang, "-")
+	for _, want := range []rawImage{{Language: language, Region: region}, {Language: language}, {}} {
 		for _, im := range images {
 			if im.Language == want.Language && (want.Region == "" || im.Region == want.Region) && imagePath.MatchString(im.FilePath) {
 				return im.FilePath

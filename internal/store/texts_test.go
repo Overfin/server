@@ -31,7 +31,7 @@ func TestTitleTexts(t *testing.T) {
 
 	en, _ := json.Marshal(TitleDetails{Genres: []string{"Drama"}, Tagline: "Winter is coming",
 		Cast: []CastMember{{Name: "Kit Harington", Character: "Jon Snow"}}, Seasons: []SeasonInfo{{Number: 1, Name: "Season 1"}}})
-	if err := s.SetTitleTexts(ctx, "en-CA", Title{Kind: "series", TMDB: "1399", Name: "Game of Thrones", Overview: "Seven noble families…"}, en, now); err != nil {
+	if err := s.SetTitleTexts(ctx, "en-CA", Title{Kind: "series", TMDB: "1399", Name: "Game of Thrones", Overview: "Seven noble families…"}, en, "", now); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetSeasonTexts(ctx, "en-CA", "1399", Season{Number: 1, Name: "Season 1", Overview: "The first",
@@ -76,5 +76,40 @@ func TestTitleTexts(t *testing.T) {
 	}
 	if fresh, _ := s.HasTexts(ctx, "en-CA", "series", "1399", now.Add(-time.Hour)); !fresh {
 		t.Error("the series' texts aren't fresh")
+	}
+}
+
+// A logo is text: a profile reading another language gets that language's
+// logo, or none (the name is shown), never the default language's; the
+// images it may load include it.
+func TestTextLogos(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	s.SetLanguages(ctx, []string{"fr-CA", "en-CA", "de-DE"}, "fr-CA")
+	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
+	one := 1
+	s.PutCatalog(ctx, []CatalogItem{{ID: id(0), Kind: "series", Name: "x", SortName: "x", TMDB: "1399"},
+		{ID: id(1), Kind: "episode", Name: "e", SortName: "e", SeriesID: id(0), SeasonNumber: &one, EpisodeNumber: &one}}, 1)
+	s.RefreshTitleKeys(ctx)
+	now := time.Now()
+	s.SetTitleDetails(ctx, Title{Kind: "series", TMDB: "1399", Name: "Le trône de fer"}, []byte(`{}`), now)
+	s.SetArtwork(ctx, ArtworkTarget{Kind: "series", TMDB: "1399"}, map[string]map[string]string{"series/tmdb/1399": {"logo": "/frlogo1234.png"}}, now)
+	s.SetTitleTexts(ctx, "en-CA", Title{Kind: "series", TMDB: "1399", Name: "Game of Thrones"}, []byte(`{}`), "/enlogo1234.png", now)
+	s.SetTitleTexts(ctx, "de-DE", Title{Kind: "series", TMDB: "1399", Name: "Game of Thrones (de)"}, []byte(`{}`), "", now)
+	keys := []string{"series/tmdb/1399", "series/tmdb/1399/s1/e1"}
+	for language, want := range map[string]string{"fr-CA": "/frlogo1234.png", "en-CA": "/enlogo1234.png", "de-DE": ""} {
+		got, err := s.TitleInfos(ctx, keys, "2026-10-23", language)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got[keys[0]].Logo != want {
+			t.Errorf("%s: series logo %q, want %q", language, got[keys[0]].Logo, want)
+		}
+		if got[keys[1]].Logo != want {
+			t.Errorf("%s: episode logo %q, want %q", language, got[keys[1]].Logo, want)
+		}
+	}
+	if titles, err := s.ImageTitles(ctx, "logo", "/enlogo1234.png", 10); err != nil || !slices.Equal(titles, []string{"series/tmdb/1399"}) {
+		t.Errorf("the English logo's titles: %v %v", titles, err)
 	}
 }
