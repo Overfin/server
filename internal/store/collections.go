@@ -133,12 +133,11 @@ func (s *Store) PurgeCollections(ctx context.Context, before time.Time) error {
 	return err
 }
 
-// Collections returns every collection kept that a library's film belongs
-// to, by name.
+// Collections returns every collection kept, by name: kept for a
+// library's film, though it may have left since (CollectionItems says
+// which films a library has).
 func (s *Store) Collections(ctx context.Context) ([]Collection, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, overview, poster, backdrop, parts FROM collections c
-		WHERE EXISTS (SELECT 1 FROM catalog_titles t JOIN catalog_items i ON i.kind = 'movie' AND i.tmdb = t.tmdb
-			WHERE t.kind = 'movie' AND t.collection = c.id)`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, overview, poster, backdrop, parts FROM collections`)
 	if err != nil {
 		return nil, err
 	}
