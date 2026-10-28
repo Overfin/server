@@ -165,7 +165,7 @@ func TestTemplates(t *testing.T) {
 	acct, _, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", JellyfinUsername: "of-1", JellyfinToken: "t"})
 
 	body := b.do("GET", "/admin/api/templates", "", nil).Body.String()
-	if !strings.Contains(body, `"name":"Default","maxStreams":1,"maxProfiles":1,"reserveStreams":false,"accounts":1,"default":true`) {
+	if !strings.Contains(body, `"name":"Default","maxStreams":1,"maxProfiles":5,"reserveStreams":false,"accounts":1,"default":true`) {
 		t.Fatalf("templates: %s", body)
 	}
 	rec := b.do("POST", "/admin/api/templates", `{"name":"Family","maxStreams":3,"maxProfiles":5}`, nil)

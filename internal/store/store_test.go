@@ -418,9 +418,10 @@ func TestAccountTemplates(t *testing.T) {
 	s := openTest(t)
 	a, _, _ := s.CreateAccount(ctx, "subject", owner("1"))
 
-	// Every account starts on the minimal Default.
+	// Every account starts on the minimal Default: one stream, five
+	// profiles on a new server.
 	got, _ := s.AccountByID(ctx, a.ID)
-	if got.Template.ID != DefaultTemplate || got.Template.MaxProfiles != 1 || got.Template.MaxStreams != 1 {
+	if got.Template.ID != DefaultTemplate || got.Template.MaxProfiles != 5 || got.Template.MaxStreams != 1 {
 		t.Fatalf("new account's template: %+v", got.Template)
 	}
 

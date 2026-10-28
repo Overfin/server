@@ -192,8 +192,9 @@ func (t Template) ProfileLimit() int {
 	return t.MaxProfiles
 }
 
-// DefaultTemplate is the template that exists from the start: one profile,
-// one stream, until the operator edits it. Every account without another
+// DefaultTemplate is the template that exists from the start: five
+// profiles, one stream, until the operator edits it (a server set up
+// before that keeps its own: one profile, unless edited). Every account without another
 // template is on it. It can't be deleted.
 const DefaultTemplate = "tmpl_default"
 
