@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -443,7 +444,7 @@ func convert(raw jellyfin.RawItem) (store.CatalogItem, bool) {
 		SortName: textclean.Plain(raw.SortName, 300),
 		Year:     raw.ProductionYear,
 		Rating:   textclean.Plain(raw.OfficialRating, 32),
-		TMDB:     matching(tmdbID, raw.ProviderIds["Tmdb"]),
+		TMDB:     tmdbNumber(raw.ProviderIds["Tmdb"]),
 		IMDb:     matching(imdbID, raw.ProviderIds["Imdb"]),
 		TVDB:     matching(tvdbID, raw.ProviderIds["Tvdb"]),
 	}
@@ -514,6 +515,19 @@ func convert(raw jellyfin.RawItem) (store.CatalogItem, bool) {
 		it.BackdropTag = matching(imageTag, raw.BackdropImageTags[0])
 	}
 	return it, true
+}
+
+// tmdbNumber is a TMDB ID as TMDB writes it ("0949" is 949, and 0 is
+// none), so a title has one key whatever the folder or a hand edit says.
+func tmdbNumber(s string) string {
+	if !tmdbID.MatchString(s) {
+		return ""
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n == 0 {
+		return ""
+	}
+	return strconv.Itoa(n)
 }
 
 func matching(re *regexp.Regexp, s string) string {
