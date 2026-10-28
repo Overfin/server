@@ -37,7 +37,7 @@ func TestSpecMatchesRoutes(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() && (d.Name() == ".git" || d.Name() == "examples" || d.Name() == "node_modules") {
+		if d.IsDir() && (hidden(root, path, d) || d.Name() == "examples" || d.Name() == "node_modules") {
 			return filepath.SkipDir
 		}
 		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
