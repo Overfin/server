@@ -249,3 +249,105 @@ func TestRecommended(t *testing.T) {
 		t.Errorf("bad scope: %d", code)
 	}
 }
+
+// Recommendations and similar titles keep to each profile's limits: a
+// kids profile's age, a profile's categories and its template's, for
+// titles a library has and those it hasn't.
+func TestLimitsInRecommendedAndSimilar(t *testing.T) {
+	var st *store.Store
+	var tmpl string
+	srv, _ := newServerWith(t, options{store: &st, template: &tmpl})
+	ctx := context.Background()
+	now := time.Now()
+	lib := fmt.Sprintf("%032x", 0xf1)
+	films := []struct {
+		tmdb, name, rating string
+		have               bool
+	}{
+		{"1", "Heat", "R", true}, {"2", "Bluey film", "G", true}, {"3", "Collateral", "R", true},
+		{"4", "Paddington", "PG", true}, {"5", "Missing kids", "G", false}, {"6", "Missing adult", "R", false},
+	}
+	var items []store.CatalogItem
+	for i, f := range films {
+		if f.have {
+			it := store.CatalogItem{ID: fmt.Sprintf("%032x", i+1), Kind: "movie", Name: f.name, SortName: f.name, TMDB: f.tmdb, LibraryID: lib}
+			if f.rating == "G" {
+				it.Tags = []string{"Family"}
+			}
+			items = append(items, it)
+		}
+	}
+	st.PutCatalog(ctx, items, 1)
+	st.RefreshTitleKeys(ctx)
+	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
+	for _, f := range films {
+		st.PutTitles(ctx, []store.Title{{Kind: "movie", TMDB: f.tmdb, Name: f.name, Year: 2000}}, now)
+		st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: f.tmdb, Name: f.name, Year: 2000,
+			Genres: []store.TitleGenre{{ID: 10751, Name: "Family"}}}, []byte(`{"similar":["1","3","4","5","6"]}`), now)
+		st.SetTitleRatings(ctx, store.RatedTitle{Kind: "movie", TMDB: f.tmdb}, map[string][]string{"US": {f.rating}}, "2000-01-01", "2000-01-01", now)
+	}
+	st.SetHomeMissing(ctx, true)
+	names := func(path string) []string {
+		t.Helper()
+		var page struct{ Items []struct{ Name string } }
+		if code := get(t, srv, path, &page); code != 200 {
+			t.Fatalf("%s: %d", path, code)
+		}
+		var out []string
+		for _, it := range page.Items {
+			out = append(out, it.Name)
+		}
+		slices.Sort(out)
+		return out
+	}
+	check := func(who string, similar, recommended []string) {
+		t.Helper()
+		if got := names("/api/v1/titles/title_movie_tmdb_2/similar"); !slices.Equal(got, similar) {
+			t.Errorf("%s, similar: %v, want %v", who, got, similar)
+		}
+		if got := names("/api/v1/titles/recommended?limit=50"); !slices.Equal(got, recommended) {
+			t.Errorf("%s, recommended: %v, want %v", who, got, recommended)
+		}
+	}
+	owner := ownerID(t, srv)
+	put(t, srv, "PATCH", "/api/v1/profiles/"+owner, `{"kidsTitles":true}`)
+	check("the owner", []string{"Collateral", "Heat", "Missing adult", "Missing kids", "Paddington"},
+		[]string{"Bluey film", "Collateral", "Heat", "Paddington"})
+
+	// A kids profile of 6: what's for 6 at most (PG counts as 8).
+	code, body := post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","maxAge":6}`)
+	if code != 201 {
+		t.Fatalf("kids profile: %d %s", code, body)
+	}
+	var kid struct{ ID string }
+	json.Unmarshal([]byte(body), &kid)
+	post(t, srv, "/api/v1/profiles/"+kid.ID+"/activate", `{}`)
+	check("the kids profile", []string{"Missing kids"}, []string{"Bluey film"})
+
+	// A profile limited to a category: its titles only, none no library
+	// has.
+	family := &store.Category{Names: map[string]string{"en": "Family"}, Rules: store.CategoryRules{Tags: []string{"family"}}}
+	st.SaveCategory(ctx, family)
+	code, body = post(t, srv, "/api/v1/profiles/"+owner+"/activate", `{}`)
+	if code != 200 {
+		t.Fatalf("back to the owner: %d %s", code, body)
+	}
+	code, body = post(t, srv, "/api/v1/profiles", `{"name":"Partner","categories":["`+family.ID+`"]}`)
+	if code != 201 {
+		t.Fatalf("partner: %d %s", code, body)
+	}
+	var partner struct{ ID string }
+	json.Unmarshal([]byte(body), &partner)
+	post(t, srv, "/api/v1/profiles/"+partner.ID+"/activate", `{}`)
+	put(t, srv, "PATCH", "/api/v1/profiles/"+partner.ID, `{"kidsTitles":true}`)
+	check("the partner", nil, []string{"Bluey film"})
+
+	// The template's categories hold the owner too.
+	if code, body := post(t, srv, "/api/v1/profiles/"+owner+"/activate", `{}`); code != 200 {
+		t.Fatalf("the owner again: %d %s", code, body)
+	}
+	if err := st.SetTemplateCategories(ctx, tmpl, []string{family.ID}); err != nil {
+		t.Fatal(err)
+	}
+	check("the owner, by the template", nil, []string{"Bluey film"})
+}
