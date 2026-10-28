@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 
 	"github.com/overfin/server/internal/library"
 	"github.com/overfin/server/internal/problem"
@@ -15,7 +17,9 @@ const maxSimilar = 20
 // similar lists the titles TMDB recommends with a film or a series (a
 // season's or an episode's, its series'): those a library has first, then,
 // when the operator shows titles no library has on the home page, the
-// others. Each as the profile may see it.
+// others; then, up to maxSimilar, the library's titles that have the most
+// in common with it (store.RelatedTitles), its own collection's aside (the
+// page links to it). Each as the profile may see it.
 func (l Library) similar(w http.ResponseWriter, r *http.Request) {
 	if !onlyParams(w, r, "limit") {
 		return
@@ -84,7 +88,49 @@ func (l Library) similar(w http.ResponseWriter, r *http.Request) {
 			out = append(out, s)
 		}
 		out = append(out, others...)
-		out = out[:min(len(out), maxSimilar, limit)]
 	}
+	want := min(maxSimilar, limit)
+	if len(out) < want {
+		more, err := l.related(ctx, p, kind, ref.TMDB(), out, want-len(out))
+		if err != nil {
+			l.storeError(w, err)
+			return
+		}
+		out = append(out, more...)
+	}
+	out = out[:min(len(out), want)]
 	writeOK(w, map[string]any{"items": out})
+}
+
+// related returns up to n of the library's titles most related to a film or
+// a series, as the profile may see them, leaving out those already listed
+// and the film's own collection.
+func (l Library) related(ctx context.Context, p *store.Profile, kind, tmdb string, listed []library.TitleSummary, n int) ([]library.TitleSummary, error) {
+	st := l.Provisioner.Store
+	// A few more than needed: some may be listed already, or hidden.
+	keys, err := st.RelatedTitles(ctx, kind+"/tmdb/"+tmdb, n+len(listed)+20)
+	if err != nil {
+		return nil, err
+	}
+	skip := map[string]bool{}
+	for _, s := range listed {
+		skip[s.ID] = true
+	}
+	if kind == "movie" {
+		c, err := st.FilmCollection(ctx, tmdb)
+		if err != nil {
+			return nil, err
+		}
+		if c != nil {
+			for _, film := range c.Parts {
+				skip[titleID("movie/tmdb/"+film)] = true
+			}
+		}
+	}
+	keys = slices.DeleteFunc(keys, func(k string) bool { return skip[titleID(k)] })
+	all, err := l.titleSummaries(ctx, p, keys)
+	if err != nil {
+		return nil, err
+	}
+	return all[:min(len(all), n)], nil
 }

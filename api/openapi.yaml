@@ -2220,7 +2220,11 @@ paths:
         The titles TMDB recommends with a film or a series (with a season or
         an episode, with its series), as the profile may see them: those a
         library has first, then, when the operator shows titles no library
-        has on the home page, the others. 20 at most. Since 0.6.
+        has on the home page, the others; then, up to 20 (since 0.7), the
+        library's titles of the same kind with the most in common with it
+        (genres, keywords, people, language, years; what's rare counts
+        most), its own collection's films aside. The same title always
+        gets the same list. 20 at most. Since 0.6.
       tags: [titles]
       parameters:
         - $ref: "#/components/parameters/Limit"
