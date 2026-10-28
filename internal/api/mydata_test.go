@@ -16,6 +16,9 @@ func TestExportMyData(t *testing.T) {
 		t.Fatalf("export without a fresh login: %d %s", code, body)
 	}
 	stepUp(t, srv, idp, subject, time.Now())
+	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+ownerID(t, srv), `{"kidsTitles":true,"theme":"dark"}`); code != 200 {
+		t.Fatalf("settings: %d %s", code, body)
+	}
 
 	req, _ := http.NewRequest("POST", srv.URL+"/api/v1/me/export", strings.NewReader("{}"))
 	req.Header.Set("Remote-User", subject)
@@ -30,7 +33,8 @@ func TestExportMyData(t *testing.T) {
 	if res.StatusCode != 200 || !strings.Contains(res.Header.Get("Content-Disposition"), "attachment") {
 		t.Fatalf("export: %d %s", res.StatusCode, res.Header.Get("Content-Disposition"))
 	}
-	for _, want := range []string{`"account":{"id":"acct_`, `"owner":true`, `"watchHistory":[{`, `"titles":[`, `"name":"Movie 0"`, `"sessions":[{`} {
+	for _, want := range []string{`"account":{"id":"acct_`, `"owner":true`, `"watchHistory":[{`, `"titles":[`, `"name":"Movie 0"`, `"sessions":[{`,
+		`"kidsTitles":true`, `"theme":"dark"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("export lacks %s: %s", want, body)
 		}
