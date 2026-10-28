@@ -357,7 +357,7 @@ own do), so a title looks the same wherever it is.
      the profile, on the first page only. Personal filters (watched,
      favorites, in progress) are answered from it too, with Overfin's own
      data (step 2), and so are kids profiles' listings, with only what
-     their ceilings allow and Overfin's own count (step 3). ~~A person's
+     their age allows and Overfin's own count (step 3). ~~A person's
      titles, shuffling, last played, "watched" for a whole series or
      season~~ Done, from the index (it keeps each title's people and tags
      too). Still through Jellyfin: kinds the index doesn't hold (music,
@@ -396,7 +396,7 @@ own do), so a title looks the same wherever it is.
    owner sees it, never admins; it's in the data download, its owner can
    clear it, and it goes with the profile (a new SECURITY.md rule).
 3. **Overfin enforces the rules**, on the catalog, for every title wherever
-   it comes from: rating ceilings, which libraries a profile gets, blocked
+   it comes from: kids profiles' ages, which libraries a profile gets, blocked
    tags. It fails closed: an unrated, unmatched or unknown title is hidden
    from kids, and a playback for anything not in the catalog is refused.
    Jellyfin's own parental limits are no longer used: its ratings come from
@@ -656,7 +656,7 @@ nothing beyond what that needs.
   attribution. ~~TMDB itself~~ Done: with the operator's own read access
   token (since 0.4; no key is shipped, so one server's use never puts
   another's at risk), and Seerr is a second source (and, later, requests). Kids
-  profiles see what their ceilings allow (milestone 4,
+  profiles see what their age allows (milestone 4,
   step 3). Next: search, curated lists.
 - **Discovery**: trending, popular and upcoming titles, search, a title's
   page, curated lists, with each title's place in the library (available,
