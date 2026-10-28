@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/textclean"
@@ -440,7 +442,10 @@ func role(t string) string {
 	if t == "" {
 		return "other"
 	}
-	return strings.ToLower(t[:1]) + t[1:]
+	// The first character, not the first byte: half a character would
+	// come out as garbage.
+	r, n := utf8.DecodeRuneInString(t)
+	return string(unicode.ToLower(r)) + t[n:]
 }
 
 func cleanList(in []string) []string {
@@ -485,7 +490,8 @@ var imageTag = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // img_<item>_<type>_<index>_<tag>. The tag changes when the image does, so
 // caches never serve a stale one. It returns nil when there's no valid image.
 func imageRef(jfItemID, kind string, index int, tag string, aspect *float64, hash string) *ImageRef {
-	if jfItemID == "" || !imageTag.MatchString(tag) {
+	// The image endpoint takes indexes of three digits at most.
+	if jfItemID == "" || !imageTag.MatchString(tag) || index < 0 || index > 999 {
 		return nil
 	}
 	ref := &ImageRef{
