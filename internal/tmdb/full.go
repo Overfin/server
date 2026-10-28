@@ -209,6 +209,7 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 	}
 	// The poster TMDB picks for the language, else the best one listed.
 	out.Artwork = Artwork{Poster: t.Poster, Backdrop: t.Backdrop, Logo: pickLogo(raw.Images.Logos, lang, c.languages()...)}
+	out.Artwork.Textless = pickTextless(raw.Images.Posters)
 	if out.Artwork.Logo == "" {
 		// None in the languages asked: one in its original language. A
 		// failure leaves it without: its name is shown, until next time.

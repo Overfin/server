@@ -142,6 +142,9 @@ func summaryOf(t *store.TitleInfo) library.TitleSummary {
 	} else {
 		im.Primary = ref("poster", t.Poster, &posterAspect)
 	}
+	if t.Ref.Kind == "movie" || t.Ref.Kind == "series" {
+		im.Textless = ref("poster", t.Textless, &posterAspect)
+	}
 	if r := ref("backdrop", t.Backdrop, &wideAspect); r != nil {
 		im.Backdrops = []library.ImageRef{*r}
 	}
@@ -356,6 +359,19 @@ func (l Library) describe(ctx context.Context, r store.TitleRef) {
 	}
 }
 
+// textless makes sure a film's or a series' text-free poster was asked of
+// TMDB, asking it now when it never was; when TMDB can't answer, the page
+// shows without it.
+func (l Library) textless(ctx context.Context, r store.TitleRef) {
+	if l.Titles == nil || r.TMDB() == "" || (r.Kind != "movie" && r.Kind != "series") {
+		return
+	}
+	err := l.Titles.FetchTextless(ctx, store.ArtworkTarget{Kind: r.Kind, TMDB: r.TMDB()})
+	if err != nil && ctx.Err() == nil {
+		l.Logger.Warn("asking TMDB a title's text-free poster failed", "title", r.Key(), "err", err)
+	}
+}
+
 // title serves a title's page: a series with its seasons, a season with
 // its episodes, in a library or not.
 func (l Library) title(w http.ResponseWriter, r *http.Request) {
@@ -373,6 +389,7 @@ func (l Library) title(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	l.describe(ctx, ref)
+	l.textless(ctx, ref)
 	st := l.Provisioner.Store
 	key := ref.Key()
 	infos, err := st.TitleInfos(ctx, []string{key}, today(), p.TextLanguage)

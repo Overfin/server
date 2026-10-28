@@ -68,7 +68,8 @@ func splitList(s string) []string {
 
 // SetArtwork replaces a target's artwork, its seasons' and episodes'
 // included: images maps title keys to their images by type ("poster",
-// "backdrop", "logo", "still").
+// "backdrop", "logo", "still", "textless": a poster without text, kept
+// even empty, which says TMDB has none).
 func (s *Store) SetArtwork(ctx context.Context, t ArtworkTarget, images map[string]map[string]string, at time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -85,7 +86,7 @@ func (s *Store) SetArtwork(ctx context.Context, t ArtworkTarget, images map[stri
 			continue // only the target's own
 		}
 		for typ, path := range byType {
-			if path == "" {
+			if path == "" && typ != "textless" {
 				continue
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO artwork (key, type, path) VALUES (?, ?, ?)
@@ -156,11 +157,37 @@ func (s *Store) Artwork(ctx context.Context, keys []string) (map[string]map[stri
 
 // ArtworkItems lists library items (by Jellyfin ID) the image at path
 // (of type typ) belongs to: the titles with that key, and for a series'
-// own image, its seasons and episodes too. At most limit.
+// own image, its seasons and episodes too. At most limit. A text-free
+// poster is a poster.
 func (s *Store) ArtworkItems(ctx context.Context, typ, path string, limit int) ([]string, error) {
 	return s.ids(ctx, `SELECT i.id FROM artwork a JOIN catalog_items i
 			ON i.title_key = a.key OR (i.title_key >= a.key || '/' AND i.title_key < a.key || '0')
-		WHERE a.type = ? AND a.path = ? LIMIT ?`, typ, path, limit)
+		WHERE (a.type = ?1 OR (?1 = 'poster' AND a.type = 'textless')) AND a.path = ?2 LIMIT ?3`, typ, path, limit)
+}
+
+// TextlessKnown says whether a title's text-free poster was asked of TMDB
+// (an empty one is TMDB's none), and whether its artwork is kept at all.
+func (s *Store) TextlessKnown(ctx context.Context, t ArtworkTarget) (known, kept bool, err error) {
+	err = s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM artwork WHERE key = ?1 AND type = 'textless'),
+		EXISTS (SELECT 1 FROM artwork_fetched WHERE key = ?1)`, t.Key()).Scan(&known, &kept)
+	return known, kept, err
+}
+
+// SetTextless keeps a title's text-free poster ("" when TMDB has none):
+// only for a title whose artwork is kept.
+func (s *Store) SetTextless(ctx context.Context, t ArtworkTarget, path string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO artwork (key, type, path)
+		SELECT ?, 'textless', ? WHERE EXISTS (SELECT 1 FROM artwork_fetched WHERE key = ?)
+		ON CONFLICT (key, type) DO UPDATE SET path = excluded.path`, t.Key(), path, t.Key())
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // PurgeArtwork deletes the artwork not fetched again since before.

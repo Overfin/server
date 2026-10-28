@@ -3955,6 +3955,12 @@ components:
           $ref: "#/components/schemas/ImageRef"
         thumb:
           $ref: "#/components/schemas/ImageRef"
+        textless:
+          allOf:
+            - $ref: "#/components/schemas/ImageRef"
+          description: >-
+            A film's or a series' poster without text, when TMDB has one:
+            for the background of a screen taller than wide. Since 0.7.
 
     UserState:
       description: The active profile's state for this item. Never anyone

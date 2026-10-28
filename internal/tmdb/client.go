@@ -527,6 +527,41 @@ type Artwork struct {
 	Poster   string
 	Backdrop string
 	Logo     string
+	// Textless is a poster without text (TMDB's without a language), ""
+	// when there's none.
+	Textless string
+}
+
+// pickTextless chooses, among posters (best first), the first without a
+// language: without text.
+func pickTextless(images []rawImage) string {
+	for _, im := range images {
+		if im.Language == "" && imagePath.MatchString(im.FilePath) {
+			return im.FilePath
+		}
+	}
+	return ""
+}
+
+// TextlessPoster returns a film's ("movie") or a series' ("series") poster
+// without text, "" when TMDB has none: only its images without a language
+// are asked for.
+func (c *Client) TextlessPoster(ctx context.Context, kind string, tmdbID int) (string, error) {
+	k := tv(kind)
+	if k == "" || !ValidID(tmdbID) {
+		return "", ErrNotFound
+	}
+	var raw struct {
+		ID      int        `json:"id"`
+		Posters []rawImage `json:"posters"`
+	}
+	if err := c.get(ctx, "/"+k+"/"+strconv.Itoa(tmdbID)+"/images", url.Values{"include_image_language": {"null"}}, &raw); err != nil {
+		return "", err
+	}
+	if raw.ID != tmdbID {
+		return "", ErrNotFound
+	}
+	return pickTextless(raw.Posters), nil
 }
 
 // rawImage is one of TMDB's images of a title.
