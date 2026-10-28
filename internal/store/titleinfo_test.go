@@ -144,6 +144,16 @@ func TestTitleCertification(t *testing.T) {
 	if c := got["movie/tmdb/3"].Certification; c != "" {
 		t.Errorf("unrated: %q", c)
 	}
+	// Its age, as Overfin works it out; a season's is its series'.
+	if a := got["movie/tmdb/1"].Age; a == nil || *a != 13 {
+		t.Errorf("film's age: %v", a)
+	}
+	if a := got["series/tmdb/2/s1"].Age; a == nil || *a != 17 {
+		t.Errorf("season's age: %v", a)
+	}
+	if a := got["movie/tmdb/3"].Age; a != nil {
+		t.Errorf("unrated, an age: %v", *a)
+	}
 }
 
 // The library's titles: films, series, the seasons and episodes it has;

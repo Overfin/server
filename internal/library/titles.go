@@ -36,6 +36,9 @@ type TitleSummary struct {
 	// Certification is its rating in the server's ratings country (its
 	// series', for a season or an episode).
 	Certification string `json:"certification,omitempty"`
+	// Age is its age as Overfin works it out from its ratings in any
+	// country (its series', for a season or an episode); nil when unknown.
+	Age *int `json:"age,omitempty"`
 	// Ratings are its users' scores, by source (TMDB's, for now): a film's
 	// or a series'.
 	Ratings []Rating `json:"ratings,omitempty"`

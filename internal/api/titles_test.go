@@ -14,6 +14,7 @@ import (
 type testTitle struct {
 	ID, Kind, Name, Availability, Certification string
 	Year                                        int
+	Age                                         *int
 	Playable                                    bool
 	Series, Season                              *struct{ ID, Name string }
 	EpisodeCount                                *struct{ InLibrary, Aired int }
@@ -190,7 +191,7 @@ func TestTitles(t *testing.T) {
 	}
 	st.SetTitleRatings(ctx, store.RatedTitle{Kind: "movie", TMDB: "100"}, map[string][]string{"US": {"G"}}, "2024-01-01", "2024-03-01", now)
 	var rated testTitle
-	if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_100", &rated); code != 200 || rated.Certification != "G" {
+	if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_100", &rated); code != 200 || rated.Certification != "G" || rated.Age == nil || *rated.Age != 0 {
 		t.Errorf("rated G, for a kid: %d %+v", code, rated)
 	}
 }
