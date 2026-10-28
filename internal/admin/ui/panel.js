@@ -1215,7 +1215,10 @@ async function templatesView() {
     const picked = () => catBoxes.map((l) => l.querySelector('input')).filter((b) => b.checked).map((b) => b.dataset.v);
     const body = () => ({ name: name.value, maxStreams: Number(streams.value), maxProfiles: Number(profiles.value),
       reserveStreams: reserve.checked, categories: picked().length ? picked() : null });
-    const save = h('button', { class: 'primary', type: 'button', onclick: () => busy(save, async () => {
+    // A template kept to categories (deleted since, maybe: then it sees
+    // nothing) loses its limit only when the admin says so.
+    const save = h('button', { class: 'primary', type: 'button', onclick: () => t?.categories && !picked().length
+      && !confirm(`No category is ticked: every account on "${t.name}" will see every title. Save anyway?`) ? undefined : busy(save, async () => {
       await (t ? api('PUT', `/admin/api/templates/${t.id}`, body()) : api('POST', '/admin/api/templates', body()));
       toast(t ? 'Template saved.' : 'Template made.');
       templatesView();
