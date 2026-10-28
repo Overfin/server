@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/internal/textclean"
 )
 
 // Account templates: what accounts may do. Accounts follow theirs live, so
@@ -68,7 +69,7 @@ func (p *Panel) readTemplate(w http.ResponseWriter, r *http.Request) (templateIn
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	err := dec.Decode(&in)
-	name, ok := plainName(in.Name, 40)
+	name, ok := textclean.Name(in.Name, 40)
 	in.Name = name
 	switch {
 	case err != nil:

@@ -3583,8 +3583,10 @@ components:
       minLength: 1
       maxLength: 32
       description: |
-        Unique within the account. At most 32 bytes of UTF-8, plain text
-        without markup, control characters or repeated spaces.
+        Unique within the account. At most 32 characters (an accented
+        letter counts as one), plain text without markup or control
+        characters. Spaces around it are dropped and runs of them inside
+        become one; the name is kept that way.
 
     Pin:
       type: string

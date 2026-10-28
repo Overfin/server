@@ -33,3 +33,21 @@ func TestPlainLength(t *testing.T) {
 		t.Errorf("got %d bytes, valid UTF-8: %v", len(got), utf8.ValidString(got))
 	}
 }
+
+// Names are tidied and counted in characters.
+func TestName(t *testing.T) {
+	for _, tc := range []struct {
+		in, want string
+		ok       bool
+	}{
+		{"  Bob   Smith ", "Bob Smith", true},
+		{strings.Repeat("é", 10), strings.Repeat("é", 10), true},
+		{strings.Repeat("é", 11), strings.Repeat("é", 11), false},
+		{"<b>x</b>", "<b>x</b>", false},
+		{"", "", true},
+	} {
+		if got, ok := Name(tc.in, 10); got != tc.want || ok != tc.ok {
+			t.Errorf("Name(%q) = %q, %v; want %q, %v", tc.in, got, ok, tc.want, tc.ok)
+		}
+	}
+}
