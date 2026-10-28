@@ -74,3 +74,10 @@ func inviterOf(mounts []Mount) (feature.Inviter, feature.Host) {
 // sign-in let in: their account, when it's created, needs no invitation
 // of its own.
 func markAdmitted(ctx context.Context) context.Context { return creation.Admitted(ctx) }
+
+// markHeld marks a request as coming from someone who registered with
+// Overfin's own sign-in: load reads the invitation they registered with,
+// should their account be set up.
+func markHeld(ctx context.Context, load func(context.Context) (string, error)) context.Context {
+	return creation.Held(ctx, load)
+}

@@ -20,12 +20,21 @@ import (
 )
 
 // sent keeps the invitations sent by email.
-type sent []string
+type sent struct {
+	links []string
+	// released are the people whose invitation's use was given back.
+	released []string
+}
 
 func (l *sent) CanMail() bool { return true }
 
+func (l *sent) ReleaseInvitation(_ context.Context, subject string) error {
+	l.released = append(l.released, subject)
+	return nil
+}
+
 func (l *sent) SendInvitation(_ context.Context, to, link string) error {
-	*l = append(*l, to+" "+link)
+	l.links = append(l.links, to+" "+link)
 	return nil
 }
 
@@ -96,8 +105,8 @@ func TestPeople(t *testing.T) {
 	}
 	// Invitations by email, and the rules, on the registration page.
 	if code, out := do("POST", "/admin/api/registration/send", map[string]any{"email": "ann@example.org", "link": "https://media.example.org/invite/abc"}); code != 200 ||
-		len(*made) != 1 || (*made)[0] != "ann@example.org https://media.example.org/invite/abc" {
-		t.Errorf("sending an invitation: %d %v %v", code, out, *made)
+		len(made.links) != 1 || made.links[0] != "ann@example.org https://media.example.org/invite/abc" {
+		t.Errorf("sending an invitation: %d %v %v", code, out, made.links)
 	}
 	if code, _ := do("POST", "/admin/api/registration/send", map[string]any{"email": "ann@example.org", "link": "https://evil.example/x"}); code != 400 {
 		t.Errorf("not an invitation's link: %d", code)
@@ -134,6 +143,9 @@ func TestPeople(t *testing.T) {
 	}
 	if code, _ := do("DELETE", "/admin/api/people/"+id, nil); code != 204 {
 		t.Errorf("removing Bob: %d", code)
+	}
+	if len(made.released) != 1 || made.released[0] != id {
+		t.Errorf("Bob's invitation not given back: %v", made.released)
 	}
 	if _, err := db.UserByEmail(context.Background(), "bob@example.org"); err != store.ErrNotFound {
 		t.Errorf("Bob is still there: %v", err)

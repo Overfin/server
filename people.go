@@ -109,7 +109,7 @@ func setPassword(ctx context.Context, cfg *config.Config, db *store.Store, email
 	if err := db.SetPassword(ctx, u.Subject, hash); err != nil {
 		return err
 	}
-	if _, err := db.ConfirmUser(ctx, u.Subject); err != nil {
+	if err := db.ConfirmUser(ctx, u.Subject); err != nil {
 		return err
 	}
 	if err := db.SetMustChange(ctx, u.Subject, false); err != nil {

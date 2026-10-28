@@ -22,6 +22,9 @@ type People interface {
 	CanMail() bool
 	// SendInvitation emails an invitation's link.
 	SendInvitation(ctx context.Context, to, link string) error
+	// ReleaseInvitation gives back the use of an invitation held for
+	// someone who registered, as they're removed.
+	ReleaseInvitation(ctx context.Context, subject string) error
 }
 
 type personJSON struct {
@@ -139,7 +142,7 @@ func (p *Panel) setPersonPassword(w http.ResponseWriter, r *http.Request, _ *ses
 		err = p.Store.SetMustChange(ctx, u.Subject, req.MustChange)
 	}
 	if err == nil && !u.Confirmed {
-		_, err = p.Store.ConfirmUser(ctx, u.Subject) // the admin vouches for them
+		err = p.Store.ConfirmUser(ctx, u.Subject) // the admin vouches for them
 	}
 	if err == nil {
 		err = p.Store.DeleteLogins(ctx, u.Subject)
@@ -221,6 +224,11 @@ func (p *Panel) removePerson(w http.ResponseWriter, r *http.Request, s *session)
 		invalid(w, "They have an account: delete it in Users, which removes them too.")
 		return
 	} else if !errors.Is(err, store.ErrNotFound) {
+		p.fail(w, "removing someone", err)
+		return
+	}
+	// Someone who registered gives back the use of their invitation.
+	if err := p.People.ReleaseInvitation(r.Context(), u.Subject); err != nil {
 		p.fail(w, "removing someone", err)
 		return
 	}
