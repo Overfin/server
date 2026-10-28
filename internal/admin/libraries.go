@@ -95,6 +95,15 @@ func (p *Panel) libraries(w http.ResponseWriter, r *http.Request, s *session) {
 		p.upstreamProblem(w, err, "listing libraries")
 		return
 	}
+	// Lists, even empty, as the panel reads them.
+	if libs == nil {
+		libs = []MediaLibrary{}
+	}
+	for i := range libs {
+		if libs[i].Folders == nil {
+			libs[i].Folders = []string{}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": libs})
 }
 

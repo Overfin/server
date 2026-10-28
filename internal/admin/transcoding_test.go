@@ -70,6 +70,11 @@ func TestTranscodingRoutes(t *testing.T) {
 	}
 	signIn(t, b, idp, []string{"overfin-admins"})
 
+	// Before any test: one not running, not null.
+	if rec := b.do("GET", "/admin/api/transcoding/test", "", nil); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"running":false`) ||
+		!strings.Contains(rec.Body.String(), `"results":[]`) {
+		t.Errorf("before any test: %d %s", rec.Code, rec.Body)
+	}
 	if rec := b.do("GET", "/admin/api/transcoding", "", nil); !strings.Contains(rec.Body.String(), `"id":"nvidia-pascal"`) {
 		t.Errorf("families: %s", rec.Body)
 	}
