@@ -34,6 +34,37 @@ func TestLatestOrdersSeriesByTheirNewestEpisode(t *testing.T) {
 	}
 }
 
+// "latest" without dates: a series added without one goes by its
+// newest episode, and what has no date at all comes last.
+func TestLatestWithoutDates(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
+	day := func(d int) time.Time { return time.Date(2026, 10, d, 12, 0, 0, 0, time.UTC) }
+	one := 1
+	s.PutCatalog(ctx, []CatalogItem{
+		{ID: id(0), Kind: "movie", Name: "Undated film", SortName: "a", LibraryID: "lib"},
+		{ID: id(1), Kind: "series", Name: "Undated show", SortName: "b", LibraryID: "lib"},
+		{ID: id(2), Kind: "episode", Name: "E1", SortName: "c", SeriesID: id(1), SeasonNumber: &one, EpisodeNumber: &one, LibraryID: "lib", AddedAt: day(5)},
+		{ID: id(3), Kind: "series", Name: "Empty undated show", SortName: "d", LibraryID: "lib"},
+		{ID: id(4), Kind: "movie", Name: "Film", SortName: "e", LibraryID: "lib", AddedAt: day(10)},
+		{ID: id(5), Kind: "series", Name: "Show", SortName: "f", LibraryID: "lib", AddedAt: day(1)},
+	}, 1)
+	for _, desc := range []bool{true, false} {
+		got, err := s.ListCatalog(ctx, ListQuery{Kinds: []string{"movie", "series"}, Sort: "latest", Descending: desc, Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{id(4), id(1), id(5), id(0), id(3)}
+		if !desc {
+			want = []string{id(5), id(1), id(4), id(0), id(3)}
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("descending %v: %v, want %v", desc, got, want)
+		}
+	}
+}
+
 // Genres (TMDB's) count a library's films and series, and only what the
 // profile may see.
 func TestCatalogGenres(t *testing.T) {
