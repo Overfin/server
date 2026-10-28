@@ -180,6 +180,14 @@ func (s *Store) OrderCategories(ctx context.Context, order []string) error {
 	if n != len(order) {
 		return ErrNotFound
 	}
+	// Each once: one given twice would leave another out.
+	seen := map[string]bool{}
+	for _, id := range order {
+		if seen[id] {
+			return ErrNotFound
+		}
+		seen[id] = true
+	}
 	for i, id := range order {
 		res, err := tx.ExecContext(ctx, `UPDATE categories SET position = ? WHERE id = ?`, i, id)
 		if err != nil {

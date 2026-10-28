@@ -131,6 +131,12 @@ func TestCategories(t *testing.T) {
 	if err := s.OrderCategories(ctx, order[:2]); err == nil {
 		t.Error("a partial order taken")
 	}
+	// Every one once: one twice, another left out, is refused.
+	twice := slices.Clone(order)
+	twice[1] = twice[0]
+	if err := s.OrderCategories(ctx, twice); err == nil {
+		t.Error("an order with a category twice taken")
+	}
 	all, _ = s.Categories(ctx)
 	for i, c := range all {
 		if c.ID != order[i] {
