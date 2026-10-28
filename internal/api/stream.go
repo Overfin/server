@@ -142,7 +142,7 @@ func (s Stream) proxy(w http.ResponseWriter, r *http.Request, a jellyfin.Auth, u
 	rangeHeader := ""
 	if allowRange {
 		if rh := r.Header.Get("Range"); rh != "" {
-			if !rangeRe.MatchString(rh) {
+			if !validRange(rh) {
 				w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
 				return
 			}
@@ -222,4 +222,23 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
 	w.Header().Set("Content-Length", strconv.Itoa(len(vtt)))
 	_, _ = w.Write(vtt)
+}
+
+// validRange says whether a Range header is one range of bytes Jellyfin
+// can answer: from a byte, to one, or both in order (not "bytes=-", nor
+// "bytes=5-3").
+func validRange(h string) bool {
+	if !rangeRe.MatchString(h) {
+		return false
+	}
+	from, to, _ := strings.Cut(strings.TrimPrefix(h, "bytes="), "-")
+	switch {
+	case from == "" && to == "":
+		return false
+	case from == "" || to == "":
+		return true
+	}
+	a, _ := strconv.ParseInt(from, 10, 64)
+	b, _ := strconv.ParseInt(to, 10, 64)
+	return a <= b
 }
