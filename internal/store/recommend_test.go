@@ -44,7 +44,8 @@ func TestFactsOfItems(t *testing.T) {
 
 // What a profile watched weighs its titles' genres, a series through its
 // episodes, the recent more than the old; a film it only marked a
-// favorite, or a file no one identified, counts for nothing.
+// favorite, or a file no one identified, counts for nothing; one without
+// genres is seen, but weighs none.
 func TestWatchedGenres(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
@@ -66,6 +67,8 @@ func TestWatchedGenres(t *testing.T) {
 	s.RecordPlay(ctx, prof.ID, "series/tmdb/1399/s1/e2", "", 60_000, false, now.Add(-halfLife)) // started, a half-life ago
 	s.SetFavorite(ctx, prof.ID, "movie/tmdb/13", "", true, now)
 	s.RecordPlay(ctx, prof.ID, "item/abc", "abc", 0, true, now)
+	// Watched, but without genres (its page not fetched): seen all the same.
+	s.RecordPlay(ctx, prof.ID, "movie/tmdb/77", "", 0, true, now)
 
 	weights, seen, err := s.WatchedGenres(ctx, prof.ID, now)
 	if err != nil {
@@ -80,7 +83,7 @@ func TestWatchedGenres(t *testing.T) {
 			t.Errorf("genre %d weighs %v, want %v", g, weights[g], w)
 		}
 	}
-	if len(seen) != 2 || !seen["movie/tmdb/949"] || !seen["series/tmdb/1399"] {
+	if len(seen) != 3 || !seen["movie/tmdb/949"] || !seen["series/tmdb/1399"] || !seen["movie/tmdb/77"] {
 		t.Errorf("seen = %v", seen)
 	}
 }
