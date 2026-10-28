@@ -349,3 +349,58 @@ func TestRecommendationsAndByGenre(t *testing.T) {
 		t.Error("a person's look-alikes asked for")
 	}
 }
+
+// A title's logo alone: its images in the language and without text are
+// asked for, and the one in the language is chosen, else the one without
+// text, else none; a path that isn't one is never taken.
+func TestLogo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+testToken {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		lang := r.URL.Query().Get("include_image_language")
+		switch {
+		case r.URL.Path == "/3/movie/550988/images" && lang == "fr,null":
+			io.WriteString(w, `{"id":550988,"logos":[{"file_path":"../../etc/passwd","iso_639_1":"fr"},
+				{"file_path":"/nolang1234.png","iso_639_1":null},{"file_path":"/frlogo1234.png","iso_639_1":"fr","iso_3166_1":"FR"}]}`)
+		case r.URL.Path == "/3/tv/1399/images" && lang == "de,null":
+			io.WriteString(w, `{"id":1399,"logos":[{"file_path":"/nolang1234.png","iso_639_1":null}]}`)
+		case r.URL.Path == "/3/tv/1399/images" && lang == "en,null":
+			io.WriteString(w, `{"id":1399,"logos":[]}`)
+		case r.URL.Path == "/3/movie/1/images":
+			io.WriteString(w, `{"id":2,"logos":[{"file_path":"/frlogo1234.png","iso_639_1":"fr"}]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL+"/3", testToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	in := func(lang string) *Client {
+		cp := *c
+		cp.Language = func() string { return lang }
+		return &cp
+	}
+	for _, tc := range []struct {
+		lang, kind string
+		id         int
+		want       string
+		err        error
+	}{
+		{"fr-CA", "movie", 550988, "/frlogo1234.png", nil},
+		{"de-DE", "series", 1399, "/nolang1234.png", nil},
+		{"", "series", 1399, "", nil},
+		{"fr-CA", "movie", 1, "", ErrNotFound},     // another title's answer
+		{"fr-CA", "movie", 404, "", ErrNotFound},   // TMDB doesn't know it
+		{"fr-CA", "season", 1399, "", ErrNotFound}, // not a kind
+	} {
+		got, err := in(tc.lang).Logo(ctx, tc.kind, tc.id)
+		if got != tc.want || !errors.Is(err, tc.err) {
+			t.Errorf("%s %d in %q: %q %v, want %q %v", tc.kind, tc.id, tc.lang, got, err, tc.want, tc.err)
+		}
+	}
+}

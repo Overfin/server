@@ -489,6 +489,9 @@ func run(logger *slog.Logger) error {
 	// The picks' own lists, from TMDB: once a day.
 	go catalog.NewPicks(gw.pickSource, db, logger, 24*time.Hour, 100*time.Millisecond).Run(ctx)
 	go sh.texts.Run(ctx)
+	// The logos kept before they were taken only in their language, checked
+	// again once, at the titles' pace.
+	go (&catalog.Logos{Store: db, Source: gw.logoSource, Logger: logger, Every: 10 * time.Minute, Pause: 100 * time.Millisecond}).Run(ctx)
 	go unrestrictKids(ctx, db, gw.Provisioner, logger)
 	// Each profile's data, brought over from Jellyfin once.
 	// With Pocket ID, Overfin sets up its own client and groups there.
