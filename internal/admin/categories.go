@@ -96,7 +96,7 @@ func (p *Panel) categories(w http.ResponseWriter, r *http.Request, _ *session) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out, "librariesShown": shown, "languages": bases,
-		"genres": gs, "originalLanguages": langs, "libraries": ls, "tags": orEmpty(tags)})
+		"genres": gs, "originalLanguages": orEmpty(langs), "libraries": ls, "tags": orEmpty(tags)})
 }
 
 func orEmpty(v []string) []string {
