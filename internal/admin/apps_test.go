@@ -88,6 +88,9 @@ func TestApps(t *testing.T) {
 	if rec := b.do("DELETE", "/admin/api/apps/"+made.ID, "", nil); rec.Code != 204 {
 		t.Fatalf("revoke: %d", rec.Code)
 	}
+	if rec := b.do("DELETE", "/admin/api/apps/"+made.ID, "", nil); rec.Code != 404 || !strings.Contains(rec.Body.String(), `"detail":"No such app key"`) {
+		t.Errorf("revoked twice: %d %s", rec.Code, rec.Body)
+	}
 	if rec := app.do("GET", "/apps/v1/watch-stats", "", map[string]string{"Authorization": "Bearer " + made.Key}); rec.Code != 401 {
 		t.Errorf("revoked: %d", rec.Code)
 	}

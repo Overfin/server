@@ -48,7 +48,7 @@ func (p *Panel) setRegistration(w http.ResponseWriter, r *http.Request, s *sessi
 		return
 	}
 	if !req.Rules.Valid() {
-		invalid(w, "A password has 10 to 64 characters at least.")
+		invalid(w, "The minimum length must be from 10 to 64 characters.")
 		return
 	}
 	if err := p.Store.SetPasswordRules(r.Context(), req.Rules); err != nil {

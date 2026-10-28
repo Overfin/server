@@ -111,7 +111,8 @@ func TestPeople(t *testing.T) {
 	if code, _ := do("POST", "/admin/api/registration/send", map[string]any{"email": "ann@example.org", "link": "https://evil.example/x"}); code != 400 {
 		t.Errorf("not an invitation's link: %d", code)
 	}
-	if code, out := do("PUT", "/admin/api/registration", map[string]any{"rules": map[string]any{"minLength": 9}}); code != 400 {
+	if code, out := do("PUT", "/admin/api/registration", map[string]any{"rules": map[string]any{"minLength": 9}}); code != 400 ||
+		out["detail"] != "The minimum length must be from 10 to 64 characters." {
 		t.Errorf("under 10: %d %v", code, out)
 	}
 	if code, out := do("PUT", "/admin/api/registration", map[string]any{"rules": map[string]any{"minLength": 12, "digit": true}}); code != 200 ||

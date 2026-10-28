@@ -106,6 +106,15 @@ async function busy(button, action, fail = (err) => toast(err.message, true)) {
   }
 }
 
+// numberIn reads a number field. Empty, or not a number, it refuses with
+// a message naming the field, so nothing is saved as 0 or "no limit" by
+// mistake; zero, when given, says what 0 means there.
+function numberIn(input, label, zero) {
+  const v = input.value.trim();
+  if (v === '' || !Number.isFinite(Number(v))) throw new Error(`${label}: enter a number${zero ? ` (${zero})` : ''}.`);
+  return Number(v);
+}
+
 function pageHead(title, description, ...actions) {
   return h('div', { class: 'page-head' },
     h('div', {}, h('h1', {}, title), description && h('p', {}, description)),
@@ -316,8 +325,14 @@ async function brandingView() {
     on.checked = b.on;
     const name = h('input', { autocomplete: 'off', spellcheck: 'false', maxlength: 40, value: b.name, 'aria-label': 'Name' });
     const save = h('button', { class: 'primary', type: 'button', onclick: () => busy(save, async () => {
+      if (on.checked === b.on && name.value.trim() === b.name) {
+        toast('Nothing to save.');
+        return;
+      }
+      const wasOn = b.on;
       b = await api('PUT', '/admin/api/branding', { on: on.checked, name: name.value });
-      toast(b.on ? 'Your branding is on.' : 'Overfin\'s branding is back.');
+      // Say it was switched only when it was.
+      toast(b.on === wasOn ? 'Saved.' : b.on ? 'Your branding is on.' : 'Overfin\'s branding is back.');
       draw();
     }, (err) => st.set(err.message, 'error')) }, 'Save');
     const main = card({ title: 'Your branding', badge: b.on ? badge('On', 'ok') : badge('Overfin\'s', 'plain'),
@@ -631,6 +646,10 @@ function mailCard(m) {
   const on = Boolean(m.host);
   const st = status(on ? 'Invitations and forgotten passwords work by email.' : 'Without email, you add people yourself and set their passwords.');
   const send = (body, button) => busy(button, async () => {
+    if (!body.host.trim() && !on) {
+      toast('Nothing to save.');
+      return;
+    }
     st.set(body.host ? 'Sending you a test email…' : 'Turning email off…');
     const out = await api('PUT', '/admin/api/mail', body);
     st.set(out.summary, 'ok');
@@ -684,6 +703,10 @@ function seerrCard(sr) {
   const key = h('input', { type: 'password', autocomplete: 'off', placeholder: sr.url ? 'Unchanged' : '' });
   const st = status(sr.url ? 'Requests go to Seerr.' : 'Without Seerr, nobody can request titles.');
   const send = (body, button) => busy(button, async () => {
+    if (!body.url.trim() && !sr.url) {
+      toast('Nothing to save.');
+      return;
+    }
     st.set('Testing…');
     const out = await api('PUT', '/admin/api/seerr', body);
     st.set(out.summary, 'ok');
@@ -826,8 +849,13 @@ async function featuresView() {
     input.addEventListener(input.type === 'checkbox' ? 'change' : 'input', changed);
     return input;
   };
-  const num = (label, hint, path, min, max) => setting(label, hint,
-    bind(path, (el) => Number(el.value), (el, v) => { el.value = v; }, h('input', { type: 'number', min: String(min), max: max && String(max) })));
+  // A number field; zero, when 0 has a meaning there, says it.
+  const numbers = [];
+  const num = (label, hint, path, min, max, zero) => {
+    const input = h('input', { type: 'number', min: String(min), max: max && String(max), 'aria-label': label });
+    numbers.push({ input, label, zero });
+    return setting(label, hint, bind(path, (el) => Number(el.value), (el, v) => { el.value = v; }, input));
+  };
   const choice = (label, hint, path, options, sub) => setting(label, hint,
     bind(path, (el) => el.value, (el, v) => { el.value = v; }, h('select', {}, options.map(([v, t]) => h('option', { value: v }, t)))), sub);
   const toggle = (label, hint, path, value, sub) => setting(label, hint,
@@ -890,6 +918,8 @@ async function featuresView() {
     changed();
   } }, 'Discard');
   const save = h('button', { type: 'button', class: 'primary', onclick: () => busy(save, async () => {
+    // An empty number field is refused, not saved as 0.
+    for (const n of numbers) numberIn(n.input, n.label, n.zero);
     const wanted = collect();
     try {
       const out = await api('PUT', '/admin/api/features', wanted);
@@ -921,8 +951,8 @@ async function featuresView() {
       card({ title: 'Streams' }, [
         choice('One stream too many', 'When an account starts more streams than its template allows.', 'limits.onLimit',
           [['replace-oldest', 'Replace the oldest'], ['refuse', 'Refuse the new one']]),
-        num('Transcodes on the server', 'Re-encoded video only, not repackaging. 0: no limit.', 'limits.maxTranscodesTotal', 0),
-        num('Bitrate cap (kbps)', '0: no cap.', 'limits.maxBitrateKbps', 0),
+        num('Transcodes on the server', 'Re-encoded video only, not repackaging. 0: no limit.', 'limits.maxTranscodesTotal', 0, undefined, '0: no limit'),
+        num('Bitrate cap (kbps)', '0: no cap.', 'limits.maxBitrateKbps', 0, undefined, '0: no cap'),
       ]),
       card({ title: 'Accounts' }, [
         choice('When an account is deleted', 'What happens to its watch history.', 'accounts.onDelete',
@@ -1199,7 +1229,7 @@ function historyCopy(a, reload) {
 // Accounts follow theirs live: saving changes every account on it at once.
 async function templatesView() {
   const [{ items }, cats] = await Promise.all([api('GET', '/admin/api/templates'), api('GET', '/admin/api/categories')]);
-  const catName = (c) => c.names.en || Object.values(c.names)[0] || 'Unnamed';
+  const catName = (c) => c.names[cats.defaultLanguage] || Object.values(c.names)[0] || 'Unnamed';
   const templateCard = (t) => {
     const name = h('input', { value: t?.name || '', maxlength: '40', placeholder: 'e.g. Family, Friends' });
     const streams = h('input', { type: 'number', min: '1', max: '100', value: String(t?.maxStreams ?? 1) });
@@ -1213,7 +1243,7 @@ async function templatesView() {
       return h('label', { class: 'inline' }, box, catName(c));
     });
     const picked = () => catBoxes.map((l) => l.querySelector('input')).filter((b) => b.checked).map((b) => b.dataset.v);
-    const body = () => ({ name: name.value, maxStreams: Number(streams.value), maxProfiles: Number(profiles.value),
+    const body = () => ({ name: name.value, maxStreams: numberIn(streams, 'Streams'), maxProfiles: numberIn(profiles, 'Profiles'),
       reserveStreams: reserve.checked, categories: picked().length ? picked() : null });
     // A template kept to categories (deleted since, maybe: then it sees
     // nothing) loses its limit only when the admin says so.
@@ -1297,7 +1327,7 @@ async function appsView() {
 async function categoriesView(editing) {
   const data = await api('GET', '/admin/api/categories');
   const langName = (code) => { try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code; } catch { return code; } };
-  const nameOf = (c) => c.names.en || Object.values(c.names)[0] || 'Unnamed';
+  const nameOf = (c) => c.names[data.defaultLanguage] || Object.values(c.names)[0] || 'Unnamed';
   const genreNames = Object.fromEntries(data.genres.map((g) => [g.id, g.name]));
   const libNames = Object.fromEntries(data.libraries.map((l) => [l.id, l.name]));
   const catNames = Object.fromEntries(data.items.map((c) => [c.id, nameOf(c)]));
@@ -1435,7 +1465,7 @@ async function noticesView() {
   const noEmail = !n.managed ? 'Only with Overfin\'s own sign-in: with an identity provider, Overfin doesn\'t know people\'s addresses.'
     : !n.mail ? 'Email isn\'t set up yet (Server, Email).' : '';
   if (!n.managed) { admins.disabled = true; person.disabled = true; }
-  const values = () => ({ joined: joined.checked, expiring: expiring.checked, expired: expired.checked, days: Number(days.value),
+  const values = () => ({ joined: joined.checked, expiring: expiring.checked, expired: expired.checked, days: numberIn(days, 'Days before'),
     admins: admins.checked, webhook: webhook.value.trim(), person: person.checked });
   const st = status('');
   const save = h('button', { class: 'primary', type: 'button', onclick: () => busy(save, async () => {
@@ -1629,7 +1659,7 @@ async function valuationView() {
   }, (err) => { ask.checked = !ask.checked; toast(err.message, true); }));
   const share = h('input', { type: 'number', min: '0', max: '100', step: '1', value: String(data.discoveryShare), 'aria-label': 'Discovery share, in percent' });
   share.addEventListener('change', () => busy(null, async () => {
-    const n = Math.round(Number(share.value));
+    const n = Math.round(numberIn(share, 'Discovery share', '0: the picks alone'));
     if (!(n >= 0 && n <= 100)) throw new Error('The discovery share goes from 0 to 100.');
     await api('PUT', '/admin/api/valuation', { discoveryShare: n });
     share.value = String(n);
@@ -1838,12 +1868,12 @@ async function registrationView() {
     digit.checked = reg.rules.digit;
     special.checked = reg.rules.special;
     const save = h('button', { class: 'primary', type: 'button', onclick: () => busy(save, async () => {
-      const out = await api('PUT', '/admin/api/registration', { rules: { minLength: Number(min.value), digit: digit.checked, special: special.checked } });
+      const out = await api('PUT', '/admin/api/registration', { rules: { minLength: numberIn(min, 'Minimum length'), digit: digit.checked, special: special.checked } });
       st.set('Saved: every new password follows them.', 'ok');
       Object.assign(reg, out);
     }, (err) => st.set(err.message, 'error')) }, 'Save');
     cards.push(card({ title: 'Passwords', description: 'What every new password must have: registering, a forgotten one, the account page, and those you set.' },
-      [setting('Minimum length', '10 characters at least.', min),
+      [setting('Minimum length', 'From 10 to 64 characters.', min),
         setting('A digit', null, digit),
         setting('A special character', 'Anything but a letter or a digit; a space counts.', special)],
       [st, save]));

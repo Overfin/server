@@ -25,6 +25,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/overfin/server/internal/catalog"
 	"github.com/overfin/server/internal/config"
@@ -712,6 +714,40 @@ func (p *Panel) features(w http.ResponseWriter, r *http.Request, s *session) {
 	})
 }
 
+// settingLabels turn the settings' keys in the configuration's errors into
+// what the Features page calls them.
+var settingLabels = strings.NewReplacer(
+	"config: ", "",
+	"limits.pin_attempts", "Wrong PINs before a lock",
+	"limits.max_transcodes_total", "Transcodes on the server",
+	"limits.max_bitrate_kbps", "The bitrate cap",
+	"limits.on_limit", "One stream too many",
+	"accounts.on_delete", "When an account is deleted",
+	"plugins.enable:", "Features:",
+	"privacy.expose:", "Privacy:",
+)
+
+// inWords says a configuration error to an admin in the panel's words:
+// "Wrong PINs before a lock must be between 3 and 10.", not
+// "config: limits.pin_attempts must be between 3 and 10". Each problem
+// is a sentence of its own.
+func inWords(err error) string {
+	var out []string
+	for _, line := range strings.Split(err.Error(), "\n") {
+		line = strings.TrimSpace(settingLabels.Replace(line))
+		if line == "" {
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(line)
+		line = string(unicode.ToUpper(r)) + line[size:]
+		if !strings.HasSuffix(line, ".") {
+			line += "."
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, " ")
+}
+
 func (p *Panel) setFeatures(w http.ResponseWriter, r *http.Request, s *session) {
 	var f config.Features
 	dec := json.NewDecoder(r.Body)
@@ -723,7 +759,7 @@ func (p *Panel) setFeatures(w http.ResponseWriter, r *http.Request, s *session) 
 	if err := p.Features.SetFeatures(r.Context(), f); err != nil {
 		// Validation errors name the setting and why; they carry no
 		// secrets, and only admins see them.
-		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": inWords(err)})
 		return
 	}
 	p.Logger.Info("feature settings changed in the control panel")
