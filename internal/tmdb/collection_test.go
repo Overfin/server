@@ -91,3 +91,29 @@ func TestCollection(t *testing.T) {
 		t.Errorf("unknown film: %v", err)
 	}
 }
+
+// A text-free poster: the first poster without a language.
+func TestTextlessPoster(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/tv/1399/images" && r.URL.Query().Get("include_image_language") == "null":
+			io.WriteString(w, `{"id":1399,"posters":[{"file_path":"../bad.jpg","iso_639_1":null},{"file_path":"/textless123.jpg","iso_639_1":null}]}`)
+		case r.URL.Path == "/movie/5/images":
+			io.WriteString(w, `{"id":5,"posters":[{"file_path":"/frposter12.jpg","iso_639_1":"fr"}]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, testToken)
+	ctx := context.Background()
+	if got, err := c.TextlessPoster(ctx, "series", 1399); got != "/textless123.jpg" || err != nil {
+		t.Errorf("series: %q %v", got, err)
+	}
+	if got, err := c.TextlessPoster(ctx, "movie", 5); got != "" || err != nil {
+		t.Errorf("only posters with text: %q %v", got, err)
+	}
+	if _, err := c.TextlessPoster(ctx, "movie", 404); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown: %v", err)
+	}
+}

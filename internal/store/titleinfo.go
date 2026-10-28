@@ -143,6 +143,9 @@ type TitleInfo struct {
 	// Images are TMDB paths: a season or an episode has its series'
 	// backdrop and logo.
 	Poster, Backdrop, Logo, Still string
+	// Textless is a film's or a series' poster without text (TMDB's
+	// without a language), "" when it has none: for tall screens.
+	Textless string
 	// SeriesName is a season's or an episode's series'; SeasonName, an
 	// episode's season's ("" when TMDB doesn't name it).
 	SeriesName, SeasonName string
@@ -324,7 +327,7 @@ func (s *Store) fillTitle(ctx context.Context, t *TitleInfo, kind, tmdb string) 
 		return err
 	}
 	if a := art[kind+"/tmdb/"+tmdb]; a != nil {
-		t.Poster, t.Backdrop, t.Logo = or(a["poster"], t.Poster), or(a["backdrop"], t.Backdrop), a["logo"]
+		t.Poster, t.Backdrop, t.Logo, t.Textless = or(a["poster"], t.Poster), or(a["backdrop"], t.Backdrop), a["logo"], a["textless"]
 	}
 	return nil
 }
@@ -461,7 +464,7 @@ func (s *Store) ImageTitles(ctx context.Context, typ, path string, limit int) ([
 	var q string
 	switch typ {
 	case "poster", "backdrop":
-		q = `SELECT key FROM artwork WHERE type = ?1 AND path = ?2
+		q = `SELECT key FROM artwork WHERE (type = ?1 OR (?1 = 'poster' AND type = 'textless')) AND path = ?2
 			UNION SELECT kind || '/tmdb/' || tmdb FROM catalog_titles WHERE (?1 = 'poster' AND poster = ?2) OR (?1 = 'backdrop' AND backdrop = ?2)
 			UNION SELECT 'series/tmdb/' || series || '/s' || season FROM catalog_seasons WHERE ?1 = 'poster' AND poster = ?2`
 	case "logo":

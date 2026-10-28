@@ -107,6 +107,9 @@ type Images struct {
 	Backdrops []ImageRef `json:"backdrops,omitempty"`
 	Logo      *ImageRef  `json:"logo,omitempty"`
 	Thumb     *ImageRef  `json:"thumb,omitempty"`
+	// Textless is a film's or a series' poster without text, for the
+	// background of a screen taller than wide.
+	Textless *ImageRef `json:"textless,omitempty"`
 }
 
 type UserState struct {

@@ -119,6 +119,8 @@ export interface Images {
   backdrops?: ImageRef[];
   logo?: ImageRef;
   thumb?: ImageRef;
+  /** A film's or a series' poster without text, for the background of a screen taller than wide (since 0.7). */
+  textless?: ImageRef;
 }
 
 export interface UserState {

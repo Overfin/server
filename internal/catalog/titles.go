@@ -302,7 +302,8 @@ func (a *Titles) page(ctx context.Context, src TitleSource, kind string, id int,
 			return nil, err
 		}
 	}
-	images[kind+"/tmdb/"+title.TMDB] = map[string]string{"poster": full.Artwork.Poster, "backdrop": full.Artwork.Backdrop, "logo": full.Artwork.Logo}
+	images[kind+"/tmdb/"+title.TMDB] = map[string]string{"poster": full.Artwork.Poster, "backdrop": full.Artwork.Backdrop, "logo": full.Artwork.Logo,
+		"textless": full.Artwork.Textless}
 	return seasons, nil
 }
 
@@ -350,6 +351,35 @@ func (a *Titles) FetchTitle(ctx context.Context, kind, tmdbID string) error {
 		return err
 	}
 	return a.Store.SetArtwork(ctx, store.ArtworkTarget{Kind: kind, TMDB: tmdbID}, images, a.clock())
+}
+
+// TextlessSource is TMDB, asked for a title's poster without text.
+type TextlessSource interface {
+	TextlessPoster(ctx context.Context, kind string, tmdbID int) (string, error)
+}
+
+// FetchTextless asks TMDB, now, the text-free poster of a film or a series
+// whose artwork is kept, and keeps it ("" when TMDB has none: not asked
+// again). Titles whose artwork was kept before it came with their pages
+// get theirs so, the first time they're shown.
+func (a *Titles) FetchTextless(ctx context.Context, t store.ArtworkTarget) error {
+	known, kept, err := a.Store.TextlessKnown(ctx, t)
+	if err != nil || known || !kept {
+		return err
+	}
+	src, ok := a.Source().(TextlessSource)
+	id, err := strconv.Atoi(t.TMDB)
+	if !ok || src == nil || err != nil {
+		return nil
+	}
+	path, err := src.TextlessPoster(ctx, t.Kind, id)
+	if errors.Is(err, tmdb.ErrNotFound) {
+		path, err = "", nil
+	}
+	if err != nil {
+		return err
+	}
+	return a.Store.SetTextless(ctx, t, path)
 }
 
 // FetchSeason reads and keeps, now, one of a series' seasons: for a season
