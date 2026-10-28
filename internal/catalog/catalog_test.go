@@ -221,6 +221,12 @@ func TestConvert(t *testing.T) {
 		it.PrimaryTag != "" || it.BackdropTag != "ff00" || it.SortName != it.Name {
 		t.Errorf("converted: %+v", it)
 	}
+	for raw, want := range map[string]string{"949": "949", "0949": "949", "0": "", "": ""} {
+		it, _ := convert(jellyfin.RawItem{Id: id(1), Type: "Movie", Name: "Heat", ProviderIds: map[string]string{"Tmdb": raw}})
+		if it.TMDB != want {
+			t.Errorf("TMDB %q: %q, want %q", raw, it.TMDB, want)
+		}
+	}
 	if _, ok := convert(jellyfin.RawItem{Id: id(1), Type: "Folder"}); ok {
 		t.Error("a folder was indexed")
 	}

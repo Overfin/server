@@ -122,11 +122,24 @@ var (
 	imdbID   = regexp.MustCompile(`^tt[0-9]{1,12}$`)
 )
 
+// tmdbNumber is a TMDB ID as TMDB writes it, as the catalog keeps it
+// ("0949" is 949, and 0 is none); "" when it isn't one.
+func tmdbNumber(s string) string {
+	if !numberID.MatchString(s) {
+		return ""
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n == 0 {
+		return ""
+	}
+	return strconv.Itoa(n)
+}
+
 // movieKey names a film by its TMDB ID, else its IMDb ID; "" with neither.
 func movieKey(ids map[string]string) string {
 	switch {
-	case numberID.MatchString(ids["Tmdb"]):
-		return "movie/tmdb/" + ids["Tmdb"]
+	case tmdbNumber(ids["Tmdb"]) != "":
+		return "movie/tmdb/" + tmdbNumber(ids["Tmdb"])
 	case imdbID.MatchString(ids["Imdb"]):
 		return "movie/imdb/" + ids["Imdb"]
 	}
@@ -136,8 +149,8 @@ func movieKey(ids map[string]string) string {
 // showKey names a show by its TMDB ID, else TVDB, else IMDb; "" with none.
 func showKey(ids map[string]string) string {
 	switch {
-	case numberID.MatchString(ids["Tmdb"]):
-		return "series/tmdb/" + ids["Tmdb"]
+	case tmdbNumber(ids["Tmdb"]) != "":
+		return "series/tmdb/" + tmdbNumber(ids["Tmdb"])
 	case numberID.MatchString(ids["Tvdb"]):
 		return "series/tvdb/" + ids["Tvdb"]
 	case imdbID.MatchString(ids["Imdb"]):
