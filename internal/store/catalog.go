@@ -453,10 +453,17 @@ func (s *Store) ListCatalog(ctx context.Context, q ListQuery) ([]string, error) 
 	order, ok := listOrder[q.Sort]
 	var orderArgs []any
 	if q.Sort == "lastPlayed" {
-		// When the profile last played the title, or any of its episodes.
-		order, ok = `(SELECT max(x.last_played_at) FROM profile_titles x JOIN catalog_items e ON x.title = e.title_key
-			WHERE x.profile_id = ? AND (e.id = catalog_items.id OR e.series_id = catalog_items.id OR e.season_id = catalog_items.id))`, true
-		orderArgs = []any{q.ProfileID}
+		// When the profile last played the title, or any of its episodes:
+		// a film or an episode by its own key, a series or a season by its
+		// own and its items'. Each looked up by key in what the profile
+		// did (joined the other way, SQLite went through the profile's
+		// whole history for every title: minutes on a large library).
+		order, ok = `(CASE WHEN catalog_items.kind IN ('movie', 'episode') THEN
+				(SELECT x.last_played_at FROM profile_titles x WHERE x.profile_id = ? AND x.title = catalog_items.title_key)
+			ELSE (SELECT max(x.last_played_at) FROM profile_titles x WHERE x.profile_id = ? AND x.title IN
+				(SELECT e.title_key FROM catalog_items e
+					WHERE e.id = catalog_items.id OR e.series_id = catalog_items.id OR e.season_id = catalog_items.id)) END)`, true
+		orderArgs = []any{q.ProfileID, q.ProfileID}
 	}
 	if !ok {
 		return nil, fmt.Errorf("store: unknown sort %q", q.Sort)
