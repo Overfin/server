@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,13 +26,24 @@ import (
 // (movie/tmdb/949 → title_movie_tmdb_949). No part of a key has one.
 func titleID(key string) string { return library.TitlePrefix + strings.ReplaceAll(key, "/", "_") }
 
-// titleRef checks a title's ID.
+// titleRef checks a title's ID. Only a title's one ID is taken: not
+// "_s01" for "_s1", nor "_0949" for TMDB's 949, which would be kept, and
+// fetched from TMDB again, as another title.
 func titleRef(id string) (store.TitleRef, bool) {
 	rest, ok := strings.CutPrefix(id, library.TitlePrefix)
 	if !ok || len(rest) > 120 {
 		return store.TitleRef{}, false
 	}
-	return store.ParseTitleKey(strings.ReplaceAll(rest, "_", "/"))
+	ref, ok := store.ParseTitleKey(strings.ReplaceAll(rest, "_", "/"))
+	if !ok || titleID(ref.Key()) != id {
+		return store.TitleRef{}, false
+	}
+	if t := ref.TMDB(); t != "" {
+		if n, err := strconv.Atoi(t); err != nil || strconv.Itoa(n) != t || !tmdb.ValidID(n) {
+			return store.TitleRef{}, false
+		}
+	}
+	return ref, true
 }
 
 type titleCast struct {
