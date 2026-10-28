@@ -36,7 +36,7 @@ func TestRatings(t *testing.T) {
 	}, 1)
 	for tmdb, r := range map[string]map[string][]string{
 		"1": {"US": {"G"}, "FR": {"18"}}, "2": {"US": {"R"}}, "3": {"US": {"PG", "R"}},
-		"4": {"FR": {"U"}}, "5": {"US": {"NR"}}, "7": {"US": {"X"}},
+		"4": {"FR": {"TP"}}, "5": {"US": {"NR"}}, "7": {"US": {"X"}},
 	} {
 		if err := s.SetTitleRatings(ctx, RatedTitle{"movie", tmdb}, r, "", "", now); err != nil {
 			t.Fatal(err)
