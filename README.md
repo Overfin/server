@@ -519,7 +519,8 @@ each in the control panel's **Apps** tab (shown once, revocable), for what
 you tick: each title's **value** (the Valuation tab's score, 0 to 100),
 its **watch statistics**, and whether the libraries have it (**in the
 libraries**). Totals per title only, never anything per person; counts
-below 2 are given as 0, so none points at one person. Apps ask the control
+below 2 are given as 0, and so are plays and favorites when fewer than two
+people account for them, so none points at one person. Apps ask the control
 panel's address (the site's, or its own private listener when you gave it
 one):
 
@@ -567,7 +568,9 @@ Authorization: Bearer ofapp_…
 
 `plays` are plays to the end (a series adds up its episodes), `viewers`
 the accounts that watched some of it, `favorites` the profiles that keep
-it as a favorite. With `since`, only the titles changed since then.
+it as a favorite. Only titles at least two people watched are listed,
+and `changedAt` is only the day (midnight UTC). With `since`, only the
+titles changed on that day or later.
 
 ## Building your own client
 

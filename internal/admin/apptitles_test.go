@@ -32,9 +32,18 @@ func TestAppTitles(t *testing.T) {
 	_, b, db, _ := signedInPanel(t)
 	now := time.Now()
 	var profs []string
+	var firstAcct *store.Account
 	for _, s := range []string{"1", "2"} {
-		_, prof, _ := db.CreateAccount(ctx, "person-"+s, store.NewOwner{Name: "Main", JellyfinUserID: strings.Repeat(s, 32), JellyfinUsername: "of-" + s, JellyfinToken: "t"})
+		acct, prof, _ := db.CreateAccount(ctx, "person-"+s, store.NewOwner{Name: "Main", JellyfinUserID: strings.Repeat(s, 32), JellyfinUsername: "of-" + s, JellyfinToken: "t"})
 		profs = append(profs, prof.ID)
+		if firstAcct == nil {
+			firstAcct = acct
+		}
+	}
+	// A second profile of the first account: still one person.
+	kid, err := db.AddProfile(ctx, firstAcct.ID, store.NewProfile{Name: "Kid", Kind: "standard", JellyfinUserID: strings.Repeat("9", 32), JellyfinUsername: "of-9", JellyfinToken: "t9"}, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
 	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
 	n := func(i int) *int { return &i }
@@ -48,8 +57,12 @@ func TestAppTitles(t *testing.T) {
 	for _, p := range profs {
 		db.RecordPlay(ctx, p, "movie/tmdb/1", id(0), 0, true, now)
 	}
-	db.RecordPlay(ctx, profs[0], "movie/tmdb/2", id(1), 0, true, now)
+	// One person: three plays of Beta, Show a favorite of two profiles.
+	for range 3 {
+		db.RecordPlay(ctx, profs[0], "movie/tmdb/2", id(1), 0, true, now)
+	}
 	db.SetFavorite(ctx, profs[0], "series/tmdb/3", id(2), true, now)
+	db.SetFavorite(ctx, kid.ID, "series/tmdb/3", id(2), true, now)
 
 	key := func(body string) string {
 		t.Helper()
@@ -125,7 +138,8 @@ func TestAppTitles(t *testing.T) {
 	get(scoreOnly, "?list=suggestions&sort=score", 400)
 	get(scoreOnly, "?list=suggestions&inLibrary=true", 400)
 
-	// Statistics: totals, counts below 2 as 0; a stats key can't sort by
+	// Statistics: totals, counts below 2 as 0, and plays and favorites
+	// only when two people account for them; a stats key can't sort by
 	// score.
 	stats := key(`{"name":"Dashboard","scopes":["stats","availability"]}`)
 	get(stats, "?sort=score", 403)
@@ -136,6 +150,9 @@ func TestAppTitles(t *testing.T) {
 	alpha, beta := page.Titles[0].Stats, page.Titles[1].Stats
 	if alpha.Plays != 2 || alpha.Viewers != 2 || alpha.LastPlayed == "" || beta.Plays != 0 || beta.Viewers != 0 || beta.LastPlayed != "" {
 		t.Errorf("alpha %+v, beta %+v", alpha, beta)
+	}
+	if p := get(stats, "?kind=season", 200); len(p.Titles) != 1 || p.Titles[0].Stats.Favorites != 0 {
+		t.Errorf("one person's favorite, on two profiles: %+v", p.Titles[0].Stats)
 	}
 	if !*page.Titles[0].InLibrary {
 		t.Errorf("availability: %+v", page.Titles[0])

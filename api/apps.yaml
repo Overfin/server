@@ -159,8 +159,9 @@ paths:
       operationId: appWatchStats
       summary: Watch totals per film and series, for other apps
       description: |
-        For each film and series anyone watched or keeps as a favorite, what
-        the profiles did with it in total; never anything per person. All in
+        For each film and series at least two people (accounts) watched,
+        what the profiles did with it in total; never anything per person:
+        a title fewer than two people watched is left out. All in
         one answer, not paged, in no set order. Needs the `watch-stats` (or
         `stats`) scope; a key without it answers `not-authenticated`.
         Reached like `/apps/v1/titles`, with the same plain-JSON errors.
@@ -170,7 +171,8 @@ paths:
       parameters:
         - name: since
           in: query
-          description: Only titles whose totals changed at or after this time.
+          description: Only titles whose totals changed on this time's day
+            (UTC) or later; compared by the day, like `changedAt`.
           schema:
             $ref: "#/components/schemas/Timestamp"
       responses:
@@ -246,7 +248,8 @@ components:
     AppTitleStats:
       description: |
         What every profile did with the title, in total. Counts below 2 are
-        given as 0, so none points at one person.
+        given as 0, and so are plays and favorites when fewer than two
+        people (accounts) account for them, so none points at one person.
       type: object
       required: [plays, viewers, favorites]
       properties:
@@ -308,8 +311,10 @@ components:
     AppWatchStats:
       description: |
         What the profiles did with a film or a series, in total (a series
-        counts its seasons and episodes). As on `/apps/v1/titles`, counts
-        below 2 are given as 0, so none points at one person.
+        counts its seasons and episodes), listed only when two people
+        (accounts) or more watched it. As on `/apps/v1/titles`, favorites
+        are given as 0 when fewer than two people keep it, so none points
+        at one person.
       type: object
       required: [kind, plays, viewers, favorites, changedAt]
       properties:
@@ -338,10 +343,12 @@ components:
         lastPlayed:
           type: string
           format: date
-          description: The day it was last played; only with at least two
-            viewers.
+          description: The day it was last played.
         changedAt:
-          $ref: "#/components/schemas/Timestamp"
+          type: string
+          format: date-time
+          description: The day its totals last changed, as midnight UTC that
+            day; never the time.
 
     Timestamp:
       type: string
