@@ -301,6 +301,7 @@ func (c *Client) Discover(ctx context.Context, list, kind string, page int) (*Pa
 		return nil, errors.New("tmdb: invalid discovery query")
 	}
 	var path string
+	q := url.Values{"page": {strconv.Itoa(page)}}
 	switch list {
 	case "trending":
 		path = "/trending/" + k + "/week"
@@ -309,12 +310,16 @@ func (c *Client) Discover(ctx context.Context, list, kind string, page int) (*Pa
 	case "upcoming":
 		path = "/movie/upcoming"
 		if kind == "series" {
-			path = "/tv/on_the_air"
+			// Series that start today or later, the most awaited first
+			// (TMDB's "on the air" lists series already running).
+			path = "/discover/tv"
+			q.Set("first_air_date.gte", time.Now().UTC().Format(time.DateOnly))
+			q.Set("sort_by", "popularity.desc")
 		}
 	default:
 		return nil, errors.New("tmdb: invalid discovery list")
 	}
-	return c.page(ctx, path, kind, url.Values{"page": {strconv.Itoa(page)}})
+	return c.page(ctx, path, kind, q)
 }
 
 // Recommendations returns the first page of TMDB's titles like a film or
