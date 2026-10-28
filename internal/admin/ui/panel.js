@@ -1354,7 +1354,10 @@ async function categoriesView(editing) {
 // live count of the titles it would have.
 function categoryEditor(data, c, langName, nameOf) {
   const r = c?.rules || {};
-  const names = Object.fromEntries(data.languages.map((l) => [l, h('input', { value: c?.names[l] || '', maxlength: '40', 'aria-label': `Name in ${langName(l)}` })]));
+  // The languages offered, and any other it has a name in (offered before):
+  // saving keeps that name instead of dropping it.
+  const langs = [...new Set([...data.languages, ...Object.keys(c?.names || {})])];
+  const names = Object.fromEntries(langs.map((l) => [l, h('input', { value: c?.names[l] || '', maxlength: '40', 'aria-label': `Name in ${langName(l)}` })]));
   const boxes = (list, picked, label) => list.map(([v, text]) => {
     const box = h('input', { type: 'checkbox', 'aria-label': `${label}: ${text}` });
     box.checked = (picked || []).includes(v);
