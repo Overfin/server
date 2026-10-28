@@ -3568,6 +3568,15 @@ components:
           description: Absent while this session has no profile chosen; the
             site then shows the profile list.
           $ref: "#/components/schemas/Profile"
+        panel:
+          type: string
+          description: >-
+            Where the control panel is, as a path on the site's own address
+            ("/admin/"). Present only for an admin who can open it there:
+            with Overfin's own sign-in, the panel on the site (not on a
+            listener of its own), and with admin.private only from a
+            private address. Absent otherwise. Since 0.6.
+          examples: [/admin/]
 
     ProfileName:
       type: string

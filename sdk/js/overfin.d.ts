@@ -77,6 +77,9 @@ export interface Me {
   /** What the server offers that depends on its setup: discovery (TMDB or
    * Seerr), requests (Seerr). Absent before 0.5. */
   offers?: { discovery: boolean; requests: boolean };
+  /** The control panel's path on the site ("/admin/"), only for an admin
+   * who can open it there; absent otherwise. Since 0.6. */
+  panel?: string;
 }
 
 /** What an account says it likes, for what the server keeps and gets. */

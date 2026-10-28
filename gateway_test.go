@@ -600,3 +600,34 @@ func TestJanitorEndsIdlePlaybacks(t *testing.T) {
 	}
 	time.Sleep(200 * time.Millisecond) // what follows runs in the background
 }
+
+// The site shows the control panel to admins who can open it there: not
+// when it has a listener of its own, and with admin.private, only from a
+// private address.
+func TestSitePanel(t *testing.T) {
+	asAdmin := func(isAdmin bool) func(*http.Request) (string, bool, bool) {
+		return func(*http.Request) (string, bool, bool) { return "", isAdmin, false }
+	}
+	from := func(addr string) *http.Request {
+		r := httptest.NewRequest("GET", "/api/v1/me", nil)
+		r.RemoteAddr = addr
+		return r
+	}
+	if sitePanel(config.Admin{Listen: ":8081"}, asAdmin(true)) != nil {
+		t.Error("a panel on its own listener, shown on the site")
+	}
+	onSite := sitePanel(config.Admin{}, asAdmin(true))
+	if got := onSite(from("203.0.113.5:1234")); got != "/admin/" {
+		t.Errorf("an admin: %q", got)
+	}
+	if got := sitePanel(config.Admin{}, asAdmin(false))(from("192.168.1.5:1234")); got != "" {
+		t.Errorf("someone else: %q", got)
+	}
+	private := sitePanel(config.Admin{Private: true}, asAdmin(true))
+	if got := private(from("203.0.113.5:1234")); got != "" {
+		t.Errorf("admin.private, from the internet: %q", got)
+	}
+	if got := private(from("192.168.1.5:1234")); got != "/admin/" {
+		t.Errorf("admin.private, from the LAN: %q", got)
+	}
+}

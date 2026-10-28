@@ -318,6 +318,8 @@ type options struct {
 	// playback, when set, receives the playback handler (the control
 	// panel's live view uses it).
 	playback *api.Playback
+	// panel, when set, says where the control panel is (Sessions.Panel).
+	panel func(*http.Request) string
 }
 
 func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
@@ -383,7 +385,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		t.Fatal(err)
 	}
 	service := &provision.Service{Provisioner: func() *provision.Provisioner { return prov }}
-	sessions := &api.Sessions{Provisioner: prov, Store: st, Logger: logger, Lifetime: time.Hour}
+	sessions := &api.Sessions{Provisioner: prov, Store: st, Logger: logger, Lifetime: time.Hour, Panel: o.panel}
 	extra := []plugin.Plugin{}
 	ids := identity.NewForwardAuth([]netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}, "Remote-User", "Remote-Groups", "|")
 	identify := ids.Middleware
