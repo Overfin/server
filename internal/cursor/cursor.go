@@ -42,8 +42,13 @@ func Encode(key []byte, binding string, payload []byte) (string, error) {
 
 // Decode verifies c against the query binding and returns its payload.
 func Decode(key []byte, binding string, c string) ([]byte, error) {
+	if len(c) > enc.EncodedLen(MaxPayload+macSize) {
+		return nil, ErrInvalid
+	}
 	raw, err := enc.DecodeString(c)
-	if err != nil || len(raw) < macSize || len(raw) > MaxPayload+macSize {
+	// The decoder skips line breaks: a cursor is taken only as it was
+	// given out.
+	if err != nil || len(raw) < macSize || len(raw) > MaxPayload+macSize || enc.EncodeToString(raw) != c {
 		return nil, ErrInvalid
 	}
 	payload, got := raw[:len(raw)-macSize], raw[len(raw)-macSize:]
