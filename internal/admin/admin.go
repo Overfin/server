@@ -22,6 +22,7 @@ import (
 	"net/netip"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -496,6 +497,12 @@ func (p *Panel) signedIn(h func(http.ResponseWriter, *http.Request, *session)) h
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"type": "not-authenticated", "loginUrl": "/admin/login"})
 			return
 		}
+		// How long the session has left, as of now, for the panel to sign
+		// itself out when it's over instead of finding out on a save.
+		p.mu.Lock()
+		left := min(idleFor, s.expires.Sub(p.clock()))
+		p.mu.Unlock()
+		w.Header().Set("Overfin-Session-Left", strconv.Itoa(max(0, int(left.Seconds()))))
 		h(w, r, s)
 	}
 }

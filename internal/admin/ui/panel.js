@@ -69,11 +69,12 @@ async function api(method, path, body) {
     init.body = JSON.stringify(body);
   }
   const res = await fetch(path, init);
+  sessionLeft(res);
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) {
     // Back to this page once signed in.
-    location.href = `/admin/login?return=${encodeURIComponent(`/admin/${location.hash}`)}`;
+    signInAgain();
     throw new Error('signing in');
   }
   if (!res.ok) {
@@ -82,6 +83,52 @@ async function api(method, path, body) {
     throw err;
   }
   return data;
+}
+
+// ---- The session's end ---------------------------------------------------------
+// The server ends a session after a while without a request, and after some
+// hours at most; each answer says how long it has left. Someone typing or
+// clicking here is still here: the session is kept alive for them, at most
+// once a minute. Once it's over (they went away), the panel goes to the
+// sign-in page at once, and back here after: nothing is ever changed on a
+// page whose session already ended.
+let sessionEnds = 0; // Date.now() it ends at; 0 until an answer says
+let sessionTimer;
+let lastAsked = Date.now();
+
+function signInAgain() {
+  location.href = `/admin/login?return=${encodeURIComponent(`/admin/${location.hash}`)}`;
+}
+
+function sessionLeft(res) {
+  lastAsked = Date.now();
+  const left = Number(res.headers.get('Overfin-Session-Left'));
+  if (!res.headers.has('Overfin-Session-Left') || !Number.isFinite(left)) return;
+  sessionEnds = Date.now() + left * 1000;
+  clearTimeout(sessionTimer);
+  // A little early: the clocks never quite agree.
+  sessionTimer = setTimeout(sessionOver, Math.max(0, left * 1000 - 5000));
+}
+
+function sessionOver() {
+  if (sessionEnds && Date.now() >= sessionEnds - 5000) signInAgain();
+}
+
+// A timer may wait while the computer sleeps or the tab is hidden: checked
+// again when it's back.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) sessionOver();
+});
+for (const kind of ['keydown', 'pointerdown', 'input', 'wheel']) {
+  document.addEventListener(kind, () => {
+    if (!sessionEnds || Date.now() - lastAsked < 60_000) return;
+    if (Date.now() >= sessionEnds - 5000) {
+      signInAgain();
+      return;
+    }
+    lastAsked = Date.now();
+    fetch('/admin/api/session').then((res) => (res.status === 401 ? signInAgain() : sessionLeft(res)), () => {});
+  }, { passive: true, capture: true });
 }
 
 // ---- Building blocks -----------------------------------------------------------
