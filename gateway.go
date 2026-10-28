@@ -843,6 +843,17 @@ func (g *gateway) titleSource() catalog.TitleSource {
 	return nil
 }
 
+// collectionSource is TMDB, for collections; nil without it (Seerr has
+// none).
+func (g *gateway) collectionSource() catalog.CollectionSource {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.sh.tmdb != nil {
+		return g.sh.tmdb
+	}
+	return nil
+}
+
 // pickSource is where the picks' lists come from: TMDB itself; nil
 // without it.
 func (g *gateway) pickSource() catalog.PickSource {

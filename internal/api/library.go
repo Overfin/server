@@ -73,7 +73,10 @@ func (l Library) Register(r *plugin.Registrar) error {
 		"GET /api/v1/titles/recommended":  l.recommended,
 		"GET /api/v1/titles/{id}/up-next": l.upNext,
 		"GET /api/v1/people/{id}":         l.person,
-		"POST /api/v1/search":             l.search,
+		// TMDB's series of films a library has films of.
+		"GET /api/v1/collections":      l.collections,
+		"GET /api/v1/collections/{id}": l.collection,
+		"POST /api/v1/search":          l.search,
 		// What the profile does with titles (rule 40).
 		"PUT /api/v1/titles/{id}/played":      l.markTitlePlayed,
 		"DELETE /api/v1/titles/{id}/played":   l.unmarkTitlePlayed,

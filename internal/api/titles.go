@@ -64,6 +64,15 @@ type titleDetail struct {
 	Cast     []titleCast            `json:"cast,omitempty"`
 	Seasons  []library.TitleSummary `json:"seasons,omitempty"`
 	Episodes []episodeJSON          `json:"episodes,omitempty"`
+	// Collection is the collection a film belongs to, when the profile
+	// sees it (collections.go).
+	Collection *collectionRef `json:"collection,omitempty"`
+}
+
+// collectionRef names a collection.
+type collectionRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // episodeJSON is an episode in its season's list: with what it's about.
@@ -150,10 +159,20 @@ func summaryOf(t *store.TitleInfo) library.TitleSummary {
 // no one identified, only through its copies. Specials a library doesn't
 // have, and seasons without a single episode, never show.
 func (l Library) visibleTitles(ctx context.Context, p *store.Profile, titles []*store.TitleInfo) ([]bool, error) {
-	out := make([]bool, len(titles))
+	visible, _, err := l.visibility(ctx, p, titles, false)
+	return visible, err
+}
+
+// visibility is visibleTitles; with upcoming, a film or a series no
+// library has that isn't out yet as the panel asks (its release known) is
+// visible too, and marked in soon: a collection's page shows those, to be
+// requested once they're out.
+func (l Library) visibility(ctx context.Context, p *store.Profile, titles []*store.TitleInfo, upcoming bool) (out, soon []bool, err error) {
+	out = make([]bool, len(titles))
+	soon = make([]bool, len(titles))
 	a, err := l.access(ctx, p)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var copies []string
 	for _, t := range titles {
@@ -162,7 +181,7 @@ func (l Library) visibleTitles(ctx context.Context, p *store.Profile, titles []*
 	var allowed map[string]bool
 	if a != nil && len(copies) > 0 {
 		if allowed, _, err = l.Provisioner.Store.AllowedItems(ctx, *a, copies); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	st := l.Provisioner.Store
@@ -202,9 +221,10 @@ func (l Library) visibleTitles(ctx context.Context, p *store.Profile, titles []*
 		// be watched at home. Not known yet means not out.
 		if shown == "" {
 			if shown, err = st.TitlesShown(ctx); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
+		notOut := false
 		if shown != "all" {
 			if part && (t.AirDate == "" || t.AirDate > day) {
 				continue
@@ -212,13 +232,16 @@ func (l Library) visibleTitles(ctx context.Context, p *store.Profile, titles []*
 			r, seen := releases[k]
 			if !seen {
 				if r.released, r.atHome, r.ok, err = st.TitleRelease(ctx, kind, t.Ref.TMDB()); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				releases[k] = r
 			}
 			atHome := r.atHome != "" && r.atHome <= day
 			if !r.ok || (shown == "home" && !atHome) || (shown == "released" && !atHome && (r.released == "" || r.released > day)) {
-				continue
+				if !upcoming || !r.ok || part {
+					continue
+				}
+				notOut = true
 			}
 		}
 		// A kids profile: only what's rated within its limits.
@@ -226,7 +249,7 @@ func (l Library) visibleTitles(ctx context.Context, p *store.Profile, titles []*
 			ok, seen := rated[k]
 			if !seen {
 				if ok, err = st.TitleAllowed(ctx, *a.Ceiling, kind, t.Ref.TMDB()); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				rated[k] = ok
 			}
@@ -235,13 +258,20 @@ func (l Library) visibleTitles(ctx context.Context, p *store.Profile, titles []*
 			}
 		}
 		out[i] = true
+		soon[i] = notOut
 	}
-	return out, nil
+	return out, soon, nil
 }
 
 // titleSummaries returns titles by key, in order, each once, leaving out
 // those the profile may not see, with what it did with them.
 func (l Library) titleSummaries(ctx context.Context, p *store.Profile, keys []string) ([]library.TitleSummary, error) {
+	return l.summaries(ctx, p, keys, false)
+}
+
+// summaries is titleSummaries; with upcoming, the films and series no
+// library has that aren't out yet are listed too, marked (visibility).
+func (l Library) summaries(ctx context.Context, p *store.Profile, keys []string, upcoming bool) ([]library.TitleSummary, error) {
 	st := l.Provisioner.Store
 	infos, err := st.TitleInfos(ctx, keys, today(), p.TextLanguage)
 	l.wantTexts(p, infos)
@@ -256,7 +286,7 @@ func (l Library) titleSummaries(ctx context.Context, p *store.Profile, keys []st
 			list = append(list, t)
 		}
 	}
-	visible, err := l.visibleTitles(ctx, p, list)
+	visible, soon, err := l.visibility(ctx, p, list, upcoming)
 	if err != nil {
 		return nil, err
 	}
@@ -284,6 +314,7 @@ func (l Library) titleSummaries(ctx context.Context, p *store.Profile, keys []st
 			s.UserState = stateOf(st)
 		}
 		s.Request = requests[t.Ref.Key()]
+		s.Upcoming = soon[i]
 		out = append(out, s)
 	}
 	return out, nil
@@ -374,6 +405,20 @@ func (l Library) title(w http.ResponseWriter, r *http.Request) {
 			tc.Image = &library.ImageRef{URL: "/api/v1/images/" + id}
 		}
 		out.Cast = append(out.Cast, tc)
+	}
+	if ref.Kind == "movie" && ref.TMDB() != "" {
+		c, err := st.FilmCollection(ctx, ref.TMDB())
+		shown := false
+		if err == nil && c != nil {
+			shown, err = l.collectionShown(ctx, p, c.ID)
+		}
+		if err != nil {
+			l.storeError(w, err)
+			return
+		}
+		if shown {
+			out.Collection = &collectionRef{ID: collectionID(c.ID), Name: c.Name}
+		}
 	}
 	switch ref.Kind {
 	case "series":

@@ -52,6 +52,9 @@ type Full struct {
 	// Similar are the titles of its kind TMDB recommends with it, best
 	// first (its first page: 20 at most).
 	Similar []Title
+	// Collection is the collection a film belongs to (TMDB's series of
+	// films); 0 for none, and for a series.
+	Collection int
 }
 
 // maxNames caps how many other names a title keeps.
@@ -109,6 +112,9 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 		ExternalIDs struct {
 			TVDB int `json:"tvdb_id"`
 		} `json:"external_ids"`
+		BelongsToCollection *struct {
+			ID int `json:"id"`
+		} `json:"belongs_to_collection"`
 		Recommendations struct {
 			Results []rawTitle `json:"results"`
 		} `json:"recommendations"`
@@ -186,6 +192,9 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 	out.GenreIDs = genreIDs
 	if kind == "series" && raw.ExternalIDs.TVDB > 0 && raw.ExternalIDs.TVDB < 1e9 {
 		out.TVDB = raw.ExternalIDs.TVDB
+	}
+	if kind == "movie" && raw.BelongsToCollection != nil && ValidID(raw.BelongsToCollection.ID) {
+		out.Collection = raw.BelongsToCollection.ID
 	}
 	runtime := raw.Runtime
 	if kind == "series" && len(raw.EpisodeRunTime) > 0 {

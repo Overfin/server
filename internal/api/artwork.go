@@ -59,8 +59,18 @@ func (l Library) artworkImage(w http.ResponseWriter, r *http.Request, p *store.P
 		if err != nil {
 			return err
 		}
-		if len(ids) == 0 && len(keys) == 0 {
+		// The collections it's the picture of.
+		collections, err := st.ImageCollections(ctx, ref.Type, ref.Path)
+		if err != nil {
+			return err
+		}
+		if len(ids) == 0 && len(keys) == 0 && len(collections) == 0 {
 			return images.ErrInvalid
+		}
+		for _, c := range collections {
+			if shown, err := l.collectionShown(ctx, p, c); err != nil || shown {
+				return err
+			}
 		}
 		infos, err := st.TitleInfos(ctx, keys, today(), "")
 		if err != nil {
@@ -70,13 +80,29 @@ func (l Library) artworkImage(w http.ResponseWriter, r *http.Request, p *store.P
 		for _, t := range infos {
 			titles = append(titles, t)
 		}
-		visible, err := l.visibleTitles(ctx, p, titles)
+		// Those not out yet too, shown on a collection's page it shows.
+		visible, soon, err := l.visibility(ctx, p, titles, true)
 		if err != nil {
 			return err
 		}
-		for _, v := range visible {
-			if v {
+		for i, v := range visible {
+			if v && !soon[i] {
 				return nil
+			}
+		}
+		for i, v := range visible {
+			if !v || titles[i].Ref.Kind != "movie" {
+				continue
+			}
+			c, err := st.FilmCollection(ctx, titles[i].Ref.TMDB())
+			if err != nil {
+				return err
+			}
+			if c == nil {
+				continue
+			}
+			if shown, err := l.collectionShown(ctx, p, c.ID); err != nil || shown {
+				return err
 			}
 		}
 		return images.ErrHidden

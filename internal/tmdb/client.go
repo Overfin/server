@@ -1,6 +1,7 @@
 package tmdb
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -608,4 +609,128 @@ func (c *Client) Check(ctx context.Context) error {
 		return ErrUnauthorized
 	}
 	return nil
+}
+
+// FilmCollection returns the collection a film belongs to (TMDB's series of
+// films, such as a saga), 0 when it belongs to none: the film's page alone,
+// nothing appended.
+func (c *Client) FilmCollection(ctx context.Context, tmdbID int) (int, error) {
+	if !ValidID(tmdbID) {
+		return 0, ErrNotFound
+	}
+	var raw struct {
+		ID         int `json:"id"`
+		Collection *struct {
+			ID int `json:"id"`
+		} `json:"belongs_to_collection"`
+	}
+	if err := c.get(ctx, "/movie/"+strconv.Itoa(tmdbID), nil, &raw); err != nil {
+		return 0, err
+	}
+	if raw.ID != tmdbID {
+		return 0, ErrNotFound
+	}
+	if raw.Collection == nil || !ValidID(raw.Collection.ID) {
+		return 0, nil
+	}
+	return raw.Collection.ID, nil
+}
+
+// Collection is one of TMDB's collections: a series of films, checked and
+// in plain text, its films in release order (those without a date last).
+type Collection struct {
+	ID       int
+	Name     string
+	Overview string
+	// Poster and Backdrop are TMDB image paths, checked like a title's.
+	Poster, Backdrop string
+	Parts            []Title
+	// Released are the films' release dates (YYYY-MM-DD, "" when TMDB
+	// doesn't say), by TMDB ID.
+	Released map[int]string
+}
+
+// maxParts caps how many films a collection keeps.
+const maxParts = 100
+
+// Collection returns a collection with its films, in the client's language
+// (what its translation lacks from the language alone).
+func (c *Client) Collection(ctx context.Context, id int) (*Collection, error) {
+	if !ValidID(id) {
+		return nil, ErrNotFound
+	}
+	var raw struct {
+		ID           int        `json:"id"`
+		Name         string     `json:"name"`
+		Overview     string     `json:"overview"`
+		PosterPath   string     `json:"poster_path"`
+		BackdropPath string     `json:"backdrop_path"`
+		Parts        []rawTitle `json:"parts"`
+	}
+	path := "/collection/" + strconv.Itoa(id)
+	if err := c.get(ctx, path, c.withLanguage(nil), &raw); err != nil {
+		return nil, err
+	}
+	if raw.ID != id {
+		return nil, ErrNotFound
+	}
+	// What the region's translation lacks, from the language alone: one
+	// request for the collection and its films.
+	if base := c.baseLanguage(); base != "" && (raw.Name == "" || raw.Overview == "" ||
+		slices.ContainsFunc(raw.Parts, func(r rawTitle) bool { return r.lacks(base) })) {
+		var b struct {
+			ID       int        `json:"id"`
+			Name     string     `json:"name"`
+			Overview string     `json:"overview"`
+			Parts    []rawTitle `json:"parts"`
+		}
+		if c.get(ctx, path, c.inBase(nil), &b) == nil && b.ID == id {
+			raw.Name = cmp.Or(raw.Name, b.Name)
+			raw.Overview = cmp.Or(raw.Overview, b.Overview)
+			byID := map[int]rawTitle{}
+			for _, p := range b.Parts {
+				byID[p.ID] = p
+			}
+			for i := range raw.Parts {
+				if p, ok := byID[raw.Parts[i].ID]; ok && raw.Parts[i].lacks(base) {
+					raw.Parts[i].fill(p)
+				}
+			}
+		}
+	}
+	out := &Collection{ID: id, Name: textclean.Plain(raw.Name, 300), Overview: textclean.Plain(raw.Overview, 2000),
+		Released: map[int]string{}}
+	if out.Name == "" {
+		return nil, ErrNotFound
+	}
+	if imagePath.MatchString(raw.PosterPath) {
+		out.Poster = raw.PosterPath
+	}
+	if imagePath.MatchString(raw.BackdropPath) {
+		out.Backdrop = raw.BackdropPath
+	}
+	for _, p := range raw.Parts {
+		t, ok := p.title("movie")
+		if !ok || slices.ContainsFunc(out.Parts, func(x Title) bool { return x.TMDBID == t.TMDBID }) {
+			continue
+		}
+		out.Parts = append(out.Parts, t)
+		out.Released[t.TMDBID] = date(p.ReleaseDate)
+		if len(out.Parts) == maxParts {
+			break
+		}
+	}
+	slices.SortStableFunc(out.Parts, func(a, b Title) int {
+		da, db := out.Released[a.TMDBID], out.Released[b.TMDBID]
+		switch {
+		case da == db:
+			return 0
+		case da == "":
+			return 1
+		case db == "":
+			return -1
+		}
+		return strings.Compare(da, db)
+	})
+	return out, nil
 }

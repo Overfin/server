@@ -2240,6 +2240,55 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /collections:
+    get:
+      operationId: listCollections
+      summary: Collections of films
+      description: >-
+        TMDB's collections (series of films, such as a saga) the profile has
+        at least one film of in a library, as it may see them, by name.
+        Since 0.7.
+      tags: [titles]
+      responses:
+        "200":
+          description: The collections, without their films.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Collection"
+
+  /collections/{collectionId}:
+    parameters:
+      - name: collectionId
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^collection_[1-9][0-9]{0,9}$"
+    get:
+      operationId: getCollection
+      summary: A collection and its films
+      description: >-
+        A collection the profile sees, with its films in release order:
+        those no library has as any title is shown, and those not out yet
+        too, marked `upcoming`. Since 0.7.
+      tags: [titles]
+      responses:
+        "200":
+          description: The collection, with its films (items).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Collection"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /titles/{titleId}/lyrics:
     parameters:
       - $ref: "#/components/parameters/TitleId"
@@ -4041,12 +4090,55 @@ components:
             status:
               type: string
               description: As a request's.
+        upcoming:
+          type: boolean
+          description: >-
+            Only in a collection's films (since 0.7). A film no library has
+            that isn't out yet as the server shows titles, listed all the
+            same; it has no page (`/titles/{titleId}` answers 404) and can't
+            be requested until it's out.
+
+    Collection:
+      type: object
+      required: [id, name, inLibrary, films]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        overview:
+          type: string
+          description: Only on its own page.
+        images:
+          $ref: "#/components/schemas/Images"
+        inLibrary:
+          type: integer
+          description: How many of its films the profile has in a library.
+        films:
+          type: integer
+          description: How many films it has in all.
+        items:
+          type: array
+          description: Its films, on its own page only.
+          items:
+            $ref: "#/components/schemas/TitleSummary"
 
     Title:
       allOf:
         - $ref: "#/components/schemas/TitleSummary"
         - type: object
           properties:
+            collection:
+              type: object
+              description: >-
+                The collection a film belongs to, when the profile sees it
+                (`/collections/{collectionId}`). Since 0.7.
+              required: [id, name]
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
             overview:
               type: string
             tagline:

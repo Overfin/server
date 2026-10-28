@@ -56,6 +56,10 @@ type TitleSummary struct {
 	UserState     *UserState    `json:"userState,omitempty"`
 	// Request is the account's latest request covering it, if any.
 	Request *TitleRequest `json:"request,omitempty"`
+	// Upcoming marks a title no library has that isn't out yet as the
+	// server shows titles: listed (a collection's films), but it has no page
+	// and can't be requested until it's out.
+	Upcoming bool `json:"upcoming,omitempty"`
 }
 
 // TitleRequest is a request covering a title: its ID and status.
@@ -68,3 +72,22 @@ type TitleRequest struct {
 
 // TitlePrefix starts every title's ID.
 const TitlePrefix = "title_"
+
+// CollectionPrefix starts every collection's ID.
+const CollectionPrefix = "collection_"
+
+// Collection is one of TMDB's collections (a series of films, such as a
+// saga) a library has films of: in a list, its films aren't given.
+type Collection struct {
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	Overview string  `json:"overview,omitempty"`
+	Images   *Images `json:"images,omitempty"`
+	// InLibrary is how many of its films the profile has in a library, of
+	// Films in the collection.
+	InLibrary int `json:"inLibrary"`
+	Films     int `json:"films"`
+	// Items are its films, in release order, as the profile may see them
+	// (those not out yet marked upcoming); only on its own page.
+	Items []TitleSummary `json:"items,omitempty"`
+}
