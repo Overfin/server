@@ -390,3 +390,22 @@ func TestNewProfileKeepsItsTheme(t *testing.T) {
 		t.Errorf("its look: %s", body)
 	}
 }
+
+// A profile's name is counted in characters, not bytes, and its spaces
+// are tidied: 30 accented letters fit; 33 don't.
+func TestProfileNameInCharacters(t *testing.T) {
+	srv, _ := newServer(t)
+	long := strings.Repeat("é", 30)
+	if code, body := post(t, srv, "/api/v1/profiles", `{"name":"`+long+`"}`); code != http.StatusCreated || !strings.Contains(body, `"name":"`+long+`"`) {
+		t.Errorf("30 accented letters: %d %s", code, body)
+	}
+	if code, body := post(t, srv, "/api/v1/profiles", `{"name":"  Bob   Smith "}`); code != http.StatusCreated || !strings.Contains(body, `"name":"Bob Smith"`) {
+		t.Errorf("spaces: %d %s", code, body)
+	}
+	if code, _ := post(t, srv, "/api/v1/profiles", `{"name":"`+strings.Repeat("é", 33)+`"}`); code != http.StatusBadRequest {
+		t.Errorf("33 characters: %d", code)
+	}
+	if code, _ := post(t, srv, "/api/v1/profiles", `{"name":"   "}`); code != http.StatusBadRequest {
+		t.Errorf("only spaces: %d", code)
+	}
+}

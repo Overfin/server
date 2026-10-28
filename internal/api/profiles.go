@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"slices"
 	"time"
-	"unicode/utf8"
 
 	"github.com/overfin/server/internal/cookie"
 	"github.com/overfin/server/internal/ids"
@@ -221,9 +220,16 @@ func (p Profiles) accessFrom(ctx context.Context, c *Caller, pr *store.Profile, 
 
 var languageTagRe = regexp.MustCompile(`^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$`)
 
-// validName accepts 1 to 32 bytes of plain text that is already clean.
-func validName(s string) bool {
-	return s != "" && len(s) <= 32 && utf8.ValidString(s) && textclean.Plain(s, 32) == s
+// tidyName tidies the profile name a request gives, if any (see
+// textclean.Name), and reports whether it's then 1 to 32 characters of
+// plain text.
+func tidyName(name *string) bool {
+	if name == nil {
+		return true
+	}
+	n, ok := textclean.Name(*name, 32)
+	*name = n
+	return ok && n != ""
 }
 
 // categoriesFrom reads the categories a profile is to see, from a
@@ -290,7 +296,7 @@ func (p Profiles) tags(w http.ResponseWriter, r *http.Request) {
 
 func (p Profiles) create(w http.ResponseWriter, r *http.Request) {
 	var req profileRequest
-	if !decode(r, &req) || req.Name == nil || !validName(*req.Name) || req.PIN != "" ||
+	if !decode(r, &req) || req.Name == nil || !tidyName(req.Name) || req.PIN != "" ||
 		(req.Language != nil && !languageTagRe.MatchString(*req.Language)) ||
 		(req.Theme != nil && *req.Theme != "" && *req.Theme != "light" && *req.Theme != "dark") {
 		problem.Send(w, problem.InvalidRequest, "")
@@ -371,7 +377,7 @@ func (p Profiles) update(w http.ResponseWriter, r *http.Request) {
 		(req.Name == nil && req.Language == nil && req.Theme == nil && req.Kind == nil && req.MaxAge == nil &&
 			!req.Libraries.Set && !req.BlockedTags.Set && !req.Categories.Set && !req.KidsTitles.Set) || !validAge(req.MaxAge) ||
 		(req.Theme != nil && *req.Theme != "" && *req.Theme != "light" && *req.Theme != "dark") ||
-		(req.Name != nil && !validName(*req.Name)) ||
+		!tidyName(req.Name) ||
 		(req.Language != nil && *req.Language != "" && !languageTagRe.MatchString(*req.Language)) ||
 		(req.Kind != nil && *req.Kind != "standard" && *req.Kind != "kids") {
 		problem.Send(w, problem.InvalidRequest, "")

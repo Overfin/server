@@ -11,6 +11,15 @@ import (
 	"unicode/utf8"
 )
 
+// Name tidies a name someone typed (a profile's, a category's…): spaces
+// around it go, and runs of them inside become one. ok is false unless
+// it's then plain text of at most max characters, accented ones and other
+// scripts counted as one each; "" is ok.
+func Name(s string, max int) (name string, ok bool) {
+	name = strings.Join(strings.Fields(s), " ")
+	return name, utf8.RuneCountInString(name) <= max && Plain(name, len(name)) == name
+}
+
 // Plain removes markup, control characters and bidirectional overrides,
 // collapses runs of whitespace (keeping paragraph breaks), and cuts the
 // result to at most max bytes without splitting a character.
