@@ -235,6 +235,109 @@ func TestManagedRegistration(t *testing.T) {
 	}
 }
 
+// A single-use invitation lets one person register: the registration takes
+// its use at once, and the account set up later gets the invitation's
+// plan. Someone whose invitation is gone gets no account without one.
+func TestManagedSingleUseInvitation(t *testing.T) {
+	box := &mailbox{}
+	var st *store.Store
+	var m *api.Managed
+	var tmpl string
+	panel := http.NewServeMux()
+	srv, _ := newServerWith(t, options{managed: true, mailbox: box, store: &st, signIn: &m, template: &tmpl, admin: panel,
+		modules: []feature.Feature{invites.Feature{}}, settings: map[string]map[string]string{"invites": {"required": "on"}}})
+	ctx := context.Background()
+	admin := func(method, path string, body any) map[string]any {
+		raw, _ := json.Marshal(body)
+		rec := httptest.NewRecorder()
+		panel.ServeHTTP(rec, httptest.NewRequest(method, "/admin/api/modules/invites"+path, bytes.NewReader(raw)))
+		var out map[string]any
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	it := admin("POST", "/templates", map[string]any{"name": "Once", "accountTemplate": tmpl, "accessDays": 30, "validDays": 0, "maxUses": 1})
+	invite := func(label string) (id, link string) {
+		out := admin("POST", "/invites", map[string]any{"template": it["id"], "label": label})
+		return out["invite"].(map[string]any)["id"].(string), strings.TrimPrefix(out["link"].(string), "https://media.example.org")
+	}
+	register := func(b *http.Client, email string) (int, map[string]any) {
+		return signinPost(t, b, srv, "/api/v1/register", checked(t, srv, map[string]any{"email": email, "password": "a long password 1"}))
+	}
+	// confirm opens the link sent to email in a new browser, and sets up
+	// the account there.
+	confirm := func(email string) (*http.Client, int) {
+		t.Helper()
+		m.Wait()
+		token := ""
+		for _, e := range box.all() {
+			if e.to == email {
+				token = linkIn(e.body, "verify")
+			}
+		}
+		b := newBrowser(srv)
+		if c, out := signinPost(t, b, srv, "/api/v1/signin/verify", map[string]any{"link": token}); c != 200 {
+			t.Fatalf("confirming %s: %d %v", email, c, out)
+		}
+		req, _ := http.NewRequest("POST", srv.URL+"/api/v1/me", strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		res, err := b.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return b, res.StatusCode
+	}
+	if _, err := st.CreateUser(ctx, "old@example.org", false); err != nil {
+		t.Fatal(err)
+	}
+
+	_, link := invite("Ann")
+	ann, eve := newBrowser(srv), newBrowser(srv)
+	openPage(t, ann, srv, link)
+	openPage(t, eve, srv, link) // the link went around before Ann used it
+	// An email that has an account here takes no use.
+	if c, out := register(ann, "old@example.org"); c != 200 {
+		t.Fatalf("an email with an account: %d %v", c, out)
+	}
+	if c, out := register(ann, "ann@example.org"); c != 200 {
+		t.Fatalf("Ann registering: %d %v", c, out)
+	}
+	// The invitation is used: nobody else registers with it, even unconfirmed.
+	if c, out := register(eve, "eve@example.org"); c != 403 || out["type"] != "invitation-required" {
+		t.Errorf("a second registration: %d %v", c, out)
+	}
+	if res, body := openPage(t, newBrowser(srv), srv, link); res.StatusCode != 200 || strings.Contains(body, `id="register"`) {
+		t.Errorf("the used link still opens: %d", res.StatusCode)
+	}
+	// Ann's account gets the invitation's plan, and the use stays one.
+	if _, code := confirm("ann@example.org"); code != 201 {
+		t.Fatalf("Ann's account: %d", code)
+	}
+	u, _ := st.UserByEmail(ctx, "ann@example.org")
+	acct, err := st.AccountBySubject(ctx, u.Subject)
+	if err != nil || acct.Label != "Ann" || acct.Template.ID != tmpl || acct.Expires.IsZero() {
+		t.Errorf("Ann's account: %+v %v", acct, err)
+	}
+	for _, item := range admin("GET", "/invites", nil)["items"].([]any) {
+		if inv := item.(map[string]any); inv["label"] == "Ann" && inv["uses"] != 1.0 {
+			t.Errorf("uses: %v", inv)
+		}
+	}
+
+	// An invitation deleted between registering and setting up the
+	// account: no account without one.
+	id, link := invite("Cara")
+	cara := newBrowser(srv)
+	openPage(t, cara, srv, link)
+	if c, out := register(cara, "cara@example.org"); c != 200 {
+		t.Fatalf("Cara registering: %d %v", c, out)
+	}
+	admin("DELETE", "/invites/"+id, nil)
+	if _, code := confirm("cara@example.org"); code != 403 {
+		t.Errorf("Cara's account, her invitation deleted: %d", code)
+	}
+}
+
 // Without email, nobody registers, and there's no forgotten-password page:
 // an admin makes accounts, and sets passwords.
 func TestManagedWithoutMail(t *testing.T) {

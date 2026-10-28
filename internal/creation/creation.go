@@ -34,8 +34,9 @@ func IsAdmin(ctx context.Context) bool {
 type admittedKey struct{}
 
 // Admitted marks ctx as creating the account of someone Overfin's own
-// sign-in already let in: an admin made them, or they registered with an
-// invitation. Their invitation, if any, still shapes the account.
+// sign-in already let in: an admin made them. Their invitation, if any,
+// still shapes the account. Someone who registered isn't marked: their
+// invitation is what lets them in.
 func Admitted(ctx context.Context) context.Context {
 	return context.WithValue(ctx, admittedKey{}, true)
 }

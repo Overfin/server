@@ -7,10 +7,11 @@
 // works (Invitation); the page leaves the code in a cookie. When the
 // person's account is set up, the invitation shapes it (its account
 // template, when its access ends, a label) and counts as used. With
-// "accounts only by invitation" on, nobody gets an account without one,
-// except people bringing their previous account over, whose old account is
-// proof enough, the site's admins, and people Overfin's own sign-in let in
-// (an admin made them, or they registered with an invitation).
+// Overfin's own sign-in, a registration takes its use at once (Hold), and
+// its account gets that use later. With "accounts only by invitation" on,
+// nobody gets an account without one, except people bringing their
+// previous account over, whose old account is proof enough, the site's
+// admins, and people an admin added to Overfin's own sign-in.
 package invites
 
 import (
@@ -42,8 +43,21 @@ var files embed.FS
 // cookieName carries an opened invitation's code to the account's creation.
 const cookieName = feature.InviteCookie
 
-// codePattern is a code's form: 16 random bytes, base64url.
-var codePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{22}$`)
+// codePattern is a code's form: 16 random bytes, base64url; holdPattern,
+// a hold's: 32 random bytes.
+var (
+	codePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{22}$`)
+	holdPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+)
+
+// usesOf counts an invitation's uses: those of accounts, and the holds of
+// registrations that haven't lapsed.
+const usesOf = `(SELECT count(*) FROM invites_uses
+	WHERE invite_id = invites.id AND (held_until IS NULL OR held_until > unixepoch()))`
+
+// uses takes one use of an invitation at a time, so two never take its
+// last one.
+var uses sync.Mutex
 
 // Module is the invites module.
 type Feature struct{}
@@ -131,12 +145,51 @@ func (a admin) signUpLink(ctx context.Context, inv *invite) (string, error) {
 	return link, nil
 }
 
+// Hold takes a use of the invitation code opens for a registration, until
+// a time; "" when the invitation no longer works.
+func (Feature) Hold(ctx context.Context, h feature.Host, code string, until time.Time) (string, error) {
+	if !codePattern.MatchString(code) {
+		return "", nil
+	}
+	uses.Lock()
+	defer uses.Unlock()
+	hold := newToken(32)
+	res, err := h.DB().ExecContext(ctx, `
+		INSERT INTO invites_uses (invite_id, used_at, hold_hash, held_until)
+		SELECT id, ?, ?, ? FROM invites
+		WHERE code_hash = ? AND (expires_at = 0 OR expires_at > ?) AND (max_uses = 0 OR `+usesOf+` < max_uses)`,
+		time.Now().Unix(), hash(hold), until.Unix(), hash(code), time.Now().Unix())
+	if err != nil {
+		return "", err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return "", nil
+	}
+	return hold, nil
+}
+
+// Release gives back a use held for a registration.
+func (Feature) Release(ctx context.Context, h feature.Host, hold string) error {
+	_, err := h.DB().ExecContext(ctx, `DELETE FROM invites_uses WHERE hold_hash = ?`, hash(hold))
+	return err
+}
+
 // NewAccount shapes a new account by the visitor's invitation, or refuses
-// it when invitations are required and there's none.
+// it when invitations are required and there's none. The invitation's
+// cookie carries either a code, whose invitation must still work, or a
+// registration's hold, whose use was taken when it registered: that one's
+// invitation shapes the account even if its link has expired since.
 func (Feature) NewAccount(ctx context.Context, h feature.Host, r *http.Request) (*feature.AccountPlan, error) {
 	var inv *invite
+	held := ""
 	if c, err := cookie.Get(r, cookieName); err == nil {
-		if inv, err = usable(ctx, h.DB(), c.Value); err != nil {
+		if holdPattern.MatchString(c.Value) {
+			held = hash(c.Value)
+			inv, err = heldBy(ctx, h.DB(), held)
+		} else {
+			inv, err = usable(ctx, h.DB(), c.Value)
+		}
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -157,24 +210,39 @@ func (Feature) NewAccount(ctx context.Context, h feature.Host, r *http.Request) 
 		return nil, nil
 	}
 	plan := &feature.AccountPlan{Template: inv.AccountTemplate, Label: inv.Label, Ref: inv.ID}
+	if held != "" {
+		plan.Ref = "held " + held
+	}
 	if inv.AccessDays > 0 {
 		plan.Expires = time.Now().AddDate(0, 0, inv.AccessDays)
 	}
 	return plan, nil
 }
 
-// AccountCreated counts the invitation as used. It runs under the core's
-// account-creation lock, so a single-use invitation can't be used twice.
+// AccountCreated counts the invitation as used: a registration's held use
+// becomes the account's; otherwise the account takes one, if one is left.
+// It runs under the core's account-creation lock, so a single-use
+// invitation can't be used twice.
 func (Feature) AccountCreated(ctx context.Context, h feature.Host, _ *http.Request, accountID string, plan *feature.AccountPlan) error {
 	if plan == nil {
 		return nil
 	}
-	res, err := h.DB().ExecContext(ctx, `
-		INSERT INTO invites_uses (invite_id, account_id, used_at)
-		SELECT id, ?, ? FROM invites
-		WHERE id = ? AND (expires_at = 0 OR expires_at > ?)
-			AND (max_uses = 0 OR (SELECT count(*) FROM invites_uses WHERE invite_id = invites.id) < max_uses)`,
-		accountID, time.Now().Unix(), plan.Ref, time.Now().Unix())
+	uses.Lock()
+	defer uses.Unlock()
+	var res sql.Result
+	var err error
+	if held, ok := strings.CutPrefix(plan.Ref, "held "); ok {
+		res, err = h.DB().ExecContext(ctx, `
+			UPDATE invites_uses SET account_id = ?, used_at = ?, hold_hash = NULL, held_until = NULL
+			WHERE hold_hash = ? AND held_until > unixepoch()`,
+			accountID, time.Now().Unix(), held)
+	} else {
+		res, err = h.DB().ExecContext(ctx, `
+			INSERT INTO invites_uses (invite_id, account_id, used_at)
+			SELECT id, ?, ? FROM invites
+			WHERE id = ? AND (expires_at = 0 OR expires_at > ?) AND (max_uses = 0 OR `+usesOf+` < max_uses)`,
+			accountID, time.Now().Unix(), plan.Ref, time.Now().Unix())
+	}
 	if err != nil {
 		return err
 	}
@@ -207,8 +275,7 @@ type invite struct {
 	expires   int64
 }
 
-const inviteColumns = `id, label, account_template, access_days, max_uses,
-	(SELECT count(*) FROM invites_uses WHERE invite_id = invites.id), expires_at, created_at`
+const inviteColumns = `id, label, account_template, access_days, max_uses, ` + usesOf + `, expires_at, created_at`
 
 func scanInvite(sc interface{ Scan(...any) error }) (*invite, error) {
 	var inv invite
@@ -241,6 +308,18 @@ func usable(ctx context.Context, db *sql.DB, code string) (*invite, error) {
 		return nil, nil
 	}
 	return inv, nil
+}
+
+// heldBy returns the invitation whose use a registration holds, by the
+// hold's hash, or nil when it holds none any more (the hold lapsed, or the
+// invitation was deleted).
+func heldBy(ctx context.Context, db *sql.DB, holdHash string) (*invite, error) {
+	inv, err := scanInvite(db.QueryRowContext(ctx, `SELECT `+inviteColumns+` FROM invites WHERE id =
+		(SELECT invite_id FROM invites_uses WHERE hold_hash = ? AND held_until > unixepoch())`, holdHash))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return inv, err
 }
 
 func templateExists(ctx context.Context, h feature.Host, id string) (bool, error) {
@@ -498,8 +577,11 @@ func plain(s string, max int) bool {
 	return true
 }
 
-func newCode() string {
-	b := make([]byte, 16)
+func newCode() string { return newToken(16) }
+
+// newToken is n random bytes, base64url.
+func newToken(n int) string {
+	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
 }

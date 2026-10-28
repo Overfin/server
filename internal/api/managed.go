@@ -49,6 +49,10 @@ const (
 	// UnconfirmedFor is how long someone who registered has to confirm
 	// their address before they're removed.
 	UnconfirmedFor = 7 * 24 * time.Hour
+	// holdFor is how long a registration holds a use of its invitation:
+	// the time to confirm the address, then a day (the invitation cookie's
+	// life) to set up the account.
+	holdFor = UnconfirmedFor + 24*time.Hour
 )
 
 // Managed is Overfin's own sign-in (identity mode "managed"): people sign
@@ -144,8 +148,9 @@ func (m *Managed) Register(r *plugin.Registrar) error {
 
 // Middleware sets the identity from the login cookie, for someone who still
 // has an account here, isn't disabled, confirmed their address, and has no
-// new password to choose first. It also marks them admitted: Overfin let
-// them in, so their account needs no invitation of its own.
+// new password to choose first. Someone an admin added is also marked
+// admitted: their account needs no invitation of its own. Someone who
+// registered has the invitation they registered with, and needs it.
 func (m *Managed) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, u := m.current(r); u != nil && u.Confirmed && !u.MustChange {
@@ -153,7 +158,11 @@ func (m *Managed) Middleware(next http.Handler) http.Handler {
 			if u.Admin {
 				id.Groups = []string{ManagedAdminGroup}
 			}
-			r = r.WithContext(markAdmitted(identity.With(r.Context(), id)))
+			ctx := identity.With(r.Context(), id)
+			if !u.Registered {
+				ctx = markAdmitted(ctx)
+			}
+			r = r.WithContext(ctx)
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -424,8 +433,10 @@ func (m *Managed) changePassword(w http.ResponseWriter, r *http.Request) {
 
 // register makes the account of someone with an invitation (opened in
 // this browser): their email and password, then a link to their email to
-// confirm it. An email that has an account here gets a notice instead;
-// the answer is the same.
+// confirm it. The registration takes a use of the invitation at once, so
+// a single-use invitation lets one person register. An email that has an
+// account here gets a notice instead, and the use is given back; the
+// answer is the same.
 func (m *Managed) register(w http.ResponseWriter, r *http.Request) {
 	req, ok := m.read(w, r)
 	if !ok || !m.checked(w, r, req) || !m.cleanEmail(w, r, &req) {
@@ -453,8 +464,24 @@ func (m *Managed) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	inviter, h := inviterOf(m.Mounts)
+	hold, err := inviter.Hold(ctx, h, code, time.Now().Add(holdFor))
+	if err != nil {
+		m.fail(w, r, err)
+		return
+	}
+	if hold == "" {
+		// Used up or expired since the check above.
+		m.refuse(w, r, problem.InvitationRequired, "inviteInvalid")
+		return
+	}
 	lang := pageLang(r, m.Store)
-	u, err := m.Store.RegisterUser(ctx, req.Email, hash, code)
+	u, err := m.Store.RegisterUser(ctx, req.Email, hash, hold)
+	if err != nil {
+		if rerr := inviter.Release(ctx, h, hold); rerr != nil {
+			m.Logger.Error("giving back an invitation's use failed", "err", rerr)
+		}
+	}
 	switch {
 	case errors.Is(err, store.ErrEmailTaken):
 		m.send(req.Email, lang, "exists", strings.TrimSuffix(m.SiteURL, "/")+signinPagePath)
@@ -504,8 +531,9 @@ func (m *Managed) verify(w http.ResponseWriter, r *http.Request) {
 	m.startLogin(w, r, u, "/")
 }
 
-// keepInvitation leaves the invitation someone registered with in this
-// browser, where their account is about to be set up.
+// keepInvitation leaves the invitation someone registered with (their hold
+// on a use of it) in this browser, where their account is about to be set
+// up.
 func (m *Managed) keepInvitation(w http.ResponseWriter, r *http.Request, code string) {
 	if code != "" {
 		cookie.Set(w, r, &http.Cookie{Name: feature.InviteCookie, Value: code, MaxAge: 24 * 60 * 60})
