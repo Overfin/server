@@ -516,19 +516,27 @@ func (q ListQuery) where() ([]string, []any) {
 	mine := func(cond string) string {
 		return "EXISTS (SELECT 1 FROM profile_titles x WHERE x.profile_id = ? AND x.title = catalog_items.title_key AND " + cond + ")"
 	}
-	// A series' or a season's episodes.
-	const episodes = `FROM catalog_items e WHERE e.kind = 'episode'
-		AND (e.series_id = catalog_items.id OR e.season_id = catalog_items.id)`
+	// A series' or a season's episodes, each title once, through the series
+	// or season index ("+e.kind": SQLite would rather use the kind index,
+	// and go through every episode of the library for each title).
+	episodes := func(col, join string) string {
+		return `(SELECT count(DISTINCT e.title_key) FROM catalog_items e ` + join + `
+			WHERE e.` + col + ` = catalog_items.id AND +e.kind = 'episode')`
+	}
+	played := `JOIN profile_titles x ON x.profile_id = ? AND x.title = e.title_key AND x.played = 1`
+	started := `JOIN profile_titles x ON x.profile_id = ? AND x.title = e.title_key AND x.position_ms > 0`
 	if q.Played != nil {
 		// A series or a season is watched once all its episodes are.
-		cond := `(CASE WHEN catalog_items.kind IN ('series', 'season') THEN
-			EXISTS (SELECT 1 ` + episodes + `) AND NOT EXISTS (SELECT 1 ` + episodes + `
-				AND NOT EXISTS (SELECT 1 FROM profile_titles x WHERE x.profile_id = ? AND x.title = e.title_key AND x.played = 1))
+		all := func(col string) string {
+			return "(" + episodes(col, "") + " > 0 AND " + episodes(col, "") + " = " + episodes(col, played) + ")"
+		}
+		cond := `(CASE catalog_items.kind WHEN 'series' THEN ` + all("series_id") + `
+			WHEN 'season' THEN ` + all("season_id") + `
 			ELSE ` + mine("x.played = 1") + ` END)`
 		if !*q.Played {
 			cond = "NOT " + cond
 		}
-		where, args = append(where, cond), append(args, q.ProfileID, q.ProfileID)
+		where, args = append(where, cond), append(args, q.ProfileID, q.ProfileID, q.ProfileID)
 	}
 	if q.Favorite != nil {
 		cond := mine("x.favorite = 1")
@@ -539,11 +547,10 @@ func (q ListQuery) where() ([]string, []any) {
 	}
 	if q.InProgress {
 		// A series or a season, when one of its episodes is.
-		cond := `(CASE WHEN catalog_items.kind IN ('series', 'season') THEN
-			EXISTS (SELECT 1 ` + episodes + ` AND EXISTS (SELECT 1 FROM profile_titles x
-				WHERE x.profile_id = ? AND x.title = e.title_key AND x.position_ms > 0))
+		cond := `(CASE catalog_items.kind WHEN 'series' THEN ` + episodes("series_id", started) + ` > 0
+			WHEN 'season' THEN ` + episodes("season_id", started) + ` > 0
 			ELSE ` + mine("x.position_ms > 0") + ` END)`
-		where, args = append(where, cond), append(args, q.ProfileID, q.ProfileID)
+		where, args = append(where, cond), append(args, q.ProfileID, q.ProfileID, q.ProfileID)
 	}
 	year := "coalesce(" + fromTMDB("year") + ", year)"
 	if q.YearFrom > 0 {
