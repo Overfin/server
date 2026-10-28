@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 )
@@ -38,5 +39,48 @@ func TestFactsOfItems(t *testing.T) {
 	}
 	if ids, err := s.CatalogIDs(ctx, ListQuery{Kinds: []string{"movie", "series"}}); err != nil || len(ids) != 4 {
 		t.Errorf("ids: %v %v", ids, err)
+	}
+}
+
+// What a profile watched weighs its titles' genres, a series through its
+// episodes, the recent more than the old; a film it only marked a
+// favorite, or a file no one identified, counts for nothing.
+func TestWatchedGenres(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	_, prof, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
+	now := time.Unix(2e9, 0)
+	for _, d := range []struct {
+		kind, tmdb string
+		genres     []TitleGenre
+	}{
+		{"movie", "949", []TitleGenre{{80, "Crime"}, {18, "Drama"}}},
+		{"movie", "13", []TitleGenre{{35, "Comedy"}}},
+		{"series", "1399", []TitleGenre{{18, "Drama"}, {10765, "Sci-Fi & Fantasy"}}},
+	} {
+		if err := s.SetTitleDetails(ctx, Title{Kind: d.kind, TMDB: d.tmdb, Name: d.tmdb, Genres: d.genres}, []byte(`{}`), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.RecordPlay(ctx, prof.ID, "movie/tmdb/949", "", 0, true, now)                              // now: weighs 1
+	s.RecordPlay(ctx, prof.ID, "series/tmdb/1399/s1/e2", "", 60_000, false, now.Add(-halfLife)) // started, a half-life ago
+	s.SetFavorite(ctx, prof.ID, "movie/tmdb/13", "", true, now)
+	s.RecordPlay(ctx, prof.ID, "item/abc", "abc", 0, true, now)
+
+	weights, seen, err := s.WatchedGenres(ctx, prof.ID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[int]float64{80: 1, 18: 1.5, 10765: 0.5}
+	if len(weights) != len(want) {
+		t.Errorf("weights = %v, want %v", weights, want)
+	}
+	for g, w := range want {
+		if math.Abs(weights[g]-w) > 1e-9 {
+			t.Errorf("genre %d weighs %v, want %v", g, weights[g], w)
+		}
+	}
+	if len(seen) != 2 || !seen["movie/tmdb/949"] || !seen["series/tmdb/1399"] {
+		t.Errorf("seen = %v", seen)
 	}
 }
