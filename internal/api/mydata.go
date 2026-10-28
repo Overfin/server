@@ -100,8 +100,7 @@ type exportProfileJSON struct {
 	Categories  []string `json:"categories,omitempty"`
 	Libraries   []string `json:"libraries,omitempty"`
 	BlockedTags []string `json:"blockedTags,omitempty"`
-	// KidsTitles is its "children's content" choice; absent, as its
-	// account does.
+	// KidsTitles is its "children's content" choice; absent, not chosen.
 	KidsTitles *bool  `json:"kidsTitles,omitempty"`
 	Theme      string `json:"theme,omitempty"`
 	HasPIN     bool   `json:"hasPin"`

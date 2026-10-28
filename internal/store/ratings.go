@@ -36,9 +36,8 @@ func (s *Store) RatingsCountry(ctx context.Context) (string, error) {
 	return string(v), err
 }
 
-// SetRatingsCountry changes the ratings country. Kids profiles' ceilings
-// were on the other country's scales: they're cleared in the same step, so
-// those profiles see nothing until their owners pick new ones.
+// SetRatingsCountry changes the ratings country, and works titles' ages
+// out again: they go by its ratings first.
 func (s *Store) SetRatingsCountry(ctx context.Context, country string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

@@ -253,7 +253,7 @@ type Profile struct {
 	// (any of them), by ID; empty, none.
 	Categories []string
 	// KidsTitles is whether it wants kids titles in its recommendations;
-	// nil, as its account does.
+	// nil, not chosen (off).
 	KidsTitles *bool
 	// Libraries, when not nil, are the only libraries the profile gets
 	// (by Jellyfin ID); BlockedTags are hidden from it.

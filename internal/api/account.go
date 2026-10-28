@@ -94,7 +94,7 @@ type profileJSON struct {
 	// Categories, when present, are the only categories it sees.
 	Categories *[]string `json:"categories,omitempty"`
 	// KidsTitles, when present, is whether it wants kids titles in its
-	// recommendations; absent, as its account does.
+	// recommendations; absent, off.
 	KidsTitles *bool `json:"kidsTitles,omitempty"`
 	// Theme is its look: "light" or "dark"; absent, it follows the device.
 	Theme string `json:"theme,omitempty"`
