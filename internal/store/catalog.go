@@ -441,13 +441,18 @@ func fromTMDB(column string) string {
 		WHERE t.kind = catalog_items.kind AND t.tmdb = catalog_items.tmdb)`
 }
 
+// newestOfSeries is when the newest of a series' seasons and episodes
+// arrived, in SQL (NULL for anything else), read from the series index.
+const newestOfSeries = `(SELECT max(e.added_at) FROM catalog_items e WHERE e.series_id = catalog_items.id)`
+
 var listOrder = map[string]string{
 	"name":            "coalesce(" + fromTMDB("sort_name") + ", lower(sort_name))",
 	"premiereDate":    "coalesce(" + fromTMDB("release_date") + ", premiere_date)",
 	"addedAt":         "added_at",
 	"communityRating": "coalesce(" + fromTMDB("rating") + ", community_rating)",
-	"latest": `(SELECT max(e.added_at) FROM catalog_items e
-		WHERE e.id = catalog_items.id OR e.series_id = catalog_items.id)`,
+	// The later of its own date and its episodes' (either may be NULL,
+	// which makes max of the two NULL).
+	"latest": "coalesce(max(added_at, " + newestOfSeries + "), added_at, " + newestOfSeries + ")",
 }
 
 // ListCatalog returns the item IDs of a listing's page, in order. What's
