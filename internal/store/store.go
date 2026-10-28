@@ -252,6 +252,9 @@ type Profile struct {
 	// Categories, when not nil, are the only categories the profile sees
 	// (any of them), by ID; empty, none.
 	Categories []string
+	// KidsTitles is whether it wants kids titles in its recommendations;
+	// nil, as its account does.
+	KidsTitles *bool
 	// Libraries, when not nil, are the only libraries the profile gets
 	// (by Jellyfin ID); BlockedTags are hidden from it.
 	Libraries   []string
@@ -356,7 +359,7 @@ func (s *Store) Profiles(ctx context.Context, accountID string) ([]*Profile, err
 const profileSelect = `
 	SELECT id, account_id, name, kind, owner, jellyfin_user_id, jellyfin_username,
 		jellyfin_token, language, max_age, libraries, blocked_tags, pin_hash IS NOT NULL, created_at,
-		subtitle_language, theme, categories
+		subtitle_language, theme, categories, kids_titles
 	FROM profiles`
 
 // scanner is what *sql.Row and *sql.Rows have in common.
@@ -368,10 +371,11 @@ func (s *Store) scanProfile(sc scanner) (*Profile, error) {
 	var sealed []byte
 	var language, jfUser, jfName, subtitles, theme sql.NullString
 	var maxAge sql.NullInt64
+	var kidsTitles *bool
 	var libraries, tags, categories *string
 	var created int64
 	err := sc.Scan(&p.ID, &p.AccountID, &p.Name, &p.Kind, &owner, &jfUser,
-		&jfName, &sealed, &language, &maxAge, &libraries, &tags, &p.HasPIN, &created, &subtitles, &theme, &categories)
+		&jfName, &sealed, &language, &maxAge, &libraries, &tags, &p.HasPIN, &created, &subtitles, &theme, &categories, &kidsTitles)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -394,6 +398,7 @@ func (s *Store) scanProfile(sc scanner) (*Profile, error) {
 		p.MaxAge = &age
 	}
 	p.Libraries, p.BlockedTags, p.Categories = scanList(libraries), scanList(tags), scanList(categories)
+	p.KidsTitles = kidsTitles
 	p.Created = time.Unix(created, 0).UTC()
 	return &p, nil
 }

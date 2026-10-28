@@ -93,6 +93,9 @@ type profileJSON struct {
 	BlockedTags []string  `json:"blockedTags,omitempty"`
 	// Categories, when present, are the only categories it sees.
 	Categories *[]string `json:"categories,omitempty"`
+	// KidsTitles, when present, is whether it wants kids titles in its
+	// recommendations; absent, as its account does.
+	KidsTitles *bool `json:"kidsTitles,omitempty"`
 	// Theme is its look: "light" or "dark"; absent, it follows the device.
 	Theme string `json:"theme,omitempty"`
 }
@@ -248,7 +251,7 @@ func decode(r *http.Request, v any) bool {
 func toProfileJSON(p *store.Profile) profileJSON {
 	out := profileJSON{ID: p.ID, Name: p.Name, Kind: p.Kind, Owner: p.Owner, HasPIN: p.HasPIN,
 		MaxAge: p.MaxAge, AgeNeeded: p.Kind == "kids" && p.MaxAge == nil,
-		BlockedTags: p.BlockedTags, Theme: p.Theme}
+		BlockedTags: p.BlockedTags, Theme: p.Theme, KidsTitles: p.KidsTitles}
 	if p.Libraries != nil {
 		libs := make([]string, 0, len(p.Libraries))
 		for _, id := range p.Libraries {
