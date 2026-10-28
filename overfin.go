@@ -492,6 +492,9 @@ func run(logger *slog.Logger) error {
 	// The logos kept before they were taken only in their language, checked
 	// again once, at the titles' pace.
 	go (&catalog.Logos{Store: db, Source: gw.logoSource, Logger: logger, Every: 10 * time.Minute, Pause: 100 * time.Millisecond}).Run(ctx)
+	// The collections the library's films belong to, with their films.
+	go (&catalog.Collections{Store: db, Source: gw.collectionSource, Titles: sh.titles, Logger: logger,
+		Every: 15 * time.Minute, Pause: 100 * time.Millisecond}).Run(ctx)
 	go unrestrictKids(ctx, db, gw.Provisioner, logger)
 	// Each profile's data, brought over from Jellyfin once.
 	// With Pocket ID, Overfin sets up its own client and groups there.

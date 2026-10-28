@@ -45,6 +45,20 @@ func openAt(t *testing.T, version int) *Store {
 	return s
 }
 
+// oldTitleDetails keeps a title's page as older Overfins did, before the
+// columns SetTitleDetails writes now.
+func oldTitleDetails(t *testing.T, s *Store, title Title, details string, at time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	if err := s.PutTitles(ctx, []Title{title}, at); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE catalog_titles SET details = ?, details_at = ? WHERE kind = ? AND tmdb = ?`,
+		details, at.Unix(), title.Kind, title.TMDB); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Migrations 049 to 058 on a database in use (0.5.0's, at 048) keep TMDB's
 // data: titles' pages, seasons and their episodes, artwork. They're
 // fetched again in time, and the keeper's purges that follow delete none
@@ -54,9 +68,7 @@ func TestUpgradeFrom048KeepsData(t *testing.T) {
 	s := openAt(t, 48)
 	now := time.Now()
 	fetched := now.Add(-24 * time.Hour)
-	if err := s.SetTitleDetails(ctx, Title{Kind: "series", TMDB: "1399", Name: "Game of Thrones"}, []byte(`{"language":"en"}`), fetched); err != nil {
-		t.Fatal(err)
-	}
+	oldTitleDetails(t, s, Title{Kind: "series", TMDB: "1399", Name: "Game of Thrones"}, `{"language":"en"}`, fetched)
 	if err := s.SetSeason(ctx, "1399", Season{Number: 1, Name: "Season 1", Episodes: []Episode{{Number: 1, Name: "Winter Is Coming", Still: "/a.jpg"}}}, fetched); err != nil {
 		t.Fatal(err)
 	}
@@ -113,5 +125,31 @@ func TestUpgradeFrom048KeepsData(t *testing.T) {
 		if n != want {
 			t.Errorf("%s: %d, want %d", q, n, want)
 		}
+	}
+}
+
+// Migration 067 lists the films whose page was kept, to find their
+// collection: not series, nor films whose page never was.
+func TestUpgradeListsFilmsToFind(t *testing.T) {
+	ctx := context.Background()
+	s := openAt(t, 66)
+	now := time.Now()
+	oldTitleDetails(t, s, Title{Kind: "movie", TMDB: "11", Name: "Star Wars"}, `{}`, now)
+	oldTitleDetails(t, s, Title{Kind: "series", TMDB: "1399", Name: "Game of Thrones"}, `{}`, now)
+	if err := s.PutTitles(ctx, []Title{{Kind: "movie", TMDB: "12", Name: "Never opened"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.FilmsToFind(ctx, 10); err != nil || len(got) != 1 || got[0] != "11" {
+		t.Errorf("films to find: %v %v", got, err)
+	}
+	// Its page fetched again: its collection known, off the list.
+	if err := s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "11", Name: "Star Wars", Collection: 10}, []byte(`{}`), now); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.FilmsToFind(ctx, 10); len(got) != 0 {
+		t.Errorf("after its page: %v", got)
 	}
 }

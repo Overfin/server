@@ -156,8 +156,8 @@ func TestDetailsInStep(t *testing.T) {
 		{ID: id(1), Kind: "movie", Name: "B", SortName: "b", TMDB: "2"},
 	}, 1)
 	old := time.Now().Add(-time.Hour)
-	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "1", Name: "1"}, []byte(`{"genres":["Drama","Crime"],"language":"ja"}`), old)
-	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "2", Name: "2"}, []byte(`{"genres":null}`), old)
+	oldTitleDetails(t, s, Title{Kind: "movie", TMDB: "1", Name: "1"}, `{"genres":["Drama","Crime"],"language":"ja"}`, old)
+	oldTitleDetails(t, s, Title{Kind: "movie", TMDB: "2", Name: "2"}, `{"genres":null}`, old)
 	if err := s.migrate(ctx); err != nil {
 		t.Fatal(err)
 	}

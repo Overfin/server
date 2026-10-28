@@ -231,6 +231,8 @@ export interface TitleSummary {
   /** The account's latest request covering it. */
   /** Its request, if any: by this account (with an id, to cancel), or by someone else (without). */
   request?: { id?: string; status: RequestStatus };
+  /** In a collection's films: one no library has that isn't out yet. It has no page and can't be requested until it's out (since 0.7). */
+  upcoming?: boolean;
 }
 
 export type RequestStatus = 'pending' | 'approved' | 'declined' | 'processing' | 'partiallyAvailable' | 'available' | 'failed' | (string & {});
@@ -247,6 +249,8 @@ export interface MediaRequest {
 
 /** A title's page: a series with its seasons, a season with its episodes. */
 export interface Title extends TitleSummary {
+  /** The collection a film belongs to, when the profile sees it (since 0.7). */
+  collection?: { id: string; name: string };
   overview?: string;
   tagline?: string;
   genres?: string[];
@@ -254,6 +258,20 @@ export interface Title extends TitleSummary {
   seasons?: TitleSummary[];
   /** A season's episodes, each with what it's about. */
   episodes?: (TitleSummary & { overview?: string })[];
+}
+
+/** One of TMDB's collections: a series of films, such as a saga (since 0.7). */
+export interface Collection {
+  id: string;
+  name: string;
+  /** On its own page only. */
+  overview?: string;
+  images?: Images;
+  /** How many of its films the profile has in a library, of films in all. */
+  inLibrary: number;
+  films: number;
+  /** Its films in release order, on its own page only. */
+  items?: TitleSummary[];
 }
 
 /** A person, from TMDB, and the titles they're in. */
@@ -428,6 +446,10 @@ export class Overfin {
   recommended(scope?: 'all' | 'recent', limit?: number): Promise<TitleSummary[]>;
   /** Titles like this one: those the server has first, then others when the operator shows them (since 0.6). */
   similar(id: string, limit?: number): Promise<TitleSummary[]>;
+  /** The collections of films the profile has films of, without their films (since 0.7). */
+  collections(): Promise<Collection[]>;
+  /** A collection with its films, in release order (since 0.7). */
+  collection(id: string): Promise<Collection>;
   person(id: string): Promise<Person>;
   /**
    * Several GET calls in one request: each a path as the methods use them

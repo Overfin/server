@@ -36,6 +36,9 @@ type Title struct {
 	// Genres are TMDB's, by ID, with their names in TMDB's language; they
 	// come with a title's page.
 	Genres []TitleGenre
+	// Collection is the collection a film belongs to (TMDB's ID), 0 for
+	// none; it comes with a film's page.
+	Collection int
 }
 
 // TitleGenre is one of TMDB's genres.
@@ -90,8 +93,12 @@ func (s *Store) SetTitleDetails(ctx context.Context, t Title, details []byte, at
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `UPDATE catalog_titles SET details = ?, details_at = ?, release_date = ?, rating = ?,
-		rating_votes = ?, popularity = ? WHERE kind = ? AND tmdb = ?`, string(details), at.Unix(), nullString(t.ReleaseDate),
-		rating, votes, popularity, t.Kind, t.TMDB); err != nil {
+		rating_votes = ?, popularity = ?, collection = ? WHERE kind = ? AND tmdb = ?`, string(details), at.Unix(), nullString(t.ReleaseDate),
+		rating, votes, popularity, nullInt(t.Collection), t.Kind, t.TMDB); err != nil {
+		return err
+	}
+	// Its collection is known now: none to find.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM collections_to_find WHERE tmdb = ? AND ? = 'movie'`, t.TMDB, t.Kind); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM catalog_title_genres WHERE kind = ? AND tmdb = ?`, t.Kind, t.TMDB); err != nil {

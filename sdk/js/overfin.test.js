@@ -344,3 +344,16 @@ test('quality: a bitrate limit restarts the stream at the same place with it', a
   assert.equal(calls.filter((c) => c.url === '/api/v1/playback').at(-1).body.maxBitrateKbps, undefined);
   await player.close();
 });
+
+test('collections: the list, then one with its films', async () => {
+  const calls = fakeServer({
+    'GET /api/v1/collections': () => [200, { items: [{ id: 'collection_10', name: 'Saga', inLibrary: 1, films: 3 }] }],
+    'GET /api/v1/collections/collection_10': () => [200, { id: 'collection_10', name: 'Saga', inLibrary: 1, films: 3, items: [] }],
+  });
+  const of = new Overfin();
+  const all = await of.collections();
+  assert.equal(all[0].id, 'collection_10');
+  const one = await of.collection(all[0].id);
+  assert.deepEqual(one.items, []);
+  assert.deepEqual(calls.map((c) => c.url), ['/api/v1/collections', '/api/v1/collections/collection_10']);
+});

@@ -180,6 +180,10 @@ export class Overfin {
   async recommended(scope = 'all', limit = 20) { return (await this.request('GET', `/titles/recommended${toQuery({ scope, limit })}`)).items; }
   /** Titles like this one: those the server has first (since 0.6). */
   async similar(id, limit = 20) { return (await this.request('GET', `/titles/${enc(id)}/similar${toQuery({ limit })}`)).items; }
+  /** The collections of films (TMDB's series of films) the profile has films of, without their films (since 0.7). */
+  async collections() { return (await this.request('GET', '/collections')).items; }
+  /** A collection with its films, in release order (since 0.7). */
+  collection(id) { return this.request('GET', `/collections/${enc(id)}`); }
   /** Searches titles (in a library or not) and people; the terms travel in the body. */
   search(query) { return this.request('POST', '/search', { query }); }
   /** A person's page, from TMDB, with the titles they're in. */
