@@ -82,6 +82,8 @@ type exportLimitsJSON struct {
 	Template    string `json:"template"`
 	MaxStreams  int    `json:"maxStreams"`
 	MaxProfiles int    `json:"maxProfiles"`
+	// Categories, when present, are the only ones its profiles see.
+	Categories []string `json:"categories,omitempty"`
 }
 
 type exportProfileJSON struct {
@@ -93,8 +95,17 @@ type exportProfileJSON struct {
 	// SubtitleLanguage is the language it last chose for subtitles.
 	SubtitleLanguage string `json:"subtitleLanguage,omitempty"`
 	MaxAge           *int   `json:"maxAge,omitempty"`
-	HasPIN           bool   `json:"hasPin"`
-	CreatedAt        string `json:"createdAt"`
+	// Categories and Libraries, when present, are the only ones it sees
+	// (by ID); BlockedTags are hidden from it.
+	Categories  []string `json:"categories,omitempty"`
+	Libraries   []string `json:"libraries,omitempty"`
+	BlockedTags []string `json:"blockedTags,omitempty"`
+	// KidsTitles is its "children's content" choice; absent, as its
+	// account does.
+	KidsTitles *bool  `json:"kidsTitles,omitempty"`
+	Theme      string `json:"theme,omitempty"`
+	HasPIN     bool   `json:"hasPin"`
+	CreatedAt  string `json:"createdAt"`
 	// OutOfContinue are the series it took out of Continue Watching (by
 	// title key), and when.
 	OutOfContinue map[string]string `json:"outOfContinueWatching,omitempty"`
@@ -188,7 +199,8 @@ func (a Account) export(w http.ResponseWriter, r *http.Request) {
 		acct := c.Account
 		out.Account = &exportAccountJSON{ID: acct.ID, CreatedAt: acct.Created.Format(time.RFC3339),
 			Language: acct.Language, Label: acct.Label,
-			Limits: exportLimitsJSON{Template: acct.Template.Name, MaxStreams: acct.Template.MaxStreams, MaxProfiles: acct.Template.MaxProfiles}}
+			Limits: exportLimitsJSON{Template: acct.Template.Name, MaxStreams: acct.Template.MaxStreams, MaxProfiles: acct.Template.MaxProfiles,
+				Categories: acct.Template.Categories}}
 		if !acct.Expires.IsZero() {
 			out.Account.ExpiresAt = acct.Expires.UTC().Format(time.RFC3339)
 		}
@@ -272,7 +284,8 @@ func (a Account) export(w http.ResponseWriter, r *http.Request) {
 		}
 		out.Profiles = append(out.Profiles, exportProfileJSON{
 			ID: p.ID, Name: p.Name, Kind: p.Kind, Owner: p.Owner, Language: p.Language, SubtitleLanguage: p.SubtitleLanguage,
-			MaxAge: p.MaxAge, HasPIN: p.HasPIN, CreatedAt: p.Created.Format(time.RFC3339),
+			MaxAge: p.MaxAge, Categories: p.Categories, Libraries: p.Libraries, BlockedTags: p.BlockedTags,
+			KidsTitles: p.KidsTitles, Theme: p.Theme, HasPIN: p.HasPIN, CreatedAt: p.Created.Format(time.RFC3339),
 			WatchHistory: history, Titles: titles, Requests: requests, Modules: mods, OutOfContinue: hidden,
 		})
 	}
