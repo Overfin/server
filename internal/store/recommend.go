@@ -35,7 +35,7 @@ func (s *Store) FactsOfItems(ctx context.Context, itemIDs []string) (map[string]
 			args[i] = id
 		}
 		rows, err := s.db.QueryContext(ctx, `SELECT i.title_key, i.kind, coalesce(t.rating, 0),
-				coalesce((SELECT max(e.added_at) FROM catalog_items e WHERE e.id = i.id OR e.series_id = i.id), 0),
+				max(coalesce(i.added_at, 0), coalesce((SELECT max(e.added_at) FROM catalog_items e WHERE e.series_id = i.id), 0)),
 				a.age,
 				(SELECT group_concat(g.genre) FROM catalog_title_genres g WHERE g.kind = i.kind AND g.tmdb = i.tmdb)
 			FROM catalog_items i
@@ -80,8 +80,8 @@ const halfLife = 180 * 24 * time.Hour
 
 // WatchedGenres weighs the genres of the films and series a profile
 // watched (to the end, or started; a series by any of its episodes), the
-// recent more than the old, and says how many titles they came from.
-func (s *Store) WatchedGenres(ctx context.Context, profileID string, now time.Time) (map[int]float64, int, error) {
+// recent more than the old, and gives those titles' keys.
+func (s *Store) WatchedGenres(ctx context.Context, profileID string, now time.Time) (map[int]float64, map[string]bool, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT w.kind, w.tmdb, max(w.at) FROM (
 			SELECT CASE WHEN title LIKE 'movie/tmdb/%' THEN 'movie' ELSE 'series' END AS kind,
 				CASE WHEN title LIKE 'movie/tmdb/%' THEN substr(title, 12)
@@ -93,7 +93,7 @@ func (s *Store) WatchedGenres(ctx context.Context, profileID string, now time.Ti
 				AND (title LIKE 'movie/tmdb/%' OR title LIKE 'series/tmdb/%')) w
 		GROUP BY w.kind, w.tmdb`, profileID)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, err
 	}
 	type seen struct {
 		kind, tmdb string
@@ -105,7 +105,7 @@ func (s *Store) WatchedGenres(ctx context.Context, profileID string, now time.Ti
 		var at int64
 		if err := rows.Scan(&t.kind, &t.tmdb, &at); err != nil {
 			rows.Close()
-			return nil, 0, err
+			return nil, nil, err
 		}
 		age := now.Sub(time.Unix(at, 0))
 		t.weight = math.Pow(0.5, max(age.Hours(), 0)/halfLife.Hours())
@@ -113,19 +113,20 @@ func (s *Store) WatchedGenres(ctx context.Context, profileID string, now time.Ti
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return nil, 0, err
+		return nil, nil, err
 	}
-	out := map[int]float64{}
+	out, keys := map[int]float64{}, map[string]bool{}
 	for _, t := range titles {
+		keys[t.kind+"/tmdb/"+t.tmdb] = true
 		genres, err := s.ids(ctx, `SELECT genre FROM catalog_title_genres WHERE kind = ? AND tmdb = ?`, t.kind, t.tmdb)
 		if err != nil {
-			return nil, 0, err
+			return nil, nil, err
 		}
 		for _, g := range genres {
 			out[atoi(g)] += t.weight
 		}
 	}
-	return out, len(titles), nil
+	return out, keys, nil
 }
 
 // AccountHasKids reports whether an account has a kids profile.
