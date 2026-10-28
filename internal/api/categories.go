@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"slices"
 
 	"github.com/overfin/server/internal/ids"
 	"github.com/overfin/server/internal/problem"
@@ -46,8 +47,19 @@ func (l Library) categories(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A profile kept to some categories, by its own limits or its
+	// account's template, is shown those alone.
+	acct, err := st.AccountByID(ctx, p.AccountID)
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
 	out := []categoryJSON{}
 	for _, c := range all {
+		if (p.Categories != nil && !slices.Contains(p.Categories, c.ID)) ||
+			(acct.Template.Categories != nil && !slices.Contains(acct.Template.Categories, c.ID)) {
+			continue
+		}
 		out = append(out, categoryJSON{ID: c.ID, Name: c.Name(lang), Home: c.Home})
 	}
 	writeOK(w, map[string]any{"items": out, "libraries": shown})
