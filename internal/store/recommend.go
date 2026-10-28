@@ -128,15 +128,8 @@ func (s *Store) WatchedGenres(ctx context.Context, profileID string, now time.Ti
 	return out, keys, nil
 }
 
-// AccountHasKids reports whether an account has a kids profile.
-func (s *Store) AccountHasKids(ctx context.Context, accountID string) (bool, error) {
-	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM profiles WHERE account_id = ? AND kind = 'kids'`, accountID).Scan(&n)
-	return n > 0, err
-}
-
 // SetProfileKidsTitles sets whether a profile wants kids titles in its
-// recommendations (nil: as its account does), within its account.
+// recommendations (nil: not chosen, off), within its account.
 func (s *Store) SetProfileKidsTitles(ctx context.Context, accountID, profileID string, on *bool) error {
 	var v any
 	if on != nil {

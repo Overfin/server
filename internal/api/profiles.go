@@ -117,7 +117,7 @@ type profileRequest struct {
 	// title, as far as its other limits go).
 	Categories optionalList `json:"categories"`
 	// KidsTitles is whether the profile wants kids titles in its
-	// recommendations; null, as its account does. Each profile may change
+	// recommendations; null, off. Each profile may change
 	// its own.
 	KidsTitles optionalBool `json:"kidsTitles"`
 	// PIN is the owner's PIN, needed to change a profile's limits when the
