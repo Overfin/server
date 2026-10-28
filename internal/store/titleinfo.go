@@ -6,9 +6,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 // Titles, whether a library has them or not: what TMDB says about each,
@@ -25,29 +25,75 @@ type TitleRef struct {
 	Episode int    // episodes
 }
 
-var (
-	titleKeyPattern = regexp.MustCompile(`^(movie|series)/(tmdb|imdb|tvdb)/([A-Za-z0-9]{1,20})(?:/s([0-9]{1,4})(?:/e([0-9]{1,5}))?)?$`)
-	itemKeyPattern  = regexp.MustCompile(`^item/([0-9a-f]{32})$`)
-)
-
-// ParseTitleKey checks a title key.
+// ParseTitleKey checks a title key: a film's or a series' kind, its ID's
+// source, the ID (1 to 20 letters and digits), then for a series a season
+// ("s" and 1 to 4 digits) and an episode ("e" and 1 to 5 digits); or
+// "item/" and 32 lowercase hexadecimal digits. Read by hand rather than by
+// a regular expression: the valuation reads every key of every history,
+// and the expression took a fifth of its time.
 func ParseTitleKey(key string) (TitleRef, bool) {
-	if m := itemKeyPattern.FindStringSubmatch(key); m != nil {
-		return TitleRef{Kind: "item", ID: m[1]}, true
+	if id, ok := strings.CutPrefix(key, "item/"); ok {
+		if len(id) != 32 || !allOf(id, isLowerHex) {
+			return TitleRef{}, false
+		}
+		return TitleRef{Kind: "item", ID: id}, true
 	}
-	m := titleKeyPattern.FindStringSubmatch(key)
-	if m == nil || (m[1] == "movie" && m[4] != "") {
+	parts := strings.Split(key, "/")
+	if len(parts) < 3 || len(parts) > 5 {
 		return TitleRef{}, false
 	}
-	r := TitleRef{Kind: m[1], Source: m[2], ID: m[3]}
-	if m[4] != "" {
-		r.Kind, r.Season = "season", atoi(m[4])
+	r := TitleRef{Kind: parts[0], Source: parts[1], ID: parts[2]}
+	if r.Kind != "movie" && r.Kind != "series" {
+		return TitleRef{}, false
 	}
-	if m[5] != "" {
-		r.Kind, r.Episode = "episode", atoi(m[5])
+	if r.Source != "tmdb" && r.Source != "imdb" && r.Source != "tvdb" {
+		return TitleRef{}, false
+	}
+	if len(r.ID) < 1 || len(r.ID) > 20 || !allOf(r.ID, isAlphanumeric) {
+		return TitleRef{}, false
+	}
+	if len(parts) == 3 {
+		return r, true
+	}
+	if r.Kind == "movie" {
+		return TitleRef{}, false
+	}
+	var ok bool
+	if r.Season, ok = keyNumber(parts[3], "s", 4); !ok {
+		return TitleRef{}, false
+	}
+	r.Kind = "season"
+	if len(parts) == 5 {
+		if r.Episode, ok = keyNumber(parts[4], "e", 5); !ok {
+			return TitleRef{}, false
+		}
+		r.Kind = "episode"
 	}
 	return r, true
 }
+
+// keyNumber reads part as prefix then 1 to most digits.
+func keyNumber(part, prefix string, most int) (int, bool) {
+	digits, ok := strings.CutPrefix(part, prefix)
+	if !ok || len(digits) < 1 || len(digits) > most || !allOf(digits, isDigit) {
+		return 0, false
+	}
+	return atoi(digits), true
+}
+
+// allOf says whether every byte of s passes ok.
+func allOf(s string, ok func(byte) bool) bool {
+	for i := 0; i < len(s); i++ {
+		if !ok(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isDigit(c byte) bool        { return '0' <= c && c <= '9' }
+func isLowerHex(c byte) bool     { return isDigit(c) || 'a' <= c && c <= 'f' }
+func isAlphanumeric(c byte) bool { return isDigit(c) || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' }
 
 func atoi(s string) int {
 	n, _ := strconv.Atoi(s)
