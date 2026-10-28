@@ -534,3 +534,18 @@ func TestManagedPanelListener(t *testing.T) {
 		}
 	}
 }
+
+// Trusted proxy ranges wider than a /8 or a /32 are pointed out.
+func TestWideProxies(t *testing.T) {
+	var i Identity
+	for _, p := range []string{"192.0.2.10", "10.0.0.0/8", "0.0.0.0/0", "2001:db8::/32", "::/0", "2001:db8::/16"} {
+		pr, err := parsePrefix(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i.Proxies = append(i.Proxies, pr)
+	}
+	if got := strings.Join(i.WideProxies(), " "); got != "0.0.0.0/0 ::/0 2001::/16" {
+		t.Errorf("wide: %s", got)
+	}
+}

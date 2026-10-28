@@ -144,6 +144,10 @@ func run(logger *slog.Logger) error {
 	}
 	defer db.Close()
 	logger.Info("database ready", "path", cfg.Storage.Path)
+	if wide := cfg.Identity.WideProxies(); cfg.Identity.Mode == "forwardauth" && len(wide) > 0 {
+		logger.Warn("identity.trusted_proxies is very wide: anyone in it may say who they are; give your reverse proxy's own address",
+			"ranges", strings.Join(wide, ", "))
+	}
 	// Titles' ages from their ratings (the table of ages comes with
 	// Overfin), and kids profiles' ceilings from before ages, as ages.
 	if err := db.RefreshTitleAges(context.Background()); err != nil {

@@ -255,7 +255,10 @@ func (c *checker) identity(ctx context.Context, cfg *config.Config) {
 			c.ok("identity provider: %s", cfg.OIDC.Issuer)
 		}
 	}
-	if cfg.Identity.Mode == "forwardauth" {
+	if wide := cfg.Identity.WideProxies(); cfg.Identity.Mode == "forwardauth" && len(wide) > 0 {
+		c.fail("identity: forward-auth trusts identity headers from %s, a range so wide that anyone in it may say who they are; "+
+			"give your reverse proxy's own address", strings.Join(wide, ", "))
+	} else if cfg.Identity.Mode == "forwardauth" {
 		c.ok("identity: forward-auth, trusting %s; only your reverse proxy may reach Overfin",
 			strings.Join(cfg.Identity.TrustedProxies, ", "))
 	}

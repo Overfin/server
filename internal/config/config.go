@@ -1017,3 +1017,16 @@ func (c *Config) settleModules(add func(string, ...any)) {
 	}
 	c.Modules = settled
 }
+
+// WideProxies are the trusted proxy ranges wider than a /8 (IPv4) or a /32
+// (IPv6): with forward-auth, anyone in them may say who they are, so a
+// range that wide (0.0.0.0/0, say) is most likely a mistake.
+func (i Identity) WideProxies() []string {
+	var wide []string
+	for _, p := range i.Proxies {
+		if (p.Addr().Is4() && p.Bits() < 8) || (!p.Addr().Is4() && p.Bits() < 32) {
+			wide = append(wide, p.String())
+		}
+	}
+	return wide
+}
