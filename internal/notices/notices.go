@@ -117,14 +117,18 @@ func (n *Notifier) Check(ctx context.Context, now time.Time) error {
 		return err
 	}
 	ahead := now.AddDate(0, 0, max(set.Days, 1))
+	// Emails wait for email to be set up: a notice recorded as sent
+	// without it would never be sent.
+	mail := n.Managed && n.sender() != nil
+	toAdmins := (set.Admins && mail) || set.Webhook != ""
 	for _, due := range []struct {
 		kind     string
 		on       bool
 		from, to time.Time
 	}{
-		{"expiring", set.Expiring && (set.Admins || set.Webhook != ""), now, ahead},
-		{"warned", set.Person && n.Managed, now, ahead},
-		{"expired", set.Expired && (set.Admins || set.Webhook != ""), now.Add(-expiredFor), now},
+		{"expiring", set.Expiring && toAdmins, now, ahead},
+		{"warned", set.Person && mail, now, ahead},
+		{"expired", set.Expired && toAdmins, now.Add(-expiredFor), now},
 	} {
 		if !due.on {
 			continue
