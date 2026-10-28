@@ -368,6 +368,18 @@ func TestLogo(t *testing.T) {
 			io.WriteString(w, `{"id":1399,"logos":[{"file_path":"/nolang1234.png","iso_639_1":null}]}`)
 		case r.URL.Path == "/3/tv/1399/images" && lang == "en,null":
 			io.WriteString(w, `{"id":1399,"logos":[]}`)
+		case r.URL.Path == "/3/tv/1399":
+			io.WriteString(w, `{"id":1399,"original_language":"en"}`)
+		// No French logo, nor one without text: the server's English one.
+		case r.URL.Path == "/3/movie/7/images" && lang == "fr,null,en":
+			io.WriteString(w, `{"id":7,"logos":[{"file_path":"/enlogo1234.png","iso_639_1":"en"}]}`)
+		// None in the server's languages: the original (Korean) one.
+		case r.URL.Path == "/3/movie/8/images" && lang == "fr,null,en":
+			io.WriteString(w, `{"id":8,"logos":[]}`)
+		case r.URL.Path == "/3/movie/8":
+			io.WriteString(w, `{"id":8,"original_language":"ko"}`)
+		case r.URL.Path == "/3/movie/8/images" && lang == "ko":
+			io.WriteString(w, `{"id":8,"logos":[{"file_path":"/kologo1234.png","iso_639_1":"ko"}]}`)
 		case r.URL.Path == "/3/movie/1/images":
 			io.WriteString(w, `{"id":2,"logos":[{"file_path":"/frlogo1234.png","iso_639_1":"fr"}]}`)
 		default:
@@ -397,8 +409,15 @@ func TestLogo(t *testing.T) {
 		{"fr-CA", "movie", 1, "", ErrNotFound},     // another title's answer
 		{"fr-CA", "movie", 404, "", ErrNotFound},   // TMDB doesn't know it
 		{"fr-CA", "season", 1399, "", ErrNotFound}, // not a kind
+		{"fr-CA en", "movie", 7, "/enlogo1234.png", nil},
+		{"fr-CA en", "movie", 8, "/kologo1234.png", nil},
 	} {
-		got, err := in(tc.lang).Logo(ctx, tc.kind, tc.id)
+		lang, others, _ := strings.Cut(tc.lang, " ")
+		cl := in(lang)
+		if others != "" {
+			cl.Languages = func() []string { return []string{lang, others} }
+		}
+		got, err := cl.Logo(ctx, tc.kind, tc.id)
 		if got != tc.want || !errors.Is(err, tc.err) {
 			t.Errorf("%s %d in %q: %q %v, want %q %v", tc.kind, tc.id, tc.lang, got, err, tc.want, tc.err)
 		}

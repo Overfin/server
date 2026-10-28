@@ -54,6 +54,11 @@ type Client struct {
 	// original name and no overview, so those are asked again in the
 	// language alone (see baseLanguage).
 	Language func() string
+	// Languages are the server's languages (ISO 639-1, regional or not),
+	// the default first: a title without a logo in the language, nor one
+	// without text, takes one in these, in order, then one in its original
+	// language, before none (its name shown as text). nil for none.
+	Languages func() []string
 }
 
 // language is the language to ask for; "" for TMDB's default (English).
@@ -547,15 +552,22 @@ func pick(images []rawImage, lang string) string {
 }
 
 // pickLogo chooses a title's logo, the title written as art: one in the
-// language, as pick does, else one without a language, else none (the
-// title's name is then shown as text), never one in another language.
-// "" is TMDB's default language, English.
-func pickLogo(images []rawImage, lang string) string {
+// language, the same region's first, as pick does, else one without text,
+// else one in each of others in turn (the server's other languages, then
+// the title's original one), else none (the title's name is then shown as
+// text). "" is TMDB's default language, English.
+func pickLogo(images []rawImage, lang string, others ...string) string {
 	if lang == "" {
 		lang = "en"
 	}
 	language, region, _ := strings.Cut(lang, "-")
-	for _, want := range []rawImage{{Language: language, Region: region}, {Language: language}, {}} {
+	wants := []rawImage{{Language: language, Region: region}, {Language: language}, {}}
+	for _, o := range others {
+		if o, _, _ = strings.Cut(o, "-"); o != "" && o != language {
+			wants = append(wants, rawImage{Language: o})
+		}
+	}
+	for _, want := range wants {
 		for _, im := range images {
 			if im.Language == want.Language && (want.Region == "" || im.Region == want.Region) && imagePath.MatchString(im.FilePath) {
 				return im.FilePath
@@ -578,19 +590,38 @@ func (c *Client) Logo(ctx context.Context, kind string, tmdbID int) (string, err
 	if lang == "" {
 		lang = "en"
 	}
-	language, _, _ := strings.Cut(lang, "-")
 	var raw struct {
 		ID    int        `json:"id"`
 		Logos []rawImage `json:"logos"`
 	}
-	path := "/" + k + "/" + strconv.Itoa(tmdbID) + "/images"
-	if err := c.get(ctx, path, url.Values{"include_image_language": {language + ",null"}}, &raw); err != nil {
+	path := "/" + k + "/" + strconv.Itoa(tmdbID)
+	if err := c.get(ctx, path+"/images", url.Values{"include_image_language": {c.imageLanguages(lang, false)}}, &raw); err != nil {
 		return "", err
 	}
 	if raw.ID != tmdbID {
 		return "", ErrNotFound
 	}
-	return pickLogo(raw.Logos, lang), nil
+	if logo := pickLogo(raw.Logos, lang, c.languages()...); logo != "" {
+		return logo, nil
+	}
+	// None in the languages asked: one in its original language, if it's
+	// another.
+	var title struct {
+		ID       int    `json:"id"`
+		Original string `json:"original_language"`
+	}
+	// The title is known (its images were): not finding its language only
+	// means no logo in it.
+	if err := c.get(ctx, path, nil, &title); errors.Is(err, ErrNotFound) || (err == nil && title.ID != tmdbID) {
+		return "", nil
+	} else if err != nil {
+		return "", err
+	}
+	logo, err := c.originalLogo(ctx, path, lang, title.Original)
+	if errors.Is(err, ErrNotFound) {
+		return "", nil
+	}
+	return logo, err
 }
 
 // isoLanguage is an ISO 639-1 code, as TMDB writes them.
@@ -733,4 +764,55 @@ func (c *Client) Collection(ctx context.Context, id int) (*Collection, error) {
 		return strings.Compare(da, db)
 	})
 	return out, nil
+}
+
+// languages are the server's languages, as Languages says; none when it
+// doesn't.
+func (c *Client) languages() []string {
+	if c.Languages == nil {
+		return nil
+	}
+	var out []string
+	for _, l := range c.Languages() {
+		if languageCode.MatchString(l) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// imageLanguages is which images to ask for: those in the language (TMDB
+// files images under the two-letter code), those without text, and, with
+// logos, those in the server's other languages; English too for posters.
+func (c *Client) imageLanguages(lang string, english bool) string {
+	lang, _, _ = strings.Cut(lang, "-")
+	if lang == "" {
+		lang = "en"
+	}
+	want := []string{lang, "null"}
+	if english {
+		want = append(want, "en")
+	}
+	for _, l := range c.languages() {
+		l, _, _ = strings.Cut(l, "-")
+		if !slices.Contains(want, l) {
+			want = append(want, l)
+		}
+	}
+	return strings.Join(want, ",")
+}
+
+// originalLogo is a title's logo in its original language (ISO 639-1),
+// when it's none of those already asked for; "" when there's none.
+func (c *Client) originalLogo(ctx context.Context, path, lang, original string) (string, error) {
+	if !isoLanguage.MatchString(original) || slices.Contains(strings.Split(c.imageLanguages(lang, true), ","), original) {
+		return "", nil
+	}
+	var raw struct {
+		Logos []rawImage `json:"logos"`
+	}
+	if err := c.get(ctx, path+"/images", url.Values{"include_image_language": {original}}, &raw); err != nil {
+		return "", err
+	}
+	return pickLogo(raw.Logos, original), nil
 }

@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// Migration 066 lists every film and series with a logo kept, not seasons
-// or episodes; a checked title's logo changes, or goes, at once with its
+// Migrations 066 and 068 list every film and series, with a logo kept or
+// none, not seasons or episodes; a checked title's logo changes, or goes, at once with its
 // place on the list, and only where one was kept.
 func TestLogosToCheck(t *testing.T) {
 	s := openAt(t, 65)
@@ -33,7 +33,8 @@ func TestLogosToCheck(t *testing.T) {
 	for _, t := range todo {
 		keys = append(keys, t.Key())
 	}
-	if err != nil || !slices.Equal(keys, []string{"movie/tmdb/550988", "series/tmdb/1399"}) {
+	// 1400 too, without a logo: migration 068 lists those.
+	if err != nil || !slices.Equal(keys, []string{"movie/tmdb/550988", "series/tmdb/1399", "series/tmdb/1400"}) {
 		t.Fatalf("to check: %v %v", keys, err)
 	}
 	s.SetTitleTexts(ctx, "en-CA", Title{Kind: "movie", TMDB: "550988", Name: "Free Guy"}, []byte(`{}`), "", time.Now())
@@ -63,6 +64,10 @@ func TestLogosToCheck(t *testing.T) {
 	}
 	if n, _ := s.TextLanguages(ctx, "movie", "550988"); len(n) != 1 {
 		t.Errorf("a language's texts were added: %v", n)
+	}
+	// Checked: none on TMDB either, it stays without.
+	if err := s.SetCheckedLogo(ctx, todo[2], "", nil); err != nil {
+		t.Fatal(err)
 	}
 	if todo, err := s.LogosToCheck(ctx, 10); err != nil || len(todo) != 0 {
 		t.Errorf("left: %+v %v", todo, err)

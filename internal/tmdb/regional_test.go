@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -111,7 +112,8 @@ func TestPickImage(t *testing.T) {
 }
 
 // A logo is the title written as art: in the language, else without text,
-// else none; never in another language.
+// else in the other languages given (the server's, then the original), in
+// turn, else none.
 func TestPickLogo(t *testing.T) {
 	logos := []rawImage{{"/enlogo1234.png", "en", "US"}, {"/frlogo1234.png", "fr", "FR"}, {"/nolang1234.png", "", ""}}
 	for _, tc := range []struct {
@@ -124,8 +126,12 @@ func TestPickLogo(t *testing.T) {
 		{"de-DE", logos[:2], ""},
 		{"", logos, "/enlogo1234.png"},
 		{"en-GB", logos[1:], "/nolang1234.png"},
+		{"de-DE en", logos[:2], "/enlogo1234.png"},
+		{"de-DE ja fr", logos[:2], "/frlogo1234.png"},
+		{"de-DE de", logos[:2], ""},
 	} {
-		if got := pickLogo(tc.images, tc.lang); got != tc.want {
+		lang, others, _ := strings.Cut(tc.lang, " ")
+		if got := pickLogo(tc.images, lang, strings.Fields(others)...); got != tc.want {
 			t.Errorf("logo in %q: %q, want %q", tc.lang, got, tc.want)
 		}
 	}

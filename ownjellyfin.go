@@ -351,5 +351,20 @@ func tmdbClient(db *store.Store, token string) (*tmdb.Client, error) {
 		l, _ := db.TMDBLanguage(context.Background())
 		return l
 	}
+	// The server's languages, the default first: for a title's logo when
+	// there's none in the language asked.
+	c.Languages = func() []string {
+		offered, def, _, err := db.Languages(context.Background())
+		if err != nil {
+			return nil
+		}
+		out := []string{def}
+		for _, l := range offered {
+			if l != def {
+				out = append(out, l)
+			}
+		}
+		return out
+	}
 	return c, nil
 }
