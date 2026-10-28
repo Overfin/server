@@ -27,51 +27,50 @@ type TitleFacts struct {
 // FactsOfItems returns the facts of the films and series behind library
 // items (by Jellyfin ID), by title key, each title once.
 func (s *Store) FactsOfItems(ctx context.Context, itemIDs []string) (map[string]*TitleFacts, error) {
+	// One pass over every film and series, kept when asked for: far
+	// quicker than asking for thousands by their IDs.
+	want := make(map[string]bool, len(itemIDs))
+	for _, id := range itemIDs {
+		want[id] = true
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT i.id, i.title_key, i.kind, coalesce(t.rating, 0),
+			max(coalesce(i.added_at, 0), coalesce((SELECT max(e.added_at) FROM catalog_items e WHERE e.series_id = i.id), 0)),
+			a.age,
+			(SELECT group_concat(g.genre) FROM catalog_title_genres g WHERE g.kind = i.kind AND g.tmdb = i.tmdb)
+		FROM catalog_items i
+		LEFT JOIN catalog_titles t ON t.kind = i.kind AND t.tmdb = i.tmdb
+		LEFT JOIN title_ages a ON a.kind = i.kind AND a.tmdb = i.tmdb
+		WHERE i.kind IN ('movie', 'series') AND i.title_key IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	out := map[string]*TitleFacts{}
-	for start := 0; start < len(itemIDs); start += 500 {
-		chunk := itemIDs[start:min(start+500, len(itemIDs))]
-		args := make([]any, len(chunk))
-		for i, id := range chunk {
-			args[i] = id
-		}
-		rows, err := s.db.QueryContext(ctx, `SELECT i.title_key, i.kind, coalesce(t.rating, 0),
-				max(coalesce(i.added_at, 0), coalesce((SELECT max(e.added_at) FROM catalog_items e WHERE e.series_id = i.id), 0)),
-				a.age,
-				(SELECT group_concat(g.genre) FROM catalog_title_genres g WHERE g.kind = i.kind AND g.tmdb = i.tmdb)
-			FROM catalog_items i
-			LEFT JOIN catalog_titles t ON t.kind = i.kind AND t.tmdb = i.tmdb
-			LEFT JOIN title_ages a ON a.kind = i.kind AND a.tmdb = i.tmdb
-			WHERE i.id IN (`+marks(len(chunk))+`) AND i.kind IN ('movie', 'series') AND i.title_key IS NOT NULL`, args...)
-		if err != nil {
+	for rows.Next() {
+		var id string
+		var f TitleFacts
+		var latest int64
+		var age *int
+		var genres *string
+		if err := rows.Scan(&id, &f.Key, &f.Kind, &f.Rating, &latest, &age, &genres); err != nil {
 			return nil, err
 		}
-		for rows.Next() {
-			var f TitleFacts
-			var latest int64
-			var age *int
-			var genres *string
-			if err := rows.Scan(&f.Key, &f.Kind, &f.Rating, &latest, &age, &genres); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			f.Latest, f.Age = time.Unix(latest, 0), age
-			if genres != nil {
-				for _, g := range strings.Split(*genres, ",") {
-					if n := atoi(g); n > 0 {
-						f.Genres = append(f.Genres, n)
-					}
+		if !want[id] {
+			continue
+		}
+		f.Latest, f.Age = time.Unix(latest, 0), age
+		if genres != nil {
+			for _, g := range strings.Split(*genres, ",") {
+				if n := atoi(g); n > 0 {
+					f.Genres = append(f.Genres, n)
 				}
 			}
-			if old, seen := out[f.Key]; !seen || f.Latest.After(old.Latest) {
-				out[f.Key] = &f
-			}
 		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return nil, err
+		if old, seen := out[f.Key]; !seen || f.Latest.After(old.Latest) {
+			out[f.Key] = &f
 		}
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // halfLife is how long it takes for what a profile watched to count half

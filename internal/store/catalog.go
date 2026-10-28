@@ -475,6 +475,13 @@ func (s *Store) ListCatalog(ctx context.Context, q ListQuery) ([]string, error) 
 	return s.ids(ctx, query, append(append(orderArgs, args...), q.Limit, q.Offset)...)
 }
 
+// CatalogIDs lists every item a listing has, in no order, copies of a
+// title included: the quickest way to know which items a profile may see.
+func (s *Store) CatalogIDs(ctx context.Context, q ListQuery) ([]string, error) {
+	where, args := q.where()
+	return s.ids(ctx, `SELECT id FROM catalog_items WHERE `+strings.Join(where, " AND "), args...)
+}
+
 // CountCatalog counts the titles a listing has in all.
 func (s *Store) CountCatalog(ctx context.Context, q ListQuery) (int, error) {
 	where, args := q.where()
