@@ -21,6 +21,17 @@ func FuzzCursor(f *testing.F) {
 				t.Fatal("another binding took it")
 			}
 		}
-		Decode(key, binding, junk)
+		if got, err := Decode(key, binding, junk); err == nil {
+			// Taken only as it was given out.
+			if again, _ := Encode(key, binding, got); again != junk {
+				t.Fatalf("%q taken for %q", junk, again)
+			}
+		}
+		if c, err := Encode(key, binding, payload); err == nil && len(c) > 2 {
+			// The same cursor with a line break in it.
+			if _, err := Decode(key, binding, c[:2]+"\n"+c[2:]); err == nil {
+				t.Fatal("a cursor with a line break was taken")
+			}
+		}
 	})
 }
