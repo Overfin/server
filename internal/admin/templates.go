@@ -135,7 +135,7 @@ func (p *Panel) updateTemplate(w http.ResponseWriter, r *http.Request, _ *sessio
 	case errors.Is(err, store.ErrTemplateNameTaken):
 		invalid(w, "another template has that name")
 	case errors.Is(err, store.ErrNotFound):
-		http.Error(w, "No such template", http.StatusNotFound)
+		notFound(w, "No such template")
 	case err != nil:
 		p.fail(w, "changing a template", err)
 	default:
@@ -150,7 +150,7 @@ func (p *Panel) deleteTemplate(w http.ResponseWriter, r *http.Request, _ *sessio
 	case errors.Is(err, store.ErrTemplateInUse):
 		invalid(w, "Default can't be deleted, nor a template accounts still follow: move them first")
 	case errors.Is(err, store.ErrNotFound):
-		http.Error(w, "No such template", http.StatusNotFound)
+		notFound(w, "No such template")
 	case err != nil:
 		p.fail(w, "deleting a template", err)
 	default:

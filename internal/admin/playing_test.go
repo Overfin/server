@@ -62,8 +62,11 @@ func TestNowPlaying(t *testing.T) {
 	if rec := b.do("POST", "/admin/api/playing/play_one/stop", `{}`, nil); rec.Code != 204 || len(f.stopped) != 1 {
 		t.Errorf("stop: %d %v", rec.Code, f.stopped)
 	}
-	if rec := b.do("POST", "/admin/api/playing/play_one/stop", `{}`, nil); rec.Code != 404 {
-		t.Errorf("stopped again: %d", rec.Code)
+	// Already ended: said in JSON, which the panel reads to tell it from
+	// a failure.
+	if rec := b.do("POST", "/admin/api/playing/play_one/stop", `{}`, nil); rec.Code != 404 ||
+		!strings.Contains(rec.Body.String(), `"detail":"That playback has already ended"`) {
+		t.Errorf("stopped again: %d %s", rec.Code, rec.Body)
 	}
 	// Signed out, nothing.
 	anon := &browser{h: b.h, cookies: map[string]string{}}

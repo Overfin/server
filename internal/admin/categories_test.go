@@ -84,7 +84,8 @@ func TestCategoriesPanel(t *testing.T) {
 	if rec := b.do("DELETE", "/admin/api/categories/"+films, "", nil); rec.Code != 204 {
 		t.Errorf("delete: %d", rec.Code)
 	}
-	if rec := b.do("DELETE", "/admin/api/categories/"+films, "", nil); rec.Code != 404 {
-		t.Errorf("delete again: %d", rec.Code)
+	if rec := b.do("DELETE", "/admin/api/categories/"+films, "", nil); rec.Code != 404 ||
+		!strings.Contains(rec.Body.String(), `"detail":"No such category"`) {
+		t.Errorf("delete again: %d %s", rec.Code, rec.Body)
 	}
 }

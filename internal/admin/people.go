@@ -242,7 +242,7 @@ func (p *Panel) removePerson(w http.ResponseWriter, r *http.Request, s *session)
 func (p *Panel) person(w http.ResponseWriter, r *http.Request) (*store.User, bool) {
 	u, err := p.Store.UserBySubject(r.Context(), r.PathValue("id"))
 	if errors.Is(err, store.ErrNotFound) {
-		http.Error(w, "No such person", http.StatusNotFound)
+		notFound(w, "No such person")
 		return nil, false
 	}
 	if err != nil {

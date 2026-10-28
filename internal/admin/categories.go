@@ -198,7 +198,7 @@ func (p *Panel) createCategory(w http.ResponseWriter, r *http.Request, s *sessio
 func (p *Panel) changeCategory(w http.ResponseWriter, r *http.Request, s *session) {
 	id := r.PathValue("id")
 	if !ids.Valid("cat", id) {
-		http.Error(w, "No such category", http.StatusNotFound)
+		notFound(w, "No such category")
 		return
 	}
 	in, ok := p.readCategory(w, r, id)
@@ -207,7 +207,7 @@ func (p *Panel) changeCategory(w http.ResponseWriter, r *http.Request, s *sessio
 	}
 	err := p.Store.SaveCategory(r.Context(), &store.Category{ID: id, Names: in.Names, Rules: in.Rules, Home: in.Home})
 	if errors.Is(err, store.ErrNotFound) {
-		http.Error(w, "No such category", http.StatusNotFound)
+		notFound(w, "No such category")
 		return
 	} else if err != nil {
 		p.fail(w, "saving a category", err)
@@ -222,7 +222,7 @@ func (p *Panel) deleteCategory(w http.ResponseWriter, r *http.Request, s *sessio
 	id := r.PathValue("id")
 	err := p.Store.DeleteCategory(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
-		http.Error(w, "No such category", http.StatusNotFound)
+		notFound(w, "No such category")
 		return
 	} else if err != nil {
 		p.fail(w, "deleting a category", err)
