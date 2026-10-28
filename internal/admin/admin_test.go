@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -204,8 +205,29 @@ func TestSignInAndChange(t *testing.T) {
 			t.Fatalf("change after %d minutes of activity: %d %s", m, rec.Code, rec.Body)
 		}
 	}
+	// Each answer says how long the session has left: half an hour, the
+	// panel's to sign itself out then; near its 12 hours, what's left of
+	// them.
+	if rec := b.do("GET", "/admin/api/session", "", nil); rec.Header().Get("Overfin-Session-Left") != "1800" {
+		t.Errorf("time left: %q", rec.Header().Get("Overfin-Session-Left"))
+	}
+	late := start.Add(12*time.Hour - 10*time.Minute)
+	for at := start.Add(80 * time.Minute); at.Before(late); at = at.Add(25 * time.Minute) {
+		p.now = func() time.Time { return at }
+		b.do("GET", "/admin/api/session", "", nil)
+	}
+	p.now = func() time.Time { return late }
+	if rec := b.do("GET", "/admin/api/session", "", nil); rec.Code != 200 {
+		t.Fatalf("near the end: %d", rec.Code)
+	} else if left, _ := strconv.Atoi(rec.Header().Get("Overfin-Session-Left")); left > 600 || left < 500 {
+		t.Errorf("time left near the end: %d", left)
+	}
+	// Signed out: no time left said.
+	if rec := (&browser{h: p.Handler(), cookies: map[string]string{}}).do("GET", "/admin/api/session", "", nil); rec.Header().Get("Overfin-Session-Left") != "" {
+		t.Error("time left said without a session")
+	}
 	// Half an hour without activity ends it.
-	p.now = func() time.Time { return start.Add(95 * time.Minute) }
+	p.now = func() time.Time { return late.Add(35 * time.Minute) }
 	if rec := b.do("GET", "/admin/api/features", "", nil); rec.Code != 401 {
 		t.Errorf("after 35 idle minutes: %d", rec.Code)
 	}
