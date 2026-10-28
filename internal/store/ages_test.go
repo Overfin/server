@@ -31,6 +31,15 @@ func TestTitleAge(t *testing.T) {
 		{"movie", map[string][]string{"KR": {"19"}}, "KR", 19, true},
 		{"series", map[string][]string{"SE": {"Från 11 år"}}, "SE", 11, true},
 		{"series", map[string][]string{"IE": {"15"}}, "IE", 15, true},
+		// The ratings country's says nothing of age: the others'.
+		{"movie", map[string][]string{"US": {"NR"}, "DE": {"16"}}, "US", 16, true},
+		// Several in the ratings country (cuts): the highest, whatever
+		// the others say; one of them without an age is left out.
+		{"movie", map[string][]string{"GB": {"12A", "NR", "15"}, "DE": {"0"}}, "GB", 15, true},
+		// Two countries: the higher.
+		{"series", map[string][]string{"DE": {"6"}, "FR": {"16"}}, "US", 16, true},
+		// A film's rating isn't a series' (TV-MA is no film rating).
+		{"movie", map[string][]string{"US": {"TV-MA"}}, "US", 0, false},
 		// What says nothing of age, or a country not in the table.
 		{"movie", map[string][]string{"US": {"NR"}, "XX": {"9"}}, "US", 0, false},
 		{"movie", nil, "US", 0, false},
