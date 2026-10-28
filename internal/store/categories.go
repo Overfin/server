@@ -255,10 +255,10 @@ func (s *Store) FilterFor(ctx context.Context, rules CategoryRules, self string)
 // LibraryLanguages lists the original languages of the library's films
 // and series (ISO 639-1), the most common first.
 func (s *Store) LibraryLanguages(ctx context.Context) ([]string, error) {
-	return s.ids(ctx, `SELECT l FROM (SELECT json_extract(t.details, '$.language') AS l, count(*) AS n
-		FROM catalog_titles t WHERE t.details IS NOT NULL
-			AND EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = t.kind AND i.tmdb = t.tmdb)
-		GROUP BY l) WHERE l IS NOT NULL AND l <> '' ORDER BY n DESC, l`)
+	return s.ids(ctx, `SELECT l FROM (SELECT t.language AS l, count(*) AS n
+		FROM catalog_details_language t
+		WHERE EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = t.kind AND i.tmdb = t.tmdb)
+		GROUP BY l) WHERE l <> '' ORDER BY n DESC, l`)
 }
 
 // itemIn is the filter as SQL, for the catalog_items row named table.
@@ -303,8 +303,8 @@ func (r CategoryRules) itemFits(table string) (string, []any) {
 		args = append(args, g...)
 	}
 	if len(r.Languages) > 0 {
-		conds = append(conds, `EXISTS (SELECT 1 FROM catalog_titles t WHERE t.kind = `+table+`.kind AND t.tmdb = `+table+`.tmdb
-			AND json_extract(t.details, '$.language') IN (`+marks(len(r.Languages))+`))`)
+		conds = append(conds, `EXISTS (SELECT 1 FROM catalog_details_language l WHERE l.kind = `+table+`.kind AND l.tmdb = `+table+`.tmdb
+			AND l.language IN (`+marks(len(r.Languages))+`))`)
 		args = append(args, anyOf(r.Languages)...)
 	}
 	if len(r.Tags) > 0 {

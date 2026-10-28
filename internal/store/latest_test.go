@@ -113,9 +113,10 @@ func TestListingsUseTMDB(t *testing.T) {
 	}
 }
 
-// The genres listings go by follow each title's page: those kept before
-// migration 060, then each page as it's replaced, until it's deleted.
-func TestDetailsGenresInStep(t *testing.T) {
+// The genres and languages listings go by follow each title's page: those
+// kept before migrations 060 and 061, then each page as it's replaced,
+// until it's deleted.
+func TestDetailsInStep(t *testing.T) {
 	s := openAt(t, 59)
 	ctx := context.Background()
 	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
@@ -124,7 +125,7 @@ func TestDetailsGenresInStep(t *testing.T) {
 		{ID: id(1), Kind: "movie", Name: "B", SortName: "b", TMDB: "2"},
 	}, 1)
 	old := time.Now().Add(-time.Hour)
-	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "1", Name: "1"}, []byte(`{"genres":["Drama","Crime"]}`), old)
+	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "1", Name: "1"}, []byte(`{"genres":["Drama","Crime"],"language":"ja"}`), old)
 	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "2", Name: "2"}, []byte(`{"genres":null}`), old)
 	if err := s.migrate(ctx); err != nil {
 		t.Fatal(err)
@@ -137,13 +138,31 @@ func TestDetailsGenresInStep(t *testing.T) {
 		}
 		return got
 	}
+	japanese := func() []string {
+		t.Helper()
+		got, err := s.ListCatalog(ctx, ListQuery{Sort: "name", Limit: 10,
+			Category: &CategoryFilter{Rules: CategoryRules{Languages: []string{"ja"}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
 	if got := genre("Crime"); !slices.Equal(got, []string{id(0)}) {
 		t.Errorf("kept before: %v", got)
 	}
+	if got := japanese(); !slices.Equal(got, []string{id(0)}) {
+		t.Errorf("language kept before: %v", got)
+	}
 	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "1", Name: "1"}, []byte(`{"genres":["Comedy"]}`), time.Now())
-	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "2", Name: "2"}, []byte(`{"genres":["Crime"]}`), time.Now())
+	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "2", Name: "2"}, []byte(`{"genres":["Crime"],"language":"ja"}`), time.Now())
 	if got := genre("Crime"); !slices.Equal(got, []string{id(1)}) {
 		t.Errorf("replaced: %v", got)
+	}
+	if got := japanese(); !slices.Equal(got, []string{id(1)}) {
+		t.Errorf("language replaced: %v", got)
+	}
+	if got, _ := s.LibraryLanguages(ctx); !slices.Equal(got, []string{"ja"}) {
+		t.Errorf("languages: %v", got)
 	}
 	if got, _ := s.CatalogGenres(ctx, "", nil, nil); !slices.Equal(got, []GenreCount{{"Comedy", 1}, {"Crime", 1}}) {
 		t.Errorf("genres: %v", got)
@@ -152,8 +171,8 @@ func TestDetailsGenresInStep(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	s.db.QueryRowContext(ctx, `SELECT count(*) FROM catalog_details_genres`).Scan(&n)
+	s.db.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM catalog_details_genres) + (SELECT count(*) FROM catalog_details_language)`).Scan(&n)
 	if n != 0 {
-		t.Errorf("%d genres left after the pages went", n)
+		t.Errorf("%d genres and languages left after the pages went", n)
 	}
 }
