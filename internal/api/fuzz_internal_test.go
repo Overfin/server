@@ -2,8 +2,11 @@ package api
 
 import (
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/overfin/server/internal/tmdb"
 )
 
 // Where people are sent back after signing in stays on this site.
@@ -42,7 +45,8 @@ func FuzzCleanEmail(f *testing.F) {
 }
 
 // Title IDs from clients never break the parser, and those it takes come
-// back the same.
+// back the same: one title has one ID, and a TMDB ID is TMDB's number as
+// TMDB writes it.
 func FuzzTitleRef(f *testing.F) {
 	for _, s := range []string{"title_movie_tmdb_949", "title_series_tmdb_1399_s2_e3", "title_item_0123456789abcdef0123456789abcdef", "title_series_tmdb_1_s-1"} {
 		f.Add(s)
@@ -52,8 +56,13 @@ func FuzzTitleRef(f *testing.F) {
 		if !ok {
 			return
 		}
-		if ref.TMDB() != "" && strings.ContainsAny(ref.TMDB(), "/?#.") {
-			t.Fatalf("%q -> TMDB %q", s, ref.TMDB())
+		if titleID(ref.Key()) != s {
+			t.Fatalf("%q -> %q", s, titleID(ref.Key()))
+		}
+		if id := ref.TMDB(); id != "" {
+			if n, err := strconv.Atoi(id); err != nil || strconv.Itoa(n) != id || !tmdb.ValidID(n) {
+				t.Fatalf("%q -> TMDB %q", s, id)
+			}
 		}
 	})
 }
