@@ -100,6 +100,7 @@ func TestProfileLimitedToCategories(t *testing.T) {
 	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
 	xmas := &store.Category{Names: map[string]string{"en": "Christmas"}, Rules: store.CategoryRules{Tags: []string{"noël"}}}
 	st.SaveCategory(ctx, xmas)
+	st.SaveCategory(ctx, &store.Category{Names: map[string]string{"en": "Films"}, Rules: store.CategoryRules{Kinds: []string{"movie"}}})
 
 	code, body := post(t, srv, "/api/v1/profiles", `{"name":"Partner","categories":["cat_`+strings.Repeat("a", 26)+`"]}`)
 	if code != 400 {
@@ -116,6 +117,12 @@ func TestProfileLimitedToCategories(t *testing.T) {
 	get(t, srv, "/api/v1/titles?kind=movie", &page)
 	if len(page.Items) != 1 || !strings.HasSuffix(page.Items[0].ID, "3") {
 		t.Errorf("limited: %+v", page.Items)
+	}
+	// Its menu shows its category alone.
+	var cats struct{ Items []struct{ Name string } }
+	get(t, srv, "/api/v1/categories", &cats)
+	if len(cats.Items) != 1 || cats.Items[0].Name != "Christmas" {
+		t.Errorf("categories shown: %+v", cats.Items)
 	}
 	if code := get(t, srv, fmt.Sprintf("/api/v1/titles/title_item_%032x", 1), nil); code != 404 {
 		t.Errorf("a title outside: %d", code)
