@@ -78,10 +78,11 @@ func (l Library) recommend(ctx context.Context, p *store.Profile, recent bool, n
 	if err != nil {
 		return nil, err
 	}
-	// Every film and series it may see (the cheapest listing: the SQL
-	// for "unwatched" and "latest" is slow on a large library); what it
-	// watched or started comes from its own history.
-	ids, err := st.ListCatalog(ctx, store.ListQuery{Kinds: []string{"movie", "series"}, Access: a, Sort: "addedAt", Limit: -1})
+	// Every film and series it may see, in no order and copies included
+	// (the cheapest listing: the SQL for "unwatched" and "latest" is slow
+	// on a large library); what it watched or started comes from its own
+	// history.
+	ids, err := st.CatalogIDs(ctx, store.ListQuery{Kinds: []string{"movie", "series"}, Access: a})
 	if err != nil || len(ids) == 0 {
 		return nil, err
 	}
