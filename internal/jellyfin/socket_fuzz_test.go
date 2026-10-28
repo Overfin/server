@@ -37,3 +37,20 @@ func FuzzSocketRead(f *testing.F) {
 		}
 	})
 }
+
+// Frames out of order and control frames too large or split are refused.
+func TestSocketRefusesMalformedFrames(t *testing.T) {
+	big := make([]byte, 126)
+	for name, raw := range map[string][]byte{
+		"continuation first":  serverFrame(0x0, true, "x"),
+		"text inside text":    append(serverFrame(0x1, false, "a"), serverFrame(0x1, true, "b")...),
+		"large ping":          append([]byte{0x89, 126, 0, 126}, big...),
+		"split ping":          serverFrame(0x9, false, "hi"),
+		"announced, not sent": {0x81, 0x7f, 0, 0, 0, 0, 0, 0xff, 0, 0},
+	} {
+		s := &socket{r: bufio.NewReader(bytes.NewReader(raw)), w: io.Discard}
+		if msg, err := s.read(); err == nil {
+			t.Errorf("%s: read %q", name, msg)
+		}
+	}
+}
