@@ -109,7 +109,7 @@ func accountName(person connector.Person, label, owner string) string {
 func (p *Panel) stopPlaying(w http.ResponseWriter, r *http.Request, s *session) {
 	id := r.PathValue("id")
 	if !p.Playing.EndPlayback(id) {
-		http.Error(w, "That playback has already ended", http.StatusNotFound)
+		notFound(w, "That playback has already ended")
 		return
 	}
 	p.Logger.Info("a playback was stopped in the control panel", "playback", id, "by", s.logID)

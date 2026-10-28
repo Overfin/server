@@ -177,7 +177,7 @@ func (p *Panel) changeAccount(w http.ResponseWriter, r *http.Request, s *session
 	id := r.PathValue("id")
 	a, err := p.Store.AccountByID(ctx, id)
 	if err != nil {
-		http.Error(w, "No such account", http.StatusNotFound)
+		notFound(w, "No such account")
 		return
 	}
 	if c.Disabled != nil && *c.Disabled && p.own(ctx, a, s) {
@@ -241,7 +241,7 @@ func (p *Panel) deleteAccount(w http.ResponseWriter, r *http.Request, s *session
 	}
 	keep := p.Features.Features().Accounts.OnDelete == "disable"
 	if _, err := p.Provisioner().DeleteAccount(r.Context(), r.PathValue("id"), keep); errors.Is(err, store.ErrNotFound) {
-		http.Error(w, "No such account", http.StatusNotFound)
+		notFound(w, "No such account")
 		return
 	} else if err != nil {
 		p.fail(w, "deleting an account", err)
@@ -256,7 +256,7 @@ func (p *Panel) deleteAccount(w http.ResponseWriter, r *http.Request, s *session
 
 func (p *Panel) unlockPIN(w http.ResponseWriter, r *http.Request, _ *session) {
 	if err := p.Store.UnlockPIN(r.Context(), r.PathValue("id")); errors.Is(err, store.ErrNotFound) {
-		http.Error(w, "No such profile", http.StatusNotFound)
+		notFound(w, "No such profile")
 		return
 	} else if err != nil {
 		p.fail(w, "unlocking a PIN", err)
@@ -268,7 +268,7 @@ func (p *Panel) unlockPIN(w http.ResponseWriter, r *http.Request, _ *session) {
 func (p *Panel) endSession(w http.ResponseWriter, r *http.Request, _ *session) {
 	err := p.Store.DeleteSession(r.Context(), r.PathValue("id"), r.PathValue("session"))
 	if errors.Is(err, store.ErrNotFound) {
-		http.Error(w, "No such session", http.StatusNotFound)
+		notFound(w, "No such session")
 		return
 	} else if err != nil {
 		p.fail(w, "ending a session", err)
@@ -299,6 +299,12 @@ func (p *Panel) fail(w http.ResponseWriter, what string, err error) {
 
 func invalid(w http.ResponseWriter, detail string) {
 	writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": detail})
+}
+
+// notFound answers that what a request names isn't there, in JSON as
+// every answer the panel reads: it shows the detail.
+func notFound(w http.ResponseWriter, detail string) {
+	writeJSON(w, http.StatusNotFound, map[string]string{"type": "not-found", "detail": detail})
 }
 
 type templateRef struct {
