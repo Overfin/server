@@ -45,6 +45,10 @@ type Sessions struct {
 	// SignIn is Overfin's own sign-in, nil when someone else signs people
 	// in (forward auth) or no one does (anonymous).
 	SignIn SignIn
+	// Panel, when set, is the control panel's address for the person
+	// signed in on r, "" unless they are an admin who can reach it at the
+	// site's own address.
+	Panel func(r *http.Request) string
 }
 
 // SignIn is Overfin's own sign-in: through an identity provider (Auth) or

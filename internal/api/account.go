@@ -116,6 +116,9 @@ type meJSON struct {
 	// it answered (or chose not to).
 	Tastes meTastesJSON `json:"tastes"`
 	Offers Offers       `json:"offers"`
+	// Panel is the control panel's address, only for an admin who can
+	// reach it at the site's own address.
+	Panel string `json:"panel,omitempty"`
 }
 
 type meTastesJSON struct {
@@ -316,6 +319,9 @@ func (s *Sessions) me(r *http.Request, acct *store.Account, prof *store.Profile)
 	if prof != nil {
 		pj := toProfileJSON(prof)
 		out.ActiveProfile = &pj
+	}
+	if s.Panel != nil {
+		out.Panel = s.Panel(r)
 	}
 	return out, nil
 }

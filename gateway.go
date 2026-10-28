@@ -223,6 +223,7 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 			Proof: sh.proof, Mail: sh.mailer, Emails: sh.emails, SiteURL: siteURL(cfg),
 			LoginLifetime: 30 * 24 * time.Hour, FreshFor: 5 * time.Minute, Logger: logger}
 		sessions.StepUpURL, sessions.FreshFor, sessions.SignIn = api.StepUpPath, managed.FreshFor, managed
+		sessions.Panel = sitePanel(cfg.Admin, managed.SiteAdmin)
 		signIn = append(signIn, managed)
 		identityMiddleware = func(h http.Handler) http.Handler { return ids.Middleware(managed.Middleware(h)) }
 	}
@@ -349,6 +350,23 @@ func newSite(s config.Site, gate site.Gate) (http.Handler, error) {
 // (emails, invitations, sign-in links): site.url, else the domain Overfin
 // gets a certificate for, else the identity provider's return address;
 // empty when none says.
+// sitePanel, with Overfin's own sign-in, tells the site where the control
+// panel is: "/admin/", on the site's own address, for an admin who can
+// reach it there. Nobody can when the panel has a listener of its own,
+// and with admin.private only those on a private address can. siteAdmin
+// says whether a request's person is an admin.
+func sitePanel(a config.Admin, siteAdmin func(*http.Request) (string, bool, bool)) func(*http.Request) string {
+	if a.Enabled() {
+		return nil
+	}
+	return func(r *http.Request) string {
+		if _, isAdmin, _ := siteAdmin(r); !isAdmin || (a.Private && !admin.FromPrivate(r)) {
+			return ""
+		}
+		return "/admin/"
+	}
+}
+
 func siteURL(cfg *config.Config) string {
 	if cfg.Site.URL != "" {
 		return strings.TrimSuffix(cfg.Site.URL, "/")

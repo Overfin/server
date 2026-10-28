@@ -659,6 +659,38 @@ func TestSiteAdminDisabledAccount(t *testing.T) {
 	}
 }
 
+// /me says where the control panel is to those it's for (an admin, here),
+// and to nobody else.
+func TestMePanel(t *testing.T) {
+	var st *store.Store
+	var m *api.Managed
+	panel := func(r *http.Request) string {
+		if _, isAdmin, _ := m.SiteAdmin(r); isAdmin {
+			return "/admin/"
+		}
+		return ""
+	}
+	srv, _ := newServerWith(t, options{managed: true, store: &st, signIn: &m, panel: panel})
+	ctx := context.Background()
+	for _, who := range []struct {
+		email string
+		admin bool
+	}{{"boss@example.org", true}, {"ann@example.org", false}} {
+		u, _ := st.CreateUser(ctx, who.email, who.admin)
+		hash, _ := password.Hash("a long password 1")
+		st.SetPassword(ctx, u.Subject, hash)
+		st.CreateAccount(ctx, u.Subject, store.NewOwner{Name: "Main"})
+		b := newBrowser(srv)
+		if c, out := signinPost(t, b, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": who.email, "password": "a long password 1"})); c != 200 {
+			t.Fatalf("signing in: %d %v", c, out)
+		}
+		res, body := visit(t, b, srv, "/api/v1/me", nil)
+		if res.StatusCode != 200 || strings.Contains(body, `"panel":"/admin/"`) != who.admin || (!who.admin && strings.Contains(body, `"panel"`)) {
+			t.Errorf("%s: %d %s", who.email, res.StatusCode, body)
+		}
+	}
+}
+
 // The panel opens on the site only from the account owner's profile: a kid
 // using a browser an admin just signed in shares the admin's fresh login.
 func TestSiteOwner(t *testing.T) {

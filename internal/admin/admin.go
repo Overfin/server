@@ -359,13 +359,20 @@ func PrivateOnly(next http.Handler) http.Handler { return privateOnly(next) }
 // SSH tunnel), the panel never answers the internet.
 func privateOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		peer, err := netip.ParseAddrPort(r.RemoteAddr)
-		if err != nil || !config.PrivateAddr(peer.Addr()) || !relayedPrivately(r.Header) {
+		if !FromPrivate(r) {
 			http.Error(w, "Not found", http.StatusNotFound)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// FromPrivate reports whether a request comes from a private address, and
+// was relayed, if at all, for private addresses only: whether privateOnly
+// lets it through.
+func FromPrivate(r *http.Request) bool {
+	peer, err := netip.ParseAddrPort(r.RemoteAddr)
+	return err == nil && config.PrivateAddr(peer.Addr()) && relayedPrivately(r.Header)
 }
 
 // relayedPrivately reports whether every address a proxy says it relayed
