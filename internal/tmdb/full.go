@@ -210,7 +210,7 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 		add(tr.Data.Name)
 	}
 	// The poster TMDB picks for the language, else the best one listed.
-	out.Artwork = Artwork{Poster: t.Poster, Backdrop: t.Backdrop, Logo: pick(raw.Images.Logos, lang)}
+	out.Artwork = Artwork{Poster: t.Poster, Backdrop: t.Backdrop, Logo: pickLogo(raw.Images.Logos, lang)}
 	if out.Artwork.Poster == "" {
 		out.Artwork.Poster = pick(raw.Images.Posters, lang)
 	}

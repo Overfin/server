@@ -118,13 +118,13 @@ func TestValuationTastes(t *testing.T) {
 		t.Errorf("choices: %v", g)
 	}
 	// Named in another language once the title's texts in it come.
-	s.SetTitleTexts(ctx, "fr-CA", Title{Kind: "movie", TMDB: "7", Name: "Film", Genres: []TitleGenre{{18, "Drame"}}}, []byte(`{"genres":["Drame"]}`), now)
+	s.SetTitleTexts(ctx, "fr-CA", Title{Kind: "movie", TMDB: "7", Name: "Film", Genres: []TitleGenre{{18, "Drame"}}}, []byte(`{"genres":["Drame"]}`), "", now)
 	if g, _ := s.TasteGenres(ctx, "fr-CA"); len(g) != 1 || g[0].Name != "Drame" {
 		t.Errorf("in French: %v", g)
 	}
 	// And from texts kept before genres were: a German text, then the
 	// title's page fetched again.
-	s.SetTitleTexts(ctx, "de-DE", Title{Kind: "movie", TMDB: "7", Name: "Film"}, []byte(`{"genres":["Drama (de)"]}`), now)
+	s.SetTitleTexts(ctx, "de-DE", Title{Kind: "movie", TMDB: "7", Name: "Film"}, []byte(`{"genres":["Drama (de)"]}`), "", now)
 	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "7", Name: "Film", Genres: []TitleGenre{{18, "Drama"}}}, []byte(`{}`), now)
 	if g, _ := s.TasteGenres(ctx, "de-DE"); len(g) != 1 || g[0].Name != "Drama (de)" {
 		t.Errorf("from earlier texts: %v", g)

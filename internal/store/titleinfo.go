@@ -221,6 +221,11 @@ func (s *Store) TitleInfos(ctx context.Context, keys []string, today, language s
 			}
 			t.Untranslated = !done
 		}
+		if language != "" {
+			if err := s.translateLogo(ctx, t, language); err != nil {
+				return nil, err
+			}
+		}
 		out[k] = t
 	}
 	return out, nil
@@ -460,7 +465,8 @@ func (s *Store) ImageTitles(ctx context.Context, typ, path string, limit int) ([
 			UNION SELECT kind || '/tmdb/' || tmdb FROM catalog_titles WHERE (?1 = 'poster' AND poster = ?2) OR (?1 = 'backdrop' AND backdrop = ?2)
 			UNION SELECT 'series/tmdb/' || series || '/s' || season FROM catalog_seasons WHERE ?1 = 'poster' AND poster = ?2`
 	case "logo":
-		q = `SELECT key FROM artwork WHERE type = ?1 AND path = ?2`
+		q = `SELECT key FROM artwork WHERE type = ?1 AND path = ?2
+			UNION SELECT kind || '/tmdb/' || tmdb FROM catalog_title_texts WHERE ?1 = 'logo' AND logo = ?2`
 	case "profile":
 		// A film's or a series' cast member.
 		q = `SELECT key FROM cast_photos WHERE ?1 = 'profile' AND path = ?2`
