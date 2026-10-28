@@ -40,6 +40,8 @@ type Store struct {
 	now    func() time.Time
 	forget Forgetter
 	facts  factsCache
+	// related is the library's facts for related titles (related.go).
+	related relatedCache
 }
 
 // Open opens (or creates) the database at path and applies any pending
