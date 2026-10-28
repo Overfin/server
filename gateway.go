@@ -821,6 +821,19 @@ func (g *gateway) textSource(language string) catalog.TitleSource {
 	return &c
 }
 
+// logoSource is TMDB answering in a language, for titles' logos; nil when
+// TMDB isn't reachable (Seerr gives no title's images).
+func (g *gateway) logoSource(language string) catalog.LogoSource {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.sh.tmdb == nil {
+		return nil
+	}
+	c := *g.sh.tmdb
+	c.Language = func() string { return language }
+	return &c
+}
+
 func (g *gateway) titleSource() catalog.TitleSource {
 	g.mu.Lock()
 	defer g.mu.Unlock()

@@ -564,6 +564,34 @@ func pickLogo(images []rawImage, lang string) string {
 	return ""
 }
 
+// Logo returns a film's ("movie") or a series' ("series") logo in the
+// client's language, chosen as pickLogo does; "" when there's none. Only
+// its images are asked for, those in the language and those without text,
+// so a logo can be checked without fetching the whole page again.
+func (c *Client) Logo(ctx context.Context, kind string, tmdbID int) (string, error) {
+	k := tv(kind)
+	if k == "" || !ValidID(tmdbID) {
+		return "", ErrNotFound
+	}
+	lang := c.language()
+	if lang == "" {
+		lang = "en"
+	}
+	language, _, _ := strings.Cut(lang, "-")
+	var raw struct {
+		ID    int        `json:"id"`
+		Logos []rawImage `json:"logos"`
+	}
+	path := "/" + k + "/" + strconv.Itoa(tmdbID) + "/images"
+	if err := c.get(ctx, path, url.Values{"include_image_language": {language + ",null"}}, &raw); err != nil {
+		return "", err
+	}
+	if raw.ID != tmdbID {
+		return "", ErrNotFound
+	}
+	return pickLogo(raw.Logos, lang), nil
+}
+
 // isoLanguage is an ISO 639-1 code, as TMDB writes them.
 var isoLanguage = regexp.MustCompile(`^[a-z]{2}$`)
 
