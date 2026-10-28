@@ -664,8 +664,8 @@ paths:
     get:
       operationId: getTastes
       summary: What the account said it likes
-      description: Series, films or both, genres (TMDB's IDs, named in the
-        server's language among `choices`), kids' content. The server's
+      description: Series, films or both, and genres (TMDB's IDs, named in
+        the server's language among `choices`). The server's
         title valuation mixes it with what the account watches, which
         counts more and more as it watches. Never shown to anyone else.
         Owner profile only (`owner-only`); `not-found` when the operator
@@ -1488,11 +1488,11 @@ paths:
       operationId: updateProfile
       summary: Change some of a profile's settings
       description: |
-        Changing a profile's own `theme` (alone) is open to that profile;
-        everything else is owner profile only. Changing its limits (`kind`,
-        either way, `maxAge`, `libraries` or `blockedTags`) needs the
-        owner profile's PIN in `pin` when it has one; the owner profile
-        itself has no limits.
+        Changing a profile's own `theme` or `kidsTitles` (alone) is open to
+        that profile; everything else is owner profile only. Changing its
+        limits (`kind`, either way, `maxAge`, `libraries`, `blockedTags` or
+        `categories`) needs the owner profile's PIN in `pin` when it has
+        one; the owner profile itself has no limits.
       tags: [profiles]
       requestBody:
         required: true
@@ -1979,8 +1979,8 @@ paths:
         TMDB's rating. Children's content (rated 8 at most, with Family,
         Kids or Animation) comes first for a kids profile and for a profile
         that set "Contenu pour enfants" (`kidsTitles`), and not at all for
-        the others. Worked out for the request, kept nowhere. Since
-        0.6.
+        the others. Worked out for the request, kept nowhere. `limit` is
+        20 by default here. Since 0.6.
       tags: [titles]
       parameters:
         - name: scope
@@ -2263,7 +2263,8 @@ paths:
         Sections the operator made from rules (films or series, genres,
         original language, library, tag, for ages up to, except other
         categories), named in the account's language, in the operator's
-        order. Their titles are listed with `GET /titles?category=`. With
+        order: those the active profile is kept to (by its own limits or
+        its account template's) when it is, else all. Their titles are listed with `GET /titles?category=`. With
         `libraries` false, the operator wants the site's menu without the
         libraries. Since 0.6.
       tags: [library]
@@ -3457,7 +3458,9 @@ components:
           examples: [[small, medium, large]]
         ratingsCountry:
           type: string
-          description: ISO 3166-1 country whose age ratings kids profiles use.
+          description: ISO 3166-1 country whose ratings titles' ages go by
+            first (for kids profiles and categories); a title it doesn't
+            rate gets the middle of the other countries' ages.
           examples: [CA]
         maxProfilesPerAccount:
           type: integer
@@ -3766,8 +3769,8 @@ components:
           enum: ["", light, dark]
         pin:
           description: The owner profile's PIN, required when changing the
-            age, the libraries, the hidden tags or `kind` while the
-            owner profile has one.
+            age, the libraries, the hidden tags, the categories or `kind`
+            while the owner profile has one.
           $ref: "#/components/schemas/Pin"
 
     TransferCode:
