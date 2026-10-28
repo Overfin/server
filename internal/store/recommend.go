@@ -13,7 +13,7 @@ import (
 // to tell which fit a profile, and what the profile watched. What a
 // profile watched is read for the page being shown, never kept (rule 40):
 // a profile's recommendations are its own. The library's facts, no one's,
-// are kept in memory a few seconds.
+// are kept in memory for half a minute (factsFor).
 
 // TitleFacts are what a film's or a series' fit is worked out from.
 type TitleFacts struct {
