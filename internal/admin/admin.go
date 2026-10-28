@@ -891,6 +891,7 @@ func (p *Panel) setRatings(w http.ResponseWriter, r *http.Request, s *session) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"type": "internal", "detail": "Overfin's log says why"})
 		return
 	}
+	p.accessChanged()
 	p.Logger.Info("ratings country changed in the control panel", "country", req.Country, "by", s.logID)
 	writeJSON(w, http.StatusOK, out)
 }

@@ -139,6 +139,7 @@ func (p *Panel) updateTemplate(w http.ResponseWriter, r *http.Request, _ *sessio
 	case err != nil:
 		p.fail(w, "changing a template", err)
 	default:
+		p.accessChanged()
 		p.Logger.Info("account template changed in the control panel", "template", r.PathValue("id"))
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -154,5 +155,13 @@ func (p *Panel) deleteTemplate(w http.ResponseWriter, r *http.Request, _ *sessio
 		p.fail(w, "deleting a template", err)
 	default:
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// accessChanged makes images follow at once a change that limits what
+// profiles see: what was remembered of their access is forgotten.
+func (p *Panel) accessChanged() {
+	if p.Images != nil {
+		p.Images.ForgetAll()
 	}
 }

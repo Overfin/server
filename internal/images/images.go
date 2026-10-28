@@ -178,6 +178,13 @@ func (p *Pipeline) Forget(profileID string) {
 	p.access.forget(profileID + "/")
 }
 
+// ForgetAll drops what the pipeline remembers about every profile's
+// access, after something that limits many of them changed (a template, a
+// category, the ratings country).
+func (p *Pipeline) ForgetAll() {
+	p.access.forget("")
+}
+
 // checkAccess asks Jellyfin, with the profile's own token, whether it may
 // see the item, and returns the item's current image tags by "type/index".
 func (p *Pipeline) checkAccess(ctx context.Context, v Viewer, itemID string) (map[string]string, error) {
