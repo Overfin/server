@@ -40,6 +40,8 @@ func Valid(prefix, s string) bool {
 	if !ok || len(rest) != encodedLen {
 		return false
 	}
-	_, err := enc.DecodeString(rest)
-	return err == nil
+	// The decoder skips line breaks, so a well-formed ID is one that
+	// encodes back to itself.
+	b, err := enc.DecodeString(rest)
+	return err == nil && enc.EncodeToString(b) == rest
 }
