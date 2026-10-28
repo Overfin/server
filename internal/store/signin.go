@@ -314,8 +314,9 @@ func (s *Store) TakeEmailLink(ctx context.Context, purpose string, linkHash []by
 		return "", err
 	}
 	defer tx.Rollback()
-	err = tx.QueryRowContext(ctx, `SELECT subject FROM email_links WHERE link_hash = ? AND purpose = ? AND expires_at > ?`,
-		linkHash, purpose, s.now().Unix()).Scan(&subject)
+	// Taken by deleting it: of two uses at once, one finds it.
+	err = tx.QueryRowContext(ctx, `DELETE FROM email_links WHERE link_hash = ? AND purpose = ? AND expires_at > ?
+		RETURNING subject`, linkHash, purpose, s.now().Unix()).Scan(&subject)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
