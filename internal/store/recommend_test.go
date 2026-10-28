@@ -42,6 +42,38 @@ func TestFactsOfItems(t *testing.T) {
 	}
 }
 
+// The library's facts are read once for a while, then again: a title
+// added meanwhile, or a new age, shows once they're read again. A caller
+// changing its copy changes no one else's.
+func TestFactsAreKeptBriefly(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	now := time.Unix(2e9, 0)
+	s.now = func() time.Time { return now }
+	id := func(n int) string { return fmt.Sprintf("%032x", n) }
+	s.PutCatalog(ctx, []CatalogItem{{ID: id(1), Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "949", LibraryID: "films"}}, 1)
+	s.RefreshTitleKeys(ctx)
+	facts, err := s.FactsOfItems(ctx, []string{id(1), id(2)})
+	if err != nil || len(facts) != 1 || facts["movie/tmdb/949"].Age != nil {
+		t.Fatalf("facts: %v, %v", facts, err)
+	}
+	facts["movie/tmdb/949"].Rating = 99
+
+	s.PutCatalog(ctx, []CatalogItem{{ID: id(2), Kind: "movie", Name: "Other", SortName: "other", TMDB: "13", LibraryID: "films"}}, 1)
+	s.RefreshTitleKeys(ctx)
+	s.SetTitleRatings(ctx, RatedTitle{Kind: "movie", TMDB: "949"}, map[string][]string{"US": {"PG-13"}}, "", "", now)
+	now = now.Add(factsFor - time.Second)
+	facts, _ = s.FactsOfItems(ctx, []string{id(1), id(2)})
+	if len(facts) != 1 || facts["movie/tmdb/949"].Rating != 0 || facts["movie/tmdb/949"].Age != nil {
+		t.Errorf("kept: %v", facts)
+	}
+	now = now.Add(time.Second)
+	facts, _ = s.FactsOfItems(ctx, []string{id(1), id(2)})
+	if f := facts["movie/tmdb/949"]; len(facts) != 2 || f.Age == nil || *f.Age != 13 {
+		t.Errorf("read again: %v", facts)
+	}
+}
+
 // What a profile watched weighs its titles' genres, a series through its
 // episodes, the recent more than the old; a film it only marked a
 // favorite, or a file no one identified, counts for nothing; one without

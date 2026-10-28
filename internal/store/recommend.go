@@ -5,13 +5,15 @@ import (
 	"database/sql"
 	"math"
 	"strings"
+	"sync"
 	"time"
 )
 
 // Recommendations: what Overfin knows of the library's films and series
-// to tell which fit a profile, and what the profile watched. Read for the
-// page being shown, never kept (rule 40): a profile's recommendations are
-// its own.
+// to tell which fit a profile, and what the profile watched. What a
+// profile watched is read for the page being shown, never kept (rule 40):
+// a profile's recommendations are its own. The library's facts, no one's,
+// are kept in memory a few seconds.
 
 // TitleFacts are what a film's or a series' fit is worked out from.
 type TitleFacts struct {
@@ -25,16 +27,64 @@ type TitleFacts struct {
 	Age *int
 }
 
+// factsFor is how long the library's facts are kept in memory: a home
+// page asks for two rows of recommendations at once, and every profile's
+// are worked out from the same facts. What each profile may see and what
+// it watched are read again each time; a change to the library shows
+// within this time.
+const factsFor = 30 * time.Second
+
+// factsCache is the library's facts, read in one pass: every film's and
+// series' item, in the order read.
+type factsCache struct {
+	mu    sync.Mutex
+	at    time.Time
+	items []itemFacts
+}
+
+type itemFacts struct {
+	id    string
+	facts TitleFacts
+}
+
 // FactsOfItems returns the facts of the films and series behind library
-// items (by Jellyfin ID), by title key, each title once.
+// items (by Jellyfin ID), by title key, each title once. They're the
+// caller's own copies, but share their genres: read only.
 func (s *Store) FactsOfItems(ctx context.Context, itemIDs []string) (map[string]*TitleFacts, error) {
-	// One pass over every film and series, kept when asked for: far
-	// quicker than asking for thousands by their IDs.
-	// TMDB's rating from its index (see fromTMDB).
+	items, err := s.libraryFacts(ctx)
+	if err != nil {
+		return nil, err
+	}
 	want := make(map[string]bool, len(itemIDs))
 	for _, id := range itemIDs {
 		want[id] = true
 	}
+	out := map[string]*TitleFacts{}
+	for _, it := range items {
+		if !want[it.id] {
+			continue
+		}
+		f := it.facts
+		if old, seen := out[f.Key]; !seen || f.Latest.After(old.Latest) {
+			out[f.Key] = &f
+		}
+	}
+	return out, nil
+}
+
+// libraryFacts returns the facts of every film and series item, read
+// again when older than factsFor. Callers asking meanwhile wait for the
+// one reading them, and share what it read.
+func (s *Store) libraryFacts(ctx context.Context) ([]itemFacts, error) {
+	c := &s.facts
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if now := s.now(); c.items != nil && now.Sub(c.at) < factsFor && !now.Before(c.at) {
+		return c.items, nil
+	}
+	// One pass over every film and series: far quicker than asking for
+	// thousands by their IDs. TMDB's rating from its index (see
+	// fromTMDB).
 	rows, err := s.db.QueryContext(ctx, `SELECT i.id, i.title_key, i.kind, coalesce(t.rating, 0),
 			max(coalesce(i.added_at, 0), coalesce((SELECT max(e.added_at) FROM catalog_items e WHERE e.series_id = i.id), 0)),
 			a.age,
@@ -47,20 +97,16 @@ func (s *Store) FactsOfItems(ctx context.Context, itemIDs []string) (map[string]
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[string]*TitleFacts{}
+	items := []itemFacts{}
 	for rows.Next() {
-		var id string
-		var f TitleFacts
+		var it itemFacts
+		f := &it.facts
 		var latest int64
-		var age *int
 		var genres *string
-		if err := rows.Scan(&id, &f.Key, &f.Kind, &f.Rating, &latest, &age, &genres); err != nil {
+		if err := rows.Scan(&it.id, &f.Key, &f.Kind, &f.Rating, &latest, &f.Age, &genres); err != nil {
 			return nil, err
 		}
-		if !want[id] {
-			continue
-		}
-		f.Latest, f.Age = time.Unix(latest, 0), age
+		f.Latest = time.Unix(latest, 0)
 		if genres != nil {
 			for _, g := range strings.Split(*genres, ",") {
 				if n := atoi(g); n > 0 {
@@ -68,11 +114,13 @@ func (s *Store) FactsOfItems(ctx context.Context, itemIDs []string) (map[string]
 				}
 			}
 		}
-		if old, seen := out[f.Key]; !seen || f.Latest.After(old.Latest) {
-			out[f.Key] = &f
-		}
+		items = append(items, it)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	c.items, c.at = items, s.now()
+	return items, nil
 }
 
 // halfLife is how long it takes for what a profile watched to count half

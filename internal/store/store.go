@@ -39,6 +39,7 @@ type Store struct {
 	box    *seal.Box
 	now    func() time.Time
 	forget Forgetter
+	facts  factsCache
 }
 
 // Open opens (or creates) the database at path and applies any pending
