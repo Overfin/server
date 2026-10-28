@@ -292,3 +292,43 @@ func TestLanguagesRoutes(t *testing.T) {
 		t.Errorf("changes %d", changes)
 	}
 }
+
+// Names typed in the panel: up to their length in characters, accented
+// ones counting one each (not in bytes), and spaces around or doubled
+// inside tidied rather than refused.
+func TestPanelNames(t *testing.T) {
+	ctx := context.Background()
+	_, b, db, _ := signedInPanel(t)
+	acct, _, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", JellyfinUsername: "of-1", JellyfinToken: "t"})
+	// 37 characters, 43 bytes.
+	const long = "Séries et émissions éducatives à télé"
+
+	rec := b.do("POST", "/admin/api/categories", `{"names":{"fr":"`+long+`","en":"  Kids   shows "},"rules":{}}`, nil)
+	if rec.Code != 201 {
+		t.Fatalf("category: %d %s", rec.Code, rec.Body)
+	}
+	if body := b.do("GET", "/admin/api/categories", "", nil).Body.String(); !strings.Contains(body, `"en":"Kids shows"`) || !strings.Contains(body, `"fr":"`+long+`"`) {
+		t.Errorf("category names: %s", body)
+	}
+	rec = b.do("POST", "/admin/api/templates", `{"name":" `+long+` ","maxStreams":1,"maxProfiles":1}`, nil)
+	if rec.Code != 201 || !strings.Contains(rec.Body.String(), `"name":"`+long+`"`) {
+		t.Errorf("template: %d %s", rec.Code, rec.Body)
+	}
+	rec = b.do("PATCH", "/admin/api/accounts/"+acct.ID, `{"label":"Bob "}`, nil)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"label":"Bob"`) {
+		t.Errorf("label: %d %s", rec.Code, rec.Body)
+	}
+	// Still refused: too long in characters, markup, nothing but spaces.
+	for _, bad := range []struct{ method, path, body string }{
+		{"POST", "/admin/api/categories", `{"names":{"fr":"` + strings.Repeat("é", 41) + `"},"rules":{}}`},
+		{"POST", "/admin/api/categories", `{"names":{"fr":"<b>x</b>"},"rules":{}}`},
+		{"POST", "/admin/api/categories", `{"names":{"fr":"   "},"rules":{}}`},
+		{"POST", "/admin/api/templates", `{"name":"` + strings.Repeat("é", 41) + `","maxStreams":1,"maxProfiles":1}`},
+		{"POST", "/admin/api/templates", `{"name":"  ","maxStreams":1,"maxProfiles":1}`},
+		{"PATCH", "/admin/api/accounts/" + acct.ID, `{"label":"` + strings.Repeat("é", 65) + `"}`},
+	} {
+		if rec := b.do(bad.method, bad.path, bad.body, nil); rec.Code != 400 {
+			t.Errorf("%s %s: %d", bad.path, bad.body, rec.Code)
+		}
+	}
+}

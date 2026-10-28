@@ -138,11 +138,13 @@ func (p *Panel) readCategory(w http.ResponseWriter, r *http.Request, self string
 		return in, false
 	}
 	named := false
-	for lang, name := range in.Names {
-		if !langCode.MatchString(lang) || textclean.Plain(name, 40) != name {
+	for lang, typed := range in.Names {
+		name, ok := plainName(typed, 40)
+		if !langCode.MatchString(lang) || !ok {
 			invalid(w, "a name is plain text, 40 characters at most")
 			return in, false
 		}
+		in.Names[lang] = name
 		if name == "" {
 			delete(in.Names, lang)
 		} else {

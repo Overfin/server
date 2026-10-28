@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/overfin/server/internal/store"
-	"github.com/overfin/server/internal/textclean"
 )
 
 // Account templates: what accounts may do. Accounts follow theirs live, so
@@ -68,10 +67,13 @@ func (p *Panel) readTemplate(w http.ResponseWriter, r *http.Request) (templateIn
 	var in templateInput
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
+	err := dec.Decode(&in)
+	name, ok := plainName(in.Name, 40)
+	in.Name = name
 	switch {
-	case dec.Decode(&in) != nil:
+	case err != nil:
 		invalid(w, "not a valid template")
-	case in.Name == "" || len(in.Name) > 40 || textclean.Plain(in.Name, 40) != in.Name:
+	case name == "" || !ok:
 		invalid(w, "a template's name is plain text, 1 to 40 characters")
 	case in.MaxStreams < 1 || in.MaxStreams > 100:
 		invalid(w, "streams at once: 1 to 100")

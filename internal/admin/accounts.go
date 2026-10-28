@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/overfin/server/internal/connector"
 	"github.com/overfin/server/internal/store"
@@ -170,9 +171,13 @@ func (p *Panel) changeAccount(w http.ResponseWriter, r *http.Request, s *session
 		}
 		expires = t
 	}
-	if c.Label != nil && textclean.Plain(*c.Label, 64) != *c.Label {
-		invalid(w, "a label is plain text, 64 characters at most")
-		return
+	if c.Label != nil {
+		label, ok := plainName(*c.Label, 64)
+		if !ok {
+			invalid(w, "a label is plain text, 64 characters at most")
+			return
+		}
+		c.Label = &label
 	}
 	id := r.PathValue("id")
 	a, err := p.Store.AccountByID(ctx, id)
@@ -299,6 +304,15 @@ func (p *Panel) fail(w http.ResponseWriter, what string, err error) {
 
 func invalid(w http.ResponseWriter, detail string) {
 	writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": detail})
+}
+
+// plainName tidies a name typed in the panel (a category's, a template's,
+// an account's label): spaces around it go, and runs of them inside become
+// one. ok is false unless it's then plain text of at most max characters,
+// accented ones and other scripts counted as one each; "" is ok.
+func plainName(s string, max int) (name string, ok bool) {
+	name = strings.Join(strings.Fields(s), " ")
+	return name, utf8.RuneCountInString(name) <= max && textclean.Plain(name, len(name)) == name
 }
 
 // notFound answers that what a request names isn't there, in JSON as
