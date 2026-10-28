@@ -213,6 +213,7 @@ func (p *Panel) changeAccount(w http.ResponseWriter, r *http.Request, s *session
 		} else {
 			err = errors.Join(err, terr)
 		}
+		p.accessChanged()
 	}
 	if err != nil {
 		p.fail(w, "changing an account", err)

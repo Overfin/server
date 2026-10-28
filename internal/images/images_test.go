@@ -171,6 +171,12 @@ func TestAccessCheckedEvenWhenCached(t *testing.T) {
 	if _, _, err := p.Image(ctx, allowed, ref, "huge"); !errors.Is(err, ErrInvalid) {
 		t.Errorf("unknown size: %v", err)
 	}
+	// Access forgotten for everyone: asked again.
+	p.ForgetAll()
+	p.Image(ctx, allowed, ref, "medium")
+	if fake.itemCalls.Load() != 3 {
+		t.Errorf("after ForgetAll: %d item calls; want 3", fake.itemCalls.Load())
+	}
 }
 
 func TestMadeUpTagIsRefused(t *testing.T) {

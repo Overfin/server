@@ -213,6 +213,7 @@ func (p *Panel) changeCategory(w http.ResponseWriter, r *http.Request, s *sessio
 		p.fail(w, "saving a category", err)
 		return
 	}
+	p.accessChanged()
 	p.Logger.Info("a category was changed in the control panel", "category", id, "by", s.logID)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -227,6 +228,7 @@ func (p *Panel) deleteCategory(w http.ResponseWriter, r *http.Request, s *sessio
 		p.fail(w, "deleting a category", err)
 		return
 	}
+	p.accessChanged()
 	p.Logger.Info("a category was deleted in the control panel", "category", id, "by", s.logID)
 	w.WriteHeader(http.StatusNoContent)
 }
