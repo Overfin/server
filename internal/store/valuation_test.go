@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -133,5 +135,51 @@ func TestValuationTastes(t *testing.T) {
 	}
 	if g, _ := s.TasteGenres(ctx, "fr-CA"); len(g) != 0 {
 		t.Errorf("genres outlived their title: %v", g)
+	}
+}
+
+// What TMDB and the libraries say of each valued title: its other IDs,
+// name, rating and release (a season's first air date), its genres, and a
+// season's aired episodes with their length; a film whose page hasn't come
+// yet goes by its file's name.
+func TestValuationFactsDescribed(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
+	n := func(i int) *int { return &i }
+	s.PutCatalog(ctx, []CatalogItem{
+		{ID: id(0), Kind: "movie", Name: "Heat (file)", SortName: "heat", TMDB: "949", IMDb: "tt0113277"},
+		{ID: id(1), Kind: "movie", Name: "Pending (file)", SortName: "pending", TMDB: "13"},
+		{ID: id(2), Kind: "series", Name: "Show", SortName: "show", TMDB: "8", TVDB: "121361"},
+		{ID: id(3), Kind: "episode", Name: "E1", SortName: "e1", SeriesID: id(2), SeasonNumber: n(1), EpisodeNumber: n(1)},
+	}, 1)
+	s.RefreshTitleKeys(ctx)
+	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "949", Name: "Heat", ReleaseDate: "1995-12-15", Rating: 7.9, Votes: 7000,
+		Popularity: 30, Genres: []TitleGenre{{80, "Crime"}, {18, "Drama"}}}, []byte(`{}`), now)
+	s.SetTitleDetails(ctx, Title{Kind: "series", TMDB: "8", Name: "The Show", Rating: 8.5, Votes: 100,
+		Genres: []TitleGenre{{18, "Drama"}}}, []byte(`{}`), now)
+	s.SetSeason(ctx, "8", Season{Number: 1, AirDate: "2011-04-17", Episodes: []Episode{
+		{Number: 1, AirDate: "2011-04-17", Runtime: 62}, {Number: 2, AirDate: "2011-04-24"}, {Number: 3, AirDate: "2027-01-01"},
+	}}, now)
+
+	f, err := s.ValuationFacts(ctx, now, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	heat, pending, season := f.Titles["movie/tmdb/949"], f.Titles["movie/tmdb/13"], f.Titles["series/tmdb/8/s1"]
+	if heat == nil || heat.Name != "Heat" || heat.IMDb != "tt0113277" || heat.Rating != 7.9 || heat.Votes != 7000 ||
+		heat.Popularity != 30 || heat.Released.Format(time.DateOnly) != "1995-12-15" || !slices.Equal(heat.Genres, []int{18, 80}) {
+		t.Errorf("the film: %+v", heat)
+	}
+	if pending == nil || pending.Name != "Pending (file)" || pending.Rating != 0 {
+		t.Errorf("a film without its page: %+v", pending)
+	}
+	if season == nil || season.Name != "The Show" || season.TVDB != "121361" || season.Rating != 8.5 ||
+		season.Released.Format(time.DateOnly) != "2011-04-17" || !slices.Equal(season.Genres, []int{18}) {
+		t.Errorf("the season: %+v", season)
+	}
+	if want := map[int]int64{1: 62 * 60_000, 2: 0}; season != nil && !maps.Equal(season.Episodes, want) {
+		t.Errorf("the season's episodes: %v, want %v", season.Episodes, want)
 	}
 }

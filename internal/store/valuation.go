@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -301,8 +302,42 @@ func (f *ValuationFacts) title(key string) *ValuedTitle {
 }
 
 // describeValued fills in what TMDB says about the valued titles: names,
-// ratings, popularity, dates, and each season's aired episodes.
+// ratings, popularity, dates, and each season's aired episodes. Each
+// table is read once, whole: a few queries for each of thousands of
+// titles took seconds on a large library.
 func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.Time) error {
+	// The other IDs the libraries know each film and series by, by kind
+	// and key.
+	type otherIDs struct{ imdb, tvdb string }
+	others := map[string]otherIDs{}
+	err := s.each(ctx, func(rows *sql.Rows) error {
+		var kind, key string
+		var imdb, tvdb sql.NullString
+		if err := rows.Scan(&kind, &key, &imdb, &tvdb); err != nil {
+			return err
+		}
+		others[kind+" "+key] = otherIDs{imdb.String, tvdb.String}
+		return nil
+	}, `SELECT kind, title_key, max(imdb), max(tvdb) FROM catalog_items
+		WHERE kind IN ('movie', 'series') AND title_key IS NOT NULL GROUP BY kind, title_key`)
+	if err != nil {
+		return err
+	}
+	// TMDB's genres of each film and series, by kind and TMDB ID.
+	genres := map[string][]int{}
+	err = s.each(ctx, func(rows *sql.Rows) error {
+		var kind, tmdb string
+		var g int
+		if err := rows.Scan(&kind, &tmdb, &g); err != nil {
+			return err
+		}
+		genres[kind+"/"+tmdb] = append(genres[kind+"/"+tmdb], g)
+		return nil
+	}, `SELECT kind, tmdb, genre FROM catalog_title_genres ORDER BY kind, tmdb, genre`)
+	if err != nil {
+		return err
+	}
+	// TMDB's page of each film and series, by kind and TMDB ID.
 	type top struct {
 		name               string
 		rating, popularity float64
@@ -310,28 +345,71 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 		released           string
 	}
 	tops := map[string]top{}
+	err = s.each(ctx, func(rows *sql.Rows) error {
+		var kind, tmdb string
+		var t top
+		if err := rows.Scan(&kind, &tmdb, &t.name, &t.rating, &t.votes, &t.popularity, &t.released); err != nil {
+			return err
+		}
+		tops[kind+"/"+tmdb] = t
+		return nil
+	}, `SELECT kind, tmdb, name, coalesce(rating, 0), coalesce(rating_votes, 0), coalesce(popularity, 0),
+		coalesce(release_date, '') FROM catalog_titles`)
+	if err != nil {
+		return err
+	}
 	read := func(kind, tmdb string) (top, error) {
 		k := kind + "/" + tmdb
 		if t, ok := tops[k]; ok {
 			return t, nil
 		}
+		// A library item TMDB's data hasn't come for yet.
 		var t top
-		err := s.db.QueryRowContext(ctx, `SELECT name, coalesce(rating, 0), coalesce(rating_votes, 0),
-				coalesce(popularity, 0), coalesce(release_date, '')
-			FROM catalog_titles WHERE kind = ? AND tmdb = ?`, kind, tmdb).
-			Scan(&t.name, &t.rating, &t.votes, &t.popularity, &t.released)
-		if errors.Is(err, sql.ErrNoRows) {
-			// A library item TMDB's data hasn't come for yet.
-			err = s.db.QueryRowContext(ctx, `SELECT name FROM catalog_items WHERE kind = ? AND tmdb = ? LIMIT 1`,
-				kind, tmdb).Scan(&t.name)
-		}
+		err := s.db.QueryRowContext(ctx, `SELECT name FROM catalog_items WHERE kind = ? AND tmdb = ? LIMIT 1`,
+			kind, tmdb).Scan(&t.name)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return t, err
 		}
 		tops[k] = t
 		return t, nil
 	}
+	// Each season's first air date, and its episodes aired by today, by
+	// series (TMDB ID) and season number.
+	aired := map[string]string{}
+	err = s.each(ctx, func(rows *sql.Rows) error {
+		var series, air string
+		var season int
+		if err := rows.Scan(&series, &season, &air); err != nil {
+			return err
+		}
+		aired[series+"/"+strconv.Itoa(season)] = air
+		return nil
+	}, `SELECT series, season, coalesce(air_date, '') FROM catalog_seasons`)
+	if err != nil {
+		return err
+	}
+	type episode struct {
+		number  int
+		minutes int64
+	}
+	episodes := map[string][]episode{}
 	today := now.UTC().Format(time.DateOnly)
+	err = s.each(ctx, func(rows *sql.Rows) error {
+		var series string
+		var season int
+		var e episode
+		if err := rows.Scan(&series, &season, &e.number, &e.minutes); err != nil {
+			return err
+		}
+		k := series + "/" + strconv.Itoa(season)
+		episodes[k] = append(episodes[k], e)
+		return nil
+	}, `SELECT series, season, episode, coalesce(runtime, 0) FROM catalog_episodes
+		WHERE air_date IS NOT NULL AND air_date <= ?`, today)
+	if err != nil {
+		return err
+	}
+
 	for _, t := range f.Titles {
 		r, _ := ParseTitleKey(t.Key)
 		if r.Source != "tmdb" {
@@ -341,33 +419,12 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 		if r.Kind == "season" {
 			top = r.Series()
 		}
-		var imdb, tvdb sql.NullString
-		err := s.db.QueryRowContext(ctx, `SELECT max(imdb), max(tvdb) FROM catalog_items WHERE kind = ? AND title_key = ?`,
-			top.Kind, top.Key()).Scan(&imdb, &tvdb)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		t.IMDb, t.TVDB = imdb.String, tvdb.String
+		o := others[top.Kind+" "+top.Key()]
+		t.IMDb, t.TVDB = o.imdb, o.tvdb
 		if t.TVDB == "" && top.Kind == "series" {
 			t.TVDB = f.pickTVDB[r.ID]
 		}
-		genres, err := s.db.QueryContext(ctx, `SELECT genre FROM catalog_title_genres WHERE kind = ? AND tmdb = ? ORDER BY genre`,
-			top.Kind, r.ID)
-		if err != nil {
-			return err
-		}
-		for genres.Next() {
-			var g int
-			if err := genres.Scan(&g); err != nil {
-				genres.Close()
-				return err
-			}
-			t.Genres = append(t.Genres, g)
-		}
-		genres.Close()
-		if err := genres.Err(); err != nil {
-			return err
-		}
+		t.Genres = slices.Clone(genres[top.Kind+"/"+r.ID])
 		if r.Kind == "movie" {
 			d, err := read("movie", r.ID)
 			if err != nil {
@@ -382,38 +439,34 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 			return err
 		}
 		t.Name, t.Rating, t.Votes, t.Popularity = d.name, d.rating, d.votes, d.popularity
-		var air string
-		err = s.db.QueryRowContext(ctx, `SELECT coalesce(air_date, '') FROM catalog_seasons WHERE series = ? AND season = ?`,
-			r.ID, r.Season).Scan(&air)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
+		season := r.ID + "/" + strconv.Itoa(r.Season)
+		air := aired[season]
 		if air == "" {
 			air = f.seasonAired[t.Key]
 		}
 		t.Released, _ = time.Parse(time.DateOnly, air)
-		rows, err := s.db.QueryContext(ctx, `SELECT episode, coalesce(runtime, 0) FROM catalog_episodes
-			WHERE series = ? AND season = ? AND air_date IS NOT NULL AND air_date <= ?`, r.ID, r.Season, today)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var e int
-			var minutes int64
-			if err := rows.Scan(&e, &minutes); err != nil {
-				rows.Close()
-				return err
+		for _, e := range episodes[season] {
+			if e.minutes > 0 || t.Episodes[e.number] == 0 {
+				t.Episodes[e.number] = e.minutes * 60_000
 			}
-			if minutes > 0 || t.Episodes[e] == 0 {
-				t.Episodes[e] = minutes * 60_000
-			}
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return err
 		}
 	}
 	return nil
+}
+
+// each runs a query and hands each of its rows to fn.
+func (s *Store) each(ctx context.Context, fn func(*sql.Rows) error, query string, args ...any) error {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if err := fn(rows); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }
 
 // ValuationWeights are the operator's weights for the title valuation, by
