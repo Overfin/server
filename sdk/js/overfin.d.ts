@@ -39,6 +39,8 @@ export interface Profile {
   ageNeeded?: boolean;
   /** The only categories it sees, when it's limited to some (since 0.6). */
   categories?: string[];
+  /** Whether it wants kids titles in its recommendations; absent, as its account does (since 0.6). */
+  kidsTitles?: boolean;
   /** The only libraries the profile gets (their IDs); absent, every library. */
   libraries?: string[];
   /** Tags hidden from the profile. */
@@ -404,7 +406,7 @@ export class Overfin {
   createProfile(profile: { name: string; kind?: 'standard' | 'kids'; maxAge?: number; language?: string; libraries?: string[] | null; blockedTags?: string[] | null; categories?: string[] | null }): Promise<Profile>;
   /** `libraries: null` gives every library again; `blockedTags: null` hides no tag. */
   /** Each profile may change its own `theme` (`''` follows the device); the rest is the owner's. */
-  updateProfile(id: string, changes: { name?: string; language?: string; theme?: '' | 'light' | 'dark'; kind?: 'standard' | 'kids'; maxAge?: number; libraries?: string[] | null; blockedTags?: string[] | null; categories?: string[] | null; pin?: string }): Promise<Profile>;
+  updateProfile(id: string, changes: { name?: string; language?: string; theme?: '' | 'light' | 'dark'; kind?: 'standard' | 'kids'; maxAge?: number; libraries?: string[] | null; blockedTags?: string[] | null; categories?: string[] | null; kidsTitles?: boolean | null; pin?: string }): Promise<Profile>;
   deleteProfile(id: string): Promise<null>;
   activateProfile(id: string, pin?: string): Promise<Profile>;
   setPin(id: string, pin: string, ownerPin?: string): Promise<null>;
@@ -418,6 +420,8 @@ export class Overfin {
   libraries(): Promise<Library[]>;
   /** A title's page, in a library or not. */
   title(id: string): Promise<Title>;
+  /** The titles that fit the profile best, among all or the newest (since 0.6). */
+  recommended(scope?: 'all' | 'recent', limit?: number): Promise<TitleSummary[]>;
   /** Titles like this one: those the server has first, then others when the operator shows them (since 0.6). */
   similar(id: string, limit?: number): Promise<TitleSummary[]>;
   person(id: string): Promise<Person>;

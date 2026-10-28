@@ -1969,6 +1969,42 @@ paths:
               schema:
                 $ref: "#/components/schemas/TitlePage"
 
+  /titles/recommended:
+    get:
+      operationId: listRecommended
+      summary: The titles that fit the profile
+      description: >-
+        The library's films and series the profile may see and hasn't
+        watched or started, best first: by the genres it watches (recent
+        viewing counts more), what its account said it likes, and a little
+        TMDB's rating. Kids titles (rated 8 at most, with Family, Kids or
+        Animation) come first when the profile wants them (`kidsTitles`,
+        else its account: a kids profile, or its tastes), and not at all
+        when it doesn't. Worked out for the request, kept nowhere. Since
+        0.6.
+      tags: [titles]
+      parameters:
+        - name: scope
+          in: query
+          description: "`all` (the default), or `recent`: among the newest only."
+          schema:
+            type: string
+            enum: [all, recent]
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Best first; 50 at most.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TitleSummary"
+
   /titles/{titleId}:
     parameters:
       - $ref: "#/components/parameters/TitleId"
@@ -3583,6 +3619,10 @@ components:
             sees, by ID; absent, no such limit. Since 0.6.
           items:
             type: string
+        kidsTitles:
+          type: boolean
+          description: Whether it wants kids titles in its recommendations;
+            absent, as its account does. Since 0.6.
         libraries:
           type: array
           description: The only libraries the profile gets, by ID; absent,
@@ -3715,6 +3755,10 @@ components:
           items:
             type: string
             pattern: "^cat_[a-z2-7]{26}$"
+        kidsTitles:
+          type: [boolean, "null"]
+          description: Whether it wants kids titles in its recommendations;
+            null, as its account does. Each profile may change its own.
         theme:
           type: string
           description: The profile's look; "" follows the device. Each profile

@@ -176,6 +176,8 @@ export class Overfin {
   async libraries() { return (await this.request('GET', '/libraries')).items; }
   /** A title's page, in a library or not: a series with its seasons, a season with its episodes. */
   title(id) { return this.request('GET', `/titles/${enc(id)}`); }
+  /** The titles that fit the profile best, among all or the newest (since 0.6). */
+  async recommended(scope = 'all', limit = 20) { return (await this.request('GET', `/titles/recommended${toQuery({ scope, limit })}`)).items; }
   /** Titles like this one: those the server has first (since 0.6). */
   async similar(id, limit = 20) { return (await this.request('GET', `/titles/${enc(id)}/similar${toQuery({ limit })}`)).items; }
   /** Searches titles (in a library or not) and people; the terms travel in the body. */

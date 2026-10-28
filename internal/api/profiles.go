@@ -116,6 +116,10 @@ type profileRequest struct {
 	// Categories are the only categories the profile sees (null: every
 	// title, as far as its other limits go).
 	Categories optionalList `json:"categories"`
+	// KidsTitles is whether the profile wants kids titles in its
+	// recommendations; null, as its account does. Each profile may change
+	// its own.
+	KidsTitles optionalBool `json:"kidsTitles"`
 	// PIN is the owner's PIN, needed to change a profile's limits when the
 	// owner has one.
 	PIN string `json:"pin"`
@@ -123,6 +127,26 @@ type profileRequest struct {
 
 // optionalList is a list a request may leave out (Set false), set to null
 // (Set, Value nil) or set to a list.
+// optionalBool is a field that may be absent, null or a boolean.
+type optionalBool struct {
+	Set   bool
+	Value *bool
+}
+
+func (o *optionalBool) UnmarshalJSON(b []byte) error {
+	o.Set = true
+	if string(b) == "null" {
+		o.Value = nil
+		return nil
+	}
+	var v bool
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	o.Value = &v
+	return nil
+}
+
 type optionalList struct {
 	Set   bool
 	Value []string
@@ -345,7 +369,7 @@ func (p Profiles) update(w http.ResponseWriter, r *http.Request) {
 	var req profileRequest
 	if !decode(r, &req) ||
 		(req.Name == nil && req.Language == nil && req.Theme == nil && req.Kind == nil && req.MaxAge == nil &&
-			!req.Libraries.Set && !req.BlockedTags.Set && !req.Categories.Set) || !validAge(req.MaxAge) ||
+			!req.Libraries.Set && !req.BlockedTags.Set && !req.Categories.Set && !req.KidsTitles.Set) || !validAge(req.MaxAge) ||
 		(req.Theme != nil && *req.Theme != "" && *req.Theme != "light" && *req.Theme != "dark") ||
 		(req.Name != nil && !validName(*req.Name)) ||
 		(req.Language != nil && *req.Language != "" && !languageTagRe.MatchString(*req.Language)) ||
@@ -365,7 +389,7 @@ func (p Profiles) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A profile's own look is its own business; the rest is the owner's.
-	ownLook := req.Theme != nil && req.Name == nil && req.Language == nil && req.Kind == nil &&
+	ownLook := (req.Theme != nil || req.KidsTitles.Set) && req.Name == nil && req.Language == nil && req.Kind == nil &&
 		req.MaxAge == nil && !req.Libraries.Set && !req.BlockedTags.Set && !req.Categories.Set &&
 		c.Profile != nil && c.Profile.ID == pr.ID
 	if !c.IsOwner() && !ownLook {
@@ -396,6 +420,12 @@ func (p Profiles) update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Theme != nil {
 		if err := p.Store.SetProfileTheme(ctx, c.Account.ID, id, *req.Theme); err != nil {
+			problem.Send(w, problem.NotFound, "")
+			return
+		}
+	}
+	if req.KidsTitles.Set {
+		if err := p.Store.SetProfileKidsTitles(ctx, c.Account.ID, id, req.KidsTitles.Value); err != nil {
 			problem.Send(w, problem.NotFound, "")
 			return
 		}

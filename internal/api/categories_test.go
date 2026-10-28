@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -170,5 +171,77 @@ func TestSimilarTitles(t *testing.T) {
 	}
 	if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_999999/similar", nil); code != 404 {
 		t.Errorf("unknown title: %d", code)
+	}
+}
+
+// Recommendations follow what the profile watches; kids titles come with
+// the switch (the account's wish until the profile chooses).
+func TestRecommended(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{store: &st})
+	ctx := context.Background()
+	now := time.Now()
+	lib := fmt.Sprintf("%032x", 0xf1)
+	films := []struct {
+		tmdb, name string
+		genre      int
+		rating     string
+	}{{"1", "Heat", 80, "R"}, {"2", "Collateral", 80, "R"}, {"3", "Notting Hill", 10749, "PG-13"}, {"4", "Bluey film", 10751, "G"}}
+	var items []store.CatalogItem
+	for i, f := range films {
+		items = append(items, store.CatalogItem{ID: fmt.Sprintf("%032x", i+1), Kind: "movie", Name: f.name, SortName: f.name, TMDB: f.tmdb, LibraryID: lib})
+	}
+	st.PutCatalog(ctx, items, 1)
+	st.RefreshTitleKeys(ctx)
+	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
+	for _, f := range films {
+		st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: f.tmdb, Name: f.name, Genres: []store.TitleGenre{{ID: f.genre, Name: "g"}}}, []byte(`{}`), now)
+		st.SetTitleRatings(ctx, store.RatedTitle{Kind: "movie", TMDB: f.tmdb}, map[string][]string{"US": {f.rating}}, "2000-01-01", "2000-01-01", now)
+	}
+	names := func() []string {
+		t.Helper()
+		var page struct{ Items []struct{ Name string } }
+		if code := get(t, srv, "/api/v1/titles/recommended", &page); code != 200 {
+			t.Fatalf("recommended: %d", code)
+		}
+		var out []string
+		for _, it := range page.Items {
+			out = append(out, it.Name)
+		}
+		return out
+	}
+	// Watched Heat: Collateral (crime) first; Heat itself not again.
+	owner := ownerID(t, srv)
+	st.RecordPlay(ctx, owner, "movie/tmdb/1", items[0].ID, 0, true, now)
+	got := names()
+	if len(got) == 0 || got[0] != "Collateral" || slices.Contains(got, "Heat") {
+		t.Errorf("after Heat: %v", got)
+	}
+	// No kids profile, no wish: no kids title.
+	if slices.Contains(got, "Bluey film") {
+		t.Errorf("a kids title without the wish: %v", got)
+	}
+	// The profile's own choice.
+	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+owner, `{"kidsTitles":true}`); code != 200 || !strings.Contains(body, `"kidsTitles":true`) {
+		t.Fatalf("switch on: %d %s", code, body)
+	}
+	if got := names(); !slices.Contains(got, "Bluey film") {
+		t.Errorf("with the switch on: %v", got)
+	}
+	// An account with a kids profile wants them, until the profile says no.
+	put(t, srv, "PATCH", "/api/v1/profiles/"+owner, `{"kidsTitles":null}`)
+	post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","maxAge":8}`)
+	if got := names(); !slices.Contains(got, "Bluey film") {
+		t.Errorf("with a kids profile: %v", got)
+	}
+	put(t, srv, "PATCH", "/api/v1/profiles/"+owner, `{"kidsTitles":false}`)
+	if got := names(); slices.Contains(got, "Bluey film") {
+		t.Errorf("opted out: %v", got)
+	}
+	if code := get(t, srv, "/api/v1/titles/recommended?scope=recent", nil); code != 200 {
+		t.Errorf("recent: %d", code)
+	}
+	if code := get(t, srv, "/api/v1/titles/recommended?scope=x", nil); code != 400 {
+		t.Errorf("bad scope: %d", code)
 	}
 }
