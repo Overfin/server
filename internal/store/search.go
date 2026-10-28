@@ -66,10 +66,11 @@ func (s *Store) SearchLibrary(ctx context.Context, query string, limit int) ([]s
 	}
 	pattern, prefix := likeWords(q), strings.TrimSuffix(likePrefix(q), "%")+"%"
 	name := `coalesce(t.search_name, lower(i.name))`
+	// TMDB's names and ratings from their index (see fromTMDB).
 	return s.ids(ctx, `SELECT title_key FROM (
 			SELECT i.title_key, min(CASE WHEN `+name+` = ? THEN 0 WHEN `+name+` LIKE ? ESCAPE '\' THEN 1 ELSE 2 END) AS rank,
 				max(coalesce(t.rating, i.community_rating, 0)) AS rating
-			FROM catalog_items i LEFT JOIN catalog_titles t ON t.kind = i.kind AND t.tmdb = i.tmdb
+			FROM catalog_items i LEFT JOIN catalog_titles t INDEXED BY catalog_titles_listing ON t.kind = i.kind AND t.tmdb = i.tmdb
 			WHERE i.kind IN ('movie', 'series') AND i.title_key IS NOT NULL AND `+name+` LIKE ? ESCAPE '\'
 			GROUP BY i.title_key)
 		ORDER BY rank, rating DESC, title_key LIMIT ?`, q, prefix, pattern, limit)
