@@ -433,9 +433,12 @@ type ListQuery struct {
 }
 
 // fromTMDB is a column of a listed film's or series' TMDB page, in SQL
-// (NULL for seasons, episodes, and files TMDB doesn't know).
+// (NULL for seasons, episodes, and files TMDB doesn't know): sort_name,
+// release_date, rating or year, read from their index (SQLite would
+// rather go through the table's own key, and read each page whole).
 func fromTMDB(column string) string {
-	return `(SELECT t.` + column + ` FROM catalog_titles t WHERE t.kind = catalog_items.kind AND t.tmdb = catalog_items.tmdb)`
+	return `(SELECT t.` + column + ` FROM catalog_titles t INDEXED BY catalog_titles_listing
+		WHERE t.kind = catalog_items.kind AND t.tmdb = catalog_items.tmdb)`
 }
 
 var listOrder = map[string]string{

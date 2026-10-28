@@ -29,6 +29,7 @@ type TitleFacts struct {
 func (s *Store) FactsOfItems(ctx context.Context, itemIDs []string) (map[string]*TitleFacts, error) {
 	// One pass over every film and series, kept when asked for: far
 	// quicker than asking for thousands by their IDs.
+	// TMDB's rating from its index (see fromTMDB).
 	want := make(map[string]bool, len(itemIDs))
 	for _, id := range itemIDs {
 		want[id] = true
@@ -38,7 +39,7 @@ func (s *Store) FactsOfItems(ctx context.Context, itemIDs []string) (map[string]
 			a.age,
 			(SELECT group_concat(g.genre) FROM catalog_title_genres g WHERE g.kind = i.kind AND g.tmdb = i.tmdb)
 		FROM catalog_items i
-		LEFT JOIN catalog_titles t ON t.kind = i.kind AND t.tmdb = i.tmdb
+		LEFT JOIN catalog_titles t INDEXED BY catalog_titles_listing ON t.kind = i.kind AND t.tmdb = i.tmdb
 		LEFT JOIN title_ages a ON a.kind = i.kind AND a.tmdb = i.tmdb
 		WHERE i.kind IN ('movie', 'series') AND i.title_key IS NOT NULL`)
 	if err != nil {
