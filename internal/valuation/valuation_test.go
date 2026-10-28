@@ -261,6 +261,14 @@ func TestTastes(t *testing.T) {
 		t.Errorf("a kids profile: %v", m.Titles)
 	}
 
+	// Another profile that set "Contenu pour enfants": the same.
+	f = facts(1, drama, comedy, family, show)
+	f.Profiles["p2"] = store.ValuationProfile{AccountID: "a1", ChildrensContent: true, Active: true}
+	m = Measure(f, now)
+	if !(parts(t, m, family.Key)[Tastes] > parts(t, m, comedy.Key)[Tastes]) {
+		t.Errorf("children's content set: %v", m.Titles)
+	}
+
 	// Said films, but watches dramas, as series: what it watches wins.
 	other := season("5", 1, 2)
 	other.Genres = []int{18}

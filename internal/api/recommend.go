@@ -149,20 +149,11 @@ func compareStrings(a, b string) int {
 	return 0
 }
 
-// wantsKids says whether a profile wants kids titles in its
-// recommendations: a kids profile does; another as it chose, else as its
-// account does (it has a kids profile, or said so in its tastes).
-func (l Library) wantsKids(ctx context.Context, p *store.Profile, tastes *store.Tastes) (bool, error) {
-	if p.Kind == "kids" {
-		return true, nil
-	}
-	if p.KidsTitles != nil {
-		return *p.KidsTitles, nil
-	}
-	if tastes != nil && tastes.Kids {
-		return true, nil
-	}
-	return l.Provisioner.Store.AccountHasKids(ctx, p.AccountID)
+// wantsKids says whether a profile's recommendations include children's
+// content: a kids profile's do; another's when it set "Contenu pour
+// enfants".
+func (l Library) wantsKids(_ context.Context, p *store.Profile, _ *store.Tastes) (bool, error) {
+	return p.Kind == "kids" || (p.KidsTitles != nil && *p.KidsTitles), nil
 }
 
 // fitter scores how well a title fits a profile.

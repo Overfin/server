@@ -50,7 +50,7 @@ func TestTastes(t *testing.T) {
 		}
 	}
 	if code, body := put(t, srv, "PUT", "/api/v1/me/tastes", `{"prefer":"series","genres":[35,35],"kids":true}`); code != 200 ||
-		!strings.Contains(body, `"prefer":"series","genres":[35],"kids":true`) {
+		!strings.Contains(body, `"prefer":"series","genres":[35]`) || strings.Contains(body, "kids") {
 		t.Fatalf("PUT: %d %s", code, body)
 	}
 	if _, body := getAs(t, srv, subject, "/api/v1/me"); !strings.Contains(body, `"answered":true`) {

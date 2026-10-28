@@ -17,9 +17,7 @@ type tastesJSON struct {
 	// Prefer is "series", "movies" or "both"; absent when it didn't say.
 	Prefer string `json:"prefer,omitempty"`
 	// Genres are TMDB genre IDs.
-	Genres []int `json:"genres"`
-	// Kids is whether it wants kids' content.
-	Kids      bool   `json:"kids"`
+	Genres    []int  `json:"genres"`
 	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
@@ -29,7 +27,7 @@ type tasteGenreJSON struct {
 }
 
 func tastesOf(t *store.Tastes) tastesJSON {
-	out := tastesJSON{Prefer: t.Prefer, Genres: t.Genres, Kids: t.Kids}
+	out := tastesJSON{Prefer: t.Prefer, Genres: t.Genres}
 	if out.Genres == nil {
 		out.Genres = []int{}
 	}
@@ -123,7 +121,9 @@ func (a Account) setTastes(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Prefer string `json:"prefer"`
 		Genres []int  `json:"genres"`
-		Kids   bool   `json:"kids"`
+		// Kids is no longer asked (each profile's "Contenu pour enfants"
+		// says it): accepted from older sites, and ignored.
+		Kids bool `json:"kids"`
 	}
 	if !decode(r, &req) || !slices.Contains([]string{"", "series", "movies", "both"}, req.Prefer) || len(req.Genres) > maxTasteGenres {
 		problem.Send(w, problem.InvalidRequest, "")
@@ -146,7 +146,7 @@ func (a Account) setTastes(w http.ResponseWriter, r *http.Request) {
 			genres = append(genres, g)
 		}
 	}
-	t := store.Tastes{Prefer: req.Prefer, Genres: genres, Kids: req.Kids}
+	t := store.Tastes{Prefer: req.Prefer, Genres: genres}
 	if err := a.Sessions.Store.SetAccountTastes(ctx, c.Account.ID, t, time.Now()); err != nil {
 		a.Logger.Error("saving an account's tastes failed", "err", err)
 		problem.Send(w, problem.Internal, "")

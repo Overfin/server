@@ -678,7 +678,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [genres, kids, answered, choices, kidsProfile]
+                required: [genres, answered, choices, kidsProfile]
                 properties:
                   prefer:
                     type: string
@@ -686,8 +686,6 @@ paths:
                   genres:
                     type: array
                     items: { type: integer }
-                  kids:
-                    type: boolean
                   updatedAt:
                     type: string
                     format: date-time
@@ -703,8 +701,8 @@ paths:
                         name: { type: string }
                   kidsProfile:
                     type: boolean
-                    description: The account has a kids profile, so it gets
-                      kids' content without saying so.
+                    description: The account has a kids profile, so it
+                      counts as wanting children's content.
         "403":
           $ref: "#/components/responses/OwnerOnly"
         "404":
@@ -733,6 +731,9 @@ paths:
                   items: { type: integer }
                 kids:
                   type: boolean
+                  deprecated: true
+                  description: No longer asked (each profile's `kidsTitles`
+                    says it); accepted, and ignored. Since 0.6.
       responses:
         "200":
           description: Kept, as now saved.
@@ -740,7 +741,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [genres, kids]
+                required: [genres]
                 properties:
                   prefer:
                     type: string
@@ -748,8 +749,6 @@ paths:
                   genres:
                     type: array
                     items: { type: integer }
-                  kids:
-                    type: boolean
                   updatedAt:
                     type: string
                     format: date-time
@@ -1977,10 +1976,10 @@ paths:
         The library's films and series the profile may see and hasn't
         watched or started, best first: by the genres it watches (recent
         viewing counts more), what its account said it likes, and a little
-        TMDB's rating. Kids titles (rated 8 at most, with Family, Kids or
-        Animation) come first when the profile wants them (`kidsTitles`,
-        else its account: a kids profile, or its tastes), and not at all
-        when it doesn't. Worked out for the request, kept nowhere. Since
+        TMDB's rating. Children's content (rated 8 at most, with Family,
+        Kids or Animation) comes first for a kids profile and for a profile
+        that set "Contenu pour enfants" (`kidsTitles`), and not at all for
+        the others. Worked out for the request, kept nowhere. Since
         0.6.
       tags: [titles]
       parameters:
@@ -3621,8 +3620,9 @@ components:
             type: string
         kidsTitles:
           type: boolean
-          description: Whether it wants kids titles in its recommendations;
-            absent, as its account does. Since 0.6.
+          description: '"Contenu pour enfants": its recommendations include
+            children''s content, and its account counts as wanting some (for
+            the valuation). Absent, off. Since 0.6.'
         libraries:
           type: array
           description: The only libraries the profile gets, by ID; absent,
@@ -3757,8 +3757,8 @@ components:
             pattern: "^cat_[a-z2-7]{26}$"
         kidsTitles:
           type: [boolean, "null"]
-          description: Whether it wants kids titles in its recommendations;
-            null, as its account does. Each profile may change its own.
+          description: '"Contenu pour enfants" (see Profile); null, off.
+            Each profile may change its own.'
         theme:
           type: string
           description: The profile's look; "" follows the device. Each profile

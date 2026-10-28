@@ -44,6 +44,8 @@ type ValuationFacts struct {
 type ValuationProfile struct {
 	AccountID string
 	Kids      bool
+	// ChildrensContent: another profile that set "Contenu pour enfants".
+	ChildrensContent bool
 	// Active is whether its account counts: enabled, not expired, and used
 	// in the last six months (or made since).
 	Active bool
@@ -108,7 +110,7 @@ const activeFor = 183 * 24 * time.Hour
 func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []ProfileTitle) (*ValuationFacts, error) {
 	f := &ValuationFacts{Profiles: map[string]ValuationProfile{}, Titles: map[string]*ValuedTitle{}, Interests: interests}
 	cutoff := now.Add(-activeFor).Unix()
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.account_id, p.kind = 'kids',
+	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.account_id, p.kind = 'kids', coalesce(p.kids_titles, 0) = 1,
 			a.disabled_at IS NULL AND (a.expires_at IS NULL OR a.expires_at > ?) AND (a.created_at >= ?
 				OR EXISTS (SELECT 1 FROM sessions x WHERE x.account_id = a.id AND x.last_active_at >= ?)
 				OR EXISTS (SELECT 1 FROM profile_titles t JOIN profiles q ON q.id = t.profile_id
@@ -120,7 +122,7 @@ func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []P
 	for rows.Next() {
 		var id string
 		var p ValuationProfile
-		if err := rows.Scan(&id, &p.AccountID, &p.Kids, &p.Active); err != nil {
+		if err := rows.Scan(&id, &p.AccountID, &p.Kids, &p.ChildrensContent, &p.Active); err != nil {
 			rows.Close()
 			return nil, err
 		}
