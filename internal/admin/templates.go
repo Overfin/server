@@ -21,13 +21,21 @@ type templateJSON struct {
 	MaxProfiles int    `json:"maxProfiles"`
 	// ReserveStreams: each profile owns one of the account's streams.
 	ReserveStreams bool `json:"reserveStreams"`
-	Accounts       int  `json:"accounts"`
-	Default        bool `json:"default"`
+	// Categories, when present, are the only categories its accounts'
+	// profiles see.
+	Categories *[]string `json:"categories,omitempty"`
+	Accounts   int       `json:"accounts"`
+	Default    bool      `json:"default"`
 }
 
 func toTemplateJSON(t *store.Template) templateJSON {
-	return templateJSON{ID: t.ID, Name: t.Name, MaxStreams: t.MaxStreams, MaxProfiles: t.MaxProfiles,
+	out := templateJSON{ID: t.ID, Name: t.Name, MaxStreams: t.MaxStreams, MaxProfiles: t.MaxProfiles,
 		ReserveStreams: t.ReserveStreams, Accounts: t.Accounts, Default: t.ID == store.DefaultTemplate}
+	if t.Categories != nil {
+		cats := t.Categories
+		out.Categories = &cats
+	}
+	return out
 }
 
 func (p *Panel) templates(w http.ResponseWriter, r *http.Request, _ *session) {
@@ -49,11 +57,14 @@ type templateInput struct {
 	MaxProfiles int    `json:"maxProfiles"`
 	// ReserveStreams is off when absent.
 	ReserveStreams bool `json:"reserveStreams"`
+	// Categories limits its accounts' profiles to some; null or absent, no
+	// limit.
+	Categories *[]string `json:"categories"`
 }
 
 // readTemplate decodes and checks a template; it writes the problem and
 // returns false when it's not acceptable.
-func readTemplate(w http.ResponseWriter, r *http.Request) (templateInput, bool) {
+func (p *Panel) readTemplate(w http.ResponseWriter, r *http.Request) (templateInput, bool) {
 	var in templateInput
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
@@ -68,14 +79,24 @@ func readTemplate(w http.ResponseWriter, r *http.Request) (templateInput, bool) 
 		invalid(w, "profiles: 1 to 20, the owner's included")
 	case in.ReserveStreams && in.MaxProfiles > in.MaxStreams:
 		invalid(w, "with a stream reserved for each profile, no more profiles than streams")
+	case in.Categories != nil && len(*in.Categories) > 50:
+		invalid(w, "too many categories")
 	default:
+		if in.Categories != nil {
+			for _, id := range *in.Categories {
+				if _, err := p.Store.CategoryByID(r.Context(), id); err != nil {
+					invalid(w, "a category no longer exists")
+					return in, false
+				}
+			}
+		}
 		return in, true
 	}
 	return in, false
 }
 
 func (p *Panel) createTemplate(w http.ResponseWriter, r *http.Request, _ *session) {
-	in, ok := readTemplate(w, r)
+	in, ok := p.readTemplate(w, r)
 	if !ok {
 		return
 	}
@@ -87,15 +108,30 @@ func (p *Panel) createTemplate(w http.ResponseWriter, r *http.Request, _ *sessio
 		p.fail(w, "creating a template", err)
 		return
 	}
+	if in.Categories != nil {
+		if err := p.Store.SetTemplateCategories(r.Context(), t.ID, *in.Categories); err != nil {
+			p.fail(w, "creating a template", err)
+			return
+		}
+		t.Categories = *in.Categories
+	}
 	writeJSON(w, http.StatusCreated, toTemplateJSON(t))
 }
 
 func (p *Panel) updateTemplate(w http.ResponseWriter, r *http.Request, _ *session) {
-	in, ok := readTemplate(w, r)
+	in, ok := p.readTemplate(w, r)
 	if !ok {
 		return
 	}
-	switch err := p.Store.UpdateTemplate(r.Context(), r.PathValue("id"), in.Name, in.MaxStreams, in.MaxProfiles, in.ReserveStreams); {
+	var cats []string
+	if in.Categories != nil {
+		cats = *in.Categories
+	}
+	err := p.Store.UpdateTemplate(r.Context(), r.PathValue("id"), in.Name, in.MaxStreams, in.MaxProfiles, in.ReserveStreams)
+	if err == nil {
+		err = p.Store.SetTemplateCategories(r.Context(), r.PathValue("id"), cats)
+	}
+	switch {
 	case errors.Is(err, store.ErrTemplateNameTaken):
 		invalid(w, "another template has that name")
 	case errors.Is(err, store.ErrNotFound):

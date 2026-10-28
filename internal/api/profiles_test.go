@@ -125,31 +125,24 @@ func put(t *testing.T, srv *httptest.Server, method, path, body string) (int, st
 func TestKidsProfiles(t *testing.T) {
 	srv, fake := newServer(t)
 
-	// The ratings country's scales, least mature first, without "NR".
-	if code, body := getAs(t, srv, subject, "/api/v1/ratings"); code != 200 ||
-		body != `{"country":"US","movie":[{"name":"G"},{"name":"PG"},{"name":"PG-13"}],"series":[{"name":"TV-Y","meaning":"All children"},{"name":"TV-PG"}]}`+"\n" {
-		t.Errorf("ratings: %d %s", code, body)
-	}
-	for _, bad := range []string{`{"name":"Kid","kind":"kids"}`, `{"name":"Kid","kind":"kids","movieCeiling":"PG"}`,
-		`{"name":"Kid","kind":"kids","movieCeiling":"X","seriesCeiling":"TV-Y"}`,
-		`{"name":"Kid","kind":"kids","movieCeiling":"NR","seriesCeiling":"TV-Y"}`,
-		`{"name":"Kid","kind":"kids","movieCeiling":"TV-Y","seriesCeiling":"PG"}`,
-		`{"name":"Kid","movieCeiling":"PG","seriesCeiling":"TV-Y"}`, `{"name":"Kid","kind":"teen","movieCeiling":"PG","seriesCeiling":"TV-Y"}`} {
+	for _, bad := range []string{`{"name":"Kid","kind":"kids"}`, `{"name":"Kid","kind":"kids","maxAge":-1}`,
+		`{"name":"Kid","kind":"kids","maxAge":22}`, `{"name":"Kid","kind":"kids","maxAge":"8"}`,
+		`{"name":"Kid","maxAge":8}`, `{"name":"Kid","kind":"teen","maxAge":8}`} {
 		if code, _ := post(t, srv, "/api/v1/profiles", bad); code != http.StatusBadRequest {
 			t.Errorf("%s: %d", bad, code)
 		}
 	}
 	// The owner profile is never a kids profile.
-	if code, _ := put(t, srv, "PATCH", "/api/v1/profiles/"+ownerID(t, srv), `{"kind":"kids","movieCeiling":"PG","seriesCeiling":"TV-Y"}`); code != http.StatusBadRequest {
+	if code, _ := put(t, srv, "PATCH", "/api/v1/profiles/"+ownerID(t, srv), `{"kind":"kids","maxAge":8}`); code != http.StatusBadRequest {
 		t.Errorf("owner as kids: %d", code)
 	}
-	code, body := post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","movieCeiling":"PG","seriesCeiling":"TV-Y"}`)
-	if code != http.StatusCreated || !strings.Contains(body, `"movieCeiling":"PG","seriesCeiling":"TV-Y"`) || strings.Contains(body, "ceilingsNeeded") {
+	code, body := post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","maxAge":8}`)
+	if code != http.StatusCreated || !strings.Contains(body, `"maxAge":8`) || strings.Contains(body, "ageNeeded") {
 		t.Fatalf("create: %d %s", code, body)
 	}
 	var kid struct{ ID string }
 	json.Unmarshal([]byte(body), &kid)
-	// Overfin holds it to its ceilings: it has no Jellyfin user to limit.
+	// Overfin holds it to its age: it has no Jellyfin user to limit.
 	if len(fake.users) != 0 {
 		t.Errorf("Jellyfin users made: %v", fake.users)
 	}
@@ -161,26 +154,29 @@ func TestKidsProfiles(t *testing.T) {
 	if code, body := put(t, srv, "PUT", "/api/v1/profiles/"+ownerID(t, srv)+"/pin", `{"pin":"9999"}`); code != 403 || !strings.Contains(body, "step-up-required") {
 		t.Errorf("changing a PIN: %d %s", code, body)
 	}
-	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+kid.ID, `{"movieCeiling":"PG-13"}`); code != 403 || !strings.Contains(body, "pin-required") {
+	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+kid.ID, `{"maxAge":12}`); code != 403 || !strings.Contains(body, "pin-required") {
 		t.Errorf("raise without PIN: %d %s", code, body)
 	}
-	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+kid.ID, `{"movieCeiling":"PG-13","pin":"0000"}`); code != 403 || !strings.Contains(body, "pin-incorrect") {
+	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+kid.ID, `{"maxAge":12,"pin":"0000"}`); code != 403 || !strings.Contains(body, "pin-incorrect") {
 		t.Errorf("raise with a wrong PIN: %d %s", code, body)
 	}
 	// Right PIN, but too soon after a wrong one.
-	code, body = put(t, srv, "PATCH", "/api/v1/profiles/"+kid.ID, `{"movieCeiling":"PG-13","pin":"1234"}`)
+	code, body = put(t, srv, "PATCH", "/api/v1/profiles/"+kid.ID, `{"maxAge":12,"pin":"1234"}`)
 	var wait struct{ RetryAfter int }
 	json.Unmarshal([]byte(body), &wait)
 	if code != 429 || wait.RetryAfter < 1 || wait.RetryAfter > 2 {
 		t.Errorf("right PIN too soon: %d %s", code, body)
 	}
 	time.Sleep(time.Duration(wait.RetryAfter) * time.Second)
-	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+kid.ID, `{"movieCeiling":"PG-13","pin":"1234"}`); code != 200 ||
-		!strings.Contains(body, `"movieCeiling":"PG-13","seriesCeiling":"TV-Y"`) {
+	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+kid.ID, `{"maxAge":12,"pin":"1234"}`); code != 200 ||
+		!strings.Contains(body, `"maxAge":12`) {
 		t.Errorf("raise: %d %s", code, body)
 	}
-	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+kid.ID, `{"kind":"standard","pin":"1234"}`); code != 200 || strings.Contains(body, "Ceiling") {
+	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+kid.ID, `{"kind":"standard","pin":"1234"}`); code != 200 || strings.Contains(body, "maxAge") {
 		t.Errorf("graduate: %d %s", code, body)
+	}
+	if code, _ := getAs(t, srv, subject, "/api/v1/ratings"); code != 404 && code != 405 {
+		t.Errorf("ratings, gone: %d", code)
 	}
 }
 
@@ -188,7 +184,7 @@ func TestSwitchingNeedsThePIN(t *testing.T) {
 	srv, _ := newServer(t)
 	owner := ownerID(t, srv)
 	put(t, srv, "PUT", "/api/v1/profiles/"+owner+"/pin", `{"pin":"1234"}`)
-	_, body := post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","movieCeiling":"G","seriesCeiling":"TV-Y"}`)
+	_, body := post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","maxAge":0}`)
 	var kid struct{ ID string }
 	json.Unmarshal([]byte(body), &kid)
 
@@ -311,7 +307,7 @@ func TestNoFallbackToAProtectedOwner(t *testing.T) {
 
 	// A child's kids profile is deleted: their session doesn't become the
 	// owner's.
-	_, body := post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","movieCeiling":"G","seriesCeiling":"TV-Y"}`)
+	_, body := post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","maxAge":0}`)
 	kid := between(body, `"id":"`, `"`)
 	if code, body := ask("POST", "/api/v1/profiles/"+kid+"/activate", `{}`); code != 200 {
 		t.Fatalf("kid: %d %s", code, body)

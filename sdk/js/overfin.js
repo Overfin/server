@@ -155,9 +155,9 @@ export class Overfin {
 
   async profiles() { return (await this.request('GET', '/profiles')).items; }
   profile(id) { return this.request('GET', `/profiles/${enc(id)}`); }
-  /** @param {{name: string, kind?: 'standard'|'kids', movieCeiling?: string, seriesCeiling?: string, language?: string}} profile */
+  /** @param {{name: string, kind?: 'standard'|'kids', maxAge?: number, language?: string}} profile */
   createProfile(profile) { return this.request('POST', '/profiles', profile); }
-  /** Changes name, language, kind, ceilings, libraries or hidden tags; limits need the owner's `pin` if set. */
+  /** Changes name, language, kind, age, libraries or hidden tags; limits need the owner's `pin` if set. */
   updateProfile(id, changes) { return this.request('PATCH', `/profiles/${enc(id)}`, changes); }
   /** Deletes a profile and its history. Needs a fresh login (step-up). */
   deleteProfile(id) { return this.request('DELETE', `/profiles/${enc(id)}`); }
@@ -165,8 +165,6 @@ export class Overfin {
   activateProfile(id, pin) { return this.request('POST', `/profiles/${enc(id)}/activate`, pin ? { pin } : {}); }
   setPin(id, pin, ownerPin) { return this.request('PUT', `/profiles/${enc(id)}/pin`, ownerPin ? { pin, ownerPin } : { pin }); }
   removePin(id) { return this.request('DELETE', `/profiles/${enc(id)}/pin`); }
-  /** The certifications a kids profile's ceilings can be, for films and series, least mature first. */
-  ratings() { return this.request('GET', '/ratings'); }
   /** The library's tags, to hide some from a profile (owner only). */
   async tags() { return (await this.request('GET', '/tags')).items; }
   async sessions() { return (await this.request('GET', '/sessions')).items; }

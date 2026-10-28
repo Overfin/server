@@ -32,10 +32,8 @@ type CategoryRules struct {
 	Languages []string `json:"languages,omitempty"` // original languages (ISO 639-1)
 	Libraries []string `json:"libraries,omitempty"` // Jellyfin library IDs
 	Tags      []string `json:"tags,omitempty"`      // Jellyfin tags, regardless of case
-	// MovieCeiling and SeriesCeiling: films and series rated at most that,
-	// in the server's ratings country ("" for no limit).
-	MovieCeiling  string `json:"movieCeiling,omitempty"`
-	SeriesCeiling string `json:"seriesCeiling,omitempty"`
+	// MaxAge: titles for that age at most (TitleAge); nil for no limit.
+	MaxAge *int `json:"maxAge,omitempty"`
 	// Except leaves out the titles of these categories (by ID), as their
 	// own rules say.
 	Except []string `json:"except,omitempty"`
@@ -158,6 +156,13 @@ func (s *Store) DeleteCategory(ctx context.Context, id string) error {
 			return err
 		}
 	}
+	// Out of profiles' and templates' limits too: one limited to it alone
+	// then sees nothing, until its limits are chosen again.
+	for _, table := range []string{"profiles", "account_templates"} {
+		if err := dropCategory(ctx, tx, table, id); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
@@ -212,9 +217,8 @@ func (s *Store) SetLibrariesShown(ctx context.Context, on bool) error {
 // CategoryFilter is a category as listings apply it: its rules, and
 // those of the categories it leaves out.
 type CategoryFilter struct {
-	Rules   CategoryRules
-	Except  []CategoryRules
-	Country string // the ratings country, for ceilings
+	Rules  CategoryRules
+	Except []CategoryRules
 }
 
 // CategoryFilterOf returns how listings apply a category.
@@ -229,11 +233,7 @@ func (s *Store) CategoryFilterOf(ctx context.Context, id string) (*CategoryFilte
 // FilterFor returns how listings would apply rules, of the category self
 // ("" for one not saved yet), for a preview.
 func (s *Store) FilterFor(ctx context.Context, rules CategoryRules, self string) (*CategoryFilter, error) {
-	country, err := s.RatingsCountry(ctx)
-	if err != nil {
-		return nil, err
-	}
-	f := &CategoryFilter{Rules: rules, Country: country}
+	f := &CategoryFilter{Rules: rules}
 	for _, x := range rules.Except {
 		if o, err := s.CategoryByID(ctx, x); err == nil && o.ID != self {
 			f.Except = append(f.Except, o.Rules)
@@ -255,9 +255,9 @@ func (s *Store) LibraryLanguages(ctx context.Context) ([]string, error) {
 
 // itemIn is the filter as SQL, for the catalog_items row named table.
 func (f CategoryFilter) itemIn(table string) (string, []any) {
-	cond, args := f.Rules.itemFits(table, f.Country)
+	cond, args := f.Rules.itemFits(table)
 	for _, x := range f.Except {
-		c, a := x.itemFits(table, f.Country)
+		c, a := x.itemFits(table)
 		cond, args = cond+" AND NOT "+c, append(args, a...)
 	}
 	return "(" + cond + ")", args
@@ -265,7 +265,7 @@ func (f CategoryFilter) itemIn(table string) (string, []any) {
 
 // itemFits is the rules as SQL, for the catalog_items row named table (a
 // film or a series).
-func (r CategoryRules) itemFits(table, country string) (string, []any) {
+func (r CategoryRules) itemFits(table string) (string, []any) {
 	conds := []string{table + ".kind IN ('movie', 'series')"}
 	var args []any
 	in := func(expr string, values []any) {
@@ -306,14 +306,9 @@ func (r CategoryRules) itemFits(table, country string) (string, []any) {
 			args = append(args, FoldTag(t))
 		}
 	}
-	// Rated at most: each kind by its own ceiling, the other kind as it is.
-	for _, k := range []struct{ kind, ceiling string }{{"movie", r.MovieCeiling}, {"series", r.SeriesCeiling}} {
-		if k.ceiling == "" {
-			continue
-		}
-		c, a := Ceiling{Country: country, Movie: k.ceiling, Series: k.ceiling}.itemAllowed(table)
-		conds = append(conds, "("+table+".kind <> '"+k.kind+"' OR "+c+")")
-		args = append(args, a...)
+	if r.MaxAge != nil {
+		c, a := Ceiling{MaxAge: *r.MaxAge}.itemAllowed(table)
+		conds, args = append(conds, c), append(args, a...)
 	}
 	return "(" + strings.Join(conds, " AND ") + ")", args
 }
@@ -327,4 +322,39 @@ func (s *Store) CategorySample(ctx context.Context, f *CategoryFilter, n int) ([
 	}
 	return s.ids(ctx, `SELECT coalesce((SELECT t.name FROM catalog_titles t WHERE t.kind = i.kind AND t.tmdb = i.tmdb), i.name)
 		FROM catalog_items i JOIN json_each(?) j ON j.value = i.id ORDER BY j.key`, jsonList(ids))
+}
+
+// dropCategory takes a category out of the categories lists of a table's
+// rows.
+func dropCategory(ctx context.Context, tx *sql.Tx, table, id string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id, categories FROM `+table+` WHERE categories LIKE ?`, "%"+id+"%")
+	if err != nil {
+		return err
+	}
+	type row struct {
+		id   string
+		list []string
+	}
+	var found []row
+	for rows.Next() {
+		var r row
+		var raw string
+		if err := rows.Scan(&r.id, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		r.list = scanList(&raw)
+		found = append(found, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, r := range found {
+		kept := slices.DeleteFunc(r.list, func(x string) bool { return x == id })
+		if _, err := tx.ExecContext(ctx, `UPDATE `+table+` SET categories = ? WHERE id = ?`, jsonList(kept), r.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }

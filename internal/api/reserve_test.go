@@ -91,7 +91,7 @@ func TestReservedStreamsLimitProfiles(t *testing.T) {
 	if code, body := post(t, srv, "/api/v1/profiles", `{"name":"Partner"}`); code != 201 {
 		t.Fatalf("a second: %d %s", code, body)
 	}
-	code, body := post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","movieCeiling":"G","seriesCeiling":"TV-Y"}`)
+	code, body := post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","maxAge":0}`)
 	if code != http.StatusConflict || !strings.Contains(body, "profile-limit-reached") {
 		t.Errorf("a third, over 2 streams: %d %s", code, body)
 	}

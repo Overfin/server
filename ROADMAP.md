@@ -403,9 +403,11 @@ own do), so a title looks the same wherever it is.
    other sources and would disagree with Overfin's.
    *Ratings: done.* Overfin's own, from TMDB (itself, with the operator's
    own token since 0.4; or through Seerr):
-   the operator picks the ratings country, each kids profile has a film
-   ceiling and a series ceiling on that country's scales, and every
-   certification a title has there must be within it. *Libraries and hidden
+   since 0.6, each kids profile has an age (films and series alike), and a
+   title's age comes from its rating in the operator's ratings country, else
+   the middle of its ratings elsewhere, each converted to an age by a table
+   Overfin ships (before, a film and a series ceiling on one country's
+   scales). *Libraries and hidden
    tags: done.* The owner picks, for each other profile, the libraries it
    gets and the tags hidden from it (a title's own, or its series' or
    season's), with the owner's PIN like the ratings. Titles the index holds
@@ -873,13 +875,14 @@ nothing beyond what that needs.
   categories (Films, Series, Anime, Kids…) in the panel from rules on
   what the catalog already knows: films or series, TMDB's genres, the
   original language, the library, Jellyfin's tags (often TMDB's
-  keywords), rated at most, and except other categories. Each is named
+  keywords), for ages up to, and except other categories. Each is named
   in every language offered, has its page and its place in the site's
   menu, and can be a row on the home page; the libraries can leave the
-  menu. Nothing moves on disk: one library can hold everything. Next: an
-  account's owner limiting a profile to some categories (a kids profile
-  to Kids, say), beside its rating ceilings, and account templates
-  carrying such limits; titles picked by hand; titles no library has.
+  menu. Nothing moves on disk: one library can hold everything. An
+  account's owner limits a profile to some categories (a kids profile to
+  Kids, say), beside its age, and account templates carry such limits for
+  all their accounts' profiles. Next: titles picked by hand; titles no
+  library has.
 - **A home page of one's own.** Each profile's home follows its tastes and
   habits. First step: the slideshow shows the titles that fit that profile
   (from Tastes and what it watches), instead of the same ones for everyone.

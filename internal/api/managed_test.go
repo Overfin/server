@@ -397,7 +397,7 @@ func TestManagedPasswordOwnerOnly(t *testing.T) {
 	hash, _ := password.Hash("a long password 1")
 	st.SetPassword(ctx, ann.Subject, hash)
 	acct, owner, _ := st.CreateAccount(ctx, ann.Subject, store.NewOwner{Name: "Ann"})
-	kid, err := st.AddProfile(ctx, acct.ID, store.NewProfile{Name: "Kid", Kind: "kids", MovieCeiling: "G", SeriesCeiling: "TV-Y"}, 5)
+	kid, err := st.AddProfile(ctx, acct.ID, store.NewProfile{Name: "Kid", Kind: "kids", MaxAge: new(int)}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ func TestSiteOwner(t *testing.T) {
 		t.Error("no account yet")
 	}
 	acct, main, _ := st.CreateAccount(ctx, boss.Subject, store.NewOwner{Name: "Boss"})
-	kid, _ := st.AddProfile(ctx, acct.ID, store.NewProfile{Name: "Kid", Kind: "kids", MovieCeiling: "G", SeriesCeiling: "TV-Y"}, 5)
+	kid, _ := st.AddProfile(ctx, acct.ID, store.NewProfile{Name: "Kid", Kind: "kids", MaxAge: new(int)}, 5)
 	if !owner() {
 		t.Error("no session yet: nobody on another profile")
 	}

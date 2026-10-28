@@ -1128,7 +1128,7 @@ function accountDetail(a, templates, reload, people) {
     return h('li', {}, avatar(p.name), h('div', {},
       h('div', { class: 'name' }, p.name, ' ', p.owner && badge('Owner', 'plain'), ' ', p.kind === 'kids' && badge('Kids', 'info')),
       h('div', { class: 'hint' }, [
-        p.kind === 'kids' && (p.movieCeiling && p.seriesCeiling ? `Films up to ${p.movieCeiling}, series up to ${p.seriesCeiling}` : 'Limits not chosen yet'),
+        p.kind === 'kids' && (p.maxAge !== undefined ? `Up to ${p.maxAge} years` : 'Age not chosen yet'),
         p.hasPin ? (p.pinLocked ? 'PIN locked' : 'PIN set') : 'No PIN',
       ].filter(Boolean).join(' · '))), unlock);
   });
@@ -1198,14 +1198,23 @@ function historyCopy(a, reload) {
 // templatesView lists the account templates, each editable in place.
 // Accounts follow theirs live: saving changes every account on it at once.
 async function templatesView() {
-  const { items } = await api('GET', '/admin/api/templates');
+  const [{ items }, cats] = await Promise.all([api('GET', '/admin/api/templates'), api('GET', '/admin/api/categories')]);
+  const catName = (c) => c.names.en || Object.values(c.names)[0] || 'Unnamed';
   const templateCard = (t) => {
     const name = h('input', { value: t?.name || '', maxlength: '40', placeholder: 'e.g. Family, Friends' });
     const streams = h('input', { type: 'number', min: '1', max: '100', value: String(t?.maxStreams ?? 1) });
     const profiles = h('input', { type: 'number', min: '1', max: '20', value: String(t?.maxProfiles ?? 1) });
     const reserve = h('input', { type: 'checkbox', checked: !!t?.reserveStreams, 'aria-label': 'A stream for each profile' });
+    // Only some categories: none ticked is no limit.
+    const catBoxes = cats.items.map((c) => {
+      const box = h('input', { type: 'checkbox', 'aria-label': `Only: ${catName(c)}` });
+      box.checked = (t?.categories || []).includes(c.id);
+      box.dataset.v = c.id;
+      return h('label', { class: 'inline' }, box, catName(c));
+    });
+    const picked = () => catBoxes.map((l) => l.querySelector('input')).filter((b) => b.checked).map((b) => b.dataset.v);
     const body = () => ({ name: name.value, maxStreams: Number(streams.value), maxProfiles: Number(profiles.value),
-      reserveStreams: reserve.checked });
+      reserveStreams: reserve.checked, categories: picked().length ? picked() : null });
     const save = h('button', { class: 'primary', type: 'button', onclick: () => busy(save, async () => {
       await (t ? api('PUT', `/admin/api/templates/${t.id}`, body()) : api('POST', '/admin/api/templates', body()));
       toast(t ? 'Template saved.' : 'Template made.');
@@ -1222,7 +1231,10 @@ async function templatesView() {
       description: t ? `${plural(t.accounts, 'account')} on it${t.accounts ? '; changes apply to them at once' : ''}.` : 'For a group of accounts that may do more, or less.',
     },
     [h('div', { class: 'fields' }, field('Name', name, null, true), field('Streams at once', streams), field('Profiles', profiles, 'The owner\'s included.')),
-      setting('A stream for each profile', 'Each profile keeps one of the streams for itself; the rest are shared. Nobody is cut off to make room. No more profiles than streams.', reserve)],
+      setting('A stream for each profile', 'Each profile keeps one of the streams for itself; the rest are shared. Nobody is cut off to make room. No more profiles than streams.', reserve),
+      catBoxes.length > 0 && h('div', { class: 'setting stack' }, h('div', {}, h('div', { class: 'label' }, 'Only these categories'),
+        h('div', { class: 'hint' }, 'Every profile of its accounts, the owner\'s too, sees only their titles (and none that no library has). None ticked: no limit.')),
+      h('div', { class: 'checks' }, catBoxes))],
     [h('span', { class: 'grow' }), remove, save]);
   };
   show(pageHead('Templates', 'What accounts may do. Every account follows one: Default, unless you choose another for it in People.'),
@@ -1292,7 +1304,7 @@ async function categoriesView(editing) {
     r.languages?.length && `in ${r.languages.map(langName).join(' or ')}`,
     r.libraries?.length && `from ${r.libraries.map((l) => libNames[l] || 'a library').join(' or ')}`,
     r.tags?.length && `tagged ${r.tags.join(' or ')}`,
-    (r.movieCeiling || r.seriesCeiling) && `rated at most ${[r.movieCeiling, r.seriesCeiling].filter(Boolean).join(' / ')}`,
+    r.maxAge !== undefined && r.maxAge !== null && `for ages up to ${r.maxAge}`,
     r.except?.length && `except ${r.except.map((x) => catNames[x] || '?').join(', ')}`,
   ].filter(Boolean).join(' · ') || 'Every film and series';
 
@@ -1360,17 +1372,14 @@ function categoryEditor(data, c, langName, nameOf) {
     for (const label of tags.children) label.hidden = Boolean(q) && !label.textContent.toLowerCase().includes(q) && !label.querySelector('input').checked;
   } });
   const except = h('div', { class: 'checks' }, boxes(data.items.filter((x) => x.id !== c?.id).map((x) => [x.id, nameOf(x)]), r.except, 'Leave out'));
-  const ceiling = (kind, value) => {
-    const sel = h('select', { 'aria-label': `${kind === 'movie' ? 'Films' : 'Series'} rated at most` },
-      h('option', { value: '' }, 'Any rating'), data.ratings[kind].map((x) => h('option', { value: x }, x)));
-    sel.value = value || '';
-    return sel;
-  };
-  const movieCeiling = ceiling('movie', r.movieCeiling), seriesCeiling = ceiling('series', r.seriesCeiling);
+  // For ages up to: the ages kids profiles choose among.
+  const maxAge = h('select', { 'aria-label': 'For ages up to' },
+    h('option', { value: '' }, 'Any age'), [3, 6, 8, 10, 12, 14, 16].map((a) => h('option', { value: String(a) }, `${a} years`)));
+  maxAge.value = r.maxAge !== undefined && r.maxAge !== null ? String(r.maxAge) : '';
   const home = h('input', { type: 'checkbox', 'aria-label': 'A row on the home page' });
   home.checked = Boolean(c?.home);
   const rules = () => ({ kinds: picked(kinds), genres: picked(genres).map(Number), languages: picked(languages), libraries: picked(libraries),
-    tags: picked(tags), movieCeiling: movieCeiling.value, seriesCeiling: seriesCeiling.value, except: picked(except) });
+    tags: picked(tags), maxAge: maxAge.value === '' ? undefined : Number(maxAge.value), except: picked(except) });
   const preview = h('div', { class: 'hint' }, '');
   let timer;
   const refresh = () => { clearTimeout(timer); timer = setTimeout(async () => {
@@ -1395,8 +1404,7 @@ function categoryEditor(data, c, langName, nameOf) {
     group('Original language', null, languages),
     data.libraries.length > 1 && group('Libraries', null, libraries),
     data.tags.length > 0 && group('Tags', 'Jellyfin\'s: often TMDB\'s keywords (christmas, anime, based on novel…).', h('div', {}, data.tags.length > 12 && tagSearch, tags)),
-    group('Rated at most', `In ${data.ratingsCountry}: for kids, say. A title without a rating there is left out.`,
-      h('div', { class: 'row' }, h('label', { class: 'inline' }, 'Films', movieCeiling), h('label', { class: 'inline' }, 'Series', seriesCeiling))),
+    group('For ages up to', 'From the titles\' ratings in any country (this server\'s country first). A title without any is left out.', maxAge),
     data.items.some((x) => x.id !== c?.id) && group('Leave out', 'Titles of these categories aren\'t in this one: Series except Anime, say.', except),
     setting('A row on the home page', null, home),
     h('div', { class: 'setting' }, h('div', {}, h('div', { class: 'label' }, 'What it holds'), preview)),

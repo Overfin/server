@@ -1282,8 +1282,8 @@ paths:
       operationId: createProfile
       summary: Create a profile
       description: |
-        Owner profile only. A kids profile needs both ceilings; any other
-        profile can't have any. The account may have up to
+        Owner profile only. A kids profile needs an age (`maxAge`); any
+        other profile can't have one. The account may have up to
         `limits.maxProfiles` (GET /me) profiles, which, while each profile
         has a stream reserved (`limits.reservedStreams`), is never more than
         its streams.
@@ -1304,7 +1304,7 @@ paths:
         "400":
           description: |
             A field is invalid, `pin` is sent, a library is unknown, a tag is
-            invalid, or a ceiling isn't one of GET /ratings' names
+            invalid, or an age is missing or out of 0 to 21
             (`invalid-request`).
           content:
             application/problem+json:
@@ -1447,36 +1447,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
 
-  /ratings:
-    get:
-      operationId: listRatings
-      summary: List the certifications a kids profile's ceilings can be
-      description: TMDB's certifications in the instance's ratings country,
-        for films and for series, least mature first ("not rated" is never
-        one). Both lists are empty while the instance has no ratings.
-      tags: [profiles]
-      responses:
-        "200":
-          description: The scales.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [country, movie, series]
-                properties:
-                  country:
-                    type: string
-                    description: ISO 3166-1 country code.
-                    examples: [US]
-                  movie:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/RatingLevel"
-                  series:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/RatingLevel"
-
   /tags:
     get:
       operationId: listTags
@@ -1521,7 +1491,7 @@ paths:
       description: |
         Changing a profile's own `theme` (alone) is open to that profile;
         everything else is owner profile only. Changing its limits (`kind`,
-        either way, the ceilings, `libraries` or `blockedTags`) needs the
+        either way, `maxAge`, `libraries` or `blockedTags`) needs the
         owner profile's PIN in `pin` when it has one; the owner profile
         itself has no limits.
       tags: [profiles]
@@ -1540,8 +1510,8 @@ paths:
                 $ref: "#/components/schemas/Profile"
         "400":
           description: |
-            No field to change, a field is invalid, ceilings for a standard
-            profile, a ceiling not on GET /ratings' scales, an unknown library
+            No field to change, a field is invalid, an age for a standard
+            profile, an age out of 0 to 21, an unknown library
             or invalid tag, or limits for the owner profile
             (`invalid-request`).
           content:
@@ -2255,7 +2225,7 @@ paths:
       summary: The site's categories, and whether the menu shows libraries
       description: >-
         Sections the operator made from rules (films or series, genres,
-        original language, library, tag, rated at most, except other
+        original language, library, tag, for ages up to, except other
         categories), named in the account's language, in the operator's
         order. Their titles are listed with `GET /titles?category=`. With
         `libraries` false, the operator wants the site's menu without the
@@ -2864,8 +2834,8 @@ paths:
   #
   # These exist only when the operator enables the TMDB catalog (`catalog` in
   # `Info.features`). Overfin reads TMDB's data through Seerr and keeps it;
-  # browsers never contact TMDB. Kids profiles only see titles within their
-  # rating ceiling.
+  # browsers never contact TMDB. Kids profiles only see titles for their
+  # age.
 
   /discover:
     get:
@@ -2990,7 +2960,7 @@ paths:
   #
   # These exist only when the operator enables requests (`requests` in
   # `Info.features`), which also needs the TMDB catalog. Kids profiles only
-  # request titles within their rating ceiling. Approvals happen in Seerr
+  # request titles for their age. Approvals happen in Seerr
   # itself, never here.
 
   /requests:
@@ -3597,21 +3567,21 @@ components:
           description: Kept when set, not used yet (metadata comes in the
             account's language) and not returned.
           examples: [fr-CA]
-        movieCeiling:
-          type: string
-          description: For kids profiles, the highest certification allowed
-            for films, in the instance's ratings country.
-          examples: [PG]
-        seriesCeiling:
-          type: string
-          description: For kids profiles, the same for series (their seasons
-            and episodes included).
-          examples: [TV-Y7]
-        ceilingsNeeded:
+        maxAge:
+          type: integer
+          description: For kids profiles, the age it's held to, films and
+            series alike. Since 0.6 (before, a rating ceiling per kind).
+          examples: [8]
+        ageNeeded:
           type: boolean
-          description: A kids profile without ceilings (they were never
-            picked, or the ratings country changed). It sees nothing until
-            the owner picks them.
+          description: A kids profile without an age yet. It sees nothing
+            until the owner picks one.
+        categories:
+          type: array
+          description: The only categories (GET /categories) the profile
+            sees, by ID; absent, no such limit. Since 0.6.
+          items:
+            type: string
         libraries:
           type: array
           description: The only libraries the profile gets, by ID; absent,
@@ -3631,17 +3601,6 @@ components:
           description: The profile's look; absent, it follows the device.
           enum: [light, dark]
 
-    RatingLevel:
-      type: object
-      required: [name]
-      properties:
-        name:
-          type: string
-          examples: [PG-13]
-        meaning:
-          type: string
-          description: What the certification means, in English, from TMDB.
-
     ProfileCreate:
       type: object
       required: [name]
@@ -3656,17 +3615,18 @@ components:
         language:
           type: string
           pattern: "^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$"
-        movieCeiling:
-          type: string
-          description: Required for a kids profile, refused for any other;
-            one of the films' names from `GET /ratings`. The profile sees
-            only titles with certifications in the ratings country, all
-            within its ceilings; everything else is hidden from it,
-            discovery and images included, and can't be played.
-        seriesCeiling:
-          type: string
-          description: Required for a kids profile, refused for any other;
-            one of the series' names from `GET /ratings`.
+        maxAge:
+          type: integer
+          minimum: 0
+          maximum: 21
+          description: >-
+            Required for a kids profile, refused for any other.
+            The profile sees only titles whose age is this at most, films
+            and series alike. A title's age comes from its ratings: the
+            ratings country's, else the middle of the other countries'
+            (each converted to the youngest age it allows; ratings that only
+            advise parents count as 8). A title without any is hidden from
+            it, discovery and images included, and can't be played.
         libraries:
           type: [array, "null"]
           maxItems: 100
@@ -3686,6 +3646,16 @@ components:
             type: string
             minLength: 1
             maxLength: 128
+        categories:
+          type: [array, "null"]
+          maxItems: 50
+          description: The only categories (GET /categories) the profile
+            sees, by ID; null, no such limit. Its titles are those of any of
+            them (a season or an episode, by its series), and no title that
+            no library has. Owner only, like `libraries`. Since 0.6.
+          items:
+            type: string
+            pattern: "^cat_[a-z2-7]{26}$"
         theme:
           type: string
           description: The profile's look; empty or absent, it follows the
@@ -3704,17 +3674,17 @@ components:
         kind:
           type: string
           description: Turning a kids profile into a standard one ("it grew
-            up") lifts its restrictions, so it needs the PIN like the
-            ceilings. Turning a profile into a kids one needs both ceilings.
+            up") lifts its restrictions, so it needs the PIN like its age.
+            Turning a profile into a kids one needs an age.
           enum: [standard, kids]
         language:
           type: string
           description: '"" clears it.'
           pattern: "^$|^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$"
-        movieCeiling:
-          type: string
-        seriesCeiling:
-          type: string
+        maxAge:
+          type: integer
+          minimum: 0
+          maximum: 21
         libraries:
           type: [array, "null"]
           maxItems: 100
@@ -3734,6 +3704,16 @@ components:
             type: string
             minLength: 1
             maxLength: 128
+        categories:
+          type: [array, "null"]
+          maxItems: 50
+          description: The only categories (GET /categories) the profile
+            sees, by ID; null, no such limit. Its titles are those of any of
+            them (a season or an episode, by its series), and no title that
+            no library has. Owner only, like `libraries`. Since 0.6.
+          items:
+            type: string
+            pattern: "^cat_[a-z2-7]{26}$"
         theme:
           type: string
           description: The profile's look; "" follows the device. Each profile
@@ -3741,7 +3721,7 @@ components:
           enum: ["", light, dark]
         pin:
           description: The owner profile's PIN, required when changing the
-            ceilings, the libraries, the hidden tags or `kind` while the
+            age, the libraries, the hidden tags or `kind` while the
             owner profile has one.
           $ref: "#/components/schemas/Pin"
 

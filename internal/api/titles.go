@@ -176,8 +176,8 @@ func (l Library) visibleTitles(ctx context.Context, p *store.Profile, titles []*
 				out[i] = out[i] || allowed[id]
 			}
 			continue
-		case a != nil && a.Libraries != nil:
-			continue // limited to some libraries: only what they have
+		case a.Limited():
+			continue // limited to some libraries or categories: only what they have
 		case t.Ref.Kind == "item" || t.Ref.TMDB() == "":
 			continue // nothing to show but its copies, and it has none
 		case part && t.Ref.Season == 0 && (t.Ref.Kind == "episode" || t.Have == 0):

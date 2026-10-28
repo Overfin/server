@@ -81,7 +81,7 @@ Nothing is enforced by the UI.
 - **Escaping a kids profile:** PINs are checked on the server, wrong guesses
   slow down and then require the owner to log in again, and the client never
   picks who acts upstream [21, 22, 26]. Kids can only request titles
-  within their rating ceiling, and unknown ratings are refused [28].
+  for their age (from ratings in any country), and titles without one are refused [28].
 - **Exhausting resources:** stream, transcode and rate limits, fixed image
   sizes [31]. Limits fail gently and never cut off another user [32]. Faking
   `X-Forwarded-For` doesn't dodge rate limits, because the client IP comes only

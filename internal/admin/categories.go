@@ -84,25 +84,6 @@ func (p *Panel) categories(w http.ResponseWriter, r *http.Request, _ *session) {
 		p.fail(w, "listing tags", err)
 		return
 	}
-	country, err := st.RatingsCountry(ctx)
-	if err != nil {
-		p.fail(w, "reading the ratings country", err)
-		return
-	}
-	ratings := map[string][]string{}
-	for _, kind := range []string{"movie", "series"} {
-		scale, err := st.RatingScale(ctx, kind, country)
-		if err != nil {
-			p.fail(w, "reading the ratings", err)
-			return
-		}
-		ratings[kind] = []string{}
-		for _, l := range scale {
-			if l.Certification != store.NotRated {
-				ratings[kind] = append(ratings[kind], l.Certification)
-			}
-		}
-	}
 	shown, err := st.LibrariesShown(ctx)
 	if err != nil {
 		p.fail(w, "reading the site's menu", err)
@@ -115,8 +96,7 @@ func (p *Panel) categories(w http.ResponseWriter, r *http.Request, _ *session) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out, "librariesShown": shown, "languages": bases,
-		"genres": gs, "originalLanguages": langs, "libraries": ls, "tags": orEmpty(tags), "ratings": ratings,
-		"ratingsCountry": country})
+		"genres": gs, "originalLanguages": langs, "libraries": ls, "tags": orEmpty(tags)})
 }
 
 func orEmpty(v []string) []string {
@@ -185,6 +165,8 @@ func (p *Panel) readCategory(w http.ResponseWriter, r *http.Request, self string
 		invalid(w, "not valid libraries")
 	case len(ru.Tags) > 30 || slices.ContainsFunc(ru.Tags, func(t string) bool { return t == "" || textclean.Plain(t, 100) != t }):
 		invalid(w, "a tag is plain text, 100 characters at most")
+	case ru.MaxAge != nil && (*ru.MaxAge < 0 || *ru.MaxAge > 21):
+		invalid(w, "an age from 0 to 21")
 	case len(ru.Except) > 30 || slices.ContainsFunc(ru.Except, func(id string) bool { return !ids.Valid("cat", id) || id == self }):
 		invalid(w, "not valid categories to leave out")
 	default:
@@ -194,37 +176,9 @@ func (p *Panel) readCategory(w http.ResponseWriter, r *http.Request, self string
 				return in, false
 			}
 		}
-		if !p.validCeilings(w, r, ru) {
-			return in, false
-		}
 		return in, true
 	}
 	return in, false
-}
-
-// validCeilings checks that "rated at most" names ratings of the ratings
-// country's scales.
-func (p *Panel) validCeilings(w http.ResponseWriter, r *http.Request, ru *store.CategoryRules) bool {
-	country, err := p.Store.RatingsCountry(r.Context())
-	if err != nil {
-		p.fail(w, "reading the ratings country", err)
-		return false
-	}
-	for kind, c := range map[string]string{"movie": ru.MovieCeiling, "series": ru.SeriesCeiling} {
-		if c == "" {
-			continue
-		}
-		scale, err := p.Store.RatingScale(r.Context(), kind, country)
-		if err != nil {
-			p.fail(w, "reading the ratings", err)
-			return false
-		}
-		if !slices.ContainsFunc(scale, func(l store.RatingLevel) bool { return l.Certification == c && c != store.NotRated }) {
-			invalid(w, "not a rating of "+country+"'s")
-			return false
-		}
-	}
-	return true
 }
 
 func (p *Panel) createCategory(w http.ResponseWriter, r *http.Request, s *session) {

@@ -414,7 +414,7 @@ watchlist are always on; the rest is switched on in the control panel.
 | Invitations | Invitations and invite templates | Always on |
 | Migration | Bringing Jellyfin accounts over | Switch |
 | Catalog | The library's index, matched to TMDB | Always on |
-| Discovery | Trending, popular and upcoming titles, from TMDB | With a TMDB token or Seerr; kids profiles see what their ceilings allow |
+| Discovery | Trending, popular and upcoming titles, from TMDB | With a TMDB token or Seerr; kids profiles see what their age allows |
 | Requests | Asking for titles no library has, through Seerr | When Seerr is connected |
 
 Everything people see about a title, its text and its images, comes from

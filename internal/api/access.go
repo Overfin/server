@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -19,17 +20,47 @@ import (
 
 // access is what the profile may see; nil when it may see everything.
 func (l Library) access(ctx context.Context, p *store.Profile) (*store.Access, error) {
-	country := ""
-	if p.Kind == "kids" {
-		var err error
-		if country, err = l.Provisioner.Store.RatingsCountry(ctx); err != nil {
+	a := store.AccessOf(p)
+	st := l.Provisioner.Store
+	acct, err := st.AccountByID(ctx, p.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	if p.Categories == nil && acct.Template.Categories == nil {
+		return a, nil
+	}
+	if a == nil {
+		a = &store.Access{}
+	}
+	// The categories' rules, as listings apply them; one deleted meanwhile
+	// counts for nothing.
+	filters := func(ids []string) ([]*store.CategoryFilter, error) {
+		out := []*store.CategoryFilter{}
+		for _, id := range ids {
+			f, err := st.CategoryFilterOf(ctx, id)
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			} else if err != nil {
+				return nil, err
+			}
+			out = append(out, f)
+		}
+		return out, nil
+	}
+	if p.Categories != nil {
+		if a.Categories, err = filters(p.Categories); err != nil {
 			return nil, err
 		}
 	}
-	return store.AccessOf(p, country), nil
+	if acct.Template.Categories != nil {
+		if a.TemplateCategories, err = filters(acct.Template.Categories); err != nil {
+			return nil, err
+		}
+	}
+	return a, nil
 }
 
-// ceiling is the ratings a kids profile is held to; nil for others.
+// ceiling is the age a kids profile is held to; nil for others.
 func (l Library) ceiling(ctx context.Context, p *store.Profile) (*store.Ceiling, error) {
 	a, err := l.access(ctx, p)
 	if a == nil || err != nil {
@@ -69,8 +100,8 @@ func (l Library) keep(ctx context.Context, p *store.Profile, items []jellyfin.Ra
 			ok = true // people carry no rating, library or tag of their own
 		case indexed[id]:
 			ok = allowed[id]
-		case a.Ceiling != nil:
-			// Not in the index, so not rated: hidden from kids.
+		case a.Ceiling != nil || a.Categories != nil || a.TemplateCategories != nil:
+			// Not in the index, so not rated nor in any category: hidden.
 		case a.Libraries == nil:
 			ok = true
 		default:

@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/overfin/server/internal/cookie"
+	"github.com/overfin/server/internal/ids"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/library"
@@ -52,7 +53,6 @@ func (p Profiles) Register(r *plugin.Registrar) error {
 		"POST /api/v1/profiles/{id}/activate": p.activate,
 		"PUT /api/v1/profiles/{id}/pin":       p.setPIN,
 		"DELETE /api/v1/profiles/{id}/pin":    p.removePIN,
-		"GET /api/v1/ratings":                 p.ratings,
 		"GET /api/v1/tags":                    p.tags,
 		"GET /api/v1/sessions":                p.sessions,
 		"DELETE /api/v1/sessions":             p.endOtherSessions,
@@ -106,14 +106,16 @@ type profileRequest struct {
 	// Theme is the profile's look: "light", "dark", or "" to follow the
 	// device. Each profile may change its own.
 	Theme *string `json:"theme"`
-	// MovieCeiling and SeriesCeiling are a kids profile's highest allowed
-	// certifications, on the ratings country's scales.
-	MovieCeiling  *string `json:"movieCeiling"`
-	SeriesCeiling *string `json:"seriesCeiling"`
+	// MaxAge is a kids profile's age (0 to 21): it sees titles for that
+	// age at most, films and series alike.
+	MaxAge *int `json:"maxAge"`
 	// Libraries are the only libraries the profile gets (null: every
 	// library); BlockedTags, the tags hidden from it (null: none).
 	Libraries   optionalList `json:"libraries"`
 	BlockedTags optionalList `json:"blockedTags"`
+	// Categories are the only categories the profile sees (null: every
+	// title, as far as its other limits go).
+	Categories optionalList `json:"categories"`
 	// PIN is the owner's PIN, needed to change a profile's limits when the
 	// owner has one.
 	PIN string `json:"pin"`
@@ -200,71 +202,41 @@ func validName(s string) bool {
 	return s != "" && len(s) <= 32 && utf8.ValidString(s) && textclean.Plain(s, 32) == s
 }
 
-// scale is the ratings country's scale for a kind (movie, series), from
-// least to most mature, without "not rated", which is never a ceiling.
-func (p Profiles) scale(ctx context.Context, kind string) (string, []store.RatingLevel, error) {
-	country, err := p.Store.RatingsCountry(ctx)
-	if err != nil {
-		return "", nil, err
+// categoriesFrom reads the categories a profile is to see, from a
+// request, else as they are (pr; nil for a new profile). ok is false when
+// one isn't the operator's.
+func (p Profiles) categoriesFrom(ctx context.Context, pr *store.Profile, req profileRequest) (cats []string, ok bool, err error) {
+	if pr != nil {
+		cats = pr.Categories
 	}
-	all, err := p.Store.RatingScale(ctx, kind, country)
-	if err != nil {
-		return "", nil, err
+	if !req.Categories.Set {
+		return cats, true, nil
 	}
-	out := all[:0]
-	for _, l := range all {
-		if l.Certification != store.NotRated {
-			out = append(out, l)
+	if req.Categories.Value == nil {
+		return nil, true, nil
+	}
+	if len(req.Categories.Value) > 50 {
+		return nil, false, nil
+	}
+	cats = []string{}
+	for _, id := range req.Categories.Value {
+		if !ids.Valid("cat", id) {
+			return nil, false, nil
+		}
+		if _, err := p.Store.CategoryByID(ctx, id); errors.Is(err, store.ErrNotFound) {
+			return nil, false, nil
+		} else if err != nil {
+			return nil, false, err
+		}
+		if !slices.Contains(cats, id) {
+			cats = append(cats, id)
 		}
 	}
-	return country, out, nil
+	return cats, true, nil
 }
 
-// validCeilings checks a kids profile's ceilings against the scales; ok is
-// false when either isn't on its scale.
-func (p Profiles) validCeilings(ctx context.Context, movie, series string) (ok bool, err error) {
-	for kind, cert := range map[string]string{"movie": movie, "series": series} {
-		_, levels, err := p.scale(ctx, kind)
-		if err != nil {
-			return false, err
-		}
-		if !slices.ContainsFunc(levels, func(l store.RatingLevel) bool { return l.Certification == cert }) {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-// ratings lists the certifications a kids profile's ceilings can be, for
-// films and for series, from least to most mature, in the ratings country.
-// Both lists are empty while Overfin has no ratings (no Seerr).
-func (p Profiles) ratings(w http.ResponseWriter, r *http.Request) {
-	if p.Sessions.Current(w, r) == nil {
-		return
-	}
-	type levelJSON struct {
-		Name    string `json:"name"`
-		Meaning string `json:"meaning,omitempty"`
-	}
-	out := struct {
-		Country string      `json:"country"`
-		Movie   []levelJSON `json:"movie"`
-		Series  []levelJSON `json:"series"`
-	}{Movie: []levelJSON{}, Series: []levelJSON{}}
-	for kind, dst := range map[string]*[]levelJSON{"movie": &out.Movie, "series": &out.Series} {
-		country, levels, err := p.scale(r.Context(), kind)
-		if err != nil {
-			p.Logger.Error("listing ratings failed", "err", err)
-			problem.Send(w, problem.Internal, "")
-			return
-		}
-		out.Country = country
-		for _, l := range levels {
-			*dst = append(*dst, levelJSON{Name: l.Certification, Meaning: l.Meaning})
-		}
-	}
-	writeOK(w, out)
-}
+// validAge checks a kids profile's age, when one is given.
+func validAge(age *int) bool { return age == nil || (*age >= 0 && *age <= 21) }
 
 // tags lists the library's tags, for the owner choosing which to hide from
 // a profile.
@@ -304,9 +276,9 @@ func (p Profiles) create(w http.ResponseWriter, r *http.Request) {
 	if req.Kind != nil {
 		kind = *req.Kind
 	}
-	// A kids profile needs both ceilings; any other profile can't have any.
+	// A kids profile needs an age; any other profile can't have one.
 	kids := kind == "kids"
-	if (kind != "standard" && !kids) || (kids != (req.MovieCeiling != nil)) || (kids != (req.SeriesCeiling != nil)) {
+	if (kind != "standard" && !kids) || kids != (req.MaxAge != nil) || !validAge(req.MaxAge) {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
@@ -333,15 +305,17 @@ func (p Profiles) create(w http.ResponseWriter, r *http.Request) {
 		np.Libraries, np.BlockedTags = libs, tags
 	}
 	if kids {
-		np.MovieCeiling, np.SeriesCeiling = *req.MovieCeiling, *req.SeriesCeiling
-		if ok, err := p.validCeilings(r.Context(), np.MovieCeiling, np.SeriesCeiling); err != nil {
-			p.Logger.Error("listing ratings failed", "err", err)
-			problem.Send(w, problem.Internal, "")
-			return
-		} else if !ok {
-			problem.Send(w, problem.InvalidRequest, "unknown rating")
-			return
-		}
+		np.MaxAge = req.MaxAge
+	}
+	if cats, ok, err := p.categoriesFrom(r.Context(), nil, req); err != nil {
+		p.Logger.Error("listing categories failed", "err", err)
+		problem.Send(w, problem.Internal, "")
+		return
+	} else if !ok {
+		problem.Send(w, problem.InvalidRequest, "unknown category")
+		return
+	} else {
+		np.Categories = cats
 	}
 	prof, err := p.Provisioner.AddProfile(r.Context(), c.Account.ID, np, c.Account.Template.ProfileLimit())
 	switch {
@@ -370,8 +344,8 @@ func (p Profiles) create(w http.ResponseWriter, r *http.Request) {
 func (p Profiles) update(w http.ResponseWriter, r *http.Request) {
 	var req profileRequest
 	if !decode(r, &req) ||
-		(req.Name == nil && req.Language == nil && req.Theme == nil && req.Kind == nil && req.MovieCeiling == nil &&
-			req.SeriesCeiling == nil && !req.Libraries.Set && !req.BlockedTags.Set) ||
+		(req.Name == nil && req.Language == nil && req.Theme == nil && req.Kind == nil && req.MaxAge == nil &&
+			!req.Libraries.Set && !req.BlockedTags.Set && !req.Categories.Set) || !validAge(req.MaxAge) ||
 		(req.Theme != nil && *req.Theme != "" && *req.Theme != "light" && *req.Theme != "dark") ||
 		(req.Name != nil && !validName(*req.Name)) ||
 		(req.Language != nil && *req.Language != "" && !languageTagRe.MatchString(*req.Language)) ||
@@ -392,7 +366,7 @@ func (p Profiles) update(w http.ResponseWriter, r *http.Request) {
 	}
 	// A profile's own look is its own business; the rest is the owner's.
 	ownLook := req.Theme != nil && req.Name == nil && req.Language == nil && req.Kind == nil &&
-		req.MovieCeiling == nil && req.SeriesCeiling == nil && !req.Libraries.Set && !req.BlockedTags.Set &&
+		req.MaxAge == nil && !req.Libraries.Set && !req.BlockedTags.Set && !req.Categories.Set &&
 		c.Profile != nil && c.Profile.ID == pr.ID
 	if !c.IsOwner() && !ownLook {
 		problem.Send(w, problem.OwnerOnly, "")
@@ -400,7 +374,7 @@ func (p Profiles) update(w http.ResponseWriter, r *http.Request) {
 	}
 	// Limits first: they can fail on the PIN, and nothing else should
 	// change then.
-	if req.Kind != nil || req.MovieCeiling != nil || req.SeriesCeiling != nil || req.Libraries.Set || req.BlockedTags.Set {
+	if req.Kind != nil || req.MaxAge != nil || req.Libraries.Set || req.BlockedTags.Set || req.Categories.Set {
 		if !p.changeLimits(w, r, c, pr, req) {
 			return
 		}
@@ -433,11 +407,11 @@ func (p Profiles) update(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, toProfileJSON(pr))
 }
 
-// changeLimits makes a profile a kids profile, changes its ceilings, or
+// changeLimits makes a profile a kids profile, changes its age, or
 // makes it a standard profile again, and changes the libraries it gets and
 // the tags hidden from it. Only the owner can, with the owner's PIN if
 // there is one. It writes the problem and returns false on failure.
-// Overfin holds kids profiles to their ceilings itself: Jellyfin isn't told.
+// Overfin holds kids profiles to their age itself: Jellyfin isn't told.
 func (p Profiles) changeLimits(w http.ResponseWriter, r *http.Request, c *Caller, pr *store.Profile, req profileRequest) bool {
 	ctx := r.Context()
 	if pr.Owner {
@@ -448,25 +422,18 @@ func (p Profiles) changeLimits(w http.ResponseWriter, r *http.Request, c *Caller
 	if req.Kind != nil {
 		kind = *req.Kind
 	}
-	movie, series := pr.MovieCeiling, pr.SeriesCeiling
-	if req.MovieCeiling != nil {
-		movie = *req.MovieCeiling
-	}
-	if req.SeriesCeiling != nil {
-		series = *req.SeriesCeiling
+	age := pr.MaxAge
+	if req.MaxAge != nil {
+		age = req.MaxAge
 	}
 	if kind == "standard" {
-		if req.MovieCeiling != nil || req.SeriesCeiling != nil {
-			problem.Send(w, problem.InvalidRequest, "a standard profile has no ceilings")
+		if req.MaxAge != nil {
+			problem.Send(w, problem.InvalidRequest, "a standard profile has no age")
 			return false
 		}
-		movie, series = "", ""
-	} else if ok, err := p.validCeilings(ctx, movie, series); err != nil {
-		p.Logger.Error("listing ratings failed", "err", err)
-		problem.Send(w, problem.Internal, "")
-		return false
-	} else if !ok {
-		problem.Send(w, problem.InvalidRequest, "unknown rating")
+		age = nil
+	} else if age == nil {
+		problem.Send(w, problem.InvalidRequest, "a kids profile needs an age")
 		return false
 	}
 	libs, tags, ok, err := p.accessFrom(ctx, c, pr, req)
@@ -478,10 +445,23 @@ func (p Profiles) changeLimits(w http.ResponseWriter, r *http.Request, c *Caller
 		problem.Send(w, problem.InvalidRequest, "unknown library or invalid tag")
 		return false
 	}
+	cats, ok, err := p.categoriesFrom(ctx, pr, req)
+	if err != nil {
+		p.Logger.Error("listing categories failed", "err", err)
+		problem.Send(w, problem.Internal, "")
+		return false
+	} else if !ok {
+		problem.Send(w, problem.InvalidRequest, "unknown category")
+		return false
+	}
 	if !p.checkPIN(w, ctx, c.Account.ID, c.Owner.ID, req.PIN) {
 		return false
 	}
-	if err := p.Store.SetKind(ctx, c.Account.ID, pr.ID, kind, movie, series); err != nil {
+	if err := p.Store.SetProfileCategories(ctx, c.Account.ID, pr.ID, cats); err != nil {
+		problem.Send(w, problem.NotFound, "")
+		return false
+	}
+	if err := p.Store.SetKind(ctx, c.Account.ID, pr.ID, kind, age); err != nil {
 		problem.Send(w, problem.NotFound, "")
 		return false
 	}

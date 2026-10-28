@@ -38,14 +38,13 @@ type accountJSON struct {
 }
 
 type adminProfile struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Kind          string `json:"kind"`
-	Owner         bool   `json:"owner"`
-	MovieCeiling  string `json:"movieCeiling,omitempty"`
-	SeriesCeiling string `json:"seriesCeiling,omitempty"`
-	HasPIN        bool   `json:"hasPin"`
-	PINLocked     bool   `json:"pinLocked"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Owner     bool   `json:"owner"`
+	MaxAge    *int   `json:"maxAge,omitempty"`
+	HasPIN    bool   `json:"hasPin"`
+	PINLocked bool   `json:"pinLocked"`
 }
 
 type adminSession struct {
@@ -91,7 +90,7 @@ func (p *Panel) accountJSON(r *http.Request, a *store.Account) (accountJSON, err
 			ownerName = pr.Name
 		}
 		out.Profiles = append(out.Profiles, adminProfile{ID: pr.ID, Name: pr.Name, Kind: pr.Kind, Owner: pr.Owner,
-			MovieCeiling: pr.MovieCeiling, SeriesCeiling: pr.SeriesCeiling, HasPIN: pr.HasPIN, PINLocked: locks[pr.ID]})
+			MaxAge: pr.MaxAge, HasPIN: pr.HasPIN, PINLocked: locks[pr.ID]})
 	}
 	sessions, err := p.Store.Sessions(ctx, a.ID)
 	if err != nil {

@@ -24,7 +24,7 @@ func TestCategoriesPanel(t *testing.T) {
 		`{"names":{"en":"<b>x</b>"},"rules":{}}`,
 		`{"names":{"en":"X"},"rules":{"kinds":["music"]}}`,
 		`{"names":{"en":"X"},"rules":{"except":["cat_aaaaaaaaaaaaaaaaaaaaaaaaaa"]}}`,
-		`{"names":{"en":"X"},"rules":{"movieCeiling":"PG"}}`, // no US scale here
+		`{"names":{"en":"X"},"rules":{"maxAge":30}}`,
 		`{"names":{"en":"X"},"rules":{},"x":1}`,
 	} {
 		if rec := b.do("POST", "/admin/api/categories", bad, nil); rec.Code != 400 {
