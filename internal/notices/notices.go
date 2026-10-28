@@ -245,12 +245,15 @@ func (n *Notifier) name(ctx context.Context, a *store.Account) string {
 }
 
 // Payload is what the webhook receives. Content and Text carry the
-// notice in words, as Discord and Slack read them.
+// notice in words, as Discord and Slack read them. AllowedMentions keeps
+// Discord from pinging anyone a name in the words would mention: names
+// are chosen by the people they belong to ("@everyone", say).
 type Payload struct {
-	Event   string `json:"event"` // account.joined, account.expiring, account.expired, test
-	Content string `json:"content"`
-	Text    string `json:"text"`
-	Account *struct {
+	Event           string          `json:"event"` // account.joined, account.expiring, account.expired, test
+	Content         string          `json:"content"`
+	Text            string          `json:"text"`
+	AllowedMentions allowedMentions `json:"allowed_mentions"`
+	Account         *struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"account,omitempty"`
@@ -258,10 +261,16 @@ type Payload struct {
 	At        string `json:"at"`
 }
 
+// allowedMentions is Discord's: an empty list, no mentions at all.
+type allowedMentions struct {
+	Parse []string `json:"parse"`
+}
+
 // post sends an event to the webhook, signed when there's a key:
 // X-Overfin-Signature is "sha256=" and the HMAC-SHA256 of the body, in hex.
 func (n *Notifier) post(ctx context.Context, address string, ev Event, v emails.Vars, text string) error {
-	p := Payload{Event: "test", Content: text, Text: text, At: time.Now().UTC().Format(time.RFC3339)}
+	p := Payload{Event: "test", Content: text, Text: text, AllowedMentions: allowedMentions{Parse: []string{}},
+		At: time.Now().UTC().Format(time.RFC3339)}
 	if ev.Account != nil {
 		p.Event = "account." + ev.Kind
 		p.Account = &struct {
