@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"math"
 	"strings"
 	"time"
@@ -78,52 +79,64 @@ func (s *Store) FactsOfItems(ctx context.Context, itemIDs []string) (map[string]
 // as much in its tastes.
 const halfLife = 180 * 24 * time.Hour
 
+// watchedTitles are the films and series a profile watched (to the end,
+// or started; a series by any of its episodes), in SQL, with when: its
+// one argument is the profile's ID.
+const watchedTitles = `SELECT CASE WHEN title LIKE 'movie/tmdb/%' THEN 'movie' ELSE 'series' END AS kind,
+		CASE WHEN title LIKE 'movie/tmdb/%' THEN substr(title, 12)
+			ELSE substr(title, 13, CASE WHEN instr(substr(title, 13), '/') > 0
+				THEN instr(substr(title, 13), '/') - 1 ELSE length(title) END) END AS tmdb,
+		coalesce(last_played_at, updated_at) AS at
+	FROM profile_titles
+	WHERE profile_id = ? AND (played = 1 OR position_ms > 0)
+		AND (title LIKE 'movie/tmdb/%' OR title LIKE 'series/tmdb/%')`
+
 // WatchedGenres weighs the genres of the films and series a profile
 // watched (to the end, or started; a series by any of its episodes), the
 // recent more than the old, and gives those titles' keys.
 func (s *Store) WatchedGenres(ctx context.Context, profileID string, now time.Time) (map[int]float64, map[string]bool, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT w.kind, w.tmdb, max(w.at) FROM (
-			SELECT CASE WHEN title LIKE 'movie/tmdb/%' THEN 'movie' ELSE 'series' END AS kind,
-				CASE WHEN title LIKE 'movie/tmdb/%' THEN substr(title, 12)
-					ELSE substr(title, 13, CASE WHEN instr(substr(title, 13), '/') > 0
-						THEN instr(substr(title, 13), '/') - 1 ELSE length(title) END) END AS tmdb,
-				coalesce(last_played_at, updated_at) AS at
-			FROM profile_titles
-			WHERE profile_id = ? AND (played = 1 OR position_ms > 0)
-				AND (title LIKE 'movie/tmdb/%' OR title LIKE 'series/tmdb/%')) w
-		GROUP BY w.kind, w.tmdb`, profileID)
-	if err != nil {
-		return nil, nil, err
-	}
 	type seen struct {
 		kind, tmdb string
 		weight     float64
 	}
 	var titles []seen
-	for rows.Next() {
+	err := s.each(ctx, func(rows *sql.Rows) error {
 		var t seen
 		var at int64
 		if err := rows.Scan(&t.kind, &t.tmdb, &at); err != nil {
-			rows.Close()
-			return nil, nil, err
+			return err
 		}
 		age := now.Sub(time.Unix(at, 0))
 		t.weight = math.Pow(0.5, max(age.Hours(), 0)/halfLife.Hours())
 		titles = append(titles, t)
+		return nil
+	}, `SELECT w.kind, w.tmdb, max(w.at) FROM (`+watchedTitles+`) w GROUP BY w.kind, w.tmdb`, profileID)
+	if err != nil {
+		return nil, nil, err
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
+	// Their genres, all at once: a query for each title took a fifth of
+	// a second for a profile that watched thousands.
+	genres := map[string][]int{}
+	err = s.each(ctx, func(rows *sql.Rows) error {
+		var kind, tmdb string
+		var g int
+		if err := rows.Scan(&kind, &tmdb, &g); err != nil {
+			return err
+		}
+		genres[kind+"/tmdb/"+tmdb] = append(genres[kind+"/tmdb/"+tmdb], g)
+		return nil
+	}, `SELECT g.kind, g.tmdb, g.genre FROM catalog_title_genres g
+		WHERE (g.kind, g.tmdb) IN (SELECT w.kind, w.tmdb FROM (`+watchedTitles+`) w)
+		ORDER BY g.kind, g.tmdb, g.genre`, profileID)
+	if err != nil {
 		return nil, nil, err
 	}
 	out, keys := map[int]float64{}, map[string]bool{}
 	for _, t := range titles {
-		keys[t.kind+"/tmdb/"+t.tmdb] = true
-		genres, err := s.ids(ctx, `SELECT genre FROM catalog_title_genres WHERE kind = ? AND tmdb = ?`, t.kind, t.tmdb)
-		if err != nil {
-			return nil, nil, err
-		}
-		for _, g := range genres {
-			out[atoi(g)] += t.weight
+		key := t.kind + "/tmdb/" + t.tmdb
+		keys[key] = true
+		for _, g := range genres[key] {
+			out[g] += t.weight
 		}
 	}
 	return out, keys, nil
