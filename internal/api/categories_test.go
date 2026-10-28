@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/overfin/server/internal/store"
 )
@@ -123,5 +124,51 @@ func TestProfileLimitedToCategories(t *testing.T) {
 	get(t, srv, "/api/v1/titles?kind=movie", &page)
 	if len(page.Items) != 0 {
 		t.Errorf("after the category went: %+v", page.Items)
+	}
+}
+
+// A title's similar titles: those a library has first, then, when the
+// operator shows titles no library has on the home page, the others.
+func TestSimilarTitles(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{store: &st})
+	ctx := context.Background()
+	now := time.Now()
+	st.PutCatalog(ctx, []store.CatalogItem{
+		{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "949", LibraryID: fmt.Sprintf("%032x", 0xf1)},
+		{ID: fmt.Sprintf("%032x", 2), Kind: "movie", Name: "Collateral", SortName: "collateral", TMDB: "1538", LibraryID: fmt.Sprintf("%032x", 0xf1)},
+	}, 1)
+	st.RefreshTitleKeys(ctx)
+	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
+	st.PutTitles(ctx, []store.Title{{Kind: "movie", TMDB: "13", Name: "Missing one", Year: 2000}, {Kind: "movie", TMDB: "1538", Name: "Collateral", Year: 2004}}, now)
+	st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "949", Name: "Heat", Year: 1995}, []byte(`{"similar":["13","1538"]}`), now)
+	st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "1538", Name: "Collateral", Year: 2004}, []byte(`{}`), now)
+	st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "13", Name: "Missing one", Year: 2000}, []byte(`{}`), now)
+	st.SetTitleRatings(ctx, store.RatedTitle{Kind: "movie", TMDB: "13"}, nil, "2000-01-01", "2000-06-01", now)
+
+	names := func() []string {
+		t.Helper()
+		var page struct{ Items []struct{ Name string } }
+		if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_949/similar", &page); code != 200 {
+			t.Fatalf("similar: %d", code)
+		}
+		var out []string
+		for _, it := range page.Items {
+			out = append(out, it.Name)
+		}
+		return out
+	}
+	if got := names(); strings.Join(got, ",") != "Collateral" {
+		t.Errorf("library only: %v", got)
+	}
+	st.SetHomeMissing(ctx, true)
+	if got := names(); strings.Join(got, ",") != "Collateral,Missing one" {
+		t.Errorf("with titles no library has: %v", got)
+	}
+	if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_1538/similar", nil); code != 200 {
+		t.Errorf("none: %d", code)
+	}
+	if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_999999/similar", nil); code != 404 {
+		t.Errorf("unknown title: %d", code)
 	}
 }

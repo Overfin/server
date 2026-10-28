@@ -25,6 +25,9 @@ type TitleDetails struct {
 	Names []string `json:"names,omitempty"`
 	// TVDB is a series' TheTVDB ID, from TMDB; "" when it doesn't say.
 	TVDB string `json:"tvdb,omitempty"`
+	// Similar are the TMDB IDs of the titles of its kind TMDB recommends
+	// with it, best first.
+	Similar []string `json:"similar,omitempty"`
 }
 
 // CastMember is someone in a title's cast.

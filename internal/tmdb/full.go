@@ -49,6 +49,9 @@ type Full struct {
 	// TVDB is a series' TheTVDB ID, which Sonarr knows it by; 0 when TMDB
 	// doesn't say.
 	TVDB int
+	// Similar are the titles of its kind TMDB recommends with it, best
+	// first (its first page: 20 at most).
+	Similar []Title
 }
 
 // maxNames caps how many other names a title keeps.
@@ -106,6 +109,9 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 		ExternalIDs struct {
 			TVDB int `json:"tvdb_id"`
 		} `json:"external_ids"`
+		Recommendations struct {
+			Results []rawTitle `json:"results"`
+		} `json:"recommendations"`
 		Translations struct {
 			Translations []struct {
 				Data struct {
@@ -116,9 +122,9 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 		} `json:"translations"`
 	}
 	// The certifications and release dates come along: one request.
-	extra := "credits,images,alternative_titles,translations,release_dates"
+	extra := "credits,images,alternative_titles,translations,release_dates,recommendations"
 	if kind == "series" {
-		extra = "aggregate_credits,images,alternative_titles,translations,content_ratings,external_ids"
+		extra = "aggregate_credits,images,alternative_titles,translations,content_ratings,external_ids,recommendations"
 	}
 	q := c.withLanguage(url.Values{"append_to_response": {extra}, "include_image_language": {imageLanguages(lang)}})
 	path := "/" + k + "/" + strconv.Itoa(tmdbID)
@@ -207,6 +213,18 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 	out.Artwork = Artwork{Poster: t.Poster, Backdrop: t.Backdrop, Logo: pick(raw.Images.Logos, lang)}
 	if out.Artwork.Poster == "" {
 		out.Artwork.Poster = pick(raw.Images.Posters, lang)
+	}
+	// Similar titles, named like any list (in a regional language, what
+	// its translation lacks from the language alone).
+	recs := make([]*rawTitle, 0, len(raw.Recommendations.Results))
+	for i := range raw.Recommendations.Results {
+		recs = append(recs, &raw.Recommendations.Results[i])
+	}
+	c.fillTitles(ctx, path+"/recommendations", nil, recs)
+	for _, r := range recs {
+		if s, ok := r.title(kind); ok && s.TMDBID != tmdbID {
+			out.Similar = append(out.Similar, s)
+		}
 	}
 	return out, nil
 }

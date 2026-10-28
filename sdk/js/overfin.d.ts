@@ -418,6 +418,8 @@ export class Overfin {
   libraries(): Promise<Library[]>;
   /** A title's page, in a library or not. */
   title(id: string): Promise<Title>;
+  /** Titles like this one: those the server has first, then others when the operator shows them (since 0.6). */
+  similar(id: string, limit?: number): Promise<TitleSummary[]>;
   person(id: string): Promise<Person>;
   /**
    * Several GET calls in one request: each a path as the methods use them

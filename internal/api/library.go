@@ -69,6 +69,7 @@ func (l Library) Register(r *plugin.Registrar) error {
 		"GET /api/v1/titles/latest":       l.latestTitles,
 		"GET /api/v1/titles/continue":     l.continueTitles,
 		"GET /api/v1/titles/{id}":         l.title,
+		"GET /api/v1/titles/{id}/similar": l.similar,
 		"GET /api/v1/titles/{id}/up-next": l.upNext,
 		"GET /api/v1/people/{id}":         l.person,
 		"POST /api/v1/search":             l.search,
