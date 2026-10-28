@@ -801,7 +801,7 @@ function tmdbCard(rt) {
     setting('Token', rt.token.inEnv ? keyHint : 'TMDB\'s API Read Access Token.', h('div', { class: 'row' }, key, testKey, removeKey)),
     !rt.token.inEnv && !rt.token.set && h('p', { class: 'hint' }, keyHint),
     keySt,
-    setting('Ratings country', 'Kids profiles\' limits use this country\'s ratings. A title with none there is hidden from them.', country),
+    setting('Ratings country', 'Titles\' ages, for kids profiles and categories, go by this country\'s ratings first; a title with none there gets the middle of the other countries\'.', country),
     setting('Titles shown', 'Of those no library has, in discovery and requests. A title a library has is always shown.', shown),
   ],
   [st, save]);

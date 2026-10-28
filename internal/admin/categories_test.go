@@ -14,6 +14,11 @@ import (
 func TestCategoriesPanel(t *testing.T) {
 	ctx := context.Background()
 	_, b, db, _ := signedInPanel(t)
+	// A new server, its library not read yet: every list is a list, as the
+	// panel's editor reads them.
+	if rec := b.do("GET", "/admin/api/categories", "", nil); rec.Code != 200 || strings.Contains(rec.Body.String(), "null") {
+		t.Errorf("empty server: %d %s", rec.Code, rec.Body)
+	}
 	db.PutCatalog(ctx, []store.CatalogItem{
 		{ID: strings.Repeat("0", 31) + "a", Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "1"},
 		{ID: strings.Repeat("0", 31) + "b", Kind: "series", Name: "Bluey", SortName: "bluey", TMDB: "2"},
