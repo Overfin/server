@@ -2176,18 +2176,19 @@ paths:
     parameters:
       - $ref: "#/components/parameters/TitleId"
     get:
-      x-status: planned
       operationId: listSimilar
-      summary: Items like this one
-      description: Where the suggestions come from (Jellyfin, TMDB, or
-        Overfin's own scoring) is the operator's choice; the shape is always
-        the same.
-      tags: [library]
+      summary: Titles like this one
+      description: >-
+        The titles TMDB recommends with a film or a series (with a season or
+        an episode, with its series), as the profile may see them: those a
+        library has first, then, when the operator shows titles no library
+        has on the home page, the others. 20 at most. Since 0.6.
+      tags: [titles]
       parameters:
         - $ref: "#/components/parameters/Limit"
       responses:
         "200":
-          description: Similar items in the library.
+          description: Similar titles, best first within each group.
           content:
             application/json:
               schema:

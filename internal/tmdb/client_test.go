@@ -62,7 +62,7 @@ func fakeTMDB(t *testing.T) *Client {
 			io.WriteString(w, `{"id":1399,"name":"Thrones","first_air_date":"2011-04-17","seasons":[{"season_number":1,"name":"Season 1","episode_count":10,"air_date":"2011-04-17"}],
 				"content_ratings":{"results":[{"iso_3166_1":"US","rating":"TV-MA"}]}}`)
 		case "/3/movie/550":
-			if r.URL.Query().Get("append_to_response") != "credits,images,alternative_titles,translations,release_dates" || r.URL.Query().Get("language") != "fr" ||
+			if r.URL.Query().Get("append_to_response") != "credits,images,alternative_titles,translations,release_dates,recommendations" || r.URL.Query().Get("language") != "fr" ||
 				r.URL.Query().Get("include_image_language") != "fr,null,en" {
 				w.WriteHeader(http.StatusBadRequest)
 				return
@@ -100,7 +100,7 @@ func fakeTMDB(t *testing.T) *Client {
 			}
 			io.WriteString(w, `{"movie_results":[],"tv_results":[{"id":1399}]}`)
 		case "/3/tv/1400":
-			if r.URL.Query().Get("append_to_response") != "aggregate_credits,images,alternative_titles,translations,content_ratings,external_ids" {
+			if r.URL.Query().Get("append_to_response") != "aggregate_credits,images,alternative_titles,translations,content_ratings,external_ids,recommendations" {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}

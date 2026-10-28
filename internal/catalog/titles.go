@@ -273,6 +273,13 @@ func (a *Titles) page(ctx context.Context, src TitleSource, kind string, id int,
 			AirDate: se.AirDate})
 		seasons = append(seasons, se.Number)
 	}
+	// Similar titles: kept like a list's, so they can be shown.
+	similar := make([]store.Title, 0, len(full.Similar))
+	for _, t := range full.Similar {
+		st := StoreTitle(t)
+		similar = append(similar, st)
+		det.Similar = append(det.Similar, st.TMDB)
+	}
 	raw, err := json.Marshal(det)
 	if err != nil {
 		return nil, err
@@ -282,6 +289,9 @@ func (a *Titles) page(ctx context.Context, src TitleSource, kind string, id int,
 		Popularity: full.Popularity}
 	for _, g := range full.GenreIDs {
 		title.Genres = append(title.Genres, store.TitleGenre{ID: g.ID, Name: g.Name})
+	}
+	if err := a.Store.PutTitles(ctx, similar, a.clock()); err != nil {
+		return nil, err
 	}
 	if err := a.Store.SetTitleDetails(ctx, title, raw, a.clock()); err != nil {
 		return nil, err
