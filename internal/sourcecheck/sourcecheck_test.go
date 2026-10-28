@@ -21,6 +21,12 @@ func invisible(r rune) bool {
 	return false
 }
 
+// hidden says whether a folder under root is hidden (.git, an editor's or
+// an agent's, with copies of the repository inside): not walked.
+func hidden(root, path string, d fs.DirEntry) bool {
+	return path != root && strings.HasPrefix(d.Name(), ".")
+}
+
 func TestNoInvisibleCharactersInSource(t *testing.T) {
 	root := filepath.Join("..", "..")
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -29,7 +35,7 @@ func TestNoInvisibleCharactersInSource(t *testing.T) {
 		}
 		// Vendored third-party files are checked against their published
 		// hashes instead.
-		if d.IsDir() && (d.Name() == ".git" || d.Name() == "node_modules" || d.Name() == "vendor") {
+		if d.IsDir() && (hidden(root, path, d) || d.Name() == "node_modules" || d.Name() == "vendor") {
 			return filepath.SkipDir
 		}
 		if d.IsDir() || !(strings.HasSuffix(path, ".go") || strings.HasSuffix(path, ".sql") ||
@@ -64,7 +70,7 @@ func TestCoreDoesNotBundleTheWebClient(t *testing.T) {
 			return err
 		}
 		rel, _ := filepath.Rel(root, path)
-		if d.IsDir() && (d.Name() == ".git" || rel == "cmd" || rel == "examples") {
+		if d.IsDir() && (hidden(root, path, d) || rel == "cmd" || rel == "examples") {
 			return filepath.SkipDir
 		}
 		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
