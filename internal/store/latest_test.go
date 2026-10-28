@@ -112,3 +112,48 @@ func TestListingsUseTMDB(t *testing.T) {
 		t.Errorf("TMDB's genre: %v", got)
 	}
 }
+
+// The genres listings go by follow each title's page: those kept before
+// migration 060, then each page as it's replaced, until it's deleted.
+func TestDetailsGenresInStep(t *testing.T) {
+	s := openAt(t, 59)
+	ctx := context.Background()
+	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
+	s.PutCatalog(ctx, []CatalogItem{
+		{ID: id(0), Kind: "movie", Name: "A", SortName: "a", TMDB: "1"},
+		{ID: id(1), Kind: "movie", Name: "B", SortName: "b", TMDB: "2"},
+	}, 1)
+	old := time.Now().Add(-time.Hour)
+	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "1", Name: "1"}, []byte(`{"genres":["Drama","Crime"]}`), old)
+	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "2", Name: "2"}, []byte(`{"genres":null}`), old)
+	if err := s.migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	genre := func(g string) []string {
+		t.Helper()
+		got, err := s.ListCatalog(ctx, ListQuery{Kinds: []string{"movie"}, Genres: []string{g}, Sort: "name", Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := genre("Crime"); !slices.Equal(got, []string{id(0)}) {
+		t.Errorf("kept before: %v", got)
+	}
+	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "1", Name: "1"}, []byte(`{"genres":["Comedy"]}`), time.Now())
+	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "2", Name: "2"}, []byte(`{"genres":["Crime"]}`), time.Now())
+	if got := genre("Crime"); !slices.Equal(got, []string{id(1)}) {
+		t.Errorf("replaced: %v", got)
+	}
+	if got, _ := s.CatalogGenres(ctx, "", nil, nil); !slices.Equal(got, []GenreCount{{"Comedy", 1}, {"Crime", 1}}) {
+		t.Errorf("genres: %v", got)
+	}
+	if err := s.ForgetTMDB(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	s.db.QueryRowContext(ctx, `SELECT count(*) FROM catalog_details_genres`).Scan(&n)
+	if n != 0 {
+		t.Errorf("%d genres left after the pages went", n)
+	}
+}
