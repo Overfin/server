@@ -3,7 +3,7 @@
 package main
 
 import (
-	overfin "github.com/overfin/server"
+	overfin "github.com/overfin/server/overfin"
 	web "github.com/overfin/web"
 )
 
