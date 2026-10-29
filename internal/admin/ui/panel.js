@@ -1713,7 +1713,7 @@ async function identificationView(selected = '') {
       h('td', {}, h('div', { class: 'name' }, titleOf(t)), h('div', { class: 'hint' }, t.folderName || t.fileName || '')),
       h('td', { class: 'hide-narrow' }, t.kind === 'movie' ? 'Film' : 'Series'),
       h('td', {}, t.overridden ? badge('Fixed here', 'ok')
-        : t.reasons.length ? badge(t.reasons.length === 1 ? reasonName(t.reasons[0].code) : `${t.reasons.length} doubts`, 'warn') : h('span', { class: 'hint' }, 'Looks right')))));
+        : t.reasons.length ? badge(t.reasons.length === 1 ? reasonName(t.reasons[0].code) : `${t.reasons.length} doubts`, 'warn') : h('span', { class: 'hint nowrap' }, 'Looks right')))));
     if (!shown.length) tbody.append(h('tr', {}, h('td', { colspan: '3', class: 'empty' }, filter.value === 'suspects' ? 'Nothing to check: every title looks right.' : 'Nothing matches.')));
     if (shown.length > 500) tbody.append(h('tr', {}, h('td', { colspan: '3', class: 'empty' }, `${shown.length - 500} more: search to narrow.`)));
     const current = items.find((t) => t.itemId === selected);
