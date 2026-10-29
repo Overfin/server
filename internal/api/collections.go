@@ -39,11 +39,22 @@ func (l Library) collections(w http.ResponseWriter, r *http.Request) {
 		l.storeError(w, err)
 		return
 	}
-	out := []library.Collection{}
+	var shown []store.Collection
 	for _, c := range all {
-		if n := have[c.ID]; n > 0 {
-			out = append(out, collectionOf(c, n))
+		if have[c.ID] > 0 {
+			shown = append(shown, c)
 		}
+	}
+	films, err := l.collectionFilms(ctx, p, shown)
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	out := []library.Collection{}
+	for _, c := range shown {
+		col := collectionOf(c, have[c.ID])
+		col.Films = films[c.ID]
+		out = append(out, col)
 	}
 	writeOK(w, map[string]any{"items": out})
 }
@@ -91,7 +102,47 @@ func (l Library) collection(w http.ResponseWriter, r *http.Request) {
 	out := collectionOf(*c, have[id])
 	out.Overview = c.Overview
 	out.Items = films
+	out.Films = len(films)
 	writeOK(w, out)
+}
+
+// collectionFilms says, for each collection, how many of its films the
+// profile sees on its page: its limits and the titles shown, as there.
+func (l Library) collectionFilms(ctx context.Context, p *store.Profile, cs []store.Collection) (map[int]int, error) {
+	var keys []string
+	for _, c := range cs {
+		for _, film := range c.Parts {
+			keys = append(keys, "movie/tmdb/"+film)
+		}
+	}
+	out := make(map[int]int, len(cs))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	infos, err := l.Provisioner.Store.TitleInfos(ctx, keys, today(), p.TextLanguage)
+	if err != nil {
+		return nil, err
+	}
+	var list []*store.TitleInfo
+	index := map[string]int{}
+	for _, k := range keys {
+		if _, seen := index[k]; !seen && infos[k] != nil {
+			index[k] = len(list)
+			list = append(list, infos[k])
+		}
+	}
+	visible, _, err := l.visibility(ctx, p, list, true)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range cs {
+		for _, film := range c.Parts {
+			if i, ok := index["movie/tmdb/"+film]; ok && visible[i] {
+				out[c.ID]++
+			}
+		}
+	}
+	return out, nil
 }
 
 // collectionsHave says, for collections (all of them when nil), how many of

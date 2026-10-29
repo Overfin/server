@@ -95,8 +95,8 @@ func TestCollections(t *testing.T) {
 	}
 
 	// The owner: by name; films in release order, the one whose release
-	// isn't known left out.
-	if got := list(); !slices.Equal(got, []string{"Kids saga 1/3", "Saga 1/4"}) {
+	// isn't known left out, of the page and of the count.
+	if got := list(); !slices.Equal(got, []string{"Kids saga 1/3", "Saga 1/3"}) {
 		t.Errorf("owner's collections: %v", got)
 	}
 	if got := films2("collection_100"); !slices.Equal(got, []string{"Heat", "Missing adult", "Future (upcoming)"}) {
@@ -163,7 +163,7 @@ func TestCollections(t *testing.T) {
 	var partner struct{ ID string }
 	json.Unmarshal([]byte(body), &partner)
 	post(t, srv, "/api/v1/profiles/"+partner.ID+"/activate", `{}`)
-	if got := list(); !slices.Equal(got, []string{"Kids saga 1/3"}) {
+	if got := list(); !slices.Equal(got, []string{"Kids saga 1/1"}) {
 		t.Errorf("partner's collections: %v", got)
 	}
 	if got := films2("collection_200"); !slices.Equal(got, []string{"Bluey film"}) {
