@@ -188,20 +188,41 @@ func (l Library) visibility(ctx context.Context, p *store.Profile, titles []*sto
 		}
 	}
 	st := l.Provisioner.Store
-	shown := "" // read when a title without copies needs it
-	rated := map[string]bool{}
-	type release struct {
-		released, atHome string
-		ok               bool
+	// The titles without copies are judged by their release and, for a
+	// kids profile, their ratings: read at once for all of them.
+	key := func(t *store.TitleInfo) string {
+		if t.Ref.Kind == "movie" {
+			return "movie/" + t.Ref.TMDB()
+		}
+		return "series/" + t.Ref.TMDB()
 	}
-	releases := map[string]release{}
+	var bare []string
+	for _, t := range titles {
+		if len(t.Items) == 0 && t.Ref.TMDB() != "" {
+			bare = append(bare, key(t))
+		}
+	}
+	shown := ""
+	releases := map[string]store.Release{}
+	rated := map[string]bool{}
+	if len(bare) > 0 && !a.Limited() {
+		if shown, err = st.TitlesShown(ctx); err != nil {
+			return nil, nil, err
+		}
+		if shown != "all" {
+			if releases, err = st.TitleReleases(ctx, bare); err != nil {
+				return nil, nil, err
+			}
+		}
+		if a != nil && a.Ceiling != nil {
+			if rated, err = st.TitlesAllowed(ctx, *a.Ceiling, bare); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
 	day := today()
 	for i, t := range titles {
-		kind := "movie"
-		if t.Ref.Kind != "movie" {
-			kind = "series"
-		}
-		k := kind + "/" + t.Ref.TMDB()
+		k := key(t)
 		part := t.Ref.Kind == "season" || t.Ref.Kind == "episode"
 		switch {
 		case len(t.Items) > 0:
@@ -222,43 +243,23 @@ func (l Library) visibility(ctx context.Context, p *store.Profile, titles []*sto
 		// Out yet, as the panel asks (titles shown): a season or an episode
 		// once aired, its series or a film once released, or once it can
 		// be watched at home. Not known yet means not out.
-		if shown == "" {
-			if shown, err = st.TitlesShown(ctx); err != nil {
-				return nil, nil, err
-			}
-		}
 		notOut := false
 		if shown != "all" {
 			if part && (t.AirDate == "" || t.AirDate > day) {
 				continue
 			}
-			r, seen := releases[k]
-			if !seen {
-				if r.released, r.atHome, r.ok, err = st.TitleRelease(ctx, kind, t.Ref.TMDB()); err != nil {
-					return nil, nil, err
-				}
-				releases[k] = r
-			}
-			atHome := r.atHome != "" && r.atHome <= day
-			if !r.ok || (shown == "home" && !atHome) || (shown == "released" && !atHome && (r.released == "" || r.released > day)) {
-				if !upcoming || !r.ok || part {
+			r, ok := releases[k]
+			atHome := r.AtHome != "" && r.AtHome <= day
+			if !ok || (shown == "home" && !atHome) || (shown == "released" && !atHome && (r.Released == "" || r.Released > day)) {
+				if !upcoming || !ok || part {
 					continue
 				}
 				notOut = true
 			}
 		}
 		// A kids profile: only what's rated within its limits.
-		if a != nil && a.Ceiling != nil {
-			ok, seen := rated[k]
-			if !seen {
-				if ok, err = st.TitleAllowed(ctx, *a.Ceiling, kind, t.Ref.TMDB()); err != nil {
-					return nil, nil, err
-				}
-				rated[k] = ok
-			}
-			if !ok {
-				continue
-			}
+		if a != nil && a.Ceiling != nil && !rated[k] {
+			continue
 		}
 		out[i] = true
 		soon[i] = notOut
