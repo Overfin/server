@@ -46,7 +46,7 @@ func Handler() http.Handler {
 // "accent"…), for what can't load the stylesheet: emails, written inline.
 func Colors(light bool) map[string]string {
 	css := string(CSS)
-	block := css[strings.Index(css, ":root {"):]
+	block := css[strings.Index(css, `:root, [data-theme="dark"] {`):]
 	if light {
 		block = css[strings.Index(css, `:root[data-theme="light"] {`):]
 	}
