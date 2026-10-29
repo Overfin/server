@@ -48,7 +48,8 @@ func fakeTMDB(t *testing.T) *Client {
 			}
 			io.WriteString(w, `{"page":2,"total_pages":2,"results":[{"id":1399,"name":"Thrones"}]}`)
 		case "/3/movie/949":
-			if r.URL.Query().Get("append_to_response") != "credits,release_dates" {
+			// Its page (with its cast), or its release alone.
+			if a := r.URL.Query().Get("append_to_response"); a != "credits,release_dates" && a != "release_dates" {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}

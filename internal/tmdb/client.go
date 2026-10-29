@@ -469,9 +469,22 @@ func (c *Client) Details(ctx context.Context, kind string, tmdbID int) (*Details
 }
 
 func (c *Client) Release(ctx context.Context, kind string, tmdbID int) (*Release, error) {
-	raw, err := c.details(ctx, kind, tmdbID)
-	if err != nil {
+	k := tv(kind)
+	if k == "" || !ValidID(tmdbID) {
+		return nil, ErrNotFound
+	}
+	// Only what a release needs: not the cast and crew (a popular film's
+	// are some hundred kilobytes), nor its names in a language.
+	extra := "release_dates"
+	if kind == "series" {
+		extra = "content_ratings"
+	}
+	var raw rawDetails
+	if err := c.get(ctx, "/"+k+"/"+strconv.Itoa(tmdbID), url.Values{"append_to_response": {extra}}, &raw); err != nil {
 		return nil, err
+	}
+	if raw.ID != tmdbID {
+		return nil, ErrNotFound
 	}
 	return raw.release(kind), nil
 }
