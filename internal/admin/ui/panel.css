@@ -47,10 +47,10 @@ nav a.active svg { color: var(--accent); opacity: 1; }
 main { padding: 2rem clamp(1rem, 3vw, 2.5rem) 4rem; max-width: 72rem; width: 100%; }
 main.wide { max-width: none; }
 .page-head { display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
-.page-head > div { flex: 1 1 22rem; }
+.page-head > div:first-child { flex: 1 1 22rem; }
 .page-head h1 { margin: 0 0 .3rem; font-size: 1.6rem; letter-spacing: -.01em; }
 .page-head p { margin: 0; color: var(--muted); max-width: 46rem; }
-.page-head .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+.page-head .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-left: auto; }
 
 .loading { display: flex; align-items: center; gap: .6rem; color: var(--muted); padding: 2rem 0; }
 .loading::before {
