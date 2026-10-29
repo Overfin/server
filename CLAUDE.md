@@ -35,14 +35,15 @@ limits); apps, official or not, use only its public API. MIT, public.
   `python3 -c "import yaml; yaml.safe_load(open('api/openapi.yaml'))"`.
   A colon followed by a space inside a plain-text description breaks it.
 - CI (`.github/workflows/ci.yml`) runs all of the above on every push.
-- Layout: the root package `overfin` is Overfin (startup, gateway, every
-  feature built in); `cmd/overfin` is the official build (Overfin plus
-  overfin-web). Some features (`internal/watchlist`, `internal/invites`,
+- Layout: the package `overfin` (in `overfin/`) is Overfin (startup,
+  gateway, every feature built in); `cmd/overfin` is the official build
+  (Overfin plus overfin-web). No Go files at the repository's root. Some features (`internal/watchlist`, `internal/invites`,
   `internal/migration`) are written on the internal feature contract
   (`internal/feature`), each with its own database; there are no modules
   for others to add.
 
 ## Layout
 - `cmd/overfin`: entry point
+- `overfin`: Overfin itself (startup, the gateway, wiring every feature)
 - `internal/server`: HTTP handler, middleware
 - `internal/plugin`: plugin interface and the route registrar

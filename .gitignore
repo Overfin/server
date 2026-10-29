@@ -1,4 +1,3 @@
-/overfin
 *.db
 .env
 # local configs and secrets
