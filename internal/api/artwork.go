@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/overfin/server/internal/images"
@@ -98,7 +99,8 @@ func (l Library) artworkImage(w http.ResponseWriter, r *http.Request, p *store.P
 			if err != nil {
 				return err
 			}
-			if c == nil {
+			// Only one its page lists: none other shows it.
+			if c == nil || !slices.Contains(c.Parts, titles[i].Ref.TMDB()) {
 				continue
 			}
 			if shown, err := l.collectionShown(ctx, p, c.ID); err != nil || shown {

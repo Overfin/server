@@ -304,6 +304,8 @@ type options struct {
 	directory connector.Directory
 	// tmdb, when set, is TMDB for the pages fetched when opened.
 	tmdb catalog.TitleSource
+	// artworkDir, when set, is where TMDB's images are kept on disk.
+	artworkDir string
 	// adminGroup, when set, is the control panel's group, sent in the
 	// Remote-Groups header.
 	adminGroup string
@@ -425,6 +427,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		lib.Titles = catalog.NewTitles(func() catalog.TitleSource { return src }, st, logger, time.Hour, 0)
 	}
 	lib.Images = images.New(jf, 1<<20)
+	lib.Images.ArtworkDir = o.artworkDir
 	if o.seerr != nil {
 		disc := &api.Discovery{Library: lib, Store: st}
 		client := o.seerr
