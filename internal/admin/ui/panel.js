@@ -51,6 +51,7 @@ const icons = {
   sliders: ['M4 6h10', 'M18 6h2', 'M4 12h4', 'M12 12h8', 'M4 18h12', 'M20 18h0', 'M16 4v4', 'M10 10v4', 'M18 16v4'],
   people: ['M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1', 'M9.5 10a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z', 'M21 19v-1a4 4 0 0 0-3-3.87', 'M16 3.13a3.5 3.5 0 0 1 0 6.75'],
   layers: ['M12 3l9 5-9 5-9-5 9-5z', 'M3 13l9 5 9-5'],
+  grid: ['M4 4h7v7H4z', 'M13 4h7v7h-7z', 'M4 13h7v7H4z', 'M13 13h7v7h-7z'],
   mail: ['M4 6h16v12H4z', 'M4 7l8 6 8-6'],
   move: ['M5 12h14', 'M13 6l6 6-6 6'],
   check: ['M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z', 'M20 20l-4-4'],
@@ -1427,8 +1428,9 @@ async function appsView() {
       h('td', { class: 'hint' }, k.lastUsedAt ? ago(k.lastUsedAt) : 'never'),
       h('td', { class: 'row-actions' }, revoke));
   });
-  show(pageHead('Apps', 'Other apps (Overtide…) can read each film\'s and season\'s value, how much it\'s watched (plays, viewers, favorites, the day last played) and whether the libraries have it, as each key allows. Totals per title only, never anything about a person; counts below 2 are given as 0, and so are plays and favorites unless two people account for them.'),
-    card({ title: 'Keys', badge: h('button', { type: 'button', class: 'primary', onclick: newKey }, 'New key') },
+  show(pageHead('Apps', 'Other apps (Overtide…) can read each film\'s and season\'s value, how much it\'s watched (plays, viewers, favorites, the day last played) and whether the libraries have it, as each key allows. Totals per title only, never anything about a person; counts below 2 are given as 0, and so are plays and favorites unless two people account for them.',
+    h('button', { type: 'button', class: 'primary', onclick: newKey }, 'New key')),
+    card({ title: 'Keys' },
       h('div', { class: 'table-wrap' }, h('table', {},
         h('thead', {}, h('tr', {}, h('th', {}, 'App'), h('th', {}, 'Made'), h('th', {}, 'Last used'), h('th', {}))),
         h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { colspan: '4', class: 'empty' }, 'No app has a key yet.')))))));
@@ -2033,7 +2035,7 @@ const views = {
   libraries: { label: 'Libraries', icon: icons.folder, view: () => librariesView() },
   identification: { label: 'Identification', icon: icons.check, view: () => identificationView() },
   valuation: { label: 'Valuation', icon: icons.scale, view: () => valuationView() },
-  categories: { label: 'Categories', icon: icons.layers, view: () => categoriesView() },
+  categories: { label: 'Categories', icon: icons.grid, view: () => categoriesView() },
   apps: { label: 'Apps', icon: icons.key, view: () => appsView() },
   playing: { label: 'Now playing', icon: icons.play, view: () => playingView() },
   notices: { label: 'Notices', icon: icons.bell, view: () => noticesView() },
