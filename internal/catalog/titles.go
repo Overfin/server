@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/overfin/server/internal/store"
@@ -45,6 +46,10 @@ type Titles struct {
 	wake chan struct{}
 	now  func() time.Time
 }
+
+// searchReleases is how many releases a search asks TMDB for at the same
+// time.
+const searchReleases = 5
 
 // TitlesFresh is how long a title's data stays before it's fetched again.
 const TitlesFresh = 120 * 24 * time.Hour
@@ -481,24 +486,44 @@ func (a *Titles) Search(ctx context.Context, query string) (_ []store.Title, _ [
 	if err := a.Store.PutTitles(ctx, titles, now); err != nil {
 		return nil, nil, false, err
 	}
+	// The first ten's releases, when unknown (the rest at the ratings
+	// keeper's next pass): asked of TMDB a few at a time, so a search
+	// waits for the slowest, not their sum.
+	var unknown []int
 	for i, t := range titles {
 		if i == 10 {
-			break // the rest at the ratings keeper's next pass
+			break
 		}
 		_, _, known, err := a.Store.TitleRelease(ctx, t.Kind, t.TMDB)
 		if err != nil {
 			return nil, nil, false, err
 		}
-		if known {
-			continue
+		if !known {
+			unknown = append(unknown, i)
 		}
-		r, err := src.Release(ctx, t.Kind, found[i].TMDBID)
-		if errors.Is(err, tmdb.ErrNotFound) {
-			r, err = &tmdb.Release{}, nil
+	}
+	releases := make([]*tmdb.Release, len(unknown))
+	errs := make([]error, len(unknown))
+	slots := make(chan struct{}, searchReleases)
+	var wg sync.WaitGroup
+	for j, i := range unknown {
+		wg.Add(1)
+		slots <- struct{}{}
+		go func() {
+			defer func() { <-slots; wg.Done() }()
+			r, err := src.Release(ctx, titles[i].Kind, found[i].TMDBID)
+			if errors.Is(err, tmdb.ErrNotFound) {
+				r, err = &tmdb.Release{}, nil
+			}
+			releases[j], errs[j] = r, err
+		}()
+	}
+	wg.Wait()
+	for j, i := range unknown {
+		if errs[j] != nil {
+			return nil, nil, false, errs[j]
 		}
-		if err != nil {
-			return nil, nil, false, err
-		}
+		r, t := releases[j], titles[i]
 		if err := a.Store.SetTitleRatings(ctx, store.RatedTitle{Kind: t.Kind, TMDB: t.TMDB}, r.Ratings, r.Released, r.AtHome, now); err != nil {
 			return nil, nil, false, err
 		}
