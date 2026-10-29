@@ -53,7 +53,7 @@ import (
 var builtinSite fs.FS
 
 // Version is set at build time with
-// -ldflags "-X github.com/overfin/server.Version=…".
+// -ldflags "-X github.com/overfin/server/overfin.Version=…" (Dockerfile).
 var Version = "dev"
 
 // Run runs Overfin, serving site as its web client when the configuration
