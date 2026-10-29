@@ -82,7 +82,7 @@ func (s *Store) ImportUser(ctx context.Context, subject, email string, admin boo
 // SubjectsInGroup lists the subjects whose live logins carry a group: who
 // the identity provider said was in it, at their last login.
 func (s *Store) SubjectsInGroup(ctx context.Context, group string) (map[string]bool, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT subject, groups FROM logins WHERE expires_at > ?`, s.now().Unix())
+	rows, err := s.read.QueryContext(ctx, `SELECT subject, groups FROM logins WHERE expires_at > ?`, s.now().Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -102,17 +102,17 @@ func (s *Store) SubjectsInGroup(ctx context.Context, group string) (map[string]b
 
 // UserByEmail finds someone by email, whatever its case.
 func (s *Store) UserByEmail(ctx context.Context, email string) (*User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE email = ?`, email))
+	return scanUser(s.read.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE email = ?`, email))
 }
 
 // UserBySubject finds someone by their subject.
 func (s *Store) UserBySubject(ctx context.Context, subject string) (*User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE subject = ?`, subject))
+	return scanUser(s.read.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE subject = ?`, subject))
 }
 
 // Users lists everyone, by email.
 func (s *Store) Users(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+userColumns+` FROM users ORDER BY email`)
+	rows, err := s.read.QueryContext(ctx, `SELECT `+userColumns+` FROM users ORDER BY email`)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func (s *Store) Users(ctx context.Context) ([]User, error) {
 // HasAdmin reports whether anyone is an admin.
 func (s *Store) HasAdmin(ctx context.Context) (bool, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM users WHERE admin = 1`).Scan(&n)
+	err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM users WHERE admin = 1`).Scan(&n)
 	return n > 0, err
 }
 
@@ -247,7 +247,7 @@ func (s *Store) ConfirmUser(ctx context.Context, subject string) error {
 // an admin added.
 func (s *Store) UserInvitation(ctx context.Context, subject string) (string, error) {
 	var sealed []byte
-	err := s.db.QueryRowContext(ctx, `SELECT invite_code FROM users WHERE subject = ?`, subject).Scan(&sealed)
+	err := s.read.QueryRowContext(ctx, `SELECT invite_code FROM users WHERE subject = ?`, subject).Scan(&sealed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}

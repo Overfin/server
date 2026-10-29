@@ -19,7 +19,7 @@ type FindTarget struct {
 // TitlesToFind lists up to limit films and series without a TMDB ID that
 // have an IMDb (else TVDB) ID not looked for since before.
 func (s *Store) TitlesToFind(ctx context.Context, before time.Time, limit int) ([]FindTarget, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT i.kind, CASE WHEN i.imdb IS NOT NULL THEN 'imdb' ELSE 'tvdb' END,
+	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT i.kind, CASE WHEN i.imdb IS NOT NULL THEN 'imdb' ELSE 'tvdb' END,
 			coalesce(i.imdb, i.tvdb)
 		FROM catalog_items i
 		WHERE i.kind IN ('movie', 'series') AND i.tmdb IS NULL AND (i.imdb IS NOT NULL OR i.tvdb IS NOT NULL)

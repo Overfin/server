@@ -41,7 +41,7 @@ func (s *Store) readBatch(ctx context.Context, refs []TitleRef, country string) 
 	}
 	for start := 0; start < len(keys); start += batchChunk {
 		chunk := keys[start:min(start+batchChunk, len(keys))]
-		rows, err := s.db.QueryContext(ctx, `SELECT title_key, id FROM catalog_items WHERE title_key IN (`+marks(len(chunk))+`)
+		rows, err := s.read.QueryContext(ctx, `SELECT title_key, id FROM catalog_items WHERE title_key IN (`+marks(len(chunk))+`)
 			ORDER BY id`, anys(chunk)...)
 		if err != nil {
 			return nil, err
@@ -63,7 +63,7 @@ func (s *Store) readBatch(ctx context.Context, refs []TitleRef, country string) 
 		for start := 0; start < len(ids); start += batchChunk {
 			chunk := ids[start:min(start+batchChunk, len(ids))]
 			args := append([]any{kind}, anys(chunk)...)
-			rows, err := s.db.QueryContext(ctx, `SELECT `+titleColumns+` FROM catalog_titles t
+			rows, err := s.read.QueryContext(ctx, `SELECT `+titleColumns+` FROM catalog_titles t
 				WHERE t.kind = ? AND t.tmdb IN (`+marks(len(chunk))+`)`, args...)
 			if err != nil {
 				return nil, err
@@ -83,7 +83,7 @@ func (s *Store) readBatch(ctx context.Context, refs []TitleRef, country string) 
 			// The certification in the country: the one its scale puts
 			// highest, as certification() picks it.
 			args = append([]any{kind, country}, anys(chunk)...)
-			rows, err = s.db.QueryContext(ctx, `SELECT r.tmdb, r.certification FROM title_ratings r
+			rows, err = s.read.QueryContext(ctx, `SELECT r.tmdb, r.certification FROM title_ratings r
 				LEFT JOIN rating_scales sc ON sc.kind = r.kind AND sc.country = r.country AND sc.certification = r.certification
 				WHERE r.kind = ? AND r.country = ? AND r.tmdb IN (`+marks(len(chunk))+`)
 				ORDER BY r.tmdb, coalesce(sc.position, -1) DESC, r.certification`, args...)
@@ -104,7 +104,7 @@ func (s *Store) readBatch(ctx context.Context, refs []TitleRef, country string) 
 			if err := rows.Err(); err != nil {
 				return nil, err
 			}
-			rows, err = s.db.QueryContext(ctx, `SELECT tmdb, age FROM title_ages WHERE kind = ? AND tmdb IN (`+marks(len(chunk))+`)`,
+			rows, err = s.read.QueryContext(ctx, `SELECT tmdb, age FROM title_ages WHERE kind = ? AND tmdb IN (`+marks(len(chunk))+`)`,
 				append([]any{kind}, anys(chunk)...)...)
 			if err != nil {
 				return nil, err

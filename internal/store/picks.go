@@ -21,7 +21,7 @@ var pickLists = "'" + strings.Join(PickLists, "', '") + "'"
 // favourite since, the most accounts first, at most limit: those whose
 // look-alikes are picks.
 func (s *Store) PickSeeds(ctx context.Context, since time.Time, limit int) ([]TitleRef, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT p.account_id, t.title FROM profile_titles t
+	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT p.account_id, t.title FROM profile_titles t
 		JOIN profiles p ON p.id = t.profile_id
 		WHERE t.updated_at >= ? AND t.title NOT LIKE 'item/%'
 			AND (t.play_count > 0 OR t.played = 1 OR t.position_ms > 0 OR t.favorite = 1)`, since.Unix())
@@ -74,7 +74,7 @@ func (s *Store) PickSeeds(ctx context.Context, since time.Time, limit int) ([]Ti
 // most limit: their page has what the valuation needs (rating,
 // popularity, genres, seasons).
 func (s *Store) PicksToDescribe(ctx context.Context, before time.Time, limit int) ([]ArtworkTarget, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT t.kind, t.tmdb FROM catalog_lists l
+	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT t.kind, t.tmdb FROM catalog_lists l
 		JOIN catalog_titles t ON t.kind = l.kind AND t.tmdb = l.tmdb
 		WHERE l.list IN (`+pickLists+`) AND coalesce(t.details_at, 0) < ?
 			AND NOT EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = t.kind AND i.tmdb = t.tmdb)
@@ -98,7 +98,7 @@ func (s *Store) PicksToDescribe(ctx context.Context, before time.Time, limit int
 // as itself, a series as each of its seasons that has aired or airs within
 // ReleaseSoon. Seasons TMDB hasn't dated yet are left out (nothing to add).
 func (s *Store) picks(ctx context.Context, f *ValuationFacts, now time.Time) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT t.kind, t.tmdb, t.details FROM catalog_lists l
+	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT t.kind, t.tmdb, t.details FROM catalog_lists l
 		JOIN catalog_titles t ON t.kind = l.kind AND t.tmdb = l.tmdb
 		WHERE l.list IN (`+pickLists+`) AND t.details IS NOT NULL
 			AND NOT EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = t.kind AND i.tmdb = t.tmdb)`)
@@ -141,7 +141,7 @@ func (s *Store) picks(ctx context.Context, f *ValuationFacts, now time.Time) err
 // ListPositions are where each title stands in one of discovery's lists,
 // from 0, by kind and TMDB ID ("movie/550", "series/1399").
 func (s *Store) ListPositions(ctx context.Context, list string) (map[string]int, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT kind, tmdb, position FROM catalog_lists WHERE list = ?`, list)
+	rows, err := s.read.QueryContext(ctx, `SELECT kind, tmdb, position FROM catalog_lists WHERE list = ?`, list)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func (r HomeRelease) OutBy(day time.Time) bool {
 // FilmReleases are the films the catalog knows, by TMDB ID, with what's
 // known of their release.
 func (s *Store) FilmReleases(ctx context.Context) (map[string]HomeRelease, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT t.tmdb, coalesce(t.year, 0), coalesce(r.released, ''), coalesce(r.at_home, '')
+	rows, err := s.read.QueryContext(ctx, `SELECT t.tmdb, coalesce(t.year, 0), coalesce(r.released, ''), coalesce(r.at_home, '')
 		FROM catalog_titles t LEFT JOIN title_ratings_fetched r ON r.kind = t.kind AND r.tmdb = t.tmdb
 		WHERE t.kind = 'movie'`)
 	if err != nil {

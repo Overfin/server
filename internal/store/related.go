@@ -177,7 +177,7 @@ func (s *Store) readRelated(ctx context.Context) (*relatedCache, error) {
 	var order []*relatedFacts
 	// Each film and series once, by its title key: its year, rating,
 	// language and genres.
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT i.title_key, i.kind, coalesce(t.year, 0), coalesce(t.rating, 0),
+	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT i.title_key, i.kind, coalesce(t.year, 0), coalesce(t.rating, 0),
 			coalesce(l.language, ''),
 			(SELECT group_concat(g.genre) FROM catalog_title_genres g WHERE g.kind = i.kind AND g.tmdb = i.tmdb)
 		FROM catalog_items i
@@ -225,7 +225,7 @@ func (s *Store) readRelated(ctx context.Context) (*relatedCache, error) {
 		{"p:", `SELECT DISTINCT i.title_key, p.person_id FROM catalog_people p JOIN catalog_items i ON i.id = p.item_id
 			WHERE i.kind IN ('movie', 'series') AND i.title_key IS NOT NULL`},
 	} {
-		rows, err := s.db.QueryContext(ctx, q.sql)
+		rows, err := s.read.QueryContext(ctx, q.sql)
 		if err != nil {
 			return nil, err
 		}

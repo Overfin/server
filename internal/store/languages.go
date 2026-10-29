@@ -17,9 +17,9 @@ import (
 // fr-CA), else English (United States). set is false until then.
 func (s *Store) Languages(ctx context.Context) (offered []string, def string, set bool, err error) {
 	var list, d []byte
-	err = s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'languages'`).Scan(&list)
+	err = s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'languages'`).Scan(&list)
 	if err == nil {
-		err = s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'default-language'`).Scan(&d)
+		err = s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'default-language'`).Scan(&d)
 	}
 	switch {
 	case err == nil:
@@ -110,7 +110,7 @@ const tmdbTokenContext = "tmdb token"
 // ok is false without one.
 func (s *Store) TMDBToken(ctx context.Context) (token string, ok bool, err error) {
 	var sealed []byte
-	err = s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'tmdb-token'`).Scan(&sealed)
+	err = s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'tmdb-token'`).Scan(&sealed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}

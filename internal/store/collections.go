@@ -25,7 +25,7 @@ type Collection struct {
 // FilmsToFind returns films whose collection is to be asked of TMDB
 // (migration 067's list), limit at most.
 func (s *Store) FilmsToFind(ctx context.Context, limit int) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT tmdb FROM collections_to_find ORDER BY tmdb LIMIT ?`, limit)
+	rows, err := s.read.QueryContext(ctx, `SELECT tmdb FROM collections_to_find ORDER BY tmdb LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (s *Store) SetFilmCollection(ctx context.Context, tmdb string, collection i
 // CollectionsToFetch returns the collections a library's film belongs to
 // that aren't kept, or were fetched before before, limit at most.
 func (s *Store) CollectionsToFetch(ctx context.Context, before time.Time, limit int) ([]int, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT t.collection FROM catalog_titles t
+	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT t.collection FROM catalog_titles t
 		LEFT JOIN collections c ON c.id = t.collection
 		WHERE t.kind = 'movie' AND t.collection IS NOT NULL AND (c.id IS NULL OR c.fetched_at < ?)
 			AND EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = 'movie' AND i.tmdb = t.tmdb)
@@ -110,7 +110,7 @@ func (s *Store) FilmsToDescribe(ctx context.Context, films []string, before time
 	for _, f := range films {
 		args = append(args, f)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT tmdb FROM catalog_titles WHERE kind = 'movie'
+	rows, err := s.read.QueryContext(ctx, `SELECT tmdb FROM catalog_titles WHERE kind = 'movie'
 		AND (details_at IS NULL OR details_at < ?) AND tmdb IN (`+marks(len(films))+`)`, args...)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func (s *Store) PurgeCollections(ctx context.Context, before time.Time) error {
 // library's film, though it may have left since (CollectionItems says
 // which films a library has).
 func (s *Store) Collections(ctx context.Context) ([]Collection, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, overview, poster, backdrop, parts FROM collections`)
+	rows, err := s.read.QueryContext(ctx, `SELECT id, name, overview, poster, backdrop, parts FROM collections`)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func (s *Store) Collections(ctx context.Context) ([]Collection, error) {
 
 // CollectionByID returns a kept collection, nil when there's none.
 func (s *Store) CollectionByID(ctx context.Context, id int) (*Collection, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, overview, poster, backdrop, parts FROM collections WHERE id = ?`, id)
+	row := s.read.QueryRowContext(ctx, `SELECT id, name, overview, poster, backdrop, parts FROM collections WHERE id = ?`, id)
 	c, err := scanCollection(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -174,7 +174,7 @@ func (s *Store) CollectionByID(ctx context.Context, id int) (*Collection, error)
 // none is kept.
 func (s *Store) FilmCollection(ctx context.Context, tmdb string) (*Collection, error) {
 	var id sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT collection FROM catalog_titles WHERE kind = 'movie' AND tmdb = ?`, tmdb).Scan(&id)
+	err := s.read.QueryRowContext(ctx, `SELECT collection FROM catalog_titles WHERE kind = 'movie' AND tmdb = ?`, tmdb).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !id.Valid) {
 		return nil, nil
 	}
@@ -268,7 +268,7 @@ func (s *Store) CollectionItems(ctx context.Context, collections []int) ([]Colle
 			args = append(args, c)
 		}
 	}
-	rows, err := s.db.QueryContext(ctx, q+` ORDER BY t.collection, t.tmdb, i.id`, args...)
+	rows, err := s.read.QueryContext(ctx, q+` ORDER BY t.collection, t.tmdb, i.id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +296,7 @@ func (s *Store) ImageCollections(ctx context.Context, typ, path string) ([]int, 
 	default:
 		return nil, nil
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM collections WHERE `+column+` = ? ORDER BY id LIMIT 50`, path)
+	rows, err := s.read.QueryContext(ctx, `SELECT id FROM collections WHERE `+column+` = ? ORDER BY id LIMIT 50`, path)
 	if err != nil {
 		return nil, err
 	}

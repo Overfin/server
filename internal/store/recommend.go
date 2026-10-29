@@ -85,7 +85,7 @@ func (s *Store) libraryFacts(ctx context.Context) ([]itemFacts, error) {
 	// One pass over every film and series: far quicker than asking for
 	// thousands by their IDs. TMDB's rating from its index (see
 	// fromTMDB).
-	rows, err := s.db.QueryContext(ctx, `SELECT i.id, i.title_key, i.kind, coalesce(t.rating, 0),
+	rows, err := s.read.QueryContext(ctx, `SELECT i.id, i.title_key, i.kind, coalesce(t.rating, 0),
 			max(coalesce(i.added_at, 0), coalesce((SELECT max(e.added_at) FROM catalog_items e WHERE e.series_id = i.id), 0)),
 			a.age,
 			(SELECT group_concat(g.genre) FROM catalog_title_genres g WHERE g.kind = i.kind AND g.tmdb = i.tmdb)

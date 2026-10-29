@@ -13,7 +13,7 @@ import (
 // until the panel changes them.
 func (s *Store) PasswordRules(ctx context.Context) (password.Rules, error) {
 	var raw []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'password-rules'`).Scan(&raw)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'password-rules'`).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return password.DefaultRules, nil
 	}

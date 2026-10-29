@@ -34,7 +34,7 @@ type LibraryTitle struct {
 // LibraryTitles lists every film and series of the libraries, for
 // Identification.
 func (s *Store) LibraryTitles(ctx context.Context) ([]LibraryTitle, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT i.id, i.kind, coalesce(i.library_id, ''), i.name, coalesce(i.year, 0),
+	rows, err := s.read.QueryContext(ctx, `SELECT i.id, i.kind, coalesce(i.library_id, ''), i.name, coalesce(i.year, 0),
 			coalesce(i.folder_name, ''), coalesce(i.file_name, ''), coalesce(i.runtime_ms, 0),
 			coalesce(i.tmdb, ''), coalesce(i.jellyfin_tmdb, ''), o.item_id IS NOT NULL,
 			coalesce(t.name, ''), coalesce(t.year, 0), t.details
@@ -70,7 +70,7 @@ func (s *Store) LibraryTitles(ctx context.Context) ([]LibraryTitle, error) {
 			bySeries[out[i].ItemID] = &out[i]
 		}
 	}
-	counts, err := s.db.QueryContext(ctx, `SELECT series_id, season_number, count(DISTINCT episode_number) FROM catalog_items
+	counts, err := s.read.QueryContext(ctx, `SELECT series_id, season_number, count(DISTINCT episode_number) FROM catalog_items
 		WHERE kind = 'episode' AND series_id IS NOT NULL AND season_number IS NOT NULL AND episode_number IS NOT NULL
 		GROUP BY series_id, season_number`)
 	if err != nil {

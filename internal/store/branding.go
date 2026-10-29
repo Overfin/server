@@ -33,7 +33,7 @@ var BrandingKinds = []string{"logo", "banner-dark", "banner-light"}
 func (s *Store) Branding(ctx context.Context) (Branding, error) {
 	var b Branding
 	var raw []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'branding'`).Scan(&raw)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'branding'`).Scan(&raw)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return b, err
 	}
@@ -43,7 +43,7 @@ func (s *Store) Branding(ctx context.Context) (Branding, error) {
 		}
 	}
 	b.Files = map[string]time.Time{}
-	rows, err := s.db.QueryContext(ctx, `SELECT kind, updated_at FROM branding_files`)
+	rows, err := s.read.QueryContext(ctx, `SELECT kind, updated_at FROM branding_files`)
 	if err != nil {
 		return b, err
 	}
@@ -73,7 +73,7 @@ func (s *Store) SetBranding(ctx context.Context, on bool, name string) error {
 // BrandingFileOf reads one branding file; ok is false without it.
 func (s *Store) BrandingFileOf(ctx context.Context, kind string) (f BrandingFile, ok bool, err error) {
 	var at int64
-	err = s.db.QueryRowContext(ctx, `SELECT content_type, data, updated_at FROM branding_files WHERE kind = ?`, kind).
+	err = s.read.QueryRowContext(ctx, `SELECT content_type, data, updated_at FROM branding_files WHERE kind = ?`, kind).
 		Scan(&f.ContentType, &f.Data, &at)
 	if errors.Is(err, sql.ErrNoRows) {
 		return f, false, nil

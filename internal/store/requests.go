@@ -15,7 +15,7 @@ import (
 // SeerrUser returns an account's Seerr user ID; ok is false when it has
 // none yet.
 func (s *Store) SeerrUser(ctx context.Context, accountID string) (id int, ok bool, err error) {
-	err = s.db.QueryRowContext(ctx, `SELECT seerr_id FROM seerr_users WHERE account_id = ?`, accountID).Scan(&id)
+	err = s.read.QueryRowContext(ctx, `SELECT seerr_id FROM seerr_users WHERE account_id = ?`, accountID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}
@@ -92,7 +92,7 @@ func (s *Store) ProfileRequests(ctx context.Context, accountID string, profileID
 	for _, id := range profileIDs {
 		args = append(args, id)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+requestColumns+` FROM requests
+	rows, err := s.read.QueryContext(ctx, `SELECT `+requestColumns+` FROM requests
 		WHERE account_id = ? AND profile_id IN (`+marks(len(profileIDs))+`) ORDER BY created_at DESC, id`, args...)
 	if err != nil {
 		return nil, err
@@ -110,7 +110,7 @@ func (s *Store) AccountRequests(ctx context.Context, accountID string, titles []
 	for _, t := range titles {
 		args = append(args, t)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+requestColumns+` FROM requests
+	rows, err := s.read.QueryContext(ctx, `SELECT `+requestColumns+` FROM requests
 		WHERE account_id = ? AND title IN (`+marks(len(titles))+`) ORDER BY created_at DESC, id`, args...)
 	if err != nil {
 		return nil, err
@@ -120,7 +120,7 @@ func (s *Store) AccountRequests(ctx context.Context, accountID string, titles []
 
 // RequestByID returns one of an account's requests, or ErrNotFound.
 func (s *Store) RequestByID(ctx context.Context, accountID, id string) (*Request, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+requestColumns+` FROM requests WHERE account_id = ? AND id = ?`, accountID, id)
+	rows, err := s.read.QueryContext(ctx, `SELECT `+requestColumns+` FROM requests WHERE account_id = ? AND id = ?`, accountID, id)
 	if err != nil {
 		return nil, err
 	}

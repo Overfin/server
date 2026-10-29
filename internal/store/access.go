@@ -166,7 +166,7 @@ func (s *Store) AllowedItems(ctx context.Context, a Access, itemIDs []string) (a
 		for _, id := range chunk {
 			ca = append(ca, id)
 		}
-		rows, err := s.db.QueryContext(ctx, q, ca...)
+		rows, err := s.read.QueryContext(ctx, q, ca...)
 		if err != nil {
 			return nil, nil, err
 		}

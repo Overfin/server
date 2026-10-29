@@ -279,7 +279,7 @@ func (s *Store) titleInfo(ctx context.Context, r TitleRef, today string, b *info
 		}
 		t.SeriesName, t.Backdrop, t.Logo = series.Name, series.Backdrop, series.Logo
 		var poster sql.NullString
-		err := s.db.QueryRowContext(ctx, `SELECT name, overview, coalesce(air_date, ''), poster FROM catalog_seasons
+		err := s.read.QueryRowContext(ctx, `SELECT name, overview, coalesce(air_date, ''), poster FROM catalog_seasons
 			WHERE series = ? AND season = ?`, tmdb, r.Season).Scan(&t.Name, &t.Overview, &t.AirDate, &poster)
 		switch {
 		case err == nil:
@@ -296,13 +296,13 @@ func (s *Store) titleInfo(ctx context.Context, r TitleRef, today string, b *info
 			return nil, err
 		}
 		t.SeriesName, t.Backdrop, t.Logo, t.Poster = series.Name, series.Backdrop, series.Logo, series.Poster
-		if err := s.db.QueryRowContext(ctx, `SELECT name FROM catalog_seasons WHERE series = ? AND season = ?`,
+		if err := s.read.QueryRowContext(ctx, `SELECT name FROM catalog_seasons WHERE series = ? AND season = ?`,
 			tmdb, r.Season).Scan(&t.SeasonName); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
 		var still sql.NullString
 		var runtime sql.NullInt64
-		err := s.db.QueryRowContext(ctx, `SELECT name, overview, coalesce(air_date, ''), runtime, still FROM catalog_episodes
+		err := s.read.QueryRowContext(ctx, `SELECT name, overview, coalesce(air_date, ''), runtime, still FROM catalog_episodes
 			WHERE series = ? AND season = ? AND episode = ?`, tmdb, r.Season, r.Episode).
 			Scan(&t.Name, &t.Overview, &t.AirDate, &runtime, &still)
 		switch {
@@ -313,7 +313,7 @@ func (s *Store) titleInfo(ctx context.Context, r TitleRef, today string, b *info
 		}
 	default:
 		// Not on TMDB (yet): known by its file only.
-		err := s.db.QueryRowContext(ctx, `SELECT name, coalesce(year, 0), kind FROM catalog_items WHERE title_key = ?
+		err := s.read.QueryRowContext(ctx, `SELECT name, coalesce(year, 0), kind FROM catalog_items WHERE title_key = ?
 			ORDER BY id LIMIT 1`, key).Scan(&t.Name, &t.Year, &t.ItemKind)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
@@ -382,7 +382,7 @@ func (s *Store) countEpisodes(ctx context.Context, t *TitleInfo, today string) e
 	// A specials season counts its own; a series, the others'.
 	specials := t.Ref.Kind == "season" && t.Ref.Season == 0
 	lo, hi := keyRange(prefix)
-	err := s.db.QueryRowContext(ctx, `SELECT count(DISTINCT title_key) FROM catalog_items
+	err := s.read.QueryRowContext(ctx, `SELECT count(DISTINCT title_key) FROM catalog_items
 		WHERE kind = 'episode' AND title_key >= ? AND title_key < ? AND (coalesce(season_number, 0) > 0 OR ?)`,
 		lo, hi, specials).Scan(&t.Have)
 	if err != nil {
@@ -399,7 +399,7 @@ func (s *Store) countEpisodes(ctx context.Context, t *TitleInfo, today string) e
 		q += ` AND season = ?`
 		args = append(args, t.Ref.Season)
 	}
-	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&t.Listed, &t.Aired); err != nil {
+	if err := s.read.QueryRowContext(ctx, q, args...).Scan(&t.Listed, &t.Aired); err != nil {
 		return err
 	}
 	if t.Listed == 0 && t.Ref.Kind == "series" {
@@ -419,7 +419,7 @@ func (s *Store) SeasonEpisodes(ctx context.Context, season TitleRef) ([]int, err
 	seen := map[int]bool{}
 	var out []int
 	add := func(q string, args ...any) error {
-		rows, err := s.db.QueryContext(ctx, q, args...)
+		rows, err := s.read.QueryContext(ctx, q, args...)
 		if err != nil {
 			return err
 		}
@@ -462,7 +462,7 @@ func (s *Store) SeriesSeasons(ctx context.Context, series TitleRef, listed []Sea
 		}
 	}
 	lo, hi := keyRange(series.Key() + "/s")
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT season_number FROM catalog_items WHERE kind IN ('season', 'episode')
+	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT season_number FROM catalog_items WHERE kind IN ('season', 'episode')
 		AND title_key >= ? AND title_key < ? AND season_number IS NOT NULL`, lo, hi)
 	if err != nil {
 		return nil, err
@@ -485,7 +485,7 @@ func (s *Store) SeriesSeasons(ctx context.Context, series TitleRef, listed []Sea
 // InLibrary says whether a library has a film or a series (by TMDB ID).
 func (s *Store) InLibrary(ctx context.Context, kind, tmdb string) (bool, error) {
 	var ok bool
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM catalog_items WHERE kind = ? AND tmdb = ?)`, kind, tmdb).Scan(&ok)
+	err := s.read.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM catalog_items WHERE kind = ? AND tmdb = ?)`, kind, tmdb).Scan(&ok)
 	return ok, err
 }
 
@@ -529,7 +529,7 @@ func (s *Store) ContinueTitles(ctx context.Context, profileID, today string, lim
 	}
 	var out []entry
 	inProgress := map[string]bool{} // series keys
-	rows, err := s.db.QueryContext(ctx, `SELECT title, coalesce(last_played_at, 0) FROM profile_titles
+	rows, err := s.read.QueryContext(ctx, `SELECT title, coalesce(last_played_at, 0) FROM profile_titles
 		WHERE profile_id = ? AND position_ms > 0 ORDER BY last_played_at DESC LIMIT 500`, profileID)
 	if err != nil {
 		return nil, err
@@ -557,7 +557,7 @@ func (s *Store) ContinueTitles(ctx context.Context, profileID, today string, lim
 	}
 	lasts := map[string]last{}
 	var order []string
-	rows, err = s.db.QueryContext(ctx, `SELECT title, coalesce(last_played_at, 0) FROM profile_titles
+	rows, err = s.read.QueryContext(ctx, `SELECT title, coalesce(last_played_at, 0) FROM profile_titles
 		WHERE profile_id = ? AND played = 1 AND title LIKE 'series/%/s%/e%' ORDER BY last_played_at DESC`, profileID)
 	if err != nil {
 		return nil, err
@@ -633,7 +633,7 @@ func (s *Store) nextEpisode(ctx context.Context, profileID string, w TitleRef, t
 		ORDER BY season, episode LIMIT 1`
 	var sn, en int
 	lo, hi := keyRange(series + "/s")
-	err := s.db.QueryRowContext(ctx, q, w.ID, w.Source, today, lo, hi,
+	err := s.read.QueryRowContext(ctx, q, w.ID, w.Source, today, lo, hi,
 		w.Season, w.Season, w.Episode, w.Season, profileID, series).Scan(&sn, &en)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
@@ -648,7 +648,7 @@ func (s *Store) nextEpisode(ctx context.Context, profileID string, w TitleRef, t
 // releases' there (by the country's scale); "" when it has none.
 func (s *Store) certification(ctx context.Context, kind, tmdb, country string) (string, error) {
 	var c string
-	err := s.db.QueryRowContext(ctx, `SELECT r.certification FROM title_ratings r
+	err := s.read.QueryRowContext(ctx, `SELECT r.certification FROM title_ratings r
 		LEFT JOIN rating_scales sc ON sc.kind = r.kind AND sc.country = r.country AND sc.certification = r.certification
 		WHERE r.kind = ? AND r.tmdb = ? AND r.country = ?
 		ORDER BY coalesce(sc.position, -1) DESC, r.certification LIMIT 1`, kind, tmdb, country).Scan(&c)
@@ -661,7 +661,7 @@ func (s *Store) certification(ctx context.Context, kind, tmdb, country string) (
 // titleAge is a film's or a series' age (title_ages), nil when unknown.
 func (s *Store) titleAge(ctx context.Context, kind, tmdb string) (*int, error) {
 	var age int
-	err := s.db.QueryRowContext(ctx, `SELECT age FROM title_ages WHERE kind = ? AND tmdb = ?`, kind, tmdb).Scan(&age)
+	err := s.read.QueryRowContext(ctx, `SELECT age FROM title_ages WHERE kind = ? AND tmdb = ?`, kind, tmdb).Scan(&age)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
