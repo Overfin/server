@@ -32,6 +32,9 @@ type ValuationFacts struct {
 	// Tastes are what accounts said they like, by account ID, when the
 	// operator has people asked; empty otherwise.
 	Tastes map[string]Tastes
+	// Picks are the keys of Overfin's picks: from TMDB's lists, not from
+	// anyone here.
+	Picks map[string]bool
 
 	// seasonAired are the picks' seasons' first air dates, from their
 	// series' page, by key: for seasons not fetched on their own.
@@ -109,7 +112,8 @@ const activeFor = 183 * 24 * time.Hour
 // ValuationFacts reads what the title valuation needs, as of now, with the
 // interests the features keep (by title key).
 func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []ProfileTitle) (*ValuationFacts, error) {
-	f := &ValuationFacts{Profiles: map[string]ValuationProfile{}, Titles: map[string]*ValuedTitle{}, Interests: interests}
+	f := &ValuationFacts{Profiles: map[string]ValuationProfile{}, Titles: map[string]*ValuedTitle{}, Interests: interests,
+		Picks: map[string]bool{}}
 	cutoff := now.Add(-activeFor).Unix()
 	rows, err := s.read.QueryContext(ctx, `SELECT p.id, p.account_id, p.kind = 'kids', coalesce(p.kids_titles, 0) = 1,
 			a.disabled_at IS NULL AND (a.expires_at IS NULL OR a.expires_at > ?) AND (a.created_at >= ?

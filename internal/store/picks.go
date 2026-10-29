@@ -113,7 +113,7 @@ func (s *Store) picks(ctx context.Context, f *ValuationFacts, now time.Time) err
 			return err
 		}
 		if kind == "movie" {
-			f.title(TitleRef{Kind: "movie", Source: "tmdb", ID: tmdb}.Key())
+			f.Picks[f.title(TitleRef{Kind: "movie", Source: "tmdb", ID: tmdb}.Key()).Key] = true
 			continue
 		}
 		var d TitleDetails
@@ -129,6 +129,7 @@ func (s *Store) picks(ctx context.Context, f *ValuationFacts, now time.Time) err
 				continue
 			}
 			t := f.title(TitleRef{Kind: "season", Source: "tmdb", ID: tmdb, Season: se.Number}.Key())
+			f.Picks[t.Key] = true
 			if f.seasonAired == nil {
 				f.seasonAired = map[string]string{}
 			}
