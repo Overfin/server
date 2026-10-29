@@ -11,8 +11,8 @@ import (
 
 // LibraryArtwork keeps the library titles' artwork on disk, ahead of time
 // (images.Pipeline.Keep), in the background: the pictures their pages and
-// cards show, at once, without waiting for TMDB. Titles no library has
-// get theirs when first shown.
+// cards show, at once, without waiting for TMDB; their collections' too.
+// Titles no library has get theirs when first shown.
 type LibraryArtwork struct {
 	Store  *store.Store
 	Images *images.Pipeline
@@ -39,15 +39,29 @@ func (k *LibraryArtwork) Run(ctx context.Context) {
 // Once keeps every library title's artwork, fetched again after
 // TitlesFresh, within what TMDB lets Overfin keep (Kept).
 func (k *LibraryArtwork) Once(ctx context.Context) error {
-	keys, err := k.Store.LibraryTitleKeys(ctx)
+	wanted, err := k.wanted(ctx)
 	if err != nil {
 		return err
+	}
+	fetched, deleted, err := k.Images.Keep(ctx, wanted, time.Now().Add(-TitlesFresh))
+	if fetched > 0 || deleted > 0 {
+		k.Logger.Info("catalog: the library's artwork kept", "fetched", fetched, "deleted", deleted)
+	}
+	return err
+}
+
+// wanted is the artwork to keep: the library titles', and their
+// collections'.
+func (k *LibraryArtwork) wanted(ctx context.Context) ([]images.TMDBRef, error) {
+	keys, err := k.Store.LibraryTitleKeys(ctx)
+	if err != nil {
+		return nil, err
 	}
 	var wanted []images.TMDBRef
 	for start := 0; start < len(keys); start += 500 {
 		infos, err := k.Store.TitleInfos(ctx, keys[start:min(start+500, len(keys))], time.Now().Format(time.DateOnly), "")
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for _, t := range infos {
 			if t.Ref.Kind == "episode" {
@@ -62,9 +76,14 @@ func (k *LibraryArtwork) Once(ctx context.Context) error {
 			}
 		}
 	}
-	fetched, deleted, err := k.Images.Keep(ctx, wanted, time.Now().Add(-TitlesFresh))
-	if fetched > 0 || deleted > 0 {
-		k.Logger.Info("catalog: the library's artwork kept", "fetched", fetched, "deleted", deleted)
+	// The collections the library's films belong to: their page and the
+	// Collections page show them as much.
+	collections, err := k.Store.Collections(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return err
+	for _, c := range collections {
+		wanted = append(wanted, images.TMDBRef{Type: "poster", Path: c.Poster}, images.TMDBRef{Type: "backdrop", Path: c.Backdrop})
+	}
+	return wanted, nil
 }
