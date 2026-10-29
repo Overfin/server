@@ -96,8 +96,8 @@ Jellyfin makes it again. Keep the secret key apart from the rest: with
 it, anyone can read the tokens sealed in Overfin's database.
 
 Stop the stack first, so the databases are copied whole, then start it
-again. From the folder with `compose.yaml` (the volumes' names start with
-that folder's name, here `overfin`):
+again. From the folder with `compose.yaml` (it names the project `overfin`, so
+the volumes' names start with `overfin_`, whatever the folder is called):
 
 ```sh
 docker compose stop
