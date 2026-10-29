@@ -15,6 +15,7 @@ input, select, button, textarea { font: inherit; color: inherit; }
 code { font-size: .9em; background: var(--panel-3); padding: .1em .35em; border-radius: 4px; }
 .muted { color: var(--muted); }
 .hint { font-size: .85rem; color: var(--muted); }
+.nowrap { white-space: nowrap; }
 .error { color: var(--danger); }
 .grow { flex: 1; }
 
@@ -94,7 +95,7 @@ section > h2 { font-size: 1.08rem; }
 .card-foot .status { flex: 1; min-width: 12rem; font-size: .88rem; color: var(--muted); }
 .card-foot .status.error { color: var(--danger); }
 .card-foot .status.ok { color: var(--ok); }
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr)); gap: 1.25rem; align-items: start; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr)); gap: 1.25rem; align-items: start; margin-bottom: 1.25rem; }
 .cards > section, .cards > .card { margin: 0; }
 h3 { margin: 1.4rem 0 .5rem; font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
 
