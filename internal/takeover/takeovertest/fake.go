@@ -28,7 +28,10 @@ type Jellyfin struct {
 	// FailPasswords how many of those to set a password, FailPolicies
 	// those to set a user's policy.
 	FailKeys, FailPasswords, FailPolicies int
-	made                                  int // keys made so far
+	// Starting is how many of the next first-run setup requests answer
+	// 503, as Jellyfin does while it's still starting.
+	Starting int
+	made     int // keys made so far
 }
 
 // UserID is the ID the fake gives a user.
@@ -84,6 +87,11 @@ func (f *Jellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/Startup/") {
 		if f.SetUp {
 			http.Error(w, "", http.StatusUnauthorized)
+			return
+		}
+		if f.Starting > 0 {
+			f.Starting--
+			http.Error(w, "", http.StatusServiceUnavailable)
 			return
 		}
 		f.Writes = append(f.Writes, route)
