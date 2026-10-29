@@ -69,3 +69,33 @@ func TestTitleInfosBatchedSameAsAlone(t *testing.T) {
 }
 
 func ptr(n int) *int { return &n }
+
+// A profile's states, many titles at once: those it touched, by title,
+// those it didn't left out; more than one query's worth too.
+func TestPersonalStatesMany(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	_, prof, err := s.CreateAccount(ctx, "subject-1", owner("1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := prof.ID
+	now := time.Now()
+	var titles []string
+	for i := 0; i < batchChunk+50; i++ {
+		titles = append(titles, fmt.Sprintf("movie/tmdb/%d", i+1))
+	}
+	if err := s.SetPlayed(ctx, profile, map[string]string{"movie/tmdb/1": "", fmt.Sprintf("movie/tmdb/%d", batchChunk+10): ""}, true, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetFavorite(ctx, profile, "movie/tmdb/2", "", true, now); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.PersonalStates(ctx, profile, append(titles, "movie/tmdb/1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || !got["movie/tmdb/1"].Played || !got[fmt.Sprintf("movie/tmdb/%d", batchChunk+10)].Played || !got["movie/tmdb/2"].Favorite {
+		t.Errorf("states: %+v", got)
+	}
+}

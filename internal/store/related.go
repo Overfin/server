@@ -56,6 +56,8 @@ type relatedCache struct {
 	// language under "l:<language>".
 	df    map[string]map[string]int
 	count map[string]int // titles of each kind
+	// refreshing: old facts are read again in the background.
+	refreshing bool
 }
 
 // RelatedTitles returns the library's titles of the same kind as the one
@@ -134,16 +136,43 @@ func (s *Store) RelatedTitles(ctx context.Context, key string, limit int) ([]str
 	return out, nil
 }
 
-// relatedFacts returns the library's facts for related titles, read again
-// when older than relatedFor.
+// relatedFacts returns the library's facts for related titles. Older than
+// relatedFor, they still answer while they're read again in the
+// background, so no one waits for that; only the first ones are read while
+// the caller waits.
 func (s *Store) relatedFacts(ctx context.Context) (*relatedCache, error) {
 	c := &s.related
 	c.mu.Lock()
-	if now := s.now(); c.byKey != nil && now.Sub(c.at) < relatedFor && !now.Before(c.at) {
-		c.mu.Unlock()
+	defer c.mu.Unlock()
+	now := s.now()
+	if c.byKey != nil && now.Sub(c.at) < relatedFor && !now.Before(c.at) {
 		return c, nil
 	}
-	defer c.mu.Unlock()
+	if c.byKey != nil {
+		if !c.refreshing {
+			c.refreshing = true
+			go func() {
+				r, err := s.readRelated(context.Background())
+				c.mu.Lock()
+				defer c.mu.Unlock()
+				c.refreshing = false
+				if err == nil {
+					c.titles, c.byKey, c.df, c.count, c.at = r.titles, r.byKey, r.df, r.count, s.now()
+				}
+			}()
+		}
+		return c, nil
+	}
+	r, err := s.readRelated(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.titles, c.byKey, c.df, c.count, c.at = r.titles, r.byKey, r.df, r.count, s.now()
+	return c, nil
+}
+
+// readRelated reads the library's facts for related titles.
+func (s *Store) readRelated(ctx context.Context) (*relatedCache, error) {
 	titles := map[string]*relatedFacts{}
 	var order []*relatedFacts
 	// Each film and series once, by its title key: its year, rating,
@@ -231,6 +260,5 @@ func (s *Store) relatedFacts(ctx context.Context) (*relatedCache, error) {
 			df[f.kind]["l:"+f.language]++
 		}
 	}
-	c.titles, c.byKey, c.df, c.count, c.at = order, titles, df, count, s.now()
-	return c, nil
+	return &relatedCache{titles: order, byKey: titles, df: df, count: count}, nil
 }
