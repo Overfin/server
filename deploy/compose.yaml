@@ -48,9 +48,10 @@ services:
     volumes:
       - jellyfin-config:/config
       - jellyfin-cache:/cache
-      # Your films and series, read only: in Overfin's control panel, add
-      # libraries with folders under /media.
-      - ${MEDIA_DIR:?set MEDIA_DIR in .env (see .env.example)}:/media:ro
+      # Your films and series, read only: change /srv/media to where they
+      # are on this machine. In Overfin's control panel, add libraries with
+      # folders under /media.
+      - /srv/media:/media:ro
       # More folders (another disk, a NAS share mounted on this machine):
       # one line each, then docker compose up -d. In the control panel, a
       # library's folders are the paths after the colon.

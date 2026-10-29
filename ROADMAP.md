@@ -889,7 +889,8 @@ nothing beyond what that needs.
 - ~~**Media in several places.**~~ Done (0.5), in the README: one line
   per folder under Jellyfin's `volumes` in the Compose file (anyone
   running Docker edits one), and a library's folders are the paths after
-  the colon. `MEDIA_DIR` stays the first one, at `/media`.
+  the colon. The first one, at `/media`, is in the Compose file too
+  (no `MEDIA_DIR` any more, since 0.7).
 
 ## Companion projects
 

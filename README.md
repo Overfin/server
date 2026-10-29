@@ -15,7 +15,7 @@ for the rest.
 mkdir overfin && cd overfin
 curl -fsSLO https://raw.githubusercontent.com/overfin/server/v0.6.1/deploy/compose.yaml
 curl -fsSL -o .env https://raw.githubusercontent.com/overfin/server/v0.6.1/deploy/.env.example
-# set MEDIA_DIR in .env to your films and series, then:
+# in compose.yaml, change /srv/media to where your films and series are, then:
 docker compose up -d
 ```
 
@@ -149,10 +149,11 @@ runs one, which Overfin sets up by itself on its first start, and manages
 from then on. A Jellyfin you already use stays yours and untouched: see
 [Your own Jellyfin](#your-own-jellyfin).
 
-**1. Start it** with the commands at the top. [.env](deploy/.env.example)
-has two settings: `MEDIA_DIR`, your films and series (Jellyfin only reads
-them), and `OVERFIN_DOMAIN`, optional (see below). Your TMDB token can go
-there too, as `OVERFIN_TMDB_TOKEN`, or in the wizard. On Fedora, RHEL and
+**1. Start it** with the commands at the top. Your films and series are on
+the media line of `compose.yaml` (`/srv/media:/media:ro`: the part before
+the colon is where they are on this machine; Jellyfin only reads them).
+[.env](deploy/.env.example) is optional: `OVERFIN_DOMAIN` (see below), and
+your TMDB token as `OVERFIN_TMDB_TOKEN`, or give it in the wizard. On Fedora, RHEL and
 other SELinux systems, add `,z` after `:ro` on the media line of
 `compose.yaml`, so Jellyfin may read the folder.
 
@@ -163,7 +164,7 @@ library's folders are then the paths after the colon:
 
 ```yaml
     volumes:
-      - ${MEDIA_DIR:?set MEDIA_DIR in .env (see .env.example)}:/media:ro
+      - /srv/media:/media:ro
       - /mnt/nas/films:/nas/films:ro
 ```
 
@@ -184,7 +185,7 @@ Intro Skipper (optional), Seerr (optional), and your email and a password,
 for you, its first admin.
 
 **3. Add your libraries** in the control panel (`/admin/`, Libraries), with
-folders under `/media`, where the compose file puts `MEDIA_DIR`.
+folders under `/media`, where the compose file puts your media folder.
 
 That's all. People sign in with their email and a password. In the
 control panel: add people (People: an email and a first password, which
