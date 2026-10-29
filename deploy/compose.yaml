@@ -1,7 +1,7 @@
-# Overfin and its own Jellyfin, on one machine. Copy .env.example to .env,
-# set where your media is, then: docker compose up -d. Open this machine's
-# address in a browser, and the setup wizard takes it from there. See
-# README.md.
+# Overfin and its own Jellyfin, on one machine. Set where your media is on
+# the media line below (.env holds optional settings, see .env.example),
+# then: docker compose up -d. Open this machine's address in a browser, and
+# the setup wizard takes it from there. See README.md.
 #
 # Overfin reaches Jellyfin on this project's network only; nothing else
 # does. Nothing gets the Docker socket.

@@ -91,8 +91,21 @@ func Look(ctx context.Context, jf *jellyfin.Client, key, serverID string) (Found
 // whose password nobody keeps, and returns the key Overfin made with it.
 func SetUp(ctx context.Context, jf *jellyfin.Client, st jellyfin.Startup) (key string, err error) {
 	password := rand.Text()
-	if err := jf.RunStartup(ctx, st, AdminName, password); err != nil {
-		return "", fmt.Errorf("takeover: setting Jellyfin up: %w", err)
+	// A Jellyfin just started may answer before it's ready (503): asked
+	// again, as it would be after Overfin restarted.
+	for try := 1; ; try++ {
+		err = jf.RunStartup(ctx, st, AdminName, password)
+		if err == nil {
+			break
+		}
+		if !jellyfin.IsStatus(err, http.StatusServiceUnavailable) || try == startupTries {
+			return "", fmt.Errorf("takeover: setting Jellyfin up: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(keyWait):
+		}
 	}
 	// From now on, only this password opens the server: the key is made
 	// even if whoever asked went away, and tried again a few times, or the
@@ -115,8 +128,12 @@ func SetUp(ctx context.Context, jf *jellyfin.Client, st jellyfin.Startup) (key s
 }
 
 // keyTries is how many times SetUp tries to make its key, keyWait more
-// between each.
-const keyTries = 5
+// between each; startupTries how many times it runs Jellyfin's first-run
+// setup while Jellyfin is still starting, keyWait between each.
+const (
+	keyTries     = 5
+	startupTries = 30
+)
 
 var keyWait = 2 * time.Second
 

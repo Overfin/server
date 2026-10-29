@@ -46,6 +46,18 @@ func TestFreshServerIsSetUp(t *testing.T) {
 	}
 }
 
+// A Jellyfin that's still starting answers 503 to its first-run setup for a
+// while: asked again, rather than Overfin giving up.
+func TestSetUpWaitsForAStartingServer(t *testing.T) {
+	takeover.SetKeyWait(time.Millisecond)
+	f, jf := newFake(t, false)
+	f.Starting = 3
+	key, err := takeover.SetUp(context.Background(), jf, jellyfin.Startup{UICulture: "en-US", Country: "US", Language: "en"})
+	if err != nil || f.Keys[key] != takeover.AppName || !f.SetUp {
+		t.Fatalf("key %q, %v, set up %v", key, err, f.SetUp)
+	}
+}
+
 // Once set up, only the password SetUp threw away opens the server: a key
 // that fails to come is asked again, rather than leaving a server nobody
 // can get into.
