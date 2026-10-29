@@ -165,3 +165,26 @@ func TestAppTitles(t *testing.T) {
 	}
 	get(old, "?fields=score", 403)
 }
+
+// Plays and the day last played count only accounts that played the
+// title: one that only started it doesn't make another's plays anonymous.
+func TestAppTitlesPlaysNeedTwoPlayers(t *testing.T) {
+	day := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	f := &store.ValuationFacts{
+		Profiles: map[string]store.ValuationProfile{"pa": {AccountID: "A"}, "pb": {AccountID: "B"}},
+		Titles:   map[string]*store.ValuedTitle{"movie/tmdb/550": {Key: "movie/tmdb/550"}},
+		Viewings: []store.Viewing{
+			{ProfileID: "pa", Title: "movie/tmdb/550", PlayCount: 7, LastPlayed: day},
+			{ProfileID: "pb", Title: "movie/tmdb/550", PositionMs: 1000},
+		},
+	}
+	s := titleStats(f)["movie/tmdb/550"]
+	if s.Plays != 0 || s.LastPlayed != "" || s.Viewers != 2 {
+		t.Fatalf("one player: plays %d, last %q, viewers %d", s.Plays, s.LastPlayed, s.Viewers)
+	}
+	f.Viewings[1].PlayCount, f.Viewings[1].LastPlayed = 1, day
+	s = titleStats(f)["movie/tmdb/550"]
+	if s.Plays != 8 || s.LastPlayed != "2026-10-01" {
+		t.Fatalf("two players: plays %d, last %q", s.Plays, s.LastPlayed)
+	}
+}

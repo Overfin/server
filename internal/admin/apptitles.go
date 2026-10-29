@@ -297,6 +297,7 @@ func titleStats(f *store.ValuationFacts) map[string]*titleStatsJSON {
 	type total struct {
 		plays     int
 		viewers   map[string]bool
+		players   map[string]bool // the accounts behind plays and the last one
 		favorites int
 		fans      map[string]bool // the accounts behind favorites
 		last      time.Time
@@ -305,7 +306,7 @@ func titleStats(f *store.ValuationFacts) map[string]*titleStatsJSON {
 	get := func(key string) *total {
 		t := totals[key]
 		if t == nil {
-			t = &total{viewers: map[string]bool{}, fans: map[string]bool{}}
+			t = &total{viewers: map[string]bool{}, players: map[string]bool{}, fans: map[string]bool{}}
 			totals[key] = t
 		}
 		return t
@@ -324,11 +325,19 @@ func titleStats(f *store.ValuationFacts) map[string]*titleStatsJSON {
 		}
 		t := get(key)
 		t.plays += v.PlayCount
-		if p, ok := f.Profiles[v.ProfileID]; ok {
+		p, ok := f.Profiles[v.ProfileID]
+		if ok {
 			t.viewers[p.AccountID] = true
 		}
-		if v.LastPlayed.After(t.last) {
-			t.last = v.LastPlayed
+		// Plays and the last one count only accounts that played it: one
+		// that only started it doesn't make another's plays anonymous.
+		if v.PlayCount > 0 {
+			if ok {
+				t.players[p.AccountID] = true
+			}
+			if v.LastPlayed.After(t.last) {
+				t.last = v.LastPlayed
+			}
 		}
 	}
 	seasons := map[string][]string{} // series key → its valued seasons
@@ -354,9 +363,9 @@ func titleStats(f *store.ValuationFacts) map[string]*titleStatsJSON {
 	}
 	out := make(map[string]*titleStatsJSON, len(totals))
 	for key, t := range totals {
-		s := &titleStatsJSON{Plays: byTwo(t.plays, len(t.viewers)), Viewers: atLeast2(len(t.viewers)),
+		s := &titleStatsJSON{Plays: byTwo(t.plays, len(t.players)), Viewers: atLeast2(len(t.viewers)),
 			Favorites: byTwo(t.favorites, len(t.fans))}
-		if !t.last.IsZero() && len(t.viewers) >= 2 {
+		if !t.last.IsZero() && len(t.players) >= 2 {
 			s.LastPlayed = t.last.UTC().Format(time.DateOnly)
 		}
 		out[key] = s
