@@ -4126,7 +4126,9 @@ components:
           description: How many of its films the profile has in a library.
         films:
           type: integer
-          description: How many films it has in all.
+          description: >-
+            How many of its films the profile sees on its page (0.7.0 and
+            before: all of them, even those its limits hid).
         items:
           type: array
           description: Its films, on its own page only.

@@ -84,7 +84,7 @@ type Collection struct {
 	Overview string  `json:"overview,omitempty"`
 	Images   *Images `json:"images,omitempty"`
 	// InLibrary is how many of its films the profile has in a library, of
-	// Films in the collection.
+	// Films it sees on its page.
 	InLibrary int `json:"inLibrary"`
 	Films     int `json:"films"`
 	// Items are its films, in release order, as the profile may see them
