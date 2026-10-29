@@ -90,13 +90,14 @@ func (s *Store) AppKeyFor(ctx context.Context, key string, at time.Time) (*AppKe
 type WatchStats struct {
 	Kind             string // movie, series
 	TMDB, IMDb, TVDB string
-	// Plays are the times it was played to the end; Viewers, the accounts
-	// that watched some of it; Favorites, the profiles that keep it as a
-	// favorite, and FavoriteAccounts, the accounts those profiles belong to.
-	Plays, Viewers, Favorites int
-	FavoriteAccounts          int
-	LastPlayed                time.Time // zero: never
-	Changed                   time.Time
+	// Plays are the times it was played to the end, and PlayAccounts the
+	// accounts behind them; Viewers, the accounts that watched some of it;
+	// Favorites, the profiles that keep it as a favorite, and
+	// FavoriteAccounts, the accounts those profiles belong to.
+	Plays, PlayAccounts, Viewers, Favorites int
+	FavoriteAccounts                        int
+	LastPlayed                              time.Time // of those plays; zero: never
+	Changed                                 time.Time
 }
 
 // AllWatchStats totals, for each film and series anyone watched or keeps
@@ -112,7 +113,7 @@ func (s *Store) AllWatchStats(ctx context.Context, since time.Time) ([]WatchStat
 	}
 	type total struct {
 		WatchStats
-		viewers, fans map[string]bool
+		viewers, players, fans map[string]bool
 	}
 	byKey := map[string]*total{}
 	var order []string
@@ -135,7 +136,7 @@ func (s *Store) AllWatchStats(ctx context.Context, since time.Time) ([]WatchStat
 		key := top.Key()
 		t := byKey[key]
 		if t == nil {
-			t = &total{WatchStats: WatchStats{Kind: top.Kind}, viewers: map[string]bool{}, fans: map[string]bool{}}
+			t = &total{WatchStats: WatchStats{Kind: top.Kind}, viewers: map[string]bool{}, players: map[string]bool{}, fans: map[string]bool{}}
 			if top.Source == "tmdb" {
 				t.TMDB = top.ID
 			}
@@ -150,8 +151,11 @@ func (s *Store) AllWatchStats(ctx context.Context, since time.Time) ([]WatchStat
 			t.Favorites++
 			t.fans[account] = true
 		}
-		if last > 0 && time.Unix(last, 0).After(t.LastPlayed) {
-			t.LastPlayed = time.Unix(last, 0).UTC()
+		if plays > 0 {
+			t.players[account] = true
+			if last > 0 && time.Unix(last, 0).After(t.LastPlayed) {
+				t.LastPlayed = time.Unix(last, 0).UTC()
+			}
 		}
 		if u := time.Unix(updated, 0).UTC(); u.After(t.Changed) {
 			t.Changed = u
@@ -181,7 +185,7 @@ func (s *Store) AllWatchStats(ctx context.Context, since time.Time) ([]WatchStat
 		if t.IMDb == "" && strings.HasPrefix(key, t.Kind+"/imdb/") {
 			t.IMDb = strings.TrimPrefix(key, t.Kind+"/imdb/")
 		}
-		t.Viewers, t.FavoriteAccounts = len(t.viewers), len(t.fans)
+		t.Viewers, t.PlayAccounts, t.FavoriteAccounts = len(t.viewers), len(t.players), len(t.fans)
 		out = append(out, t.WatchStats)
 	}
 	return out, nil

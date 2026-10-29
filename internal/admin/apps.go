@@ -182,9 +182,10 @@ func (p *Panel) watchStats(w http.ResponseWriter, r *http.Request) {
 		if s.Viewers < 2 {
 			continue
 		}
-		j := watchStatsJSON{Kind: s.Kind, TMDB: s.TMDB, IMDb: s.IMDb, TVDB: s.TVDB, Plays: s.Plays,
+		// Plays and the last one only with two accounts behind them.
+		j := watchStatsJSON{Kind: s.Kind, TMDB: s.TMDB, IMDb: s.IMDb, TVDB: s.TVDB, Plays: byTwo(s.Plays, s.PlayAccounts),
 			Viewers: s.Viewers, Favorites: byTwo(s.Favorites, s.FavoriteAccounts), Changed: dayOf(s.Changed).Format(time.RFC3339)}
-		if !s.LastPlayed.IsZero() {
+		if !s.LastPlayed.IsZero() && s.PlayAccounts >= 2 {
 			j.LastPlayed = s.LastPlayed.Format(time.DateOnly)
 		}
 		out = append(out, j)
