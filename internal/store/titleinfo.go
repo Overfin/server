@@ -352,7 +352,7 @@ func (s *Store) fillTitle(ctx context.Context, t *TitleInfo, kind, tmdb string, 
 		}
 	}
 	// The keeper's images, picked in the panel's language, come first.
-	art := map[string]map[string]string{}
+	var art map[string]map[string]string
 	if b.has(key) {
 		art = b.art
 	} else if art, err = s.Artwork(ctx, []string{key}); err != nil {
