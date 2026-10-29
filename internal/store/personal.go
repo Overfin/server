@@ -112,28 +112,36 @@ func (s *Store) MergePersonal(ctx context.Context, profileID string, states []Pe
 }
 
 // PersonalStates returns what a profile did with these titles, by title
-// key; titles it never touched are left out.
+// key; titles it never touched are left out. A few hundred at a time, in
+// one query each.
 func (s *Store) PersonalStates(ctx context.Context, profileID string, titles []string) (map[string]Personal, error) {
 	out := map[string]Personal{}
-	for _, title := range titles {
-		var p Personal
-		var item sql.NullString
-		var played, favorite int
-		var last sql.NullInt64
-		err := s.db.QueryRowContext(ctx, `SELECT title, item_id, position_ms, played, play_count, last_played_at, favorite
-			FROM profile_titles WHERE profile_id = ? AND title = ?`, profileID, title).
-			Scan(&p.Title, &item, &p.PositionMs, &played, &p.PlayCount, &last, &favorite)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
+	for start := 0; start < len(titles); start += batchChunk {
+		chunk := titles[start:min(start+batchChunk, len(titles))]
+		rows, err := s.db.QueryContext(ctx, `SELECT title, item_id, position_ms, played, play_count, last_played_at, favorite
+			FROM profile_titles WHERE profile_id = ? AND title IN (`+marks(len(chunk))+`)`, append([]any{profileID}, anys(chunk)...)...)
 		if err != nil {
 			return nil, err
 		}
-		p.ItemID, p.Played, p.Favorite = item.String, played == 1, favorite == 1
-		if last.Valid && last.Int64 > 0 {
-			p.LastPlayedAt = time.Unix(last.Int64, 0)
+		for rows.Next() {
+			var p Personal
+			var item sql.NullString
+			var played, favorite int
+			var last sql.NullInt64
+			if err := rows.Scan(&p.Title, &item, &p.PositionMs, &played, &p.PlayCount, &last, &favorite); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			p.ItemID, p.Played, p.Favorite = item.String, played == 1, favorite == 1
+			if last.Valid && last.Int64 > 0 {
+				p.LastPlayedAt = time.Unix(last.Int64, 0)
+			}
+			out[p.Title] = p
 		}
-		out[title] = p
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
