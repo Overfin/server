@@ -181,6 +181,12 @@ type TitleInfo struct {
 // (YYYY-MM-DD, for what has aired), their texts in language where they're
 // kept ("" for the default language).
 func (s *Store) TitleInfos(ctx context.Context, keys []string, today, language string) (map[string]*TitleInfo, error) {
+	return s.titleInfos(ctx, keys, today, language, true)
+}
+
+// titleInfos is TitleInfos; batched, its films and series are read at once
+// (infoBatch), else each on its own (as before; for tests to compare).
+func (s *Store) titleInfos(ctx context.Context, keys []string, today, language string, batched bool) (map[string]*TitleInfo, error) {
 	out := map[string]*TitleInfo{}
 	country, err := s.RatingsCountry(ctx)
 	if err != nil {
@@ -193,6 +199,19 @@ func (s *Store) TitleInfos(ctx context.Context, keys []string, today, language s
 			language = ""
 		}
 	}
+	// The films and series, read at once (infoBatch).
+	var refs []TitleRef
+	for _, k := range keys {
+		if r, ok := ParseTitleKey(k); ok {
+			refs = append(refs, r)
+		}
+	}
+	var b *infoBatch
+	if batched {
+		if b, err = s.readBatch(ctx, refs, country); err != nil {
+			return nil, err
+		}
+	}
 	for _, k := range keys {
 		if _, done := out[k]; done {
 			continue
@@ -201,7 +220,7 @@ func (s *Store) TitleInfos(ctx context.Context, keys []string, today, language s
 		if !ok {
 			continue
 		}
-		t, err := s.titleInfo(ctx, r, today)
+		t, err := s.titleInfo(ctx, r, today, b)
 		if err != nil {
 			return nil, err
 		}
@@ -210,11 +229,15 @@ func (s *Store) TitleInfos(ctx context.Context, keys []string, today, language s
 			if r.Kind != "movie" {
 				kind = "series"
 			}
-			if t.Certification, err = s.certification(ctx, kind, tmdb, country); err != nil {
-				return nil, err
-			}
-			if t.Age, err = s.titleAge(ctx, kind, tmdb); err != nil {
-				return nil, err
+			if key := keyOf(kind, tmdb); b.has(key) {
+				t.Certification, t.Age = b.cert[key], b.age[key]
+			} else {
+				if t.Certification, err = s.certification(ctx, kind, tmdb, country); err != nil {
+					return nil, err
+				}
+				if t.Age, err = s.titleAge(ctx, kind, tmdb); err != nil {
+					return nil, err
+				}
 			}
 		}
 		if language != "" && t.Known {
@@ -234,22 +257,24 @@ func (s *Store) TitleInfos(ctx context.Context, keys []string, today, language s
 	return out, nil
 }
 
-func (s *Store) titleInfo(ctx context.Context, r TitleRef, today string) (*TitleInfo, error) {
+func (s *Store) titleInfo(ctx context.Context, r TitleRef, today string, b *infoBatch) (*TitleInfo, error) {
 	t := &TitleInfo{Ref: r}
 	key := r.Key()
 	var err error
-	if t.Items, err = s.ids(ctx, `SELECT id FROM catalog_items WHERE title_key = ? ORDER BY id`, key); err != nil {
+	if b.has(key) {
+		t.Items = b.items[key]
+	} else if t.Items, err = s.ids(ctx, `SELECT id FROM catalog_items WHERE title_key = ? ORDER BY id`, key); err != nil {
 		return nil, err
 	}
 	tmdb := r.TMDB()
 	switch {
 	case tmdb != "" && (r.Kind == "movie" || r.Kind == "series"):
-		if err := s.fillTitle(ctx, t, r.Kind, tmdb); err != nil {
+		if err := s.fillTitle(ctx, t, r.Kind, tmdb, b); err != nil {
 			return nil, err
 		}
 	case tmdb != "" && r.Kind == "season":
 		var series TitleInfo
-		if err := s.fillTitle(ctx, &series, "series", tmdb); err != nil {
+		if err := s.fillTitle(ctx, &series, "series", tmdb, b); err != nil {
 			return nil, err
 		}
 		t.SeriesName, t.Backdrop, t.Logo = series.Name, series.Backdrop, series.Logo
@@ -267,7 +292,7 @@ func (s *Store) titleInfo(ctx context.Context, r TitleRef, today string) (*Title
 		}
 	case tmdb != "" && r.Kind == "episode":
 		var series TitleInfo
-		if err := s.fillTitle(ctx, &series, "series", tmdb); err != nil {
+		if err := s.fillTitle(ctx, &series, "series", tmdb, b); err != nil {
 			return nil, err
 		}
 		t.SeriesName, t.Backdrop, t.Logo, t.Poster = series.Name, series.Backdrop, series.Logo, series.Poster
@@ -305,10 +330,15 @@ func (s *Store) titleInfo(ctx context.Context, r TitleRef, today string) (*Title
 	return t, nil
 }
 
-// fillTitle fills in a film's or a series' page and images.
-func (s *Store) fillTitle(ctx context.Context, t *TitleInfo, kind, tmdb string) error {
-	title, err := s.TitleByTMDB(ctx, kind, tmdb)
-	if err != nil {
+// fillTitle fills in a film's or a series' page and images: from the
+// batch, when it read them.
+func (s *Store) fillTitle(ctx context.Context, t *TitleInfo, kind, tmdb string, b *infoBatch) error {
+	key := keyOf(kind, tmdb)
+	var title *Title
+	var err error
+	if b.has(key) {
+		title = b.titles[key]
+	} else if title, err = s.TitleByTMDB(ctx, kind, tmdb); err != nil {
 		return err
 	}
 	if title != nil {
@@ -322,11 +352,13 @@ func (s *Store) fillTitle(ctx context.Context, t *TitleInfo, kind, tmdb string) 
 		}
 	}
 	// The keeper's images, picked in the panel's language, come first.
-	art, err := s.Artwork(ctx, []string{kind + "/tmdb/" + tmdb})
-	if err != nil {
+	art := map[string]map[string]string{}
+	if b.has(key) {
+		art = b.art
+	} else if art, err = s.Artwork(ctx, []string{key}); err != nil {
 		return err
 	}
-	if a := art[kind+"/tmdb/"+tmdb]; a != nil {
+	if a := art[key]; a != nil {
 		t.Poster, t.Backdrop, t.Logo, t.Textless = or(a["poster"], t.Poster), or(a["backdrop"], t.Backdrop), a["logo"], a["textless"]
 	}
 	return nil
