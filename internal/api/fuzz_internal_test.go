@@ -125,3 +125,21 @@ func FuzzPickLanguage(f *testing.F) {
 		}
 	})
 }
+
+// Collection IDs from clients: those taken are TMDB's IDs, written one
+// way only, so one collection has one ID.
+func FuzzCollectionNumber(f *testing.F) {
+	for _, s := range []string{"collection_10", "collection_0", "collection_010", "collection_+1", "collection_-1", "collection_",
+		"collection_9999999999", "collection_10000000000", "collection_99999999999999999999", "collection_1 ", "10", "collection_1e3"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		n, ok := collectionNumber(s)
+		if !ok {
+			return
+		}
+		if !tmdb.ValidID(n) || collectionID(n) != s {
+			t.Fatalf("%q -> %d", s, n)
+		}
+	})
+}
