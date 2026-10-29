@@ -406,8 +406,11 @@ comes from the internet, and media files can be written by anyone.
     What they read are totals per title, counts below 2 given as 0, and
     plays and favorites given as 0 when fewer than two people (accounts)
     account for them; watch statistics leave out a title fewer than two
-    people watched, and say when a title changed only by its day, so no
-    title and no time points at one person.
+    people watched, and say when a title changed only by its day; a title
+    the libraries lack is listed only when two accounts or more want it
+    (watched, marked, asked for or kept for later), or when it's one of
+    Overfin's picks from TMDB's lists. So no title and no time points at
+    one person.
 
 ### Code supply
 59. No code copied or ported from other projects. Dependencies are few, chosen

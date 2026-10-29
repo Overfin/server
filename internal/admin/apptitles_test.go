@@ -188,3 +188,60 @@ func TestAppTitlesPlaysNeedTwoPlayers(t *testing.T) {
 		t.Fatalf("two players: plays %d, last %q", s.Plays, s.LastPlayed)
 	}
 }
+
+// A title the libraries lack, wanted by one account only (asked for,
+// kept for later, by any of its profiles), isn't listed: its row alone
+// would tell what that person wants. Two accounts' wishes, or one of each
+// kind from two accounts, list it.
+func TestAppTitlesOneWishStaysUnseen(t *testing.T) {
+	ctx := context.Background()
+	p, b, db, _ := signedInPanel(t)
+	now := time.Now()
+	var accts, profs []string
+	for _, s := range []string{"1", "2"} {
+		acct, prof, _ := db.CreateAccount(ctx, "person-"+s, store.NewOwner{Name: "Main", JellyfinUserID: strings.Repeat(s, 32), JellyfinUsername: "of-" + s, JellyfinToken: "t"})
+		accts, profs = append(accts, acct.ID), append(profs, prof.ID)
+	}
+	kid, err := db.AddProfile(ctx, accts[0], store.NewProfile{Name: "Kid", Kind: "standard", JellyfinUserID: strings.Repeat("9", 32), JellyfinUsername: "of-9", JellyfinToken: "t9"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ask := func(acct, prof, title string) {
+		t.Helper()
+		if err := db.AddRequest(ctx, &store.Request{AccountID: acct, ProfileID: prof, Title: title, Status: "pending", CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ask(accts[0], profs[0], "movie/tmdb/10") // one account
+	ask(accts[0], profs[0], "movie/tmdb/12") // asked for by one,
+	ask(accts[0], profs[0], "movie/tmdb/13") // asked for by both
+	ask(accts[1], profs[1], "movie/tmdb/13")
+	p.Interests = func(context.Context) ([]store.ProfileTitle, error) {
+		return []store.ProfileTitle{
+			{ProfileID: profs[0], Title: "movie/tmdb/11"}, // two profiles, one account
+			{ProfileID: kid.ID, Title: "movie/tmdb/11"},
+			{ProfileID: profs[1], Title: "movie/tmdb/12"}, // kept for later by the other
+		}, nil
+	}
+
+	rec := b.do("POST", "/admin/api/apps", `{"name":"Overtide","scopes":["score"]}`, nil)
+	var made struct{ Key string }
+	if json.Unmarshal(rec.Body.Bytes(), &made); rec.Code != 201 {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	app := &browser{h: b.h, cookies: map[string]string{}}
+	for _, query := range []string{"", "?inLibrary=false"} {
+		rec := app.do("GET", "/apps/v1/titles"+query, "", map[string]string{"Authorization": "Bearer " + made.Key})
+		var page appTitlesPage
+		if json.Unmarshal(rec.Body.Bytes(), &page); rec.Code != 200 {
+			t.Fatalf("%q: %d %s", query, rec.Code, rec.Body)
+		}
+		listed := map[string]bool{}
+		for _, r := range page.Titles {
+			listed[r.TmdbId] = true
+		}
+		if listed["10"] || listed["11"] || !listed["12"] || !listed["13"] {
+			t.Errorf("%q: listed %v, want 12 and 13 only", query, listed)
+		}
+	}
+}

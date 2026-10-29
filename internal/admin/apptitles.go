@@ -192,10 +192,16 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		n, ok := positions[top+r.TMDB()]
 		return n, ok
 	}
+	wanted := wantedBy(f)
 	var rows []valuation.Value
 	for _, v := range m.Scored(valuation.Weights(saved)) {
 		r, _ := store.ParseTitleKey(v.Key)
 		if (inLibrary != nil && v.InLibrary != *inLibrary) || (kind != "" && r.Kind != kind) {
+			continue
+		}
+		// A title the libraries lack is there because someone here wants it,
+		// or it's one of Overfin's picks: one account's wish stays unseen.
+		if !v.InLibrary && !f.Picks[v.Key] && len(wanted[v.Key]) < 2 {
 			continue
 		}
 		if _, ok := position(v.Key); positions != nil && !ok {
@@ -287,6 +293,59 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		page["next"] = strconv.Itoa(next)
 	}
 	writeJSON(w, http.StatusOK, page)
+}
+
+// wantedBy gives, per film and season, the accounts that watched, marked,
+// asked for or kept it for later: a series' marks count for each of its
+// seasons, an episode's for its season.
+func wantedBy(f *store.ValuationFacts) map[string]map[string]bool {
+	seasons := map[string][]string{} // series key → its valued seasons
+	for key := range f.Titles {
+		if ref, _ := store.ParseTitleKey(key); ref.Kind == "season" {
+			seasons[ref.Series().Key()] = append(seasons[ref.Series().Key()], key)
+		}
+	}
+	out := map[string]map[string]bool{}
+	add := func(title, account string) {
+		ref, ok := store.ParseTitleKey(title)
+		if !ok {
+			return
+		}
+		keys := []string{ref.Key()}
+		switch ref.Kind {
+		case "episode":
+			keys = []string{ref.SeasonOf().Key()}
+		case "series":
+			keys = seasons[ref.Key()]
+		}
+		for _, key := range keys {
+			if f.Titles[key] == nil {
+				continue
+			}
+			if out[key] == nil {
+				out[key] = map[string]bool{}
+			}
+			out[key][account] = true
+		}
+	}
+	byProfile := func(profile, title string) {
+		if p, ok := f.Profiles[profile]; ok {
+			add(title, p.AccountID)
+		}
+	}
+	for _, v := range f.Viewings {
+		byProfile(v.ProfileID, v.Title)
+	}
+	for _, t := range f.Favorites {
+		byProfile(t.ProfileID, t.Title)
+	}
+	for _, t := range f.Interests {
+		byProfile(t.ProfileID, t.Title)
+	}
+	for _, t := range f.Requests {
+		add(t.Title, t.AccountID)
+	}
+	return out
 }
 
 // titleStats totals, per film and season, what every profile did: plays
