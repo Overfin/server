@@ -790,7 +790,7 @@ function emailsCard(t, m) {
     return setting(emailNames[e.name] || e.name, yours.length ? yours.join(', ') : null,
       h('div', { class: 'row' }, yours.length ? badge('Yours', 'info') : badge('Overfin\'s', 'plain'), send));
   });
-  return card({ title: 'Emails', description: `What people get, in their language. Overfin's own, or yours: put templates of the same names in ${t.dir} (README.md, Emails, says how).` },
+  return card({ title: 'Emails', description: `What people get, in their language. Overfin's own, or yours: put templates of the same names in ${t.dir} (README.md, Your brand, and your emails, says how).` },
     rows, [st]);
 }
 

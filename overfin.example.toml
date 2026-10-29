@@ -199,7 +199,8 @@ max_transcodes_total = 4
 # 0 means no cap.
 max_bitrate_kbps = 0
 # Wrong PINs in a row before a profile's PIN locks (3 to 10). The lock lifts
-# when the account owner logs in again (with step-up), or after 15 minutes.
+# when the account owner logs in again (with step-up); only where there's no
+# step-up (forwardauth without [oidc], anonymous), after 15 minutes instead.
 pin_attempts = 5
 # When an account starts one stream too many: "replace-oldest" stops its
 # oldest stream (that device is told why; with a stream reserved for each
