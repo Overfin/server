@@ -4,11 +4,12 @@
    things out with them.
 
    Dark is the default. A page picks light with data-theme="light" on
-   <html>; one without data-theme follows the device. The -rgb tokens are
+   <html>; one without data-theme follows the device. An element with
+   data-theme="dark" stays dark whatever the page is (the site's header). The -rgb tokens are
    the same colors as numbers, for rgba(var(--text-rgb), .1): old TV
    browsers have no color-mix(). */
 
-:root {
+:root, [data-theme="dark"] {
   --bg: #0c0d11;
   --bg-rgb: 12, 13, 17;
   --panel: #16181e;
