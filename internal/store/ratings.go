@@ -248,6 +248,66 @@ func (s *Store) TitleAllowed(ctx context.Context, c Ceiling, kind, tmdb string) 
 	return ok, err
 }
 
+// keyKind and keyTMDB split a "kind/tmdb" value (TitlesAllowed's,
+// TitleReleases') in SQL.
+const (
+	keyKind = `substr(j.value, 1, instr(j.value, '/') - 1)`
+	keyTMDB = `substr(j.value, instr(j.value, '/') + 1)`
+)
+
+// TitlesAllowed is TitleAllowed for many titles at once, by "kind/tmdb"
+// ("movie/550"): those the ceiling allows.
+func (s *Store) TitlesAllowed(ctx context.Context, c Ceiling, keys []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if len(keys) == 0 {
+		return out, nil
+	}
+	cond, args := c.allowed(keyKind, keyTMDB)
+	rows, err := s.read.QueryContext(ctx, `SELECT j.value FROM json_each(?) j WHERE `+cond,
+		append([]any{jsonList(keys)}, args...)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out[k] = true
+	}
+	return out, rows.Err()
+}
+
+// Release is when a title came out, as TitleRelease gives it.
+type Release struct {
+	Released, AtHome string
+}
+
+// TitleReleases is TitleRelease for many titles at once, by "kind/tmdb":
+// those not fetched yet are left out.
+func (s *Store) TitleReleases(ctx context.Context, keys []string) (map[string]Release, error) {
+	out := map[string]Release{}
+	if len(keys) == 0 {
+		return out, nil
+	}
+	rows, err := s.read.QueryContext(ctx, `SELECT j.value, r.released, r.at_home FROM json_each(?) j
+		JOIN title_ratings_fetched r ON r.kind = `+keyKind+` AND r.tmdb = `+keyTMDB, jsonList(keys))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		var r, h sql.NullString
+		if err := rows.Scan(&k, &r, &h); err != nil {
+			return nil, err
+		}
+		out[k] = Release{Released: r.String, AtHome: h.String}
+	}
+	return out, rows.Err()
+}
+
 // KidsProfiles lists every kids profile.
 func (s *Store) KidsProfiles(ctx context.Context) ([]*Profile, error) {
 	rows, err := s.read.QueryContext(ctx, profileSelect+` WHERE kind = 'kids'`)
