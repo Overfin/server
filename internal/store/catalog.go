@@ -33,9 +33,9 @@ var ErrServiceToken = errors.New("store: the service account's token can't be re
 // Service returns the service account, or nil before it's made.
 func (s *Store) Service(ctx context.Context) (*ServiceAccount, error) {
 	var raw, sealed []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'service-account'`).Scan(&raw)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'service-account'`).Scan(&raw)
 	if err == nil {
-		err = s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'service-token'`).Scan(&sealed)
+		err = s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'service-token'`).Scan(&sealed)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -177,7 +177,7 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 // UnseenCatalog lists the titles the full pass pass didn't see: gone from
 // the library, or missed, which the caller checks before deleting them.
 func (s *Store) UnseenCatalog(ctx context.Context, pass int64) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM catalog_items WHERE seen < ?`, pass)
+	rows, err := s.read.QueryContext(ctx, `SELECT id FROM catalog_items WHERE seen < ?`, pass)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +210,7 @@ func (s *Store) DeleteCatalog(ctx context.Context, ids []string) error {
 
 // CatalogCounts counts the indexed titles, by kind.
 func (s *Store) CatalogCounts(ctx context.Context) (map[string]int, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT kind, count(*) FROM catalog_items GROUP BY kind`)
+	rows, err := s.read.QueryContext(ctx, `SELECT kind, count(*) FROM catalog_items GROUP BY kind`)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +232,7 @@ func (s *Store) CatalogCounts(ctx context.Context) (map[string]int, error) {
 // number, episodes without their season or episode number (episodes and
 // seasons are matched by their show's ID and their numbers).
 func (s *Store) CatalogUnmatched(ctx context.Context) (map[string]int, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT kind, count(*) FROM catalog_items
+	rows, err := s.read.QueryContext(ctx, `SELECT kind, count(*) FROM catalog_items
 		WHERE (kind IN ('movie', 'series') AND tmdb IS NULL)
 		   OR (kind = 'season' AND season_number IS NULL)
 		   OR (kind = 'episode' AND (season_number IS NULL OR episode_number IS NULL))
@@ -267,7 +267,7 @@ type CatalogState struct {
 func (s *Store) CatalogState(ctx context.Context) (CatalogState, error) {
 	var st CatalogState
 	var raw []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'catalog-state'`).Scan(&raw)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'catalog-state'`).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return st, nil
 	}
@@ -318,9 +318,9 @@ const seerrKeyContext = "seerr api key"
 // Seerr returns Seerr's address and API key, and false when none is saved.
 func (s *Store) Seerr(ctx context.Context) (url, key string, ok bool, err error) {
 	var u, sealed []byte
-	err = s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'seerr-url'`).Scan(&u)
+	err = s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'seerr-url'`).Scan(&u)
 	if err == nil {
-		err = s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'seerr-key'`).Scan(&sealed)
+		err = s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'seerr-key'`).Scan(&sealed)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", false, nil
@@ -366,7 +366,7 @@ func (s *Store) CatalogByTMDB(ctx context.Context, kind string, tmdbIDs []string
 	out := map[string]string{}
 	for _, tmdb := range tmdbIDs {
 		var id string
-		err := s.db.QueryRowContext(ctx, `SELECT id FROM catalog_items WHERE kind = ? AND tmdb = ? ORDER BY id LIMIT 1`,
+		err := s.read.QueryRowContext(ctx, `SELECT id FROM catalog_items WHERE kind = ? AND tmdb = ? ORDER BY id LIMIT 1`,
 			kind, tmdb).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
@@ -382,7 +382,7 @@ func (s *Store) CatalogByTMDB(ctx context.Context, kind string, tmdbIDs []string
 // CatalogEpisodes counts a series' episodes in the library, by season
 // number.
 func (s *Store) CatalogEpisodes(ctx context.Context, seriesID string) (map[int]int, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT season_number, count(*) FROM catalog_items
+	rows, err := s.read.QueryContext(ctx, `SELECT season_number, count(*) FROM catalog_items
 		WHERE kind = 'episode' AND series_id = ? AND season_number IS NOT NULL GROUP BY season_number`, seriesID)
 	if err != nil {
 		return nil, err
@@ -501,7 +501,7 @@ func (s *Store) CatalogIDs(ctx context.Context, q ListQuery) ([]string, error) {
 func (s *Store) CountCatalog(ctx context.Context, q ListQuery) (int, error) {
 	where, args := q.where()
 	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT count(DISTINCT coalesce(title_key, id)) FROM catalog_items WHERE `+
+	err := s.read.QueryRowContext(ctx, `SELECT count(DISTINCT coalesce(title_key, id)) FROM catalog_items WHERE `+
 		strings.Join(where, " AND "), args...).Scan(&n)
 	return n, err
 }
@@ -634,7 +634,7 @@ func (s *Store) CatalogGenres(ctx context.Context, libraryID string, category *C
 		cond, a := access.itemAllowed("catalog_items")
 		where, args = append(where, cond), append(args, a...)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT g.name, count(DISTINCT g.kind || g.tmdb)
+	rows, err := s.read.QueryContext(ctx, `SELECT g.name, count(DISTINCT g.kind || g.tmdb)
 		FROM catalog_items JOIN catalog_details_genres g ON g.kind = catalog_items.kind AND g.tmdb = catalog_items.tmdb
 		WHERE `+strings.Join(where, " AND ")+`
 		GROUP BY g.name`, args...)

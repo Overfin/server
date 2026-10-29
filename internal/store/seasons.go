@@ -99,7 +99,7 @@ func (s *Store) SetSeason(ctx context.Context, series string, se Season, at time
 func (s *Store) SeasonByTMDB(ctx context.Context, series string, number int) (*Season, error) {
 	se := Season{Number: number}
 	var fetched int64
-	err := s.db.QueryRowContext(ctx, `SELECT name, overview, coalesce(air_date, ''), coalesce(poster, ''), fetched_at
+	err := s.read.QueryRowContext(ctx, `SELECT name, overview, coalesce(air_date, ''), coalesce(poster, ''), fetched_at
 		FROM catalog_seasons WHERE series = ? AND season = ?`, series, number).
 		Scan(&se.Name, &se.Overview, &se.AirDate, &se.Poster, &fetched)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -109,7 +109,7 @@ func (s *Store) SeasonByTMDB(ctx context.Context, series string, number int) (*S
 		return nil, err
 	}
 	se.FetchedAt = time.Unix(fetched, 0)
-	rows, err := s.db.QueryContext(ctx, `SELECT episode, name, overview, coalesce(air_date, ''), coalesce(runtime, 0),
+	rows, err := s.read.QueryContext(ctx, `SELECT episode, name, overview, coalesce(air_date, ''), coalesce(runtime, 0),
 		coalesce(still, '') FROM catalog_episodes WHERE series = ? AND season = ? ORDER BY episode`, series, number)
 	if err != nil {
 		return nil, err

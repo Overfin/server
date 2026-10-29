@@ -30,7 +30,7 @@ func (s *Store) TitleKeys(ctx context.Context, itemIDs []string) (map[string]str
 	out := map[string]string{}
 	for _, id := range itemIDs {
 		var key sql.NullString
-		err := s.db.QueryRowContext(ctx, `SELECT title_key FROM catalog_items WHERE id = ?`, id).Scan(&key)
+		err := s.read.QueryRowContext(ctx, `SELECT title_key FROM catalog_items WHERE id = ?`, id).Scan(&key)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
@@ -46,7 +46,7 @@ func (s *Store) TitleKeys(ctx context.Context, itemIDs []string) (map[string]str
 // (RefreshTitleKeys ran since the last items arrived).
 func (s *Store) TitleKeysReady(ctx context.Context) (bool, error) {
 	var missing int
-	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM catalog_items WHERE title_key IS NULL`).Scan(&missing)
+	err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM catalog_items WHERE title_key IS NULL`).Scan(&missing)
 	return missing == 0, err
 }
 
@@ -118,7 +118,7 @@ func (s *Store) PersonalStates(ctx context.Context, profileID string, titles []s
 	out := map[string]Personal{}
 	for start := 0; start < len(titles); start += batchChunk {
 		chunk := titles[start:min(start+batchChunk, len(titles))]
-		rows, err := s.db.QueryContext(ctx, `SELECT title, item_id, position_ms, played, play_count, last_played_at, favorite
+		rows, err := s.read.QueryContext(ctx, `SELECT title, item_id, position_ms, played, play_count, last_played_at, favorite
 			FROM profile_titles WHERE profile_id = ? AND title IN (`+marks(len(chunk))+`)`, append([]any{profileID}, anys(chunk)...)...)
 		if err != nil {
 			return nil, err
@@ -149,7 +149,7 @@ func (s *Store) PersonalStates(ctx context.Context, profileID string, titles []s
 // ProfilesToImport lists the profiles whose data hasn't been brought over
 // from Jellyfin yet.
 func (s *Store) ProfilesToImport(ctx context.Context) ([]*Profile, error) {
-	rows, err := s.db.QueryContext(ctx, profileSelect+` WHERE id NOT IN (SELECT profile_id FROM profile_imports)`)
+	rows, err := s.read.QueryContext(ctx, profileSelect+` WHERE id NOT IN (SELECT profile_id FROM profile_imports)`)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +175,7 @@ func (s *Store) MarkImported(ctx context.Context, profileID string, at time.Time
 // AllPersonal returns everything kept about a profile's titles, for its
 // data download.
 func (s *Store) AllPersonal(ctx context.Context, profileID string) ([]Personal, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT title, coalesce(item_id, ''), position_ms, played, play_count,
+	rows, err := s.read.QueryContext(ctx, `SELECT title, coalesce(item_id, ''), position_ms, played, play_count,
 		coalesce(last_played_at, 0), favorite FROM profile_titles WHERE profile_id = ? ORDER BY title`, profileID)
 	if err != nil {
 		return nil, err
@@ -262,7 +262,7 @@ func (s *Store) SetFavorite(ctx context.Context, profileID, title, itemID string
 // CatalogEpisodeIDs lists the episodes the index has under a series or a
 // season.
 func (s *Store) CatalogEpisodeIDs(ctx context.Context, parentID string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM catalog_items WHERE kind = 'episode'
+	rows, err := s.read.QueryContext(ctx, `SELECT id FROM catalog_items WHERE kind = 'episode'
 		AND (series_id = ? OR season_id = ?)`, parentID, parentID)
 	if err != nil {
 		return nil, err
@@ -282,7 +282,7 @@ func (s *Store) CatalogEpisodeIDs(ctx context.Context, parentID string) ([]strin
 // Imported reports whether a profile's data was brought over from Jellyfin.
 func (s *Store) Imported(ctx context.Context, profileID string) (bool, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM profile_imports WHERE profile_id = ?`, profileID).Scan(&n)
+	err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM profile_imports WHERE profile_id = ?`, profileID).Scan(&n)
 	return n > 0, err
 }
 
@@ -370,7 +370,7 @@ func (s *Store) ContinueWatching(ctx context.Context, profileID string, offset, 
 }
 
 func (s *Store) ids(ctx context.Context, q string, args ...any) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, q, args...)
+	rows, err := s.read.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -414,7 +414,7 @@ func (s *Store) ClearPersonal(ctx context.Context, profileID string) error {
 // their history copied into; "" if none.
 func (s *Store) CopiedInto(ctx context.Context, serverID, userID string) (string, error) {
 	var account string
-	err := s.db.QueryRowContext(ctx, `SELECT account_id FROM history_copies WHERE server_id = ? AND user_id = ?`,
+	err := s.read.QueryRowContext(ctx, `SELECT account_id FROM history_copies WHERE server_id = ? AND user_id = ?`,
 		serverID, userID).Scan(&account)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
@@ -434,7 +434,7 @@ func (s *Store) RecordCopy(ctx context.Context, serverID, userID, account string
 // account; ok is false if none was.
 func (s *Store) AccountCopy(ctx context.Context, accountID string) (at time.Time, ok bool, err error) {
 	var unix sql.NullInt64
-	err = s.db.QueryRowContext(ctx, `SELECT max(copied_at) FROM history_copies WHERE account_id = ?`, accountID).Scan(&unix)
+	err = s.read.QueryRowContext(ctx, `SELECT max(copied_at) FROM history_copies WHERE account_id = ?`, accountID).Scan(&unix)
 	if err != nil || !unix.Valid {
 		return time.Time{}, false, err
 	}

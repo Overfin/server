@@ -35,7 +35,8 @@ var ErrNotFound = errors.New("store: not found")
 
 // Store is the database. It is safe for concurrent use.
 type Store struct {
-	db     *sql.DB
+	db     *sql.DB // writes and transactions: one connection
+	read   *sql.DB // reads outside a transaction: several, side by side
 	box    *seal.Box
 	now    func() time.Time
 	forget Forgetter
@@ -58,20 +59,42 @@ func Open(ctx context.Context, path string, box *seal.Box) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: %w", err)
 	}
-	// One connection: SQLite allows one writer at a time anyway, and this
-	// keeps every transaction simple and correct at Overfin's scale.
+	// One connection for writes: SQLite allows one writer at a time anyway,
+	// and this keeps every transaction simple and correct at Overfin's
+	// scale.
 	db.SetMaxOpenConns(1)
 
-	s := &Store{db: db, box: box, now: time.Now}
+	s := &Store{db: db, read: db, box: box, now: time.Now}
 	if err := s.migrate(ctx); err != nil {
 		db.Close()
 		return nil, err
 	}
+	// Reads have their own connections, so a page's requests don't wait
+	// in line for one (in WAL mode, readers go alongside the writer, each
+	// seeing what was committed when it started). They can't write.
+	read, err := sql.Open("sqlite", "file:"+path+
+		"?_pragma=busy_timeout(5000)&_pragma=temp_store(2)&_pragma=query_only(1)")
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	read.SetMaxOpenConns(readers)
+	read.SetMaxIdleConns(readers)
+	s.read = read
 	return s, nil
 }
 
+// readers is how many reads run at the same time.
+const readers = 6
+
 // Close closes the database.
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	err := s.db.Close()
+	if s.read != s.db {
+		err = errors.Join(err, s.read.Close())
+	}
+	return err
+}
 
 // migrate applies migrations newer than the database's user_version, each in
 // its own transaction.
@@ -332,19 +355,19 @@ func insertProfile(ctx context.Context, tx *sql.Tx, box *seal.Box, p *Profile, n
 
 // AccountBySubject finds the account of an identity provider user.
 func (s *Store) AccountBySubject(ctx context.Context, subject string) (*Account, error) {
-	return scanAccount(s.db.QueryRowContext(ctx, accountSelect+` WHERE a.subject = ?`, subject))
+	return scanAccount(s.read.QueryRowContext(ctx, accountSelect+` WHERE a.subject = ?`, subject))
 }
 
 // Profile returns one profile, only if it belongs to accountID (SECURITY.md
 // rule 23): another account's profile is simply not found.
 func (s *Store) Profile(ctx context.Context, accountID, profileID string) (*Profile, error) {
-	row := s.db.QueryRowContext(ctx, profileSelect+` WHERE id = ? AND account_id = ?`, profileID, accountID)
+	row := s.read.QueryRowContext(ctx, profileSelect+` WHERE id = ? AND account_id = ?`, profileID, accountID)
 	return s.scanProfile(row)
 }
 
 // Profiles lists an account's profiles, owner first.
 func (s *Store) Profiles(ctx context.Context, accountID string) ([]*Profile, error) {
-	rows, err := s.db.QueryContext(ctx, profileSelect+` WHERE account_id = ? ORDER BY owner DESC, name`, accountID)
+	rows, err := s.read.QueryContext(ctx, profileSelect+` WHERE account_id = ? ORDER BY owner DESC, name`, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -452,7 +475,7 @@ func (s *Store) CreateSession(ctx context.Context, accountID, profileID, device 
 // SessionByToken finds a live session by its cookie value. Expired sessions
 // are not found.
 func (s *Store) SessionByToken(ctx context.Context, token string) (*Session, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.read.QueryRowContext(ctx, `
 		SELECT id, account_id, active_profile_id, device, created_at, last_active_at,
 			fresh_login_at, expires_at
 		FROM sessions WHERE token_hash = ? AND expires_at > ?`,
@@ -633,7 +656,7 @@ func (s *Store) SetSubtitleLanguage(ctx context.Context, accountID, profileID, l
 
 // Sessions lists an account's live sessions, most recently active first.
 func (s *Store) Sessions(ctx context.Context, accountID string) ([]*Session, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.read.QueryContext(ctx, `
 		SELECT id, account_id, active_profile_id, device, created_at, last_active_at, fresh_login_at, expires_at
 		FROM sessions WHERE account_id = ? AND expires_at > ? ORDER BY last_active_at DESC`,
 		accountID, s.now().Unix())
@@ -751,7 +774,7 @@ type PINState struct {
 func (s *Store) PIN(ctx context.Context, accountID, profileID string) (*PINState, error) {
 	var st PINState
 	var failedAt, lockedUntil sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `
+	err := s.read.QueryRowContext(ctx, `
 		SELECT pin_hash, pin_failures, pin_failed_at, pin_locked_until FROM profiles
 		WHERE id = ? AND account_id = ?`, profileID, accountID,
 	).Scan(&st.Hash, &st.Failures, &failedAt, &lockedUntil)
@@ -875,14 +898,14 @@ func (s *Store) CreateLogin(ctx context.Context, subject string, groups []string
 
 // LoginByToken finds a live login by its cookie value.
 func (s *Store) LoginByToken(ctx context.Context, token string) (*Login, error) {
-	return s.scanLogin(s.db.QueryRowContext(ctx, `
+	return s.scanLogin(s.read.QueryRowContext(ctx, `
 		SELECT id, subject, groups, refresh_token, checked_at, last_active_at, expires_at, coalesce(fresh_at, 0)
 		FROM logins WHERE token_hash = ? AND expires_at > ?`, hashToken(token), s.now().Unix()))
 }
 
 // LoginByID finds a live login by its ID.
 func (s *Store) LoginByID(ctx context.Context, id string) (*Login, error) {
-	return s.scanLogin(s.db.QueryRowContext(ctx, `
+	return s.scanLogin(s.read.QueryRowContext(ctx, `
 		SELECT id, subject, groups, refresh_token, checked_at, last_active_at, expires_at, coalesce(fresh_at, 0)
 		FROM logins WHERE id = ? AND expires_at > ?`, id, s.now().Unix()))
 }
@@ -971,7 +994,7 @@ var ErrWrongKey = errors.New("store: OVERFIN_SECRET_KEY is not the key this data
 // without one (older, or new) records it.
 func (s *Store) CheckKey(ctx context.Context, check []byte) error {
 	var stored []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'key-check'`).Scan(&stored)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'key-check'`).Scan(&stored)
 	if errors.Is(err, sql.ErrNoRows) {
 		return s.SetKeyCheck(ctx, check)
 	}
@@ -1021,7 +1044,7 @@ type Unreadable struct {
 
 // UnreadableTokens lists the profiles whose Jellyfin token can't be opened.
 func (s *Store) UnreadableTokens(ctx context.Context) ([]Unreadable, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, jellyfin_user_id, jellyfin_username, jellyfin_token FROM profiles
+	rows, err := s.read.QueryContext(ctx, `SELECT id, jellyfin_user_id, jellyfin_username, jellyfin_token FROM profiles
 		WHERE jellyfin_token IS NOT NULL`)
 	if err != nil {
 		return nil, err
@@ -1139,7 +1162,7 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string) error {
 // are stored yet.
 func (s *Store) Features(ctx context.Context) ([]byte, bool, error) {
 	var v []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'features'`).Scan(&v)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'features'`).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -1169,7 +1192,7 @@ func (s *Store) Jellyfin(ctx context.Context) (url, key string, ok bool, err err
 // empty when none is saved.
 func (s *Store) JellyfinServer(ctx context.Context) (string, error) {
 	var id []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'jellyfin-id'`).Scan(&id)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'jellyfin-id'`).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -1200,7 +1223,7 @@ func (s *Store) SetJellyfin(ctx context.Context, url, key, serverID string) erro
 // since when; closed until an admin opens it.
 func (s *Store) JellyfinAccess(ctx context.Context) (open bool, since time.Time, err error) {
 	var v []byte
-	err = s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'jellyfin-access'`).Scan(&v)
+	err = s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'jellyfin-access'`).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, time.Time{}, nil
 	}
@@ -1227,7 +1250,7 @@ func (s *Store) SetJellyfinAccess(ctx context.Context, open bool) error {
 // device; "" until one is chosen.
 func (s *Store) Transcoding(ctx context.Context) (family, device string, err error) {
 	var v []byte
-	err = s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'transcoding'`).Scan(&v)
+	err = s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'transcoding'`).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", nil
 	}
@@ -1249,7 +1272,7 @@ func (s *Store) SetTranscoding(ctx context.Context, family, device string) error
 // unless the operator turned them on.
 func (s *Store) Previews(ctx context.Context) (bool, error) {
 	var v []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'previews'`).Scan(&v)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'previews'`).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -1275,7 +1298,7 @@ func ReadTranscoding(ctx context.Context, path string, box *seal.Box) (family, d
 		return "", "", fmt.Errorf("store: %w", err)
 	}
 	defer db.Close()
-	return (&Store{db: db, box: box}).Transcoding(ctx)
+	return (&Store{db: db, read: db, box: box}).Transcoding(ctx)
 }
 
 // ReadPreviews is Previews for the database at path, opened read-only
@@ -1286,7 +1309,7 @@ func ReadPreviews(ctx context.Context, path string) (bool, error) {
 		return false, fmt.Errorf("store: %w", err)
 	}
 	defer db.Close()
-	return (&Store{db: db}).Previews(ctx)
+	return (&Store{db: db, read: db}).Previews(ctx)
 }
 
 // ReadJellyfin is Jellyfin for the database at path, opened read-only so
@@ -1323,12 +1346,12 @@ func jellyfinSettings(ctx context.Context, db *sql.DB, box *seal.Box) (url, key 
 
 // AccountByID finds an account by its ID.
 func (s *Store) AccountByID(ctx context.Context, id string) (*Account, error) {
-	return scanAccount(s.db.QueryRowContext(ctx, accountSelect+` WHERE a.id = ?`, id))
+	return scanAccount(s.read.QueryRowContext(ctx, accountSelect+` WHERE a.id = ?`, id))
 }
 
 // Accounts lists every account, newest first.
 func (s *Store) Accounts(ctx context.Context) ([]*Account, error) {
-	rows, err := s.db.QueryContext(ctx, accountSelect+` ORDER BY a.created_at DESC`)
+	rows, err := s.read.QueryContext(ctx, accountSelect+` ORDER BY a.created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -1372,7 +1395,7 @@ func (s *Store) SetAccountExpiry(ctx context.Context, id string, at time.Time) e
 
 // PINLocks lists the profiles of an account whose PIN is locked now.
 func (s *Store) PINLocks(ctx context.Context, accountID string) (map[string]bool, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM profiles WHERE account_id = ? AND pin_locked_until > ?`,
+	rows, err := s.read.QueryContext(ctx, `SELECT id FROM profiles WHERE account_id = ? AND pin_locked_until > ?`,
 		accountID, s.now().Unix())
 	if err != nil {
 		return nil, err
@@ -1408,14 +1431,14 @@ var ErrTemplateNameTaken = errors.New("store: template name already used")
 
 func (s *Store) templateNameTaken(ctx context.Context, name, exceptID string) (bool, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM account_templates WHERE name = ? AND id != ?`, name, exceptID).Scan(&n)
+	err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM account_templates WHERE name = ? AND id != ?`, name, exceptID).Scan(&n)
 	return n > 0, err
 }
 
 // Templates lists the account templates, Default first, with how many
 // accounts follow each.
 func (s *Store) Templates(ctx context.Context) ([]*Template, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.read.QueryContext(ctx, `
 		SELECT t.id, t.name, t.max_streams, t.max_profiles, t.reserve_streams, t.categories,
 			(SELECT count(*) FROM accounts a WHERE COALESCE(a.template_id, 'tmpl_default') = t.id)
 		FROM account_templates t ORDER BY t.id != 'tmpl_default', t.name`)
@@ -1469,7 +1492,7 @@ func (s *Store) DeleteTemplate(ctx context.Context, id string) error {
 		return ErrTemplateInUse
 	}
 	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM accounts WHERE template_id = ?`, id).Scan(&n); err != nil {
+	if err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM accounts WHERE template_id = ?`, id).Scan(&n); err != nil {
 		return err
 	}
 	if n > 0 {

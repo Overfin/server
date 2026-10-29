@@ -33,7 +33,7 @@ func (s *Store) CreateAppKey(ctx context.Context, name, scope, key string, at ti
 
 // AppKeys lists the keys, the newest first.
 func (s *Store) AppKeys(ctx context.Context) ([]AppKey, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, scope, created_at, coalesce(last_used_at, 0) FROM app_keys
+	rows, err := s.read.QueryContext(ctx, `SELECT id, name, scope, created_at, coalesce(last_used_at, 0) FROM app_keys
 		ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -71,7 +71,7 @@ func (s *Store) DeleteAppKey(ctx context.Context, id string) error {
 func (s *Store) AppKeyFor(ctx context.Context, key string, at time.Time) (*AppKey, error) {
 	var k AppKey
 	var created int64
-	err := s.db.QueryRowContext(ctx, `SELECT id, name, scope, created_at FROM app_keys WHERE key_hash = ?`, hashKey(key)).
+	err := s.read.QueryRowContext(ctx, `SELECT id, name, scope, created_at FROM app_keys WHERE key_hash = ?`, hashKey(key)).
 		Scan(&k.ID, &k.Name, &k.Scope, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -103,7 +103,7 @@ type WatchStats struct {
 // as a favorite, what the profiles did with it; only those changed since
 // since when it isn't zero.
 func (s *Store) AllWatchStats(ctx context.Context, since time.Time) ([]WatchStats, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT t.title, p.account_id, t.play_count, t.played, t.favorite,
+	rows, err := s.read.QueryContext(ctx, `SELECT t.title, p.account_id, t.play_count, t.played, t.favorite,
 			coalesce(t.last_played_at, 0), t.updated_at
 		FROM profile_titles t JOIN profiles p ON p.id = t.profile_id
 		WHERE (t.play_count > 0 OR t.played = 1 OR t.favorite = 1) AND t.title NOT LIKE 'item/%'`)
@@ -169,7 +169,7 @@ func (s *Store) AllWatchStats(ctx context.Context, since time.Time) ([]WatchStat
 			continue
 		}
 		var imdb, tvdb, tmdb sql.NullString
-		err := s.db.QueryRowContext(ctx, `SELECT max(imdb), max(tvdb), max(tmdb) FROM catalog_items
+		err := s.read.QueryRowContext(ctx, `SELECT max(imdb), max(tvdb), max(tmdb) FROM catalog_items
 			WHERE title_key = ? AND kind IN ('movie', 'series')`, key).Scan(&imdb, &tvdb, &tmdb)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err

@@ -8,7 +8,7 @@ import "context"
 // LogosToCheck returns up to limit films and series whose logo is still to
 // be checked.
 func (s *Store) LogosToCheck(ctx context.Context, limit int) ([]ArtworkTarget, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT kind, tmdb FROM logos_to_check ORDER BY kind, tmdb LIMIT ?`, limit)
+	rows, err := s.read.QueryContext(ctx, `SELECT kind, tmdb FROM logos_to_check ORDER BY kind, tmdb LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}

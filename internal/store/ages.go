@@ -139,7 +139,7 @@ func (s *Store) RefreshTitleAges(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT kind, tmdb, country, certification FROM title_ratings ORDER BY kind, tmdb`)
+	rows, err := s.read.QueryContext(ctx, `SELECT kind, tmdb, country, certification FROM title_ratings ORDER BY kind, tmdb`)
 	if err != nil {
 		return err
 	}
@@ -191,7 +191,7 @@ func (s *Store) AgesFromCeilings(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, coalesce(movie_ceiling, ''), coalesce(series_ceiling, '') FROM profiles
+	rows, err := s.read.QueryContext(ctx, `SELECT id, coalesce(movie_ceiling, ''), coalesce(series_ceiling, '') FROM profiles
 		WHERE kind = 'kids' AND max_age IS NULL AND (movie_ceiling IS NOT NULL OR series_ceiling IS NOT NULL)`)
 	if err != nil {
 		return 0, err

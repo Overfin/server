@@ -63,7 +63,7 @@ func (c *Category) Name(lang string) string {
 
 // Categories lists the categories in the operator's order.
 func (s *Store) Categories(ctx context.Context) ([]*Category, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, names, rules, home FROM categories ORDER BY position, id`)
+	rows, err := s.read.QueryContext(ctx, `SELECT id, names, rules, home FROM categories ORDER BY position, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +81,7 @@ func (s *Store) Categories(ctx context.Context) ([]*Category, error) {
 
 // CategoryByID returns a category, or ErrNotFound.
 func (s *Store) CategoryByID(ctx context.Context, id string) (*Category, error) {
-	c, err := scanCategory(s.db.QueryRowContext(ctx, `SELECT id, names, rules, home FROM categories WHERE id = ?`, id))
+	c, err := scanCategory(s.read.QueryRowContext(ctx, `SELECT id, names, rules, home FROM categories WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -204,7 +204,7 @@ func (s *Store) OrderCategories(ctx context.Context, order []string) error {
 // the operator says otherwise, it does.
 func (s *Store) LibrariesShown(ctx context.Context) (bool, error) {
 	var v []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'libraries-shown'`).Scan(&v)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'libraries-shown'`).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true, nil
 	}

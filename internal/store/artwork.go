@@ -24,7 +24,7 @@ func (t ArtworkTarget) Key() string { return t.Kind + "/tmdb/" + t.TMDB }
 // ArtworkToFetch returns up to limit films and series of the library whose
 // artwork wasn't fetched since before.
 func (s *Store) ArtworkToFetch(ctx context.Context, before time.Time, limit int) ([]ArtworkTarget, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT kind, tmdb, (SELECT group_concat(DISTINCT se.season_number)
+	rows, err := s.read.QueryContext(ctx, `SELECT kind, tmdb, (SELECT group_concat(DISTINCT se.season_number)
 			FROM catalog_items se JOIN catalog_items o ON o.id = se.series_id
 			WHERE t.kind = 'series' AND se.kind = 'season' AND se.season_number IS NOT NULL
 			AND o.kind = 'series' AND o.tmdb = t.tmdb)
@@ -132,7 +132,7 @@ func (s *Store) Artwork(ctx context.Context, keys []string) (map[string]map[stri
 		for i, k := range chunk {
 			args[i] = k
 		}
-		rows, err := s.db.QueryContext(ctx, `SELECT key, type, path FROM artwork WHERE key IN (`+marks(len(chunk))+`)`, args...)
+		rows, err := s.read.QueryContext(ctx, `SELECT key, type, path FROM artwork WHERE key IN (`+marks(len(chunk))+`)`, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -168,7 +168,7 @@ func (s *Store) ArtworkItems(ctx context.Context, typ, path string, limit int) (
 // TextlessKnown says whether a title's text-free poster was asked of TMDB
 // (an empty one is TMDB's none), and whether its artwork is kept at all.
 func (s *Store) TextlessKnown(ctx context.Context, t ArtworkTarget) (known, kept bool, err error) {
-	err = s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM artwork WHERE key = ?1 AND type = 'textless'),
+	err = s.read.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM artwork WHERE key = ?1 AND type = 'textless'),
 		EXISTS (SELECT 1 FROM artwork_fetched WHERE key = ?1)`, t.Key()).Scan(&known, &kept)
 	return known, kept, err
 }
@@ -226,7 +226,7 @@ func (s *Store) PurgeArtwork(ctx context.Context, before time.Time) error {
 // language's tag ("fr-CA"), or, from before, its two letters.
 func (s *Store) TMDBLanguage(ctx context.Context) (string, error) {
 	var v []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'tmdb-language'`).Scan(&v)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'tmdb-language'`).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "en", nil
 	}
@@ -262,7 +262,7 @@ func (s *Store) SetTMDBLanguage(ctx context.Context, lang string) error {
 // "released" until the panel says otherwise.
 func (s *Store) TitlesShown(ctx context.Context) (string, error) {
 	var v []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'titles-shown'`).Scan(&v)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'titles-shown'`).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "released", nil
 	}
@@ -280,7 +280,7 @@ func (s *Store) SetTitlesShown(ctx context.Context, shown string) error {
 // what's trending and in its slideshow; off until the panel says otherwise.
 func (s *Store) HomeMissing(ctx context.Context) (bool, error) {
 	var v []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'home-missing'`).Scan(&v)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'home-missing'`).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

@@ -37,7 +37,7 @@ func (s *Store) AllTastes(ctx context.Context) (map[string]Tastes, error) {
 }
 
 func (s *Store) tastes(ctx context.Context, where string, args ...any) (map[string]Tastes, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT account_id, coalesce(prefer, ''), genres, kids, updated_at FROM account_tastes `+where, args...)
+	rows, err := s.read.QueryContext(ctx, `SELECT account_id, coalesce(prefer, ''), genres, kids, updated_at FROM account_tastes `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +77,7 @@ func (s *Store) SetAccountTastes(ctx context.Context, accountID string, t Tastes
 // TastesAsked is whether the operator has people asked what they like.
 func (s *Store) TastesAsked(ctx context.Context) (bool, error) {
 	var v []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'tastes-asked'`).Scan(&v)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'tastes-asked'`).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -105,7 +105,7 @@ type TasteGenre struct {
 // choose among, named in language when TMDB's names in it came with
 // titles' texts, in TMDB's language otherwise.
 func (s *Store) TasteGenres(ctx context.Context, language string) ([]TasteGenre, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT g.genre, coalesce(n.name, min(g.name)) AS name FROM catalog_title_genres g
+	rows, err := s.read.QueryContext(ctx, `SELECT g.genre, coalesce(n.name, min(g.name)) AS name FROM catalog_title_genres g
 		LEFT JOIN tmdb_genre_names n ON n.genre = g.genre AND n.language = ?
 		GROUP BY g.genre ORDER BY name`, language)
 	if err != nil {

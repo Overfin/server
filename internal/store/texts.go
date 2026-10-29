@@ -48,7 +48,7 @@ func (s *Store) translateLogo(ctx context.Context, t *TitleInfo, language string
 		kind = "series"
 	}
 	var logo string
-	err := s.db.QueryRowContext(ctx, `SELECT logo FROM catalog_title_texts WHERE kind = ? AND tmdb = ? AND language = ?`,
+	err := s.read.QueryRowContext(ctx, `SELECT logo FROM catalog_title_texts WHERE kind = ? AND tmdb = ? AND language = ?`,
 		kind, tmdb, language).Scan(&logo)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
@@ -84,7 +84,7 @@ func (s *Store) SetSeasonTexts(ctx context.Context, language, series string, se 
 // or with texts fetched before before, with their seasons as the library
 // has them.
 func (s *Store) TextsToFetch(ctx context.Context, language string, before time.Time, limit int) ([]ArtworkTarget, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT kind, tmdb FROM (SELECT DISTINCT kind, tmdb FROM catalog_items
+	rows, err := s.read.QueryContext(ctx, `SELECT kind, tmdb FROM (SELECT DISTINCT kind, tmdb FROM catalog_items
 			WHERE kind IN ('movie', 'series') AND tmdb IS NOT NULL) t
 		WHERE NOT EXISTS (SELECT 1 FROM catalog_title_texts x WHERE x.kind = t.kind AND x.tmdb = t.tmdb
 			AND x.language = ? AND x.fetched_at >= ?)
@@ -108,7 +108,7 @@ func (s *Store) TextsToFetch(ctx context.Context, language string, before time.T
 // fetched at or after since.
 func (s *Store) HasTexts(ctx context.Context, language, kind, tmdb string, since time.Time) (bool, error) {
 	var at int64
-	err := s.db.QueryRowContext(ctx, `SELECT fetched_at FROM catalog_title_texts WHERE kind = ? AND tmdb = ? AND language = ?`,
+	err := s.read.QueryRowContext(ctx, `SELECT fetched_at FROM catalog_title_texts WHERE kind = ? AND tmdb = ? AND language = ?`,
 		kind, tmdb, language).Scan(&at)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -130,7 +130,7 @@ func (s *Store) translate(ctx context.Context, t *TitleInfo, language string) (b
 		kind = "series"
 	}
 	var name, overview, details string
-	err := s.db.QueryRowContext(ctx, `SELECT name, overview, details FROM catalog_title_texts
+	err := s.read.QueryRowContext(ctx, `SELECT name, overview, details FROM catalog_title_texts
 		WHERE kind = ? AND tmdb = ? AND language = ?`, kind, tmdb, language).Scan(&name, &overview, &details)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -163,7 +163,7 @@ func (s *Store) translate(ctx context.Context, t *TitleInfo, language string) (b
 	case "season", "episode":
 		t.SeriesName = or(name, t.SeriesName)
 		var seasonName, seasonOverview string
-		err := s.db.QueryRowContext(ctx, `SELECT name, overview FROM catalog_season_texts WHERE series = ? AND season = ? AND language = ?`,
+		err := s.read.QueryRowContext(ctx, `SELECT name, overview FROM catalog_season_texts WHERE series = ? AND season = ? AND language = ?`,
 			tmdb, r.Season, language).Scan(&seasonName, &seasonOverview)
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
@@ -177,7 +177,7 @@ func (s *Store) translate(ctx context.Context, t *TitleInfo, language string) (b
 		}
 		t.SeasonName = or(seasonName, t.SeasonName)
 		var epName, epOverview string
-		err = s.db.QueryRowContext(ctx, `SELECT name, overview FROM catalog_episode_texts
+		err = s.read.QueryRowContext(ctx, `SELECT name, overview FROM catalog_episode_texts
 			WHERE series = ? AND season = ? AND episode = ? AND language = ?`, tmdb, r.Season, r.Episode, language).
 			Scan(&epName, &epOverview)
 		if errors.Is(err, sql.ErrNoRows) {

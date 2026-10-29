@@ -29,7 +29,7 @@ const DefaultRatingsCountry = "US"
 // RatingsCountry is the country whose certifications apply.
 func (s *Store) RatingsCountry(ctx context.Context) (string, error) {
 	var v []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'ratings-country'`).Scan(&v)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'ratings-country'`).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DefaultRatingsCountry, nil
 	}
@@ -90,7 +90,7 @@ func (s *Store) SetRatingScales(ctx context.Context, kind string, scales map[str
 
 // RatingScale is a country's scale for a kind, from least to most mature.
 func (s *Store) RatingScale(ctx context.Context, kind, country string) ([]RatingLevel, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT certification, meaning, position FROM rating_scales
+	rows, err := s.read.QueryContext(ctx, `SELECT certification, meaning, position FROM rating_scales
 		WHERE kind = ? AND country = ? ORDER BY position, certification`, kind, country)
 	if err != nil {
 		return nil, err
@@ -126,7 +126,7 @@ type RatedTitle struct {
 // Titles that can't be watched at home yet (as of today, YYYY-MM-DD) are
 // fetched again sooner, after pendingBefore, so a new release shows soon.
 func (s *Store) TitlesToRate(ctx context.Context, before, pendingBefore time.Time, today string, limit int) ([]RatedTitle, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT kind, tmdb FROM (
+	rows, err := s.read.QueryContext(ctx, `SELECT kind, tmdb FROM (
 			SELECT kind, tmdb FROM catalog_items WHERE kind IN ('movie', 'series') AND tmdb IS NOT NULL
 			UNION SELECT kind, tmdb FROM catalog_titles) t
 		WHERE NOT EXISTS (SELECT 1 FROM title_ratings_fetched f
@@ -209,7 +209,7 @@ func (s *Store) PurgeRatings(ctx context.Context, before time.Time) error {
 // RatingProgress counts the library's films and series, and those whose
 // certifications were fetched.
 func (s *Store) RatingProgress(ctx context.Context) (fetched, total int, err error) {
-	err = s.db.QueryRowContext(ctx, `SELECT count(*), coalesce(sum(EXISTS (SELECT 1 FROM title_ratings_fetched f
+	err = s.read.QueryRowContext(ctx, `SELECT count(*), coalesce(sum(EXISTS (SELECT 1 FROM title_ratings_fetched f
 			WHERE f.kind = t.kind AND f.tmdb = t.tmdb)), 0)
 		FROM (SELECT DISTINCT kind, tmdb FROM catalog_items WHERE kind IN ('movie', 'series') AND tmdb IS NOT NULL) t`).
 		Scan(&total, &fetched)
@@ -243,14 +243,14 @@ func (c Ceiling) itemAllowed(table string) (string, []any) {
 func (s *Store) TitleAllowed(ctx context.Context, c Ceiling, kind, tmdb string) (bool, error) {
 	cond, args := c.allowed("t.kind", "t.tmdb")
 	var ok bool
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM (SELECT ? AS kind, ? AS tmdb) t WHERE `+cond+`)`,
+	err := s.read.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM (SELECT ? AS kind, ? AS tmdb) t WHERE `+cond+`)`,
 		append([]any{kind, tmdb}, args...)...).Scan(&ok)
 	return ok, err
 }
 
 // KidsProfiles lists every kids profile.
 func (s *Store) KidsProfiles(ctx context.Context) ([]*Profile, error) {
-	rows, err := s.db.QueryContext(ctx, profileSelect+` WHERE kind = 'kids'`)
+	rows, err := s.read.QueryContext(ctx, profileSelect+` WHERE kind = 'kids'`)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +272,7 @@ func (s *Store) KidsProfiles(ctx context.Context) ([]*Profile, error) {
 // fetched yet.
 func (s *Store) TitleRelease(ctx context.Context, kind, tmdb string) (released, atHome string, ok bool, err error) {
 	var r, h sql.NullString
-	err = s.db.QueryRowContext(ctx, `SELECT released, at_home FROM title_ratings_fetched WHERE kind = ? AND tmdb = ?`,
+	err = s.read.QueryRowContext(ctx, `SELECT released, at_home FROM title_ratings_fetched WHERE kind = ? AND tmdb = ?`,
 		kind, tmdb).Scan(&r, &h)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", false, nil

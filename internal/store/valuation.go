@@ -111,7 +111,7 @@ const activeFor = 183 * 24 * time.Hour
 func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []ProfileTitle) (*ValuationFacts, error) {
 	f := &ValuationFacts{Profiles: map[string]ValuationProfile{}, Titles: map[string]*ValuedTitle{}, Interests: interests}
 	cutoff := now.Add(-activeFor).Unix()
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.account_id, p.kind = 'kids', coalesce(p.kids_titles, 0) = 1,
+	rows, err := s.read.QueryContext(ctx, `SELECT p.id, p.account_id, p.kind = 'kids', coalesce(p.kids_titles, 0) = 1,
 			a.disabled_at IS NULL AND (a.expires_at IS NULL OR a.expires_at > ?) AND (a.created_at >= ?
 				OR EXISTS (SELECT 1 FROM sessions x WHERE x.account_id = a.id AND x.last_active_at >= ?)
 				OR EXISTS (SELECT 1 FROM profile_titles t JOIN profiles q ON q.id = t.profile_id
@@ -134,7 +134,7 @@ func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []P
 		return nil, err
 	}
 
-	rows, err = s.db.QueryContext(ctx, `SELECT profile_id, title, play_count, played, position_ms, favorite,
+	rows, err = s.read.QueryContext(ctx, `SELECT profile_id, title, play_count, played, position_ms, favorite,
 			coalesce(last_played_at, 0), updated_at
 		FROM profile_titles WHERE title NOT LIKE 'item/%' AND (play_count > 0 OR played = 1 OR position_ms > 0 OR favorite = 1)`)
 	if err != nil {
@@ -168,7 +168,7 @@ func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []P
 		return nil, err
 	}
 
-	rows, err = s.db.QueryContext(ctx, `SELECT account_id, title, coalesce(seasons, '') FROM requests
+	rows, err = s.read.QueryContext(ctx, `SELECT account_id, title, coalesce(seasons, '') FROM requests
 		WHERE status NOT IN ('declined', 'failed')`)
 	if err != nil {
 		return nil, err
@@ -203,7 +203,7 @@ func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []P
 	}
 
 	// The films and seasons the libraries have.
-	rows, err = s.db.QueryContext(ctx, `SELECT title_key, max(coalesce(runtime_ms, 0)), coalesce(min(added_at), 0)
+	rows, err = s.read.QueryContext(ctx, `SELECT title_key, max(coalesce(runtime_ms, 0)), coalesce(min(added_at), 0)
 		FROM catalog_items
 		WHERE kind IN ('movie', 'episode') AND title_key IS NOT NULL AND title_key NOT LIKE 'item/%' GROUP BY title_key`)
 	if err != nil {
@@ -365,7 +365,7 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 		}
 		// A library item TMDB's data hasn't come for yet.
 		var t top
-		err := s.db.QueryRowContext(ctx, `SELECT name FROM catalog_items WHERE kind = ? AND tmdb = ? LIMIT 1`,
+		err := s.read.QueryRowContext(ctx, `SELECT name FROM catalog_items WHERE kind = ? AND tmdb = ? LIMIT 1`,
 			kind, tmdb).Scan(&t.name)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return t, err
@@ -456,7 +456,7 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 
 // each runs a query and hands each of its rows to fn.
 func (s *Store) each(ctx context.Context, fn func(*sql.Rows) error, query string, args ...any) error {
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.read.QueryContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -473,7 +473,7 @@ func (s *Store) each(ctx context.Context, fn func(*sql.Rows) error, query string
 // criterion; nil when never set.
 func (s *Store) ValuationWeights(ctx context.Context) (map[string]int, error) {
 	var raw []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'valuation'`).Scan(&raw)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'valuation'`).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -510,7 +510,7 @@ const DefaultDiscoveryShare = 50
 // TMDB's trending and popular titles whatever their value.
 func (s *Store) DiscoveryShare(ctx context.Context) (int, error) {
 	var v []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'discovery-share'`).Scan(&v)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'discovery-share'`).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DefaultDiscoveryShare, nil
 	}

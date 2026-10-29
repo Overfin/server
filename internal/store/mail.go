@@ -14,9 +14,9 @@ const mailPasswordContext = "smtp password"
 // SMTP password, and false when none are saved.
 func (s *Store) Mail(ctx context.Context) (settings []byte, password string, ok bool, err error) {
 	var sealed []byte
-	err = s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'mail'`).Scan(&settings)
+	err = s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'mail'`).Scan(&settings)
 	if err == nil {
-		err = s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'mail-password'`).Scan(&sealed)
+		err = s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'mail-password'`).Scan(&sealed)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, "", false, nil

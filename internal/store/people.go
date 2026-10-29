@@ -60,7 +60,7 @@ func (s *Store) PersonByTMDB(ctx context.Context, id string) (*Person, error) {
 	var birthday, deathday, profile sql.NullString
 	var credits string
 	var fetched int64
-	err := s.db.QueryRowContext(ctx, `SELECT name, biography, birthday, deathday, birthplace, department, profile, credits, fetched_at, page
+	err := s.read.QueryRowContext(ctx, `SELECT name, biography, birthday, deathday, birthplace, department, profile, credits, fetched_at, page
 		FROM tmdb_people WHERE id = ?`, id).Scan(&p.Name, &p.Biography, &birthday, &deathday, &p.Birthplace, &p.Department,
 		&profile, &credits, &fetched, &p.Page)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -79,7 +79,7 @@ func (s *Store) PersonByTMDB(ctx context.Context, id string) (*Person, error) {
 // IsPersonPhoto says whether path is a kept person's photo.
 func (s *Store) IsPersonPhoto(ctx context.Context, path string) (bool, error) {
 	var ok bool
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM tmdb_people WHERE profile = ?)`, path).Scan(&ok)
+	err := s.read.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM tmdb_people WHERE profile = ?)`, path).Scan(&ok)
 	return ok, err
 }
 

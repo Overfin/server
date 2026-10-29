@@ -103,7 +103,7 @@ func (s *Store) retitle(ctx context.Context, tx *sql.Tx, itemID, kind, tmdb, old
 
 // Overrides returns the TMDB IDs admins chose, by item ID.
 func (s *Store) Overrides(ctx context.Context) (map[string]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT item_id, tmdb FROM title_overrides`)
+	rows, err := s.read.QueryContext(ctx, `SELECT item_id, tmdb FROM title_overrides`)
 	if err != nil {
 		return nil, err
 	}

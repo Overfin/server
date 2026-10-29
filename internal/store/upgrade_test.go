@@ -27,7 +27,7 @@ func openAt(t *testing.T, version int) *Store {
 	}
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
-	s := &Store{db: db, box: box, now: time.Now}
+	s := &Store{db: db, read: db, box: box, now: time.Now}
 	names, err := fs.Glob(migrations, "migrations/*.sql")
 	if err != nil {
 		t.Fatal(err)

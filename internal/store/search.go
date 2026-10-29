@@ -11,7 +11,7 @@ import (
 // FillSearchNames gives the titles kept before searching existed their
 // search name, once.
 func (s *Store) FillSearchNames(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT kind, tmdb, name FROM catalog_titles WHERE search_name IS NULL`)
+	rows, err := s.read.QueryContext(ctx, `SELECT kind, tmdb, name FROM catalog_titles WHERE search_name IS NULL`)
 	if err != nil {
 		return err
 	}

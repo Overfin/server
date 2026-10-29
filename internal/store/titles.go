@@ -183,7 +183,7 @@ func scanTitle(row interface{ Scan(...any) error }) (*Title, error) {
 
 // TitleByTMDB returns a title, or nil when the catalog doesn't have it.
 func (s *Store) TitleByTMDB(ctx context.Context, kind, tmdb string) (*Title, error) {
-	t, err := scanTitle(s.db.QueryRowContext(ctx, `SELECT `+titleColumns+` FROM catalog_titles t
+	t, err := scanTitle(s.read.QueryRowContext(ctx, `SELECT `+titleColumns+` FROM catalog_titles t
 		WHERE t.kind = ? AND t.tmdb = ?`, kind, tmdb))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -227,7 +227,7 @@ func (s *Store) ListTitles(ctx context.Context, list, kind, availability string,
 		filter += ` AND ` + cond
 		args = append(args, a...)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+titleColumns+` FROM catalog_lists l
+	rows, err := s.read.QueryContext(ctx, `SELECT `+titleColumns+` FROM catalog_lists l
 		JOIN catalog_titles t ON t.kind = l.kind AND t.tmdb = l.tmdb
 		WHERE l.list = ? AND l.kind = ?`+filter+` ORDER BY l.position LIMIT ? OFFSET ?`,
 		append(args, limit, offset)...)

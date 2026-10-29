@@ -34,7 +34,7 @@ func (s *Store) SetLibraries(ctx context.Context, libs []Library) error {
 // Libraries returns the libraries the index knows, in order; none before
 // its first read.
 func (s *Store) Libraries(ctx context.Context) ([]Library, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, item FROM catalog_libraries ORDER BY position`)
+	rows, err := s.read.QueryContext(ctx, `SELECT id, item FROM catalog_libraries ORDER BY position`)
 	if err != nil {
 		return nil, err
 	}

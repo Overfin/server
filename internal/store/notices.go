@@ -39,7 +39,7 @@ func (n NoticeSettings) On() bool {
 func (s *Store) NoticeSettings(ctx context.Context) (NoticeSettings, error) {
 	n := NoticeSettings{Days: 7}
 	var v []byte
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'notices'`).Scan(&v)
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'notices'`).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return n, nil
 	}
@@ -66,7 +66,7 @@ const noticeSecretContext = "notice secret"
 // without one.
 func (s *Store) NoticeSecret(ctx context.Context) (secret []byte, ok bool, err error) {
 	var sealed []byte
-	err = s.db.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'notice-secret'`).Scan(&sealed)
+	err = s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'notice-secret'`).Scan(&sealed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -94,7 +94,7 @@ func (s *Store) NewNoticeSecret(ctx context.Context) ([]byte, error) {
 // from and no later than until, and that haven't had a notice of kind for
 // that end ("expiring", "expired" or "warned", the person's own).
 func (s *Store) NoticesDue(ctx context.Context, kind string, from, until time.Time) ([]*Account, error) {
-	rows, err := s.db.QueryContext(ctx, accountSelect+`
+	rows, err := s.read.QueryContext(ctx, accountSelect+`
 		WHERE a.disabled_at IS NULL AND a.expires_at > ? AND a.expires_at <= ?
 			AND NOT EXISTS (SELECT 1 FROM notices_sent n WHERE n.account_id = a.id AND n.kind = ? AND n.expires_at = a.expires_at)
 		ORDER BY a.expires_at`, from.Unix(), until.Unix(), kind)

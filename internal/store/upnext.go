@@ -18,7 +18,7 @@ func (s *Store) SeriesUpNext(ctx context.Context, profileID string, series Title
 	if a != nil {
 		allowed, args = a.itemAllowed("catalog_items")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT title_key, season_number, episode_number FROM catalog_items
+	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT title_key, season_number, episode_number FROM catalog_items
 		WHERE kind = 'episode' AND title_key >= ? AND title_key < ? AND season_number IS NOT NULL AND episode_number IS NOT NULL
 		AND `+allowed+`
 		ORDER BY season_number = 0, season_number, episode_number`, append([]any{lo, hi}, args...)...)
@@ -46,7 +46,7 @@ func (s *Store) SeriesUpNext(ctx context.Context, profileID string, series Title
 	// The one in the middle, the latest first.
 	var title string
 	var pos int64
-	err = s.db.QueryRowContext(ctx, `SELECT title, position_ms FROM profile_titles
+	err = s.read.QueryRowContext(ctx, `SELECT title, position_ms FROM profile_titles
 		WHERE profile_id = ? AND title >= ? AND title < ? AND position_ms > 0 AND played = 0
 		ORDER BY last_played_at DESC LIMIT 1`, profileID, lo, hi).Scan(&title, &pos)
 	if err == nil {
@@ -59,7 +59,7 @@ func (s *Store) SeriesUpNext(ctx context.Context, profileID string, series Title
 	// The one after the last finished: the latest in the series when several
 	// were finished at once, as when a season is marked played. The first
 	// after the end.
-	rows, err = s.db.QueryContext(ctx, `SELECT title FROM profile_titles
+	rows, err = s.read.QueryContext(ctx, `SELECT title FROM profile_titles
 		WHERE profile_id = ? AND title >= ? AND title < ? AND played = 1
 		AND coalesce(last_played_at, 0) = (SELECT max(coalesce(last_played_at, 0)) FROM profile_titles
 			WHERE profile_id = ? AND title >= ? AND title < ? AND played = 1)`, profileID, lo, hi, profileID, lo, hi)
@@ -105,7 +105,7 @@ func (s *Store) DismissContinue(ctx context.Context, profileID string, series Ti
 // dismissed are the series a profile took out of Continue Watching, and
 // when.
 func (s *Store) dismissed(ctx context.Context, profileID string) (map[string]int64, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT series, dismissed_at FROM continue_dismissed WHERE profile_id = ?`, profileID)
+	rows, err := s.read.QueryContext(ctx, `SELECT series, dismissed_at FROM continue_dismissed WHERE profile_id = ?`, profileID)
 	if err != nil {
 		return nil, err
 	}
