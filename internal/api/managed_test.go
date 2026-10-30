@@ -758,9 +758,9 @@ func TestSiteOwner(t *testing.T) {
 		t.Error("back on the owner's")
 	}
 
-	// On the kid's profile, the session's cookie deleted: on the panel's
-	// own listener it can't be told apart from a browser without a
-	// session; on the site, it doesn't pass for the owner's.
+	// On the site, without a session (deleted, or not made yet: an admin
+	// signing in on the way to the panel), it's the profile a new session
+	// starts on: the owner's, unless a PIN protects it.
 	onSite := func(drop bool) bool {
 		r := httptest.NewRequest("GET", srv.URL+"/admin/login", nil)
 		u, _ := url.Parse(srv.URL)
@@ -779,8 +779,14 @@ func TestSiteOwner(t *testing.T) {
 	if onSite(false) {
 		t.Error("on the site, the kid's profile")
 	}
+	if !onSite(true) {
+		t.Error("on the site, no session, the owner without a PIN")
+	}
+	if err := st.SetPIN(ctx, acct.ID, main.ID, []byte("hash")); err != nil {
+		t.Fatal(err)
+	}
 	if onSite(true) {
-		t.Error("on the site, the kid's session cookie deleted")
+		t.Error("on the site, the kid's session cookie deleted, the owner with a PIN")
 	}
 }
 
