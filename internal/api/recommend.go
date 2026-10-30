@@ -114,6 +114,9 @@ func (l Library) recommend(ctx context.Context, p *store.Profile, recent bool, n
 		return nil, err
 	}
 	fit := fitter{watched: watched, tastes: tastes, kids: kids, kidsProfile: p.Kind == "kids", day: now.Format(time.DateOnly)}
+	if tastes != nil {
+		fit.liked = tastes.LikedGenres()
+	}
 	type scored struct {
 		key   string
 		score float64
@@ -161,6 +164,7 @@ func (l Library) wantsKids(_ context.Context, p *store.Profile, _ *store.Tastes)
 type fitter struct {
 	watched     map[int]float64 // genres the profile watched, weighed
 	tastes      *store.Tastes   // what its account said; nil if never asked
+	liked       []int           // the genres tastes count for (LikedGenres)
 	kids        bool
 	kidsProfile bool
 	day         string // the day's own small shuffle among equals
@@ -191,7 +195,7 @@ func (f fitter) score(t *store.TitleFacts) (float64, bool) {
 	}
 	// What its account said.
 	if f.tastes != nil {
-		if slices.ContainsFunc(t.Genres, func(g int) bool { return slices.Contains(f.tastes.Genres, g) }) {
+		if slices.ContainsFunc(t.Genres, func(g int) bool { return slices.Contains(f.liked, g) }) {
 			score += 0.25
 		}
 		if (f.tastes.Prefer == "series" && t.Kind == "series") || (f.tastes.Prefer == "movies" && t.Kind == "movie") {
