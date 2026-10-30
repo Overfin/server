@@ -24,12 +24,12 @@ behind your own proxy, with a Jellyfin you run yourself, or with your own
 identity provider: see [Running it](#running-it).
 
 <p>
-  <img src="docs/screenshots/home.jpg" alt="The home page: a slideshow of titles over rows of trending films" width="72%">
+  <img src="docs/screenshots/home.jpg" alt="The home page: a slideshow of titles over rows of recommendations" width="72%">
   <img src="docs/screenshots/phone.jpg" alt="The home page on a phone" width="24%">
 </p>
 <p>
-  <img src="docs/screenshots/film.jpg" alt="A film's page: poster, logo, rating, play and list buttons, cast" width="48%">
-  <img src="docs/screenshots/library.jpg" alt="A library: posters in a grid with sort and filters" width="48%">
+  <img src="docs/screenshots/film.jpg" alt="A series' page: poster, logo, rating, play and list buttons, its seasons" width="48%">
+  <img src="docs/screenshots/library.jpg" alt="A category: its genres to choose from, recently added, and a row per genre" width="48%">
 </p>
 
 ## What you get
