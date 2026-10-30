@@ -27,7 +27,7 @@ type tasteGenreJSON struct {
 }
 
 func tastesOf(t *store.Tastes) tastesJSON {
-	out := tastesJSON{Prefer: t.Prefer, Genres: t.Genres}
+	out := tastesJSON{Prefer: t.Prefer, Genres: t.ChosenGenres()}
 	if out.Genres == nil {
 		out.Genres = []int{}
 	}
@@ -79,7 +79,7 @@ func (a Account) tastes(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.Internal, "")
 		return
 	}
-	genres, err := a.Sessions.Store.TasteGenres(ctx, c.Account.Language)
+	genres, err := a.Sessions.Store.TasteChoices(ctx, c.Account.Language)
 	if err != nil {
 		a.Logger.Error("reading the genres failed", "err", err)
 		problem.Send(w, problem.Internal, "")
@@ -130,7 +130,7 @@ func (a Account) setTastes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	known, err := a.Sessions.Store.TasteGenres(ctx, c.Account.Language)
+	known, err := a.Sessions.Store.TasteChoices(ctx, c.Account.Language)
 	if err != nil {
 		a.Logger.Error("reading the genres failed", "err", err)
 		problem.Send(w, problem.Internal, "")

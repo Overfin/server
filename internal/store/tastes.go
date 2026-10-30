@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -19,6 +21,53 @@ type Tastes struct {
 	// profile does, whatever it says).
 	Kids      bool
 	UpdatedAt time.Time
+}
+
+// jointGenres are TMDB's series genres that join film ones ("Action &
+// Adventure", "Sci-Fi & Fantasy", "War & Politics"), by ID: their film
+// genres. People choose the film genres; each counts for its series one.
+var jointGenres = map[int][]int{10759: {28, 12}, 10765: {878, 14}, 10768: {10752}}
+
+// LikedGenres are the genres the tastes count for, with titles: each film
+// genre also as the series genre joining it, and a joint series genre
+// (chosen before they were shown apart) also as its film genres.
+func (t Tastes) LikedGenres() []int {
+	var out []int
+	add := func(g int) {
+		if !slices.Contains(out, g) {
+			out = append(out, g)
+		}
+	}
+	for _, g := range t.Genres {
+		add(g)
+		for _, f := range jointGenres[g] {
+			add(f)
+		}
+		for joint, films := range jointGenres {
+			if slices.Contains(films, g) {
+				add(joint)
+			}
+		}
+	}
+	return out
+}
+
+// ChosenGenres are the tastes' genres as people choose them: a joint
+// series genre chosen before as its film genres.
+func (t Tastes) ChosenGenres() []int {
+	var out []int
+	for _, g := range t.Genres {
+		films, joint := jointGenres[g]
+		if !joint {
+			films = []int{g}
+		}
+		for _, f := range films {
+			if !slices.Contains(out, f) {
+				out = append(out, f)
+			}
+		}
+	}
+	return out
 }
 
 // AccountTastes are what the account said; nil when it was never asked.
@@ -99,6 +148,36 @@ func (s *Store) SetTastesAsked(ctx context.Context, on bool) error {
 type TasteGenre struct {
 	ID   int
 	Name string
+}
+
+// genreNames are names TMDB leaves in English, by language and genre: its
+// series genres.
+var genreNames = map[string]map[int]string{
+	"fr": {10762: "Enfants", 10763: "Actualités", 10764: "Téléréalité", 10766: "Feuilleton", 10767: "Talk-show"},
+}
+
+// TasteChoices are the genres people may say they like: TasteGenres, a
+// joint series genre giving way to its film genres when they're there, and
+// named in language where TMDB isn't.
+func (s *Store) TasteChoices(ctx context.Context, language string) ([]TasteGenre, error) {
+	all, err := s.TasteGenres(ctx, language)
+	if err != nil {
+		return nil, err
+	}
+	has := func(id int) bool { return slices.ContainsFunc(all, func(g TasteGenre) bool { return g.ID == id }) }
+	lang, _, _ := strings.Cut(language, "-")
+	var out []TasteGenre
+	for _, g := range all {
+		if films, joint := jointGenres[g.ID]; joint && slices.ContainsFunc(films, has) {
+			continue
+		}
+		if name, ok := genreNames[lang][g.ID]; ok {
+			g.Name = name
+		}
+		out = append(out, g)
+	}
+	slices.SortFunc(out, func(a, b TasteGenre) int { return strings.Compare(SortName(a.Name), SortName(b.Name)) })
+	return out, nil
 }
 
 // TasteGenres are the genres of the titles Overfin knows: those people may

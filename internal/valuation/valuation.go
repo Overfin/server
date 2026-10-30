@@ -379,7 +379,7 @@ func tastes(f *store.ValuationFacts, views map[string]map[string]float64, active
 			}
 		}
 		liked := map[int]bool{}
-		for _, g := range said.Genres {
+		for _, g := range said.LikedGenres() {
 			liked[g] = true
 		}
 		if kidsProfile[account] {
