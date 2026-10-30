@@ -399,10 +399,12 @@ comes from the internet, and media files can be written by anyone.
     stops answering after 10 wrong codes until a restart, and checks each
     step before saving it; Jellyfin's key is kept sealed, like
     every token. Other apps
-    (Stewarr…) read what Overfin shares with them on the same listener,
-    with the same guards, under /apps/: each with a key an admin made for
-    it in the panel, for what the admin ticked (values, watch statistics,
-    in the libraries or not), shown once, kept only as a hash, revocable.
+    (Stewarr…) read what Overfin shares with them where the panel is, under
+    /apps/, behind the same address limits (private addresses only when
+    the panel is): not with an admin's sign-in but each with a key an admin
+    made for it in the panel, for what the admin ticked (values, watch
+    statistics, in the libraries or not), shown once, kept only as a hash,
+    revocable.
     What they read are totals per title, counts below 2 given as 0, and
     plays and favorites given as 0 when fewer than two people (accounts)
     account for them; watch statistics leave out a title fewer than two
