@@ -185,9 +185,18 @@ function field(label, input, hint, wide = false) {
   return h('label', { class: wide ? 'field full' : 'field' }, h('span', {}, label), input, hint && h('span', { class: 'hint' }, hint));
 }
 
+// Its field is named by the row's label and described by its hint, for
+// screen readers, unless it has a name of its own.
+let settings = 0;
 function setting(label, hint, control, sub = false) {
+  const n = ++settings;
+  const field = control instanceof Element && (control.matches('input, select, textarea') ? control : control.querySelector('input, select, textarea'));
+  if (field && !field.hasAttribute('aria-label') && !field.hasAttribute('aria-labelledby') && !field.labels?.length) {
+    field.setAttribute('aria-labelledby', `setting-${n}`);
+  }
+  if (field && hint && !field.hasAttribute('aria-describedby')) field.setAttribute('aria-describedby', `setting-hint-${n}`);
   return h('div', { class: sub ? 'setting sub' : 'setting' },
-    h('div', {}, h('div', { class: 'label' }, label), hint && h('div', { class: 'hint' }, hint)), control);
+    h('div', {}, h('div', { class: 'label', id: `setting-${n}` }, label), hint && h('div', { class: 'hint', id: `setting-hint-${n}` }, hint)), control);
 }
 
 // status is a line that says where something stands, or what went wrong.
