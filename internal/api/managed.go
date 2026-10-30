@@ -703,10 +703,22 @@ func (m *Managed) setPassword(w http.ResponseWriter, r *http.Request) {
 
 // SiteOwner reports whether the person signed in uses, in this browser,
 // their account's owner profile (or has no account yet, or no session
-// here): only then does their login open the control panel on the site.
-// Whoever uses another profile here shares that login, fresh for a few
-// minutes after each sign-in (rule 25).
+// here): only then does their login open the control panel on its own
+// listener. Whoever uses another profile here shares that login, fresh
+// for a few minutes after each sign-in (rule 25).
 func (m *Managed) SiteOwner(r *http.Request) bool {
+	return m.siteOwner(r, true)
+}
+
+// SiteOwnerOnSite is SiteOwner for the control panel at /admin/ on the
+// site's own address, where no session here means one was taken away: the
+// session says which profile this browser uses, and deleting its cookie
+// mustn't pass for the owner's.
+func (m *Managed) SiteOwnerOnSite(r *http.Request) bool {
+	return m.siteOwner(r, false)
+}
+
+func (m *Managed) siteOwner(r *http.Request, withoutSession bool) bool {
 	_, u := m.current(r)
 	if u == nil {
 		return false
@@ -724,9 +736,9 @@ func (m *Managed) SiteOwner(r *http.Request) bool {
 			return sess.ActiveProfileID == owner.ID || (sess.ActiveProfileID == "" && !owner.HasPIN)
 		}
 	}
-	// No session in this browser: nobody uses another profile here (an
-	// admin on the control panel's own address, say).
-	return true
+	// No session in this browser: on the control panel's own listener,
+	// nobody uses another profile here; on the site, it can't be told.
+	return withoutSession
 }
 
 // ownerHere says whether this browser uses the account owner's profile,

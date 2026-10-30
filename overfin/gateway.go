@@ -488,6 +488,15 @@ func (g *gateway) SiteOwner(r *http.Request) bool {
 	return true
 }
 
+// SiteOwnerOnSite is api.Managed.SiteOwnerOnSite, for the control panel at
+// /admin/ on the site; true in other modes.
+func (g *gateway) SiteOwnerOnSite(r *http.Request) bool {
+	if m := g.current.Load().managed; m != nil {
+		return m.SiteOwnerOnSite(r)
+	}
+	return true
+}
+
 func (g *gateway) SiteAdmin(r *http.Request) (email string, admin, fresh bool) {
 	if m := g.current.Load().managed; m != nil {
 		return m.SiteAdmin(r)
