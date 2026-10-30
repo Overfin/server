@@ -118,6 +118,8 @@ func (l Library) artworkImage(w http.ResponseWriter, r *http.Request, p *store.P
 		l.Logger.Warn("refused an unsafe image from TMDB", "image", id)
 		problem.Send(w, problem.NotFound, "")
 		return
+	case errors.Is(err, context.Canceled):
+		return // the client left: nobody to answer, nothing wrong
 	default:
 		l.Logger.Error("TMDB image failed", "err", err)
 		problem.Send(w, problem.Internal, "")
