@@ -230,6 +230,15 @@ func TestAppTitlesOneWishStaysUnseen(t *testing.T) {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body)
 	}
 	app := &browser{h: b.h, cookies: map[string]string{}}
+	// A disabled account's wish doesn't count (nor does it in the
+	// valuation): 14, asked for by the first and a disabled third, stays
+	// unseen.
+	third, thirdProf, _ := db.CreateAccount(ctx, "person-3", store.NewOwner{Name: "Main", JellyfinUserID: strings.Repeat("3", 32), JellyfinUsername: "of-3", JellyfinToken: "t"})
+	ask(accts[0], profs[0], "movie/tmdb/14")
+	ask(third.ID, thirdProf.ID, "movie/tmdb/14")
+	if err := db.SetAccountDisabled(ctx, third.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	for _, query := range []string{"", "?inLibrary=false"} {
 		rec := app.do("GET", "/apps/v1/titles"+query, "", map[string]string{"Authorization": "Bearer " + made.Key})
 		var page appTitlesPage
@@ -240,7 +249,7 @@ func TestAppTitlesOneWishStaysUnseen(t *testing.T) {
 		for _, r := range page.Titles {
 			listed[r.TmdbId] = true
 		}
-		if listed["10"] || listed["11"] || !listed["12"] || !listed["13"] {
+		if listed["10"] || listed["11"] || !listed["12"] || !listed["13"] || listed["14"] {
 			t.Errorf("%q: listed %v, want 12 and 13 only", query, listed)
 		}
 	}
