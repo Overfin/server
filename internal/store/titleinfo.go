@@ -257,6 +257,30 @@ func (s *Store) titleInfos(ctx context.Context, keys []string, today, language s
 	return out, nil
 }
 
+// TitleCopies are the copies the libraries have of titles, by key, as
+// TitleInfos gives them (Items), for what needs nothing else of them:
+// counting what a profile sees (visibility).
+func (s *Store) TitleCopies(ctx context.Context, keys []string) (map[string][]string, error) {
+	out := map[string][]string{}
+	if len(keys) == 0 {
+		return out, nil
+	}
+	rows, err := s.read.QueryContext(ctx, `SELECT i.title_key, i.id FROM catalog_items i
+		JOIN (SELECT DISTINCT value FROM json_each(?)) j ON j.value = i.title_key ORDER BY i.title_key, i.id`, jsonList(keys))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key, id string
+		if err := rows.Scan(&key, &id); err != nil {
+			return nil, err
+		}
+		out[key] = append(out[key], id)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) titleInfo(ctx context.Context, r TitleRef, today string, b *infoBatch) (*TitleInfo, error) {
 	t := &TitleInfo{Ref: r}
 	key := r.Key()

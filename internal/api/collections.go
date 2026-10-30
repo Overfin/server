@@ -119,17 +119,21 @@ func (l Library) collectionFilms(ctx context.Context, p *store.Profile, cs []sto
 	if len(keys) == 0 {
 		return out, nil
 	}
-	infos, err := l.Provisioner.Store.TitleInfos(ctx, keys, today(), p.TextLanguage)
+	// Only what visibility looks at: a film's copies (its page reads the
+	// rest).
+	copies, err := l.Provisioner.Store.TitleCopies(ctx, keys)
 	if err != nil {
 		return nil, err
 	}
 	var list []*store.TitleInfo
 	index := map[string]int{}
 	for _, k := range keys {
-		if _, seen := index[k]; !seen && infos[k] != nil {
-			index[k] = len(list)
-			list = append(list, infos[k])
+		r, ok := store.ParseTitleKey(k)
+		if _, seen := index[k]; seen || !ok {
+			continue
 		}
+		index[k] = len(list)
+		list = append(list, &store.TitleInfo{Ref: r, Items: copies[k]})
 	}
 	visible, _, err := l.visibility(ctx, p, list, true)
 	if err != nil {

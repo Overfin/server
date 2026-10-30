@@ -78,6 +78,20 @@ func TestTitleInfos(t *testing.T) {
 	if h := got["item/"+id(4)]; h.Name != "home video.mkv" || h.Known || h.Year != 2020 {
 		t.Errorf("unidentified file: %+v", h)
 	}
+	// The copies alone (TitleCopies) are TitleInfos' Items, a key twice
+	// or one with none included.
+	copies, err := s.TitleCopies(ctx, append(keys, "series/tmdb/1399", "movie/tmdb/1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range append(keys, "movie/tmdb/1") {
+		if want := got[k]; want != nil && !slices.Equal(copies[k], want.Items) {
+			t.Errorf("copies of %s: %v, TitleInfos %v", k, copies[k], want.Items)
+		}
+	}
+	if len(copies["movie/tmdb/1"]) != 0 || len(copies["series/tmdb/1399"]) != 1 {
+		t.Errorf("copies: %v", copies)
+	}
 	eps, _ := s.SeasonEpisodes(ctx, TitleRef{Kind: "season", Source: "tmdb", ID: "1399", Season: 2})
 	if !slices.Equal(eps, []int{1, 2}) {
 		t.Errorf("season 2's episodes: %v", eps)
