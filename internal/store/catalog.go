@@ -148,13 +148,29 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 		if !it.AddedAt.IsZero() {
 			added = it.AddedAt.Unix()
 		}
+		// A film or a season the index didn't have arrived (title_history).
+		arrived := false
+		if it.Kind == "movie" || it.Kind == "season" {
+			var one int
+			arrived = errors.Is(tx.QueryRowContext(ctx, `SELECT 1 FROM catalog_items WHERE id = ?`, it.ID).Scan(&one), sql.ErrNoRows)
+		}
+		tmdb := s.foundTMDB(ctx, tx, it)
 		if _, err := stmt.ExecContext(ctx, it.ID, it.Kind, it.Name, it.SortName, nullInt(it.Year),
 			nullString(it.SeriesID), nullString(it.SeasonID), it.SeasonNumber, it.EpisodeNumber,
-			nullString(s.foundTMDB(ctx, tx, it)), nullString(it.IMDb), nullString(it.TVDB), it.Rating,
+			nullString(tmdb), nullString(it.IMDb), nullString(it.TVDB), it.Rating,
 			nullString(it.PrimaryTag), nullString(it.BackdropTag), nullString(it.ThumbTag), pass,
 			nullString(it.LibraryID), added, nullString(it.PremiereDate), it.CommunityRating,
 			nullString(it.FolderName), nullString(it.FileName), nullInt64(it.RuntimeMs), nullString(it.TMDB)); err != nil {
 			return err
+		}
+		if arrived {
+			at := time.Now()
+			if !it.AddedAt.IsZero() {
+				at = it.AddedAt
+			}
+			if err := recordHistory(ctx, tx, "arrived", it.Kind, it.ID, it.SeriesID, it.SeasonNumber, tmdb, it.TVDB, at); err != nil {
+				return err
+			}
 		}
 		// Genres, studios, tags and people, replaced as a whole.
 		for table, names := range map[string][]string{"catalog_genres": it.Genres, "catalog_studios": it.Studios,
@@ -170,6 +186,15 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 				}
 			}
 		}
+	}
+	// A season that arrived before its series was indexed gets its IDs once
+	// the series is: kept with it, should both leave later.
+	if _, err := tx.ExecContext(ctx, `UPDATE title_history SET
+			tmdb = coalesce(tmdb, (SELECT s.tmdb FROM catalog_items s WHERE s.id = title_history.series_id)),
+			tvdb = coalesce(tvdb, (SELECT s.tvdb FROM catalog_items s WHERE s.id = title_history.series_id))
+		WHERE kind = 'season' AND (tmdb IS NULL OR tvdb IS NULL)
+			AND series_id IN (SELECT id FROM catalog_items WHERE kind = 'series')`); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -193,13 +218,48 @@ func (s *Store) UnseenCatalog(ctx context.Context, pass int64) ([]string, error)
 	return ids, rows.Err()
 }
 
-// DeleteCatalog removes titles from the index.
+// DeleteCatalog removes titles from the index: the films and seasons
+// among them left the libraries (title_history).
 func (s *Store) DeleteCatalog(ctx context.Context, ids []string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	// Read before anything goes: a season's series may be among them.
+	type leaving struct {
+		kind, id, seriesID, tmdb, tvdb string
+		season                         *int
+	}
+	var left []leaving
+	for _, id := range ids {
+		var l leaving
+		var seriesID, tmdb, tvdb sql.NullString
+		var season sql.NullInt64
+		err := tx.QueryRowContext(ctx, `SELECT c.kind, c.series_id, c.season_number,
+				CASE c.kind WHEN 'movie' THEN c.tmdb ELSE s.tmdb END,
+				CASE c.kind WHEN 'movie' THEN c.tvdb ELSE s.tvdb END
+			FROM catalog_items c LEFT JOIN catalog_items s ON s.id = c.series_id
+			WHERE c.id = ? AND c.kind IN ('movie', 'season')`, id).Scan(&l.kind, &seriesID, &season, &tmdb, &tvdb)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		l.id, l.seriesID, l.tmdb, l.tvdb = id, seriesID.String, tmdb.String, tvdb.String
+		if season.Valid {
+			n := int(season.Int64)
+			l.season = &n
+		}
+		left = append(left, l)
+	}
+	now := time.Now()
+	for _, l := range left {
+		if err := recordHistory(ctx, tx, "left", l.kind, l.id, l.seriesID, l.season, l.tmdb, l.tvdb, now); err != nil {
+			return err
+		}
+	}
 	for _, id := range ids {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM catalog_items WHERE id = ?`, id); err != nil {
 			return err
