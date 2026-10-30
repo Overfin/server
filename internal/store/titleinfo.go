@@ -262,7 +262,7 @@ func (s *Store) titleInfos(ctx context.Context, keys []string, today, language s
 // counting what a profile sees (visibility).
 func (s *Store) TitleCopies(ctx context.Context, keys []string) (map[string][]string, error) {
 	out := map[string][]string{}
-	if len(keys) == 0 {
+	if keys = plainKeys(keys); len(keys) == 0 {
 		return out, nil
 	}
 	rows, err := s.read.QueryContext(ctx, `SELECT i.title_key, i.id FROM catalog_items i
