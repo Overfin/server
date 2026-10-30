@@ -297,6 +297,48 @@ paths:
               schema:
                 $ref: "#/components/schemas/AppError"
 
+  /apps/v1/categories:
+    get:
+      operationId: appCategories
+      summary: The operator's categories
+      description: |
+        The categories the operator made in the control panel, in their
+        order: their IDs, as `categories` on `list=suggestions` titles
+        gives them, and their names in each language. For an app that adds
+        titles (Overswell), to let the operator say where each category's
+        titles go. Any valid key.
+      tags: [apps]
+      security:
+        - appKey: []
+      responses:
+        "200":
+          description: The categories.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [categories]
+                properties:
+                  categories:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, names]
+                      properties:
+                        id:
+                          type: string
+                        names:
+                          type: object
+                          additionalProperties:
+                            type: string
+                          description: By language (two letters).
+        "401":
+          description: No key, or not a valid one (`not-authenticated`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+
 components:
   securitySchemes:
     appKey:
@@ -411,6 +453,15 @@ components:
         inLibrary:
           type: boolean
           description: Whether a library has it (`availability`).
+        categories:
+          type: array
+          items:
+            type: string
+          description: |
+            With `list=suggestions` only: the operator's categories it fits
+            (their IDs, see `/apps/v1/categories`), by what TMDB says of it
+            (kind, genres, original language, age). A category with a rule
+            on libraries or Jellyfin tags fits no title the libraries lack.
 
     AppWatchStats:
       description: |

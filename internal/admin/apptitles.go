@@ -30,6 +30,9 @@ type appTitleJSON struct {
 	Stats *titleStatsJSON `json:"stats,omitempty"`
 	// InLibrary says whether a library has it (availability).
 	InLibrary *bool `json:"inLibrary,omitempty"`
+	// Categories are the operator's categories it fits (their IDs), by
+	// what TMDB says of it; with list=suggestions only.
+	Categories []string `json:"categories,omitempty"`
 }
 
 // titleStatsJSON: counts below 2 are given as 0, so none points at one
@@ -52,7 +55,8 @@ const (
 // out). Filters: inLibrary, kind (movie or season), list (trending or
 // popular: the titles in TMDB's list, in its order unless sort is given;
 // suggestions: what the libraries lack, mixed by the discovery share, see
-// suggestionOrder, never sorted otherwise).
+// suggestionOrder, never sorted otherwise, each with the categories it
+// fits).
 // Sorting: by score (needs the score scope) or name, order asc or desc.
 // Pages of limit rows
 // (100, at most 1000), the next one at the cursor given.
@@ -265,6 +269,24 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 	if want["stats"] {
 		stats = titleStats(f)
 	}
+	// A suggestion's categories, for an app that adds it where the
+	// operator wants that kind of title (Overswell).
+	var categories map[string][]string
+	if list == "suggestions" {
+		var keys []string
+		for i := start; i < len(rows) && i < start+limit; i++ {
+			ref, _ := store.ParseTitleKey(rows[i].Key)
+			kind := "movie"
+			if ref.Kind != "movie" {
+				kind = "series"
+			}
+			keys = append(keys, kind+"/"+ref.TMDB())
+		}
+		if categories, err = p.Store.TitleCategories(ctx, keys); err != nil {
+			p.fail(w, "reading the titles' categories", err)
+			return
+		}
+	}
 	out := []appTitleJSON{}
 	for i := start; i < len(rows) && len(out) < limit; i++ {
 		v := rows[i]
@@ -285,6 +307,13 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		}
 		if want["availability"] {
 			j.InLibrary = &v.InLibrary
+		}
+		if categories != nil {
+			kind := "movie"
+			if ref.Kind != "movie" {
+				kind = "series"
+			}
+			j.Categories = categories[kind+"/"+ref.TMDB()]
 		}
 		out = append(out, j)
 	}

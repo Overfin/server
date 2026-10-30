@@ -548,7 +548,8 @@ season by its series' place; or `suggestions`: the titles the libraries
 lack and that are out (or out within two days), in the order an app
 should add them, the most valuable first with trending and popular titles
 mixed in by the **Discovery share** set on the Valuation tab; never sorted
-otherwise).
+otherwise; each with the `categories` it fits, by what TMDB says of it, as
+`GET /apps/v1/categories` lists them).
 Sorting: `sort=score` (keys with the value only) or `name`, `order=asc` or
 `desc`. Pages of `limit` rows (100 by default, at most 1000); the next one
 at `cursor=` what `next` says. An app that frees space (such as Overtide)

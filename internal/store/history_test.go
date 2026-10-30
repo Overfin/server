@@ -46,3 +46,36 @@ func TestHistoryStartsWithTheLibrary(t *testing.T) {
 		t.Errorf("season: %+v", season)
 	}
 }
+
+// A title not in the libraries fits the categories TMDB can tell: an
+// animated Japanese film is in Films and Anime, not Series; a category on
+// a library fits none of these; nothing known, only rules on kind fit.
+func TestTitleCategories(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	now := time.Now()
+	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "1", Name: "Anime film", Genres: []TitleGenre{{ID: 16, Name: "Animation"}}}, []byte(`{"language":"ja"}`), now)
+	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "2", Name: "Drama", Genres: []TitleGenre{{ID: 18, Name: "Drama"}}}, []byte(`{"language":"fr"}`), now)
+	save := func(name string, rules CategoryRules) string {
+		t.Helper()
+		c := &Category{Names: map[string]string{"en": name}, Rules: rules}
+		if err := s.SaveCategory(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+		return c.ID
+	}
+	films := save("Films", CategoryRules{Kinds: []string{"movie"}})
+	save("Series", CategoryRules{Kinds: []string{"series"}})
+	anime := save("Anime", CategoryRules{Genres: []int{16}, Languages: []string{"ja"}})
+	save("Library A", CategoryRules{Libraries: []string{strings.Repeat("a", 32)}})
+	got, err := s.TitleCategories(ctx, []string{"movie/1", "movie/2", "movie/3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]string{"movie/1": {films, anime}, "movie/2": {films}, "movie/3": {films}}
+	for key, ids := range want {
+		if strings.Join(got[key], ",") != strings.Join(ids, ",") {
+			t.Errorf("%s: %v, want %v", key, got[key], ids)
+		}
+	}
+}

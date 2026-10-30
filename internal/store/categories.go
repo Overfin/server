@@ -366,3 +366,38 @@ func dropCategory(ctx context.Context, tx *sql.Tx, table, id string) error {
 	}
 	return nil
 }
+
+// TitleCategories returns, for TMDB titles ("movie/1", "series/2"), the
+// categories each fits (their IDs, in the categories' order), by what
+// TMDB says of it: kind, genres, original language, age. Rules on
+// libraries and Jellyfin tags need the title in a library: a category with
+// one of them fits none of these titles (Overswell, say, asks before
+// adding them).
+func (s *Store) TitleCategories(ctx context.Context, keys []string) (map[string][]string, error) {
+	out := map[string][]string{}
+	keys = plainKeys(keys)
+	if len(keys) == 0 {
+		return out, nil
+	}
+	categories, err := s.Categories(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range categories {
+		f, err := s.FilterFor(ctx, c.Rules, c.ID)
+		if err != nil {
+			return nil, err
+		}
+		cond, args := f.itemIn("t")
+		fits, err := s.ids(ctx, `SELECT t.kind || '/' || t.tmdb FROM (SELECT `+keyKind+` AS kind, `+keyTMDB+` AS tmdb,
+				NULL AS id, NULL AS library_id, NULL AS series_id FROM json_each(?) j) t
+			WHERE `+cond, append([]any{jsonList(keys)}, args...)...)
+		if err != nil {
+			return nil, err
+		}
+		for _, key := range fits {
+			out[key] = append(out[key], c.ID)
+		}
+	}
+	return out, nil
+}
