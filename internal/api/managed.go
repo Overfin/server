@@ -711,9 +711,11 @@ func (m *Managed) SiteOwner(r *http.Request) bool {
 }
 
 // SiteOwnerOnSite is SiteOwner for the control panel at /admin/ on the
-// site's own address, where no session here means one was taken away: the
-// session says which profile this browser uses, and deleting its cookie
-// mustn't pass for the owner's.
+// site's own address, where the session says which profile this browser
+// uses: without one, it's the profile a new session would start on, the
+// owner's unless a PIN protects it. So an admin signing in on the way to
+// the panel gets in, and deleting the cookie passes for the owner's only
+// where anyone here may switch to it anyway.
 func (m *Managed) SiteOwnerOnSite(r *http.Request) bool {
 	return m.siteOwner(r, false)
 }
@@ -737,8 +739,8 @@ func (m *Managed) siteOwner(r *http.Request, withoutSession bool) bool {
 		}
 	}
 	// No session in this browser: on the control panel's own listener,
-	// nobody uses another profile here; on the site, it can't be told.
-	return withoutSession
+	// nobody uses another profile here; on the site, a new session's.
+	return withoutSession || !owner.HasPIN
 }
 
 // ownerHere says whether this browser uses the account owner's profile,
