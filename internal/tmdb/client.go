@@ -154,12 +154,13 @@ func latin(s string) bool {
 	return true
 }
 
-// english takes the English name of an unreadable title, when it has one.
+// english takes the English name of an unreadable title, when it has one;
+// a name in Latin letters stays, whoever asks.
 func (r *rawTitle) english(e rawTitle) {
-	if r.Title == r.OriginalTitle && e.Title != "" && latin(e.Title) {
+	if r.Title == r.OriginalTitle && !latin(r.Title) && e.Title != "" && latin(e.Title) {
 		r.Title = e.Title
 	}
-	if r.Name == r.OriginalName && e.Name != "" && latin(e.Name) {
+	if r.Name == r.OriginalName && !latin(r.Name) && e.Name != "" && latin(e.Name) {
 		r.Name = e.Name
 	}
 }
