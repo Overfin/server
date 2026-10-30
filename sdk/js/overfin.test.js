@@ -35,6 +35,20 @@ test('errors are typed problems', async () => {
   });
 });
 
+test("a success whose body can't be read fails; an error's still says its status", async () => {
+  globalThis.fetch = async (url) => ({
+    status: url.includes('/broken-error') ? 502 : 200,
+    ok: !url.includes('/broken-error'),
+    json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
+  });
+  const overfin = new Overfin();
+  // A title page cut short isn't a title without an ID (which put
+  // "/title/undefined" in the address bar).
+  await assert.rejects(overfin.title('title_movie_tmdb_1'), SyntaxError);
+  await assert.rejects(overfin.similar('title_movie_tmdb_1'), SyntaxError);
+  await assert.rejects(overfin.request('GET', '/broken-error'), (err) => err instanceof OverfinError && err.status === 502);
+});
+
 test('changes without a body still go as JSON', async () => {
   let sent;
   globalThis.fetch = async (url, init = {}) => {
