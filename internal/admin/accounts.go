@@ -297,6 +297,9 @@ func (p *Panel) allowHistoryCopy(w http.ResponseWriter, r *http.Request, s *sess
 }
 
 func (p *Panel) fail(w http.ResponseWriter, what string, err error) {
+	if errors.Is(err, context.Canceled) {
+		return // the client left: nobody to answer, nothing wrong
+	}
 	p.Logger.Error("control panel: "+what+" failed", "err", err)
 	writeJSON(w, http.StatusInternalServerError, map[string]string{"type": "internal-error"})
 }
