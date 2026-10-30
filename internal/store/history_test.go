@@ -68,7 +68,7 @@ func TestTitleCategories(t *testing.T) {
 	save("Series", CategoryRules{Kinds: []string{"series"}})
 	anime := save("Anime", CategoryRules{Genres: []int{16}, Languages: []string{"ja"}})
 	save("Library A", CategoryRules{Libraries: []string{strings.Repeat("a", 32)}})
-	got, err := s.TitleCategories(ctx, []string{"movie/1", "movie/2", "movie/3"})
+	got, err := s.TitleCategories(ctx, []string{"movie/1", "movie/2", "movie/3", "movie/1"})
 	if err != nil {
 		t.Fatal(err)
 	}

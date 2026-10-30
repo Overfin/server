@@ -375,7 +375,9 @@ func dropCategory(ctx context.Context, tx *sql.Tx, table, id string) error {
 // adding them).
 func (s *Store) TitleCategories(ctx context.Context, keys []string) (map[string][]string, error) {
 	out := map[string][]string{}
-	keys = plainKeys(keys)
+	// A series comes once per season it's asked for: once is enough.
+	slices.Sort(keys)
+	keys = plainKeys(slices.Compact(keys))
 	if len(keys) == 0 {
 		return out, nil
 	}
