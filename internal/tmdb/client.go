@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/overfin/server/internal/textclean"
 	"github.com/overfin/server/internal/upstream"
@@ -130,10 +131,82 @@ func (r *rawTitle) fill(b rawTitle) {
 	}
 }
 
+// unreadable says whether a title came with its original name in a script
+// other than Latin: TMDB has no name for it in the language, and its own
+// can't be read without knowing that script. Its English one is taken
+// then (english); a name in Latin letters stays, as titles often keep
+// theirs in other languages.
+func (r rawTitle) unreadable() bool {
+	name, original := r.Title, r.OriginalTitle
+	if r.Name != "" {
+		name, original = r.Name, r.OriginalName
+	}
+	return name == original && !latin(name)
+}
+
+// latin says whether every letter of s is in Latin script.
+func latin(s string) bool {
+	for _, c := range s {
+		if unicode.IsLetter(c) && !unicode.Is(unicode.Latin, c) {
+			return false
+		}
+	}
+	return true
+}
+
+// english takes the English name of an unreadable title, when it has one.
+func (r *rawTitle) english(e rawTitle) {
+	if r.Title == r.OriginalTitle && e.Title != "" && latin(e.Title) {
+		r.Title = e.Title
+	}
+	if r.Name == r.OriginalName && e.Name != "" && latin(e.Name) {
+		r.Name = e.Name
+	}
+}
+
+// inEnglish is a copy of a query in English, for unreadable titles' names;
+// nil when the language is English already.
+func (c *Client) inEnglish(q url.Values) url.Values {
+	if l, _, _ := strings.Cut(c.language(), "-"); l == "en" {
+		return nil
+	}
+	out := url.Values{}
+	for k, v := range q {
+		out[k] = v
+	}
+	out.Set("language", "en-US")
+	return out
+}
+
+// fillEnglish gives a list's unreadable titles their English names, from
+// the same list in English. Failing that, they stay as they are.
+func (c *Client) fillEnglish(ctx context.Context, path string, q url.Values, titles []*rawTitle) {
+	en := c.inEnglish(q)
+	if en == nil || !slices.ContainsFunc(titles, func(r *rawTitle) bool { return r.unreadable() }) {
+		return
+	}
+	var raw struct {
+		Results []rawTitle `json:"results"`
+	}
+	if c.get(ctx, path, en, &raw) != nil {
+		return
+	}
+	byID := map[int]rawTitle{}
+	for _, e := range raw.Results {
+		byID[e.ID] = e
+	}
+	for _, r := range titles {
+		if e, ok := byID[r.ID]; ok && r.unreadable() {
+			r.english(e)
+		}
+	}
+}
+
 // fillTitles fills a list's titles that lack the region's translation
-// from the same list in the language alone. Failing that, they stay as
-// they are.
+// from the same list in the language alone, then gives unreadable ones
+// their English names (fillEnglish). Failing that, they stay as they are.
 func (c *Client) fillTitles(ctx context.Context, path string, q url.Values, titles []*rawTitle) {
+	defer c.fillEnglish(ctx, path, q, titles)
 	base := c.baseLanguage()
 	if base == "" || !slices.ContainsFunc(titles, func(r *rawTitle) bool { return r.lacks(base) }) {
 		return
@@ -439,6 +512,12 @@ func (c *Client) details(ctx context.Context, kind string, tmdbID int) (*rawDeta
 		var b rawTitle
 		if c.get(ctx, path, c.inBase(nil), &b) == nil && b.ID == tmdbID {
 			raw.fill(b)
+		}
+	}
+	if en := c.inEnglish(nil); en != nil && raw.unreadable() {
+		var e rawTitle
+		if c.get(ctx, path, en, &e) == nil && e.ID == tmdbID {
+			raw.english(e)
 		}
 	}
 	return &raw, nil
@@ -773,6 +852,24 @@ func (c *Client) Collection(ctx context.Context, id int) (*Collection, error) {
 			for i := range raw.Parts {
 				if p, ok := byID[raw.Parts[i].ID]; ok && raw.Parts[i].lacks(base) {
 					raw.Parts[i].fill(p)
+				}
+			}
+		}
+	}
+	// Films with an unreadable name: their English ones, in one request.
+	if en := c.inEnglish(nil); en != nil && slices.ContainsFunc(raw.Parts, func(r rawTitle) bool { return r.unreadable() }) {
+		var e struct {
+			ID    int        `json:"id"`
+			Parts []rawTitle `json:"parts"`
+		}
+		if c.get(ctx, path, en, &e) == nil && e.ID == id {
+			byID := map[int]rawTitle{}
+			for _, p := range e.Parts {
+				byID[p.ID] = p
+			}
+			for i := range raw.Parts {
+				if p, ok := byID[raw.Parts[i].ID]; ok && raw.Parts[i].unreadable() {
+					raw.Parts[i].english(p)
 				}
 			}
 		}
