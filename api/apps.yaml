@@ -216,6 +216,87 @@ paths:
               schema:
                 $ref: "#/components/schemas/AppError"
 
+  /apps/v1/history:
+    get:
+      operationId: appHistory
+      summary: When films and seasons arrived in the libraries and left them
+      description: |
+        Each film and season arriving in the libraries or leaving them, as
+        Overfin's index saw it, in the order recorded; a season carries its
+        series' IDs, kept after it left. What the libraries had before
+        Overfin kept this history arrived at the date Jellyfin added it.
+        Nothing about people. Needs the `history` scope; a key without it
+        answers `not-authenticated`. Reached like `/apps/v1/titles`, with
+        the same plain-JSON errors.
+      tags: [apps]
+      security:
+        - appKey: []
+      parameters:
+        - name: since
+          in: query
+          description: Only events that happened at this time or later.
+          schema:
+            $ref: "#/components/schemas/Timestamp"
+        - name: event
+          in: query
+          description: Only arrivals, or only departures.
+          schema:
+            type: string
+            enum: [arrived, left]
+        - name: limit
+          in: query
+          description: Events per page (500 when left out).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+        - name: cursor
+          in: query
+          description: The next page, as given in `next`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A page of events.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AppHistoryEvent"
+                  next:
+                    type: string
+                    description: The cursor of the next page; absent on the last.
+        "400":
+          description: A parameter out of its range (`invalid-request`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+        "401":
+          description: No key, not a valid one, or one without the scope
+            (`not-authenticated`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+        "404":
+          description: Not from a private address (plain text).
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: A failure of the server itself (`internal-error`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+
 components:
   securitySchemes:
     appKey:
@@ -225,12 +306,35 @@ components:
         For the apps API only. An app key, sent as
         `Authorization: Bearer ofapp_…` (at most 100 characters). The
         operator makes one per app in the control panel's Apps section,
-        with a name and its scopes among `watch-stats`, `score`, `stats` and
-        `availability`; the key is shown once, kept only as a hash, and
+        with a name and its scopes among `watch-stats`, `score`, `stats`,
+        `availability` and `history`; the key is shown once, kept only as a hash, and
         revoked by deleting it there. A key with `watch-stats` also reads
         `stats`, and the reverse.
 
   schemas:
+    AppHistoryEvent:
+      description: A film or a season arriving in the libraries or leaving them.
+      type: object
+      required: [event, kind, at]
+      properties:
+        event:
+          type: string
+          enum: [arrived, left]
+        kind:
+          type: string
+          enum: [movie, season]
+        tmdbId:
+          type: string
+          description: The film's, or the season's series'.
+        tvdbId:
+          type: string
+          description: The season's series' (rarely a film's).
+        season:
+          type: integer
+          description: The season's number.
+        at:
+          $ref: "#/components/schemas/Timestamp"
+
     AppError:
       description: |
         An error from the apps API. Plain JSON, not problem details; branch

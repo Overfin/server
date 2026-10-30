@@ -19,8 +19,9 @@ import (
 // per title, never anything per person (rule 40).
 
 // appScopes are what a key may be for: watch-stats (the older endpoint),
-// and on /apps/v1/titles, score, stats and availability.
-var appScopes = map[string]bool{"watch-stats": true, "score": true, "stats": true, "availability": true}
+// on /apps/v1/titles, score, stats and availability, and history, on
+// /apps/v1/history.
+var appScopes = map[string]bool{"watch-stats": true, "score": true, "stats": true, "availability": true, "history": true}
 
 // allows reports whether a key's scopes include scope. Watch statistics
 // are the same on either endpoint, so watch-stats and stats go together.

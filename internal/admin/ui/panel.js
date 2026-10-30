@@ -1399,7 +1399,7 @@ async function templatesView() {
 
 // ---- Apps ----------------------------------------------------------------------
 
-const appScopeNames = { score: 'Values', stats: 'Watch statistics', availability: 'In the libraries', 'watch-stats': 'Watch statistics' };
+const appScopeNames = { score: 'Values', stats: 'Watch statistics', availability: 'In the libraries', history: 'What came and went', 'watch-stats': 'Watch statistics' };
 
 // appsView lists the keys other apps (Overtide…) read Overfin's values and
 // statistics with: made here, for what the operator ticks, shown once,
@@ -1409,7 +1409,7 @@ async function appsView() {
   // A new key, in a window; then the key itself, once, in another.
   const newKey = () => {
     const name = h('input', { type: 'text', placeholder: 'e.g. Overtide', maxlength: '64', required: true });
-    const scopes = Object.fromEntries(['score', 'stats', 'availability'].map((s) => [s, h('input', { type: 'checkbox', checked: true })]));
+    const scopes = Object.fromEntries(['score', 'stats', 'availability', 'history'].map((s) => [s, h('input', { type: 'checkbox', checked: true })]));
     formModal({ title: 'New key', description: 'For one app: what it may read.', saveLabel: 'Make the key' },
       [field('For', name, null, true),
         h('div', { class: 'setting stack' }, h('div', {}, h('div', { class: 'label' }, 'It may read')),

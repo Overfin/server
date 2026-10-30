@@ -151,10 +151,13 @@ func TestDetailsInStep(t *testing.T) {
 	s := openAt(t, 59)
 	ctx := context.Background()
 	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
-	s.PutCatalog(ctx, []CatalogItem{
-		{ID: id(0), Kind: "movie", Name: "A", SortName: "a", TMDB: "1"},
-		{ID: id(1), Kind: "movie", Name: "B", SortName: "b", TMDB: "2"},
-	}, 1)
+	// Written as the schema then was (PutCatalog writes today's).
+	for i, tmdb := range []string{"1", "2"} {
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO catalog_items (id, kind, name, sort_name, rating, seen, tmdb)
+			VALUES (?, 'movie', ?, ?, '', 1, ?)`, id(i), tmdb, tmdb, tmdb); err != nil {
+			t.Fatal(err)
+		}
+	}
 	old := time.Now().Add(-time.Hour)
 	oldTitleDetails(t, s, Title{Kind: "movie", TMDB: "1", Name: "1"}, `{"genres":["Drama","Crime"],"language":"ja"}`, old)
 	oldTitleDetails(t, s, Title{Kind: "movie", TMDB: "2", Name: "2"}, `{"genres":null}`, old)
