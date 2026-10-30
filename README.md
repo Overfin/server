@@ -610,6 +610,10 @@ node --test sdk/js/overfin.test.js
 go run ./cmd/overfin -config overfin.toml
 ```
 
+Your own build in the compose stack: `docker build -t overfin:dev .` in the
+repository, then `OVERFIN_IMAGE=overfin:dev` in the .env beside compose.yaml and
+`docker compose up -d`.
+
 Go with the standard library and three dependencies (a TOML parser, a
 pure-Go SQLite, and the Go team's golang.org/x/crypto for getting
 certificates from Let's Encrypt), besides overfin-web, which the official
