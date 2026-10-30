@@ -297,8 +297,15 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 
 // wantedBy gives, per film and season, the accounts that watched, marked,
 // asked for or kept it for later: a series' marks count for each of its
-// seasons, an episode's for its season.
+// seasons, an episode's for its season. Only accounts that count (Active)
+// do, as in the valuation.
 func wantedBy(f *store.ValuationFacts) map[string]map[string]bool {
+	active := map[string]bool{}
+	for _, p := range f.Profiles {
+		if p.Active {
+			active[p.AccountID] = true
+		}
+	}
 	seasons := map[string][]string{} // series key → its valued seasons
 	for key := range f.Titles {
 		if ref, _ := store.ParseTitleKey(key); ref.Kind == "season" {
@@ -308,7 +315,7 @@ func wantedBy(f *store.ValuationFacts) map[string]map[string]bool {
 	out := map[string]map[string]bool{}
 	add := func(title, account string) {
 		ref, ok := store.ParseTitleKey(title)
-		if !ok {
+		if !ok || !active[account] {
 			return
 		}
 		keys := []string{ref.Key()}
