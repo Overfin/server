@@ -53,7 +53,16 @@ export class Overfin {
     }
     const res = await fetch(this.base + path, init);
     if (res.status === 204) return null;
-    const data = await res.json().catch(() => ({}));
+    // A body that can't be read: an error's still says its status; a
+    // success's (cut short: the page left, the network dropped) is no
+    // answer, not an empty one.
+    let data;
+    try {
+      data = await res.json();
+    } catch (err) {
+      if (res.ok) throw err;
+      data = {};
+    }
     if (!res.ok) {
       const err = new OverfinError(res.status, data);
       if (err.type === 'not-authenticated') this.onLoginRequired(this.loginUrl());
