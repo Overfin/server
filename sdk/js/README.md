@@ -5,8 +5,10 @@ carries the behavior every client needs, so your site only handles screens:
 
 - **Login:** when the login lapses, the browser goes through it and comes
   back to the same page.
-- **Errors:** every failure is an `OverfinError` with a stable `type`
-  (`pin-incorrect`, `step-up-required`, …) to branch on.
+- **Errors:** every error the server answers is an `OverfinError` with a
+  stable `type` (`pin-incorrect`, `step-up-required`, …) to branch on. A
+  request that doesn't complete (no network, an answer cut short) rejects
+  with the browser's own error instead: never an empty answer.
 - **Paging:** `pages()` follows cursors for you, and keeps a shuffle's seed.
 - **Playback:** `play()` tells Overfin what the browser can play, attaches the
   stream (with [hls.js](https://github.com/video-dev/hls.js) where the browser
