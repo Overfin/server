@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"strconv"
@@ -77,6 +79,9 @@ func (d Discovery) discover(w http.ResponseWriter, r *http.Request) {
 	}
 	// One more than asked for, to know whether there are more.
 	titles, err := d.Store.ListTitles(r.Context(), list, kind, avail, ceiling, offset, limit+1)
+	if errors.Is(err, context.Canceled) {
+		return // the client left: nobody to answer, nothing wrong
+	}
 	if err != nil {
 		d.Library.Logger.Error("reading the catalog failed", "err", err)
 		problem.Send(w, problem.Internal, "")

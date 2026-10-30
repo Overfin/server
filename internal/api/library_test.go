@@ -329,6 +329,8 @@ type options struct {
 	playback *api.Playback
 	// panel, when set, says where the control panel is (Sessions.Panel).
 	panel func(*http.Request) string
+	// log, when set, receives the server's log.
+	log io.Writer
 }
 
 func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
@@ -385,7 +387,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		t.Fatal(err)
 	}
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.NewTextHandler(cmp.Or[io.Writer](o.log, io.Discard), nil))
 	prov := &provision.Provisioner{Store: st, Jellyfin: jf, AdminKey: "admin", LogKey: []byte("k"), Logger: logger,
 		AdminGroup: o.adminGroup}
 	// Overfin's one Jellyfin account, which serves everyone: the fake's

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -139,6 +140,8 @@ func (s *Sessions) CurrentAccount(w http.ResponseWriter, r *http.Request) *Calle
 	case errors.Is(err, provision.ErrAnonymous):
 		problem.Send(w, problem.NotFound, "")
 		return nil
+	case errors.Is(err, context.Canceled):
+		return nil // the client left: nobody to answer, nothing wrong
 	default:
 		s.Logger.Error("account lookup failed", "err", err)
 		problem.Send(w, problem.Internal, "")
@@ -159,6 +162,9 @@ func (s *Sessions) CurrentAccount(w http.ResponseWriter, r *http.Request) *Calle
 			start = ""
 		}
 		created, token, err := s.Store.CreateSession(ctx, acct.ID, start, deviceName(r.UserAgent()), s.Lifetime)
+		if errors.Is(err, context.Canceled) {
+			return nil // the client left: nobody to answer, nothing wrong
+		}
 		if err != nil {
 			s.Logger.Error("could not create a session", "err", err)
 			problem.Send(w, problem.Internal, "")
