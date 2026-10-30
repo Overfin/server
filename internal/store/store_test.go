@@ -15,7 +15,7 @@ import (
 	"github.com/overfin/server/internal/seal"
 )
 
-func openTest(t *testing.T) *Store {
+func openTest(t testing.TB) *Store {
 	t.Helper()
 	box, err := seal.New(bytes.Repeat([]byte{9}, 32))
 	if err != nil {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Overfin's own content ratings, from TMDB: each country's scales of
@@ -255,11 +257,24 @@ const (
 	keyTMDB = `substr(j.value, instr(j.value, '/') + 1)`
 )
 
+// plainKeys are the keys SQL's text functions read as they are: one with a
+// NUL or not UTF-8 would be cut there or changed, and matches no title
+// anyway.
+func plainKeys(keys []string) []string {
+	var out []string
+	for _, k := range keys {
+		if utf8.ValidString(k) && !strings.ContainsRune(k, 0) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
 // TitlesAllowed is TitleAllowed for many titles at once, by "kind/tmdb"
 // ("movie/550"): those the ceiling allows.
 func (s *Store) TitlesAllowed(ctx context.Context, c Ceiling, keys []string) (map[string]bool, error) {
 	out := map[string]bool{}
-	if len(keys) == 0 {
+	if keys = plainKeys(keys); len(keys) == 0 {
 		return out, nil
 	}
 	cond, args := c.allowed(keyKind, keyTMDB)
@@ -288,7 +303,7 @@ type Release struct {
 // those not fetched yet are left out.
 func (s *Store) TitleReleases(ctx context.Context, keys []string) (map[string]Release, error) {
 	out := map[string]Release{}
-	if len(keys) == 0 {
+	if keys = plainKeys(keys); len(keys) == 0 {
 		return out, nil
 	}
 	rows, err := s.read.QueryContext(ctx, `SELECT j.value, r.released, r.at_home FROM json_each(?) j

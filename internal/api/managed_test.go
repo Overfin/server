@@ -1008,3 +1008,46 @@ func TestSigninLimitPerNetwork(t *testing.T) {
 		t.Errorf("another /64: %d", c)
 	}
 }
+
+// The gate a reverse proxy asks (forward auth): yes for someone signed in;
+// a page visit by anyone else goes to the sign-in, back to where it was
+// headed only if that's on this site. Step-up sends to the sign-in to
+// confirm, with the same care for the return.
+func TestGateAndStepUp(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{managed: true, store: &st})
+	ctx := context.Background()
+	u, _ := st.CreateUser(ctx, "someone@example.org", false)
+	hash, _ := password.Hash("a long password 1")
+	st.SetPassword(ctx, u.Subject, hash)
+	page := map[string]string{"Sec-Fetch-Dest": "document"}
+	b := newBrowser(srv)
+	for uri, want := range map[string]string{
+		"/title/m550":          "/title/m550",
+		"//evil.example/x":     "/",
+		"https://evil.example": "/",
+		"/\\evil.example":      "/",
+	} {
+		res, _ := visit(t, b, srv, "/api/v1/gate", map[string]string{"Sec-Fetch-Dest": "document", "X-Forwarded-Uri": uri})
+		loc, _ := url.Parse(res.Header.Get("Location"))
+		if res.StatusCode != http.StatusFound || loc.Path != "/signin" || loc.Query().Get("return") != want {
+			t.Errorf("gate, signed out, %q: %d %s", uri, res.StatusCode, res.Header.Get("Location"))
+		}
+	}
+	if res, _ := visit(t, b, srv, "/api/v1/gate", nil); res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("gate, signed out, not a page: %d", res.StatusCode)
+	}
+	if c, out := signinPost(t, b, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "someone@example.org", "password": "a long password 1"})); c != 200 {
+		t.Fatalf("signing in: %d %v", c, out)
+	}
+	if res, _ := visit(t, b, srv, "/api/v1/gate", page); res.StatusCode != http.StatusNoContent {
+		t.Errorf("gate, signed in: %d", res.StatusCode)
+	}
+	for ret, want := range map[string]string{"/admin/login": "/admin/login", "//evil.example": "/", "": "/"} {
+		res, _ := visit(t, b, srv, "/api/v1/step-up?return="+url.QueryEscape(ret), nil)
+		loc, _ := url.Parse(res.Header.Get("Location"))
+		if res.StatusCode != http.StatusSeeOther || loc.Path != "/signin" || loc.Query().Get("fresh") != "1" || loc.Query().Get("return") != want {
+			t.Errorf("step-up, %q: %d %s", ret, res.StatusCode, res.Header.Get("Location"))
+		}
+	}
+}
