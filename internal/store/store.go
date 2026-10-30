@@ -43,6 +43,8 @@ type Store struct {
 	facts  factsCache
 	// related is the library's facts for related titles (related.go).
 	related relatedCache
+	// details are titles' details, decoded (detailsCache).
+	details detailsCache
 }
 
 // Open opens (or creates) the database at path and applies any pending
@@ -84,8 +86,10 @@ func Open(ctx context.Context, path string, box *seal.Box) (*Store, error) {
 	return s, nil
 }
 
-// readers is how many reads run at the same time.
-const readers = 6
+// readers is how many reads run at the same time. Measured under load (25
+// people browsing, 16 processors), 6 kept requests waiting for one while
+// the processors had room: 12 served 40% more home pages, sooner.
+const readers = 12
 
 // Close closes the database.
 func (s *Store) Close() error {

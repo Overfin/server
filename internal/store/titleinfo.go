@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"slices"
 	"strconv"
@@ -370,7 +369,7 @@ func (s *Store) fillTitle(ctx context.Context, t *TitleInfo, kind, tmdb string, 
 		t.Score, t.Votes = title.Rating, title.Votes
 		if len(title.Details) > 0 {
 			t.Known = true
-			if err := json.Unmarshal(title.Details, &t.Details); err != nil {
+			if err := s.details.decode(key, title.Details, &t.Details); err != nil {
 				return err
 			}
 		}
