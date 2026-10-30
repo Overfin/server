@@ -109,7 +109,8 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 		} `json:"recommendations"`
 		Translations struct {
 			Translations []struct {
-				Data struct {
+				Language string `json:"iso_639_1"`
+				Data     struct {
 					Title string `json:"title"`
 					Name  string `json:"name"`
 				} `json:"data"`
@@ -137,6 +138,15 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 		if c.get(ctx, path, c.inBase(nil), &b) == nil && b.ID == tmdbID {
 			raw.fill(b.rawTitle)
 			raw.Tagline = cmp.Or(raw.Tagline, b.Tagline)
+		}
+	}
+	// An unreadable name: its English one, among the translations.
+	if c.inEnglish(nil) != nil && raw.unreadable() {
+		for _, tr := range raw.Translations.Translations {
+			if tr.Language == "en" {
+				raw.english(rawTitle{Title: tr.Data.Title, Name: tr.Data.Name})
+				break
+			}
 		}
 	}
 	t, ok := raw.title(kind)
