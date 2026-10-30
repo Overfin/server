@@ -380,7 +380,10 @@ comes from the internet, and media files can be written by anyone.
       only on a listener of its own, with the guard below, which also
       serves the sign-in, so admins sign in there, and the site has no
       panel at all; so does the setup page. On the site, the panel opens
-      only from the account's owner profile. In the panel, admins can't take
+      only from the account's owner profile; a browser without a session
+      counts as the profile a new session would start on (the owner's,
+      unless a PIN protects it), so deleting the session's cookie never
+      passes for a PIN-protected owner's. In the panel, admins can't take
       the admin mark from themselves, remove themselves or disable their own
       account.
     - With an identity provider, it's on its own listener, off by default,

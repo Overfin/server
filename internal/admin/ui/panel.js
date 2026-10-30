@@ -407,7 +407,7 @@ function folderPicker(pick, close) {
 const brandingKinds = [
   ['logo', 'Logo', 'Square: the icon in browser tabs. Without one, Overfin\'s.'],
   ['banner-dark', 'Banner', 'Your logo and your name as one picture, with a transparent background, for dark pages: about 4:1, at least 64 pixels tall. It\'s shown as tall as the header\'s logo, never wider than a few centimeters. Without one, your name shows as text.'],
-  ['banner-light', 'Banner for light pages', 'Optional: when the banner doesn\'t suit light pages. Without one, the banner shows on both.'],
+  ['banner-light', 'Banner for light pages', 'Optional: for the sign-in page on light screens, when the banner doesn\'t suit them (the site\'s header is dark on every page). Without one, the banner shows there too.'],
 ];
 
 // brandingView: the operator's own name, logo and banners, instead of
@@ -467,12 +467,13 @@ async function brandingView() {
     });
     const files = card({ title: 'Files', description: 'Kept as you upload them: PNG works everywhere, emails included (JPEG too; not SVG, which emails can\'t show). 4 MB at most each.' }, fileRows);
 
-    // The site's header, as people will see it, on dark and light pages.
+    // The site's header (dark on every page), and the sign-in page on a
+    // light screen, as people will see them.
     const banner = (light) => {
       const src = light ? (b.files['banner-light'] || b.files['banner-dark']) : b.files['banner-dark'];
       return src ? h('img', { src, alt: b.name }) : h('strong', {}, b.name || 'Your name');
     };
-    const preview = card({ title: 'Preview', description: 'The top of your site, on dark and on light pages.' },
+    const preview = card({ title: 'Preview', description: 'The top of your site (dark on every page), then the sign-in page on a light screen.' },
       [h('div', { class: 'brand-preview header dark' }, banner(false)), h('div', { class: 'brand-preview header light' }, banner(true))]);
 
     // The home page: whether titles no library has show there too.

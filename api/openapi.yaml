@@ -147,8 +147,10 @@ paths:
       summary: Whose brand to show
       description: Overfin's, or the operator's own once switched on in the
         control panel. Without `custom`, it's Overfin's, which clients carry
-        themselves. With it, clients show the operator's banner (the light
-        one on light pages, when there's one; the name as text without any),
+        themselves. With it, clients show the operator's banner (the site
+        shows the dark one, its header being dark on every page; the light
+        one, when there's one, suits light backgrounds; the name as text
+        without any),
         the name in titles, the logo as icon (Overfin's without one), and
         "Powered by" Overfin's banner, not hidden.
       tags: [system]
