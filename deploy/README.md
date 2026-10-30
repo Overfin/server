@@ -15,8 +15,8 @@ the only one that talks to it. Nobody signs in to Jellyfin itself.
 
 ```sh
 mkdir overfin && cd overfin
-curl -fsSLO https://raw.githubusercontent.com/overfin/server/v0.7.0/deploy/compose.yaml
-curl -fsSL -o .env https://raw.githubusercontent.com/overfin/server/v0.7.0/deploy/.env.example
+curl -fsSLO https://raw.githubusercontent.com/overfin/server/v0.8.0/deploy/compose.yaml
+curl -fsSL -o .env https://raw.githubusercontent.com/overfin/server/v0.8.0/deploy/.env.example
 ```
 
 In `compose.yaml`, change `/srv/media` on the media line to your media
