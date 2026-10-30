@@ -575,6 +575,13 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 			pr.SubtitleStreamIndex, again = &n, true
 		}
 	}
+	// Jellyfin applies the tracks asked for only to the version named:
+	// without one, it streamed the default ones (the audio asked for, by
+	// language or from the menu, never played). So it's asked again, for
+	// the version it chose.
+	if pr.MediaSourceID == "" && (pr.AudioStreamIndex != nil || (pr.SubtitleStreamIndex != nil && *pr.SubtitleStreamIndex >= 0)) {
+		pr.MediaSourceID, again = dec.Source.Id, true
+	}
 	if again && !decide() {
 		return
 	}

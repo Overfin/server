@@ -210,13 +210,19 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "POST" && r.URL.Path == "/Items/"+fmt.Sprintf("%032x", 1)+"/PlaybackInfo":
 		var asked map[string]any
 		json.NewDecoder(r.Body).Decode(&asked)
-		f.calls = append(f.calls, fmt.Sprintf("PlaybackInfo audio=%v subtitles=%v", asked["AudioStreamIndex"], asked["SubtitleStreamIndex"]))
+		// As Jellyfin does: the tracks asked for apply only to the version
+		// named; without one, the stream has the default audio.
+		streamed := 1
+		if n, ok := asked["AudioStreamIndex"].(float64); ok && asked["MediaSourceId"] == fmt.Sprintf("%032x", 1) {
+			streamed = int(n)
+		}
+		f.calls = append(f.calls, fmt.Sprintf("PlaybackInfo audio=%v subtitles=%v streamed=%d", asked["AudioStreamIndex"], asked["SubtitleStreamIndex"], streamed))
 		json.NewEncoder(w).Encode(map[string]any{
 			"PlaySessionId": "abc123",
 			"MediaSources": []map[string]any{{
 				"Id": fmt.Sprintf("%032x", 1), "Name": "1080p", "Protocol": "File", "Path": "/mnt/media/secret.mkv",
 				"SupportsTranscoding": true, "TranscodingSubProtocol": "hls", "SupportsDirectPlay": f.direct,
-				"TranscodingUrl": "/videos/" + fmt.Sprintf("%032x", 1) + "/master.m3u8?ApiKey=" + token + "&MediaSourceId=x&TranscodeReasons=VideoCodecNotSupported,AudioCodecNotSupported",
+				"TranscodingUrl": "/videos/" + fmt.Sprintf("%032x", 1) + "/master.m3u8?ApiKey=" + token + "&MediaSourceId=x&TranscodeReasons=VideoCodecNotSupported,AudioCodecNotSupported" + "&AudioStreamIndex=" + strconv.Itoa(streamed),
 				"RunTimeTicks":   72000000000, "Container": "mkv", "Bitrate": 9258000,
 				"MediaStreams": []map[string]any{
 					{"Index": 0, "Type": "Video", "Codec": "hevc", "Profile": "Main 10", "Width": 3840, "Height": 2160, "BitDepth": 10,
@@ -229,6 +235,7 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}},
 		})
 	case r.URL.Path == "/videos/"+fmt.Sprintf("%032x", 1)+"/master.m3u8":
+		f.calls = append(f.calls, "master audio="+r.URL.Query().Get("AudioStreamIndex"))
 		fmt.Fprint(w, "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nmain.m3u8?ApiKey="+token+"&x=1\n")
 	case r.URL.Path == "/videos/"+fmt.Sprintf("%032x", 1)+"/main.m3u8":
 		fmt.Fprint(w, "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nhls1/main/0.mp4?ApiKey="+token+"&runtimeTicks=0\n#EXT-X-ENDLIST\n")
@@ -969,6 +976,50 @@ func TestPlaybackLanguages(t *testing.T) {
 		if code, _ := put(t, srv, "PUT", "/api/v1/me/subtitles", bad); code != 400 {
 			t.Errorf("%s: %d", bad, code)
 		}
+	}
+}
+
+// The audio asked for, by the site's language or from the menu, is the
+// one streamed: Jellyfin applies a track only to the version named, so
+// Overfin names the one it chose.
+func TestPlaybackTrackReachesJellyfin(t *testing.T) {
+	srv, fake := newServer(t)
+	streamed := func(extra string) string {
+		t.Helper()
+		code, body := post(t, srv, "/api/v1/playback",
+			`{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{},"device":"Laptop"`+extra+`}`)
+		var pb struct {
+			ID     string
+			Stream struct{ URL string }
+		}
+		json.Unmarshal([]byte(body), &pb)
+		if code != 201 {
+			t.Fatalf("start: %d %s", code, body)
+		}
+		before := len(fake.calls)
+		if code := get(t, srv, pb.Stream.URL, nil); code != 200 {
+			t.Fatalf("stream: %d", code)
+		}
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		for _, c := range fake.calls[before:] {
+			if a, ok := strings.CutPrefix(c, "master audio="); ok {
+				return a
+			}
+		}
+		return ""
+	}
+	if a := streamed(``); a != "1" {
+		t.Errorf("default: audio %q", a)
+	}
+	if a := streamed(`,"audioLanguage":"en"`); a != "2" {
+		t.Errorf("in English: audio %q", a)
+	}
+	if a := streamed(`,"audioTrack":"a2"`); a != "2" {
+		t.Errorf("from the menu: audio %q", a)
+	}
+	if a := streamed(`,"audioLanguage":"fr-CA"`); a != "1" {
+		t.Errorf("in French: audio %q", a)
 	}
 }
 
