@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -68,6 +69,9 @@ func (l Library) userState(ctx context.Context, p *store.Profile, title string) 
 }
 
 func (l Library) storeError(w http.ResponseWriter, err error) {
+	if errors.Is(err, context.Canceled) {
+		return // the client left: nobody to answer, nothing wrong
+	}
 	l.Logger.Error("reading or writing a profile's titles failed", "err", err)
 	problem.Send(w, problem.Internal, "")
 }

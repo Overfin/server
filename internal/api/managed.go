@@ -982,6 +982,9 @@ func (m *Managed) refuse(w http.ResponseWriter, r *http.Request, t problem.Type,
 }
 
 func (m *Managed) fail(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, context.Canceled) {
+		return // the client left: nobody to answer, nothing wrong
+	}
 	m.Logger.Error("sign-in failed", "err", err)
 	m.refuse(w, r, problem.Internal, "failed")
 }

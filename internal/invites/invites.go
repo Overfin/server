@@ -369,6 +369,9 @@ type admin struct {
 }
 
 func (a admin) fail(w http.ResponseWriter, err error) {
+	if errors.Is(err, context.Canceled) {
+		return // the client left: nobody to answer, nothing wrong
+	}
 	a.h.Logger().Error("invites: request failed", "err", err)
 	feature.Problem(w, feature.Internal, "")
 }
