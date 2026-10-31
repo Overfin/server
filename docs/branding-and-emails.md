@@ -2,8 +2,9 @@
 
 **Branding** (control panel, Server, Branding) puts your site's name, logo
 and banner in place of Overfin's: on the site, its sign-in page and its
-emails. They're kept as you upload them, PNG or JPEG (not SVG, which emails
-can't show); a banner for light pages is optional, for the sign-in page on
+emails. Upload them as PNG or JPEG (not SVG, which emails can't show):
+Overfin keeps them as PNG, no wider than they're shown (a logo 512 pixels,
+a banner 1200); a banner for light pages is optional, for the sign-in page on
 light screens (the site's header is dark on every page). With your brand, the
 site and emails say "Powered by Overfin", discreetly. The control panel
 stays Overfin's. The same page's **Home page** card chooses whether the

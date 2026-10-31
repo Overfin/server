@@ -1,9 +1,17 @@
 package admin
 
 import (
+	"bytes"
+	"context"
+	"image"
+	"image/jpeg"
+	"image/png"
+	"io"
+	"log/slog"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBranding(t *testing.T) {
@@ -49,19 +57,64 @@ func TestBranding(t *testing.T) {
 			t.Errorf("SVG as %s: %d %s", ct, rec.Code, rec.Body)
 		}
 	}
-	png := "\x89PNG\r\n\x1a\n" + strings.Repeat("x", 64)
-	if rec := upload(brandingFiles+"banner-dark", "image/png", png); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"banner-dark":"/admin/api/branding/files/banner-dark?v=`) {
+	// Not a picture Overfin reads: refused, whatever it says it is.
+	if rec := upload(brandingFiles+"banner-dark", "image/png", "\x89PNG\r\n\x1a\n"+strings.Repeat("x", 64)); rec.Code != 400 {
+		t.Errorf("a fake PNG: %d", rec.Code)
+	}
+	// A picture: made Overfin's, a PNG no wider than it's ever shown.
+	if rec := upload(brandingFiles+"banner-dark", "image/jpeg", picture(t, 3000, 200, "jpeg")); rec.Code != 200 ||
+		!strings.Contains(rec.Body.String(), `"banner-dark":"/admin/api/branding/files/banner-dark?v=`) {
 		t.Fatalf("upload: %d %s", rec.Code, rec.Body)
 	}
 	rec := b.do("GET", brandingFiles+"banner-dark", "", nil)
-	if rec.Code != 200 || rec.Body.String() != png || rec.Header().Get("Content-Type") != "image/png" ||
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(rec.Body.Bytes()))
+	if rec.Code != 200 || err != nil || format != "png" || cfg.Width != 1200 || rec.Header().Get("Content-Type") != "image/png" ||
 		!strings.Contains(rec.Header().Get("Content-Security-Policy"), "sandbox") {
-		t.Errorf("shown: %d %v", rec.Code, rec.Header())
+		t.Errorf("shown: %d %s %d %v", rec.Code, format, cfg.Width, rec.Header())
 	}
 	if rec := upload(brandingFiles+"logo", "image/png", strings.Repeat("x", maxBrandingFile+1)); rec.Code != 413 {
 		t.Errorf("too big: %d", rec.Code)
 	}
 	if rec := b.do("DELETE", brandingFiles+"banner-dark", "", nil); rec.Code != 200 || strings.Contains(rec.Body.String(), "banner-dark") {
 		t.Errorf("removed: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// picture is a w by h picture, as a "png" or a "jpeg" file.
+func picture(t *testing.T, w, h int, format string) string {
+	t.Helper()
+	var b bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	if format == "png" {
+		png.Encode(&b, img)
+	} else {
+		jpeg.Encode(&b, img, nil)
+	}
+	return b.String()
+}
+
+// Branding files kept as they were uploaded become Overfin's at start: a
+// JPEG as wide as it came, a PNG; one Overfin can't read, removed; one
+// prepared already, left as it is.
+func TestPrepareBranding(t *testing.T) {
+	ctx := context.Background()
+	_, _, db, _ := signedInPanel(t)
+	long := time.Now().Add(-time.Hour)
+	db.SetBrandingFile(ctx, "banner-light", "image/jpeg", []byte(picture(t, 2400, 100, "jpeg")), long)
+	db.SetBrandingFile(ctx, "banner-dark", "image/gif", []byte("GIF89a......"), long)
+	db.SetBrandingFile(ctx, "logo", "image/png", []byte(picture(t, 256, 256, "png")), long)
+	if err := PrepareBranding(ctx, db, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	light, ok, _ := db.BrandingFileOf(ctx, "banner-light")
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(light.Data))
+	if !ok || err != nil || format != "png" || light.ContentType != "image/png" || cfg.Width != 1200 {
+		t.Errorf("banner: %v %s %d %s", ok, format, cfg.Width, light.ContentType)
+	}
+	if _, ok, _ := db.BrandingFileOf(ctx, "banner-dark"); ok {
+		t.Error("a GIF stayed")
+	}
+	if logo, _, _ := db.BrandingFileOf(ctx, "logo"); !logo.Updated.Equal(long.Truncate(time.Second)) {
+		t.Errorf("a prepared logo was made again: %v", logo.Updated)
 	}
 }

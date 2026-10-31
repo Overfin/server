@@ -323,19 +323,16 @@ func (l Library) image(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if r.URL.Query().Get("width") != "" {
-		// Other images come at their sizes only.
-		problem.Send(w, problem.NotFound, "")
-		return
-	}
 	if id, ok := strings.CutPrefix(r.PathValue("id"), uploadImage); ok {
-		if !slices.Contains(images.Sizes, size) {
-			problem.Send(w, problem.NotFound, "")
-			return
-		}
+		// Its width comes with its kind, once it's read (uploadedImage).
 		if p := l.active(w, r); p != nil {
 			l.uploadedImage(w, r, p, id)
 		}
+		return
+	}
+	if r.URL.Query().Get("width") != "" {
+		// Other images come at their sizes only.
+		problem.Send(w, problem.NotFound, "")
 		return
 	}
 	ref, err := images.Parse(r.PathValue("id"))

@@ -111,6 +111,15 @@ func NamedWidth(typ, size string) (int, bool) {
 	return w, ok
 }
 
+// Largest is the largest width served of a type: an original is kept no
+// wider.
+func Largest(typ string) int {
+	if l := ladders[typ]; len(l) > 0 {
+		return l[len(l)-1]
+	}
+	return 0
+}
+
 // Smallest is the smallest width served of a type: the control panel's
 // thumbnails.
 func Smallest(typ string) int {

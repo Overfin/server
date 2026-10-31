@@ -54,7 +54,7 @@
     <div class="hint">None.</div>
   {/if}
   <div class="row">
-    <input bind:this={picker} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onchange={picked} />
+    <input bind:this={picker} type="file" accept="image/png,image/jpeg" hidden onchange={picked} />
     <button type="button" disabled={busy} onclick={() => picker?.click()}>{url ? 'Replace…' : 'Upload…'}</button>
     {#if url}<button type="button" class="danger" disabled={busy} onclick={remove}>Remove</button>{/if}
   </div>

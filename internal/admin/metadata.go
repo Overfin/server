@@ -340,7 +340,9 @@ func (p *Panel) uploadMetadataImage(w http.ResponseWriter, r *http.Request, s *s
 	if typ == "logo" {
 		contentType = "image/png"
 	}
-	data, err := images.Reencode(raw, contentType)
+	// No wider than the largest size served of its kind: sizes are made
+	// from it.
+	data, err := images.Prepare(raw, images.Largest(typ), contentType)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
 			"detail": fmt.Sprintf("That isn't a JPEG or a PNG image, or it's larger than %d pixels a side.", images.MaxDimension)})
@@ -376,6 +378,12 @@ func (p *Panel) artwork(w http.ResponseWriter, r *http.Request, _ *session) {
 			return
 		}
 		data, contentType = u.Data, u.ContentType
+		if p.Images != nil {
+			if data, err = p.Images.Resized(r.Context(), uploadImageID+upload, u.Data, u.ContentType, images.Smallest(u.Type)); err != nil {
+				p.fail(w, "making an uploaded image smaller", err)
+				return
+			}
+		}
 	} else {
 		ref, err := images.ParseArtwork(id)
 		if err != nil || !slices.Contains(store.ImageFields, ref.Type) || p.Images == nil {

@@ -242,6 +242,33 @@ func Reencode(raw []byte, contentType string) ([]byte, error) {
 	return encode(img, contentType)
 }
 
+// Prepare makes an uploaded image Overfin's: checked and decoded as
+// Reencode does, no wider than maxWidth (Shrink), encoded again as
+// contentType. Every image Overfin keeps goes through it or Reencode.
+func Prepare(raw []byte, maxWidth int, contentType string) ([]byte, error) {
+	img, err := decodeChecked(raw)
+	if err != nil {
+		return nil, err
+	}
+	return encode(Shrink(img, maxWidth), contentType)
+}
+
+// Resized returns an image Overfin holds the original of (an upload, say)
+// width pixels wide (never wider than it is), remembered in memory under
+// key and the width.
+func (p *Pipeline) Resized(ctx context.Context, key string, original []byte, contentType string, width int) ([]byte, error) {
+	k := key + "/" + strconv.Itoa(width)
+	if e, ok := p.cache.get(k); ok {
+		return e.data, nil
+	}
+	data, err := p.sized(ctx, original, contentType, width, p.slots)
+	if err != nil {
+		return nil, err
+	}
+	p.cache.put(k, entry{data: data, contentType: contentType})
+	return data, nil
+}
+
 // decodeChecked decodes an image Reencode would take: a JPEG or a PNG, its
 // dimensions checked from its header first; ErrUnsafe otherwise.
 func decodeChecked(raw []byte) (image.Image, error) {
