@@ -18,7 +18,7 @@ a Jellyfin account.
 
 ## Try it
 
-You need Docker with Compose, and your media on the same machine:
+You need Docker with Compose, and your media in a folder this machine can read:
 
 ```sh
 mkdir overfin && cd overfin
