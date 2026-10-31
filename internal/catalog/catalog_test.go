@@ -141,18 +141,31 @@ func TestSync(t *testing.T) {
 	lib.items = append(lib.items, map[string]any{"Type": "Movie", "Id": "../bad", "Name": "x"})
 	lib.saved["../bad"] = early
 
+	// Each read that found titles says so (the titles' keeper wakes).
+	reads := 0
+	s.Read = func() { reads++ }
+
 	// The first run reads everything.
 	s.once(ctx)
 	if c := counts(t, st); c["movie"] != 1 || c["series"] != 1 || c["season"] != 1 || c["episode"] != 1 {
 		t.Fatalf("first pass: %v (%s)", c, s.lastErr)
+	}
+	if reads != 1 {
+		t.Errorf("first pass: told %d times", reads)
+	}
+	// Nothing changed: nothing said.
+	*now = now.Add(time.Minute)
+	s.once(ctx)
+	if reads != 1 {
+		t.Errorf("nothing new: told %d times", reads)
 	}
 
 	// A change: read with the next run, without a full pass.
 	*now = now.Add(10 * time.Minute)
 	lib.add(7, map[string]any{"Type": "Movie", "Name": "Arrival"}, *now)
 	s.once(ctx)
-	if c := counts(t, st); c["movie"] != 2 {
-		t.Errorf("after a change: %v", c)
+	if c := counts(t, st); c["movie"] != 2 || reads != 2 {
+		t.Errorf("after a change: %v, told %d times", c, reads)
 	}
 
 	// A title gone, and one missed by the listing but still there: the full

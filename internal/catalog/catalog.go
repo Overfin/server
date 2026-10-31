@@ -45,6 +45,10 @@ type Sync struct {
 	// is out of reach (Watch); FullEvery, how often the whole library is.
 	ChangesEvery time.Duration
 	FullEvery    time.Duration
+	// Read, when set, runs once titles were read: the titles' keeper
+	// matches the new ones and fetches their pages then, not on its next
+	// pass.
+	Read func()
 
 	mu      sync.Mutex
 	lastErr string
@@ -221,7 +225,15 @@ func (s *Sync) Full(ctx context.Context) error {
 		return err
 	}
 	s.Logger.Info("catalog: the library was read", "titles", n, "removed", removed)
+	s.notify()
 	return nil
+}
+
+// notify runs Read, when set.
+func (s *Sync) notify() {
+	if s.Read != nil {
+		s.Read()
+	}
 }
 
 // Changes reads what Jellyfin saved since the last read.
@@ -246,6 +258,7 @@ func (s *Sync) Changes(ctx context.Context) error {
 	}
 	if n > 0 {
 		s.Logger.Info("catalog: changes read", "titles", n)
+		s.notify()
 	}
 	return nil
 }
