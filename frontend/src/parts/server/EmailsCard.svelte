@@ -20,7 +20,7 @@
   }
 </script>
 
-<Card title="Emails" description={`What people get, in their language. Overfin's own, or yours: put templates of the same names in ${t.dir} (README.md, Your brand, and your emails, says how).`}>
+<Card title="Emails" description={`What people get, in their language. Overfin's own, or yours: put templates of the same names in ${t.dir} (docs/branding-and-emails.md, in Overfin's repository, says how).`}>
   {#each t.emails as e (e.name)}
     {@const yours = [e.html, e.text].filter(Boolean)}
     <Setting label={emailNames[e.name] || e.name} hint={yours.length ? yours.join(', ') : ''}>
