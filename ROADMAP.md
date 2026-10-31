@@ -841,30 +841,44 @@ nothing beyond what that needs.
   how many are left to share), for "Who's watching?" to tell. Sharing a
   login also costs the owner a stream of theirs.
 
-- **Subtitles that are pictures (PGS), never burned in** (designed).
-  Today, choosing a PGS track (Blu-ray subtitles: pictures, not text) has
-  Jellyfin burn it into the picture, re-encoding the whole video. Never
-  again:
-  - One subtitle choice per language: text wins when a language has both
-    (Predator: Badlands' French is shown from its SRT).
-  - Forced subtitles are always on, in the audio's language, even with
+- **Languages, one way everywhere; subtitles never burned in** (designed,
+  under way). Today languages are named three ways (the site's language
+  choice in themselves, the player by Jellyfin's free text, the panel by
+  the browser in English), a profile's preferences know a language but
+  not its region, and choosing a subtitle track that is pictures (PGS)
+  has Jellyfin burn it into the picture, re-encoding the whole video.
+  - One list of languages in Overfin, for the site, the player, the panel
+    and the API: each named in itself, with its country for the variants
+    known ("Français (Canada)", "Español (México)", "日本語"); about a
+    hundred besides the 25 an operator can offer; one unknown shows its
+    code, an unknown one "?". The API gives the names: every app shows
+    the same.
+  - Tracks: their region from the file's tag, else from their title's
+    markers (VFQ, VFF, Latino…), never guessed. Audio: one entry per
+    language variant, its channels ("5.1"), not its codec; commentaries
+    and audio descriptions their own entries, never chosen by default.
+    Subtitles: one entry per language, text first; those for the hard of
+    hearing only when a language has nothing else.
+  - Forced subtitles always on, in the audio's language, even with
     subtitles off (an invented language translated); full subtitles in
     that language take their place when chosen; none matching the audio,
     nothing shown by itself.
-  - A language with PGS only: the track Jellyfin extracts as it is
-    (`.sup`), checked whole by Overfin (every segment well-formed, each
-    picture's run-length data within its declared size, sizes capped)
-    and refused otherwise (SECURITY.md rule 11), drawn by the player over
-    the video. The decoder lives in the JavaScript SDK, so every web app
-    gets it; native SDKs get theirs. About 0.1 second a track to check.
-  - No PGS track ever burned in; DVD subtitles may follow the same way.
-  - Turning them into text (OCR) was tried and set aside: 92% of
+  - A profile's audio: as the site, the original version (TMDB's original
+    language), or a language; its subtitles: off, or a language; both with
+    their region, the same language from elsewhere when a file lacks it.
+    What's chosen while watching stays the title's own, as now.
+  - Subtitles that are pictures (PGS): the track Jellyfin extracts as it
+    is (`.sup`), checked whole by Overfin (every segment well-formed, each
+    picture's run-length data within its declared size, sizes capped) and
+    refused otherwise (SECURITY.md rule 11), drawn by the player over the
+    video; the decoder in the JavaScript SDK, native SDKs their own. About
+    0.1 second a track to check. None ever burned in; DVD subtitles may
+    follow. Turning them into text (OCR) was tried and set aside: 92% of
     subtitles exactly right, not good enough.
-  - Order: Overfin's check and its route; the decoder in the SDK; the
-    player (one choice per language, forced subtitles, drawing); the
+  - Order: the list and its names; tracks read (languages, regions,
+    kinds); the PGS check and its route; the decoder in the SDK; the
+    profiles' preferences; the player; the panel on the same names; the
     burn-in path removed.
-  - Part of a wider plan: languages named the same way everywhere
-    ("Français (Québec)"), to design with it.
 
 ## Planned, not designed yet
 
