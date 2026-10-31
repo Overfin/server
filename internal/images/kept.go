@@ -6,42 +6,27 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // Library titles' artwork is kept on disk, ahead of time, so browsing the
-// library never waits for TMDB: files under ArtworkDir, as
-// <type>/<TMDB width>/<file>, already re-encoded. The rest (titles no
+// library never waits for TMDB: under ArtworkDir, each image's original as
+// <type>/original/<file> (Keep), and the sizes made of it, the first time
+// they're asked for, as <type>/<width>/<file> (TMDB). The rest (titles no
 // library has, people) is fetched when first shown, and kept in memory
 // only. Kept files are served like the others: the access check runs
 // first, every time.
 
-// keptSizes are the sizes kept of each type: those apps show most
-// (overfin-web's cards, title pages and episode lists).
-var keptSizes = map[string][]string{
-	"poster":   {"small", "medium"},
-	"backdrop": {"small", "large"},
-	"logo":     {"medium"},
-	"still":    {"small"},
-}
-
-// keptFile is where an image is kept, "" when nothing is kept here.
-func (p *Pipeline) keptFile(ref TMDBRef, width string) string {
+// keptFile is where an image is kept at a size ("original", or a width),
+// "" when nothing is kept here.
+func (p *Pipeline) keptFile(ref TMDBRef, size string) string {
 	if p.ArtworkDir == "" || !tmdbPath.MatchString(ref.Path) {
 		return ""
 	}
-	return filepath.Join(p.ArtworkDir, ref.Type, width, ref.Path[1:])
-}
-
-// readKept returns a kept image.
-func (p *Pipeline) readKept(ref TMDBRef, width string) ([]byte, bool) {
-	file := p.keptFile(ref, width)
-	if file == "" {
-		return nil, false
-	}
-	data, err := os.ReadFile(file)
-	return data, err == nil
+	return filepath.Join(p.ArtworkDir, ref.Type, size, ref.Path[1:])
 }
 
 // writeKept keeps an image, whole or not at all: written aside, then
@@ -71,47 +56,46 @@ func writeKept(file string, data []byte) error {
 const maxFailures = 10
 
 // Keep makes sure each image in wanted (type and path; Kind and TMDBID
-// unused; those without a path skipped) is kept, at the sizes apps show:
-// those missing, or kept before refetch, are fetched from TMDB. Then the files no longer wanted (their
-// titles left the libraries, or TMDB changed the picture) are deleted;
-// not when nothing is wanted, which is more likely a fault than an empty
-// library. It returns how many files it fetched and deleted.
+// unused; those without a path skipped) has its original kept: those
+// missing, or kept before refetch, are fetched from TMDB. Then the files
+// no longer wanted are deleted: images whose titles left the libraries (or
+// TMDB changed the picture), with the sizes made of them, and what isn't an
+// original or one of its sizes (an older layout's); not when nothing is
+// wanted, which is more likely a fault than an empty library. It returns
+// how many originals it fetched, and how many files it deleted.
 func (p *Pipeline) Keep(ctx context.Context, wanted []TMDBRef, refetch time.Time) (fetched, deleted int, err error) {
 	if p.ArtworkDir == "" {
 		return 0, 0, nil
 	}
-	keep := map[string]bool{}
+	keep := map[string]bool{} // originals, by file
 	failures := 0
 	for _, ref := range wanted {
-		for _, size := range keptSizes[ref.Type] {
-			width := tmdbWidths[ref.Type][size]
-			file := p.keptFile(ref, width)
-			if file == "" || keep[file] {
-				continue
-			}
-			keep[file] = true
-			if info, err := os.Stat(file); err == nil && info.ModTime().After(refetch) {
-				continue
-			}
-			data, err := p.fetchTMDB(ctx, ref, width, p.background)
-			if errors.Is(err, ErrHidden) || errors.Is(err, ErrUnsafe) {
-				continue // TMDB has no such image, or a bad one: tried again next pass
-			}
-			if err == nil {
-				err = writeKept(file, data)
-			}
-			if err != nil {
-				if ctx.Err() != nil {
-					return fetched, deleted, ctx.Err()
-				}
-				if failures++; failures >= maxFailures {
-					return fetched, deleted, err
-				}
-				continue
-			}
-			failures = 0
-			fetched++
+		file := p.keptFile(ref, "original")
+		if file == "" || keep[file] || len(ladders[ref.Type]) == 0 {
+			continue
 		}
+		keep[file] = true
+		if info, err := os.Stat(file); err == nil && info.ModTime().After(refetch) {
+			continue
+		}
+		data, err := p.fetchOriginal(ctx, ref, p.background)
+		if errors.Is(err, ErrHidden) || errors.Is(err, ErrUnsafe) {
+			continue // TMDB has no such image, or a bad one: tried again next pass
+		}
+		if err == nil {
+			err = writeKept(file, data)
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return fetched, deleted, ctx.Err()
+			}
+			if failures++; failures >= maxFailures {
+				return fetched, deleted, err
+			}
+			continue
+		}
+		failures = 0
+		fetched++
 	}
 	if len(keep) == 0 {
 		return fetched, 0, nil
@@ -123,10 +107,11 @@ func (p *Pipeline) Keep(ctx context.Context, wanted []TMDBRef, refetch time.Time
 			}
 			return err
 		}
-		if d.IsDir() || keep[file] {
+		if d.IsDir() || p.stillKept(file, keep) {
 			return nil
 		}
-		// What's left: unwanted images, and files a stop left half written.
+		// What's left: unwanted images, an older layout's, and files a stop
+		// left half written.
 		if err := os.Remove(file); err != nil {
 			return err
 		}
@@ -136,6 +121,27 @@ func (p *Pipeline) Keep(ctx context.Context, wanted []TMDBRef, refetch time.Time
 		return nil
 	})
 	return fetched, deleted, err
+}
+
+// stillKept says whether a file under ArtworkDir is a wanted original, or
+// a size made of one: <type>/original/<file>, <type>/<width>/<file>.
+func (p *Pipeline) stillKept(file string, originals map[string]bool) bool {
+	rel, err := filepath.Rel(p.ArtworkDir, file)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) != 3 || strings.HasPrefix(parts[2], ".new-") {
+		return false
+	}
+	typ, size, name := parts[0], parts[1], parts[2]
+	if size != "original" {
+		w, err := strconv.Atoi(size)
+		if err != nil || !slices.Contains(ladders[typ], w) || strconv.Itoa(w) != size {
+			return false
+		}
+	}
+	return originals[filepath.Join(p.ArtworkDir, typ, "original", name)]
 }
 
 // ForgetKept deletes every kept image: Overfin no longer uses TMDB's data,

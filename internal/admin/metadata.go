@@ -382,11 +382,8 @@ func (p *Panel) artwork(w http.ResponseWriter, r *http.Request, _ *session) {
 			notFound(w, "No such image")
 			return
 		}
-		size := "small"
-		if ref.Type == "backdrop" {
-			size = "medium"
-		}
-		if data, contentType, err = p.Images.TMDB(r.Context(), ref, size, func(context.Context) error { return nil }); err != nil {
+		// The smallest: the panel shows thumbnails.
+		if data, contentType, err = p.Images.TMDB(r.Context(), ref, images.Smallest(ref.Type), func(context.Context) error { return nil }); err != nil {
 			notFound(w, "No such image")
 			return
 		}

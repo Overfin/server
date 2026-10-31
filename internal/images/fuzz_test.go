@@ -86,7 +86,7 @@ func FuzzParseArtwork(f *testing.F) {
 		if ArtworkID(r.Type, r.Path) != s {
 			t.Fatalf("%q -> %+v -> %q", s, r, ArtworkID(r.Type, r.Path))
 		}
-		if _, ok := tmdbWidths[r.Type]; !ok {
+		if _, ok := ladders[r.Type]; !ok {
 			t.Fatalf("%q -> type %q", s, r.Type)
 		}
 	})

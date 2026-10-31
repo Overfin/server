@@ -293,7 +293,7 @@ func (l Library) genres(w http.ResponseWriter, r *http.Request) {
 // image serves one image, access-checked and re-encoded (rules 10 and 27).
 // Anything wrong, including an item the profile may not see, is "not found".
 func (l Library) image(w http.ResponseWriter, r *http.Request) {
-	if !onlyParams(w, r, "size") {
+	if !onlyParams(w, r, "size", "width") {
 		return
 	}
 	size := r.URL.Query().Get("size")
@@ -301,13 +301,31 @@ func (l Library) image(w http.ResponseWriter, r *http.Request) {
 		size = "medium"
 	}
 	if id := r.PathValue("id"); strings.HasPrefix(id, "tmdbart_") {
-		if !slices.Contains(images.Sizes, size) {
+		// TMDB's artwork, at the width asked (rounded up to one Overfin
+		// makes), else the one size stands for.
+		ref, err := images.ParseArtwork(id)
+		width, ok := 0, false
+		if err == nil {
+			if asked := r.URL.Query().Get("width"); asked != "" {
+				n, convErr := strconv.Atoi(asked)
+				width, ok = images.Width(ref.Type, n)
+				ok = ok && convErr == nil && r.URL.Query().Get("size") == ""
+			} else {
+				width, ok = images.NamedWidth(ref.Type, size)
+			}
+		}
+		if !ok {
 			problem.Send(w, problem.NotFound, "")
 			return
 		}
 		if p := l.active(w, r); p != nil {
-			l.artworkImage(w, r, p, id, size)
+			l.artworkImage(w, r, p, ref, width)
 		}
+		return
+	}
+	if r.URL.Query().Get("width") != "" {
+		// Other images come at their sizes only.
+		problem.Send(w, problem.NotFound, "")
 		return
 	}
 	if id, ok := strings.CutPrefix(r.PathValue("id"), uploadImage); ok {

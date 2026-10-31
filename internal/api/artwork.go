@@ -24,13 +24,8 @@ var (
 
 // artworkImage serves a title's artwork, to profiles that may see a title
 // it belongs to (in a library or not), and only at a path Overfin keeps.
-func (l Library) artworkImage(w http.ResponseWriter, r *http.Request, p *store.Profile, id, size string) {
-	ref, err := images.ParseArtwork(id)
-	if err != nil {
-		problem.Send(w, problem.NotFound, "")
-		return
-	}
-	data, contentType, err := l.Images.TMDB(r.Context(), ref, size, func(ctx context.Context) error {
+func (l Library) artworkImage(w http.ResponseWriter, r *http.Request, p *store.Profile, ref images.TMDBRef, width int) {
+	data, contentType, err := l.Images.TMDB(r.Context(), ref, width, func(ctx context.Context) error {
 		st := l.Provisioner.Store
 		ids, err := st.ArtworkItems(ctx, ref.Type, ref.Path, 50)
 		if err != nil {
@@ -115,7 +110,7 @@ func (l Library) artworkImage(w http.ResponseWriter, r *http.Request, p *store.P
 		problem.Send(w, problem.NotFound, "")
 		return
 	case errors.Is(err, images.ErrUnsafe):
-		l.Logger.Warn("refused an unsafe image from TMDB", "image", id)
+		l.Logger.Warn("refused an unsafe image from TMDB", "image", r.PathValue("id"))
 		problem.Send(w, problem.NotFound, "")
 		return
 	case errors.Is(err, context.Canceled):
