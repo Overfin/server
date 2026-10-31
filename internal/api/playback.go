@@ -17,7 +17,9 @@ import (
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/problem"
+	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/textclean"
+	"github.com/overfin/server/internal/tracks"
 )
 
 // Playback starts, follows, ends and restores playbacks.
@@ -48,6 +50,7 @@ func (pb Playback) Register(r *plugin.Registrar) error {
 		"POST /api/v1/playback/{id}/stop":             pb.stop,
 		"GET /api/v1/playback/{id}/trickplay/{sheet}": pb.trickplaySheet,
 		"PUT /api/v1/me/subtitles":                    pb.setSubtitles,
+		"PUT /api/v1/playback/{id}/tracks":            pb.chooseTracks,
 	} {
 		if err := r.HandleFunc(pattern, h); err != nil {
 			return err
@@ -557,22 +560,23 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 	if !decide() {
 		return
 	}
-	// The languages: the audio in the one asked for (the site's), the
-	// subtitles in the profile's, when the video has them and no track was
-	// asked for. Jellyfin is asked again only when that changes the stream
-	// (another audio track, subtitles burned into the picture).
-	textSubtitle := ""
+	// The languages, for tracks not asked for: those chosen for this title
+	// while watching it, else the profile's preferences, when the video
+	// has them. Subtitles are the client's to show, text or pictures; only
+	// another audio track has Jellyfin asked again.
+	shownSubtitle := ""
 	again := false
-	if req.AudioTrack == "" && req.AudioLanguage != "" {
-		if n, ok := audioIn(dec.Source, req.AudioLanguage); ok && n != defaultAudio(dec.Source) {
+	wantAudio, wantSubtitles := l.trackWishes(ctx, p, jfItem, req.AudioLanguage)
+	audioTracks, subtitleTracks, _ := tracks.Read(dec.Source.MediaStreams)
+	if req.AudioTrack == "" && wantAudio != "" {
+		if t, ok := tracks.Pick(audioTracks, wantAudio); ok && t.Index != defaultAudio(dec.Source) {
+			n := t.Index
 			pr.AudioStreamIndex, again = &n, true
 		}
 	}
-	if req.SubtitleTrack == "" && p.SubtitleLanguage != "" {
-		if n, text, ok := subtitlesIn(dec.Source, p.SubtitleLanguage); ok && text {
-			textSubtitle = "s" + strconv.Itoa(n)
-		} else if ok {
-			pr.SubtitleStreamIndex, again = &n, true
+	if req.SubtitleTrack == "" && wantSubtitles != "" {
+		if t, ok := tracks.Pick(subtitleTracks, wantSubtitles); ok {
+			shownSubtitle = "s" + strconv.Itoa(t.Index)
 		}
 	}
 	// Jellyfin applies the tracks asked for only to the version named:
@@ -691,8 +695,8 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 		out.AudioTrack = "a" + strconv.Itoa(i)
 	}
 	switch {
-	case textSubtitle != "":
-		out.SubtitleTrack = textSubtitle // shown by the client, from its URL
+	case shownSubtitle != "":
+		out.SubtitleTrack = shownSubtitle // shown by the client, from its URL
 	case pr.SubtitleStreamIndex != nil && *pr.SubtitleStreamIndex >= 0:
 		out.SubtitleTrack = "s" + strconv.Itoa(*pr.SubtitleStreamIndex)
 	}
@@ -839,59 +843,14 @@ func defaultAudio(src jellyfin.MediaSource) int {
 	return first
 }
 
-// audioIn is the index of a version's audio track in a language: its
-// default one if that's in it, else the first.
-func audioIn(src jellyfin.MediaSource, language string) (int, bool) {
-	found, ok := 0, false
-	for _, ms := range src.MediaStreams {
-		if ms.Type != "Audio" || !lang.Same(ms.Language, language) {
-			continue
-		}
-		if ms.IsDefault {
-			return ms.Index, true
-		}
-		if !ok {
-			found, ok = ms.Index, true
-		}
-	}
-	return found, ok
-}
-
-// subtitlesIn is the index of a version's subtitle track in a language,
-// and whether it's text (shown by the client) rather than pictures
-// (burned in): text first, whole subtitles before forced ones and those
-// for the hearing impaired.
-func subtitlesIn(src jellyfin.MediaSource, language string) (index int, text, ok bool) {
-	best := -1
-	for _, ms := range src.MediaStreams {
-		if ms.Type != "Subtitle" || !lang.Same(ms.Language, language) {
-			continue
-		}
-		score := 0
-		if ms.IsTextSubtitleStream {
-			score += 4
-		}
-		if !ms.IsForced {
-			score += 2
-		}
-		if !ms.IsHearingImpaired {
-			score++
-		}
-		if score > best {
-			best, index, text = score, ms.Index, ms.IsTextSubtitleStream
-		}
-	}
-	return index, text, best >= 0
-}
-
-// setSubtitles keeps the language the active profile chose for subtitles
-// ("" for none): its next playbacks start with them, when the video has
-// them.
+// setSubtitles sets the subtitles the active profile prefers: a language
+// ("" for none), its next playbacks start with, when the video has it and
+// nothing else was chosen for the title.
 func (pb Playback) setSubtitles(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Language string `json:"language"`
 	}
-	if !decode(r, &req) || (req.Language != "" && lang.Base(req.Language) == "") {
+	if !decode(r, &req) || (req.Language != "" && lang.Tag(req.Language) == "") {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
@@ -900,7 +859,128 @@ func (pb Playback) setSubtitles(w http.ResponseWriter, r *http.Request) {
 	if p == nil {
 		return
 	}
-	if err := l.Provisioner.Store.SetSubtitleLanguage(r.Context(), p.AccountID, p.ID, lang.Base(req.Language)); err != nil {
+	if err := l.Provisioner.Store.SetSubtitleLanguage(r.Context(), p.AccountID, p.ID, lang.Tag(req.Language)); err != nil {
+		l.storeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// trackWishes are the audio and subtitle languages a playback of an item
+// starts with: those the profile chose for its title (an episode's: its
+// series') while watching it, else its preferences. The audio preference
+// "" is the site's language (siteLanguage), "original" the title's own.
+// "" for either: the file's default audio, no subtitles.
+func (l Library) trackWishes(ctx context.Context, p *store.Profile, item, siteLanguage string) (audio, subtitles string) {
+	audio, subtitles = p.AudioLanguage, p.SubtitleLanguage
+	st := l.Provisioner.Store
+	key, err := l.trackKey(ctx, item)
+	if err != nil {
+		l.Logger.Warn("finding a title's tracks chosen failed", "err", err) // the preferences do
+	}
+	if key != "" {
+		chosen, err := st.TitleTracks(ctx, p.ID, key)
+		if err != nil {
+			l.Logger.Warn("reading a title's tracks chosen failed", "err", err)
+		}
+		if chosen.Audio != "" {
+			audio = chosen.Audio
+		}
+		if chosen.Subtitles != nil {
+			subtitles = *chosen.Subtitles
+		}
+	}
+	switch audio {
+	case "":
+		audio = siteLanguage
+	case "original":
+		audio = ""
+		if key != "" {
+			if infos, err := st.TitleInfos(ctx, []string{key}, today(), ""); err == nil && infos[key] != nil {
+				audio = infos[key].Details.Language
+			}
+		}
+	}
+	return audio, subtitles
+}
+
+// trackKey is the title whose tracks a playback of an item chooses: a
+// film's, an item's, an episode's series'; "" when the item has none yet.
+func (l Library) trackKey(ctx context.Context, item string) (string, error) {
+	keys, err := l.Provisioner.Store.TitleKeys(ctx, []string{item})
+	if err != nil {
+		return "", err
+	}
+	ref, ok := store.ParseTitleKey(keys[item])
+	if !ok {
+		return "", nil
+	}
+	if ref.Kind == "series" {
+		ref = ref.Series()
+	}
+	return ref.Key(), nil
+}
+
+// chooseTracks keeps the audio or the subtitles chosen while watching, by
+// their language, for the playback's title: its next playbacks start with
+// them, on any device, over the profile's preferences. subtitleTrack ""
+// is none. A track without a known language changes nothing kept.
+func (pb Playback) chooseTracks(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AudioTrack    *string `json:"audioTrack"`
+		SubtitleTrack *string `json:"subtitleTrack"`
+	}
+	if !decode(r, &req) || (req.AudioTrack == nil && req.SubtitleTrack == nil) {
+		problem.Send(w, problem.InvalidRequest, "")
+		return
+	}
+	audioIndex, subtitleIndex := -1, -1
+	if req.AudioTrack != nil {
+		n, ok := trackIndex(*req.AudioTrack, 'a')
+		if !ok {
+			problem.Send(w, problem.InvalidRequest, "")
+			return
+		}
+		audioIndex = n
+	}
+	if req.SubtitleTrack != nil && *req.SubtitleTrack != "" {
+		n, ok := trackIndex(*req.SubtitleTrack, 's')
+		if !ok {
+			problem.Send(w, problem.InvalidRequest, "")
+			return
+		}
+		subtitleIndex = n
+	}
+	s := pb.find(w, r)
+	if s == nil {
+		return
+	}
+	ctx := r.Context()
+	l := pb.Library
+	key, err := l.trackKey(ctx, s.ItemID)
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	if key == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	st := l.Provisioner.Store
+	audio, subtitles, forced := tracks.Read(s.Decision.Source.MediaStreams)
+	if audioIndex >= 0 {
+		if t, ok := tracks.Find(audio, audioIndex); ok && t.Language != "" && t.Role == tracks.Main {
+			err = st.SetTitleAudio(ctx, s.ProfileID, key, t.Language)
+		}
+	}
+	if err == nil && req.SubtitleTrack != nil {
+		if subtitleIndex < 0 {
+			err = st.SetTitleSubtitles(ctx, s.ProfileID, key, "")
+		} else if t, ok := tracks.Find(append(subtitles, forced...), subtitleIndex); ok && t.Language != "" && !t.Forced {
+			err = st.SetTitleSubtitles(ctx, s.ProfileID, key, t.Language)
+		}
+	}
+	if err != nil {
 		l.storeError(w, err)
 		return
 	}

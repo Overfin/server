@@ -633,12 +633,12 @@ paths:
   /me/subtitles:
     put:
       operationId: setSubtitleLanguage
-      summary: Keep the active profile's subtitle language
+      summary: Set the active profile's subtitle preference
       description: |
-        The language the profile chose for subtitles, or `""` for none,
-        kept as its base language (`fr-CA` and `fre` are kept as `fr`).
-        Its next playbacks start with subtitles in it when the video has
-        them (text first, whole before forced). Each profile has its own.
+        The subtitles the profile prefers, a language (`fr-CA`, `fre`),
+        or `""` for none: as `subtitleLanguage` in PATCH /profiles/{id}.
+        Its next playbacks start with them when the video has them and
+        nothing else was chosen for the title (PUT /playback/{id}/tracks).
       tags: [playback]
       requestBody:
         required: true
@@ -2697,6 +2697,51 @@ paths:
         "410":
           $ref: "#/components/responses/PlaybackEnded"
 
+  /playback/{playbackId}/tracks:
+    parameters:
+      - $ref: "#/components/parameters/PlaybackId"
+    put:
+      operationId: chooseTracks
+      summary: Keep the audio or subtitles chosen while watching, for the title
+      description: |
+        The audio or the subtitles the person switched to, kept by their
+        language for the playback's title (an episode's: its series), for
+        the profile: its next playbacks of the title start with them, on
+        any device, over its preferences. Switching the stream itself is
+        the client's (audio: start again with `audioTrack`; subtitles:
+        show them). A track without a known language, a commentary or an
+        audio description, changes nothing kept.
+      tags: [playback]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                audioTrack:
+                  type: string
+                  pattern: "^a[0-9]{1,3}$"
+                subtitleTrack:
+                  type: string
+                  description: A subtitle track, or `""` for none.
+                  pattern: "^(s[0-9]{1,3})?$"
+      responses:
+        "204":
+          description: Kept.
+        "400":
+          description: Neither track, or not a track ID (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "410":
+          $ref: "#/components/responses/PlaybackEnded"
+
   /playback/{playbackId}/stop:
     parameters:
       - $ref: "#/components/parameters/PlaybackId"
@@ -3706,6 +3751,20 @@ components:
           description: '"Contenu pour enfants": its recommendations include
             children''s content, and its account counts as wanting some (for
             the valuation). Absent, off. Since 0.6.'
+        audioLanguage:
+          type: string
+          description: The audio it prefers, `original` (each title's own
+            language) or a language tag such as `fr-CA`; absent, the site's
+            language. A file without that variant plays the same language
+            from elsewhere. What's chosen while watching a title comes
+            first (PUT /playback/{id}/tracks).
+          examples: [original]
+        subtitleLanguage:
+          type: string
+          description: The subtitles it prefers, a language tag; absent,
+            none. As `audioLanguage`, the same language from elsewhere when
+            a file lacks the variant.
+          examples: [fr-CA]
         libraries:
           type: array
           description: The only libraries the profile gets, by ID; absent,
@@ -3842,6 +3901,16 @@ components:
           type: [boolean, "null"]
           description: '"Contenu pour enfants" (see Profile); null, off.
             Each profile may change its own.'
+        audioLanguage:
+          type: string
+          maxLength: 35
+          description: The audio it prefers (see Profile), `""` for the
+            site's language. Each profile may change its own.
+        subtitleLanguage:
+          type: string
+          maxLength: 35
+          description: The subtitles it prefers (see Profile), `""` for
+            none. Each profile may change its own.
         theme:
           type: string
           description: The profile's look; "" follows the device. Each profile
