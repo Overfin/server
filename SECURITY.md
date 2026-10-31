@@ -95,8 +95,10 @@ comes from the internet, and media files can be written by anyone.
     artwork and of uploads itself, from one original (images.Shrink);
     Jellyfin's own pictures come at Jellyfin's sizes, and trickplay sheets
     are never resized (the player reads them by position).
-11. Subtitles are served only as sanitized WebVTT. Fonts and other files
-    attached to media are never served.
+11. Subtitles are served only as sanitized WebVTT, or, for subtitles that
+    are pictures (PGS), as the track Jellyfin extracts, which Overfin reads
+    whole and refuses unless every part of it is well-formed and within its
+    limits. Fonts and other files attached to media are never served.
 12. From upstream responses, only the headers streaming needs are passed on: a
     checked `Content-Type`, `Content-Length`, `Content-Range` and
     `Accept-Ranges`. Never `Set-Cookie` or `Location`.
