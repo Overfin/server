@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/overfin/server/internal/identify"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/tmdb"
 )
@@ -26,6 +27,8 @@ type TitleSource interface {
 	Person(ctx context.Context, id int) (*tmdb.PersonFull, error)
 	Release(ctx context.Context, kind string, tmdbID int) (*tmdb.Release, error)
 	Search(ctx context.Context, query string) ([]tmdb.Title, []tmdb.PersonHit, error)
+	// SearchKind finds films or series by name, from a year (0: any).
+	SearchKind(ctx context.Context, kind, query string, year int) ([]tmdb.Found, error)
 }
 
 // Titles keeps what TMDB says about every film and series the library has,
@@ -111,6 +114,9 @@ func (a *Titles) Once(ctx context.Context) error {
 		return err
 	}
 	if err := a.find(ctx, src); err != nil {
+		return err
+	}
+	if err := a.match(ctx, src); err != nil {
 		return err
 	}
 	fetched, streak := 0, 0
@@ -426,6 +432,50 @@ func (a *Titles) find(ctx context.Context, src TitleSource) error {
 	}
 	if found > 0 {
 		a.Logger.Info("catalog: titles found on TMDB by their IMDb or TVDB ID", "titles", found)
+	}
+	return nil
+}
+
+// matchesPerPass is how many films and series a pass matches at most: a
+// library read for the first time is matched over several.
+const matchesPerPass = 200
+
+// match finds which TMDB title each new film and series of the libraries
+// is (identify.Match), and those whose folder or file name changed.
+func (a *Titles) match(ctx context.Context, src TitleSource) error {
+	todo, err := a.Store.ToMatch(ctx, matchesPerPass)
+	if err != nil {
+		return err
+	}
+	matched, unsure := 0, 0
+	for _, t := range todo {
+		r, err := identify.Match(ctx, src, identify.Files{Kind: t.Kind, Folder: t.FolderName, File: t.FileName,
+			RuntimeMs: t.RuntimeMs, Episodes: t.Episodes})
+		if err != nil {
+			// TMDB unreachable, or failing: tried again next pass.
+			return err
+		}
+		m := store.Match{TMDB: r.TMDB, Sure: r.Sure}
+		for _, x := range r.Reasons {
+			m.Reasons = append(m.Reasons, store.MatchReason{Code: x.Code, Text: x.Text})
+		}
+		for _, c := range r.Candidates {
+			m.Candidates = append(m.Candidates, store.MatchCandidate{TMDB: c.TMDB, Name: c.Name, Year: c.Year,
+				OriginalName: c.OriginalName, Language: c.Language, Score: c.Score})
+		}
+		if err := a.Store.SetMatch(ctx, t.ItemID, m, t.FolderName, t.FileName, a.clock()); err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		matched++
+		if !r.Sure {
+			unsure++
+		}
+		if err := a.pause(ctx); err != nil {
+			return err
+		}
+	}
+	if matched > 0 {
+		a.Logger.Info("catalog: films and series matched to TMDB titles", "titles", matched, "to check", unsure)
 	}
 	return nil
 }

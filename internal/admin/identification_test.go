@@ -89,3 +89,37 @@ func TestIdentification(t *testing.T) {
 		t.Errorf("unknown item: %d", rec.Code)
 	}
 }
+
+// A title Overfin matched without being sure comes first, with why and
+// the candidates it weighed.
+func TestIdentificationUnsureMatch(t *testing.T) {
+	ctx := context.Background()
+	_, b, db, _ := signedInPanel(t)
+	id := strings.Repeat("0", 31) + "a"
+	db.PutCatalog(ctx, []store.CatalogItem{{ID: id, Kind: "series", Name: "19-2", SortName: "a", FolderName: "19-2"}}, 1)
+	db.RefreshTitleKeys(ctx)
+	db.SetMatch(ctx, id, store.Match{TMDB: "38527", Reasons: []store.MatchReason{{Code: "several", Text: "Several fit."}},
+		Candidates: []store.MatchCandidate{{TMDB: "38527", Name: "19-2", Year: 2011}, {TMDB: "61546", Name: "19-2", Year: 2014}}},
+		"19-2", "", time.Now())
+	var list struct {
+		Items []struct {
+			TMDB       string
+			Reasons    []struct{ Code string }
+			Candidates []struct{ TMDB string }
+		}
+		Suspects int
+	}
+	json.Unmarshal(b.do("GET", "/admin/api/identification", "", nil).Body.Bytes(), &list)
+	if list.Suspects != 1 || list.Items[0].TMDB != "38527" || list.Items[0].Reasons[0].Code != "several" || len(list.Items[0].Candidates) != 2 {
+		t.Fatalf("list: %+v", list)
+	}
+	// Fixed by hand: no longer in doubt.
+	if rec := b.do("PUT", "/admin/api/identification/"+id, `{"tmdb":"38527"}`, nil); rec.Code != 204 {
+		t.Fatalf("confirm: %d", rec.Code)
+	}
+	list.Items = nil
+	json.Unmarshal(b.do("GET", "/admin/api/identification", "", nil).Body.Bytes(), &list)
+	if list.Suspects != 0 || len(list.Items[0].Candidates) != 0 {
+		t.Errorf("after: %+v", list)
+	}
+}

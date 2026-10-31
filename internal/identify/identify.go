@@ -15,7 +15,7 @@ import (
 
 // Reason is why a title may be wrong, as a code and in words.
 type Reason struct {
-	Code string `json:"code"` // no-tmdb, tmdb-tag, name, year, seasons, runtime
+	Code string `json:"code"` // no-tmdb, no-name, tmdb-tag, name, year, seasons, runtime, unsure, several
 	Text string `json:"text"`
 }
 

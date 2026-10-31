@@ -10,7 +10,13 @@
   import MetadataArtwork from './MetadataArtwork.svelte';
   import type { Identified, Metadata } from '../../lib/types-library';
 
-  let { title: t, reload, close }: { title: Identified; reload: () => Promise<void>; close: () => void } = $props();
+  let { title: t, reload, edited, close }: {
+    title: Identified;
+    reload: () => Promise<void>;
+    /** edited says the title's texts or artwork are changed here, or not. */
+    edited: (yes: boolean) => void;
+    close: () => void;
+  } = $props();
 
   let tab = $state('identification');
   let meta = $state<Metadata | null>(null);
@@ -37,9 +43,11 @@
     }
   }
 
-  // An edit changes the list's "Edited here" too.
+  // A text or an image changed: the title is read again, and its row's
+  // "Edited here" set from it (the whole list isn't read again for that).
   async function changed() {
-    await Promise.all([loadMeta(), reload()]);
+    await loadMeta();
+    if (meta) edited(meta.texts.some((x) => x.nameEdited || x.overviewEdited) || meta.artwork.some((a) => Object.values(a.images).some((im) => im.edited)));
   }
 
   // The title may become another (identified again): its texts and artwork
@@ -61,7 +69,8 @@
   <Tabs {tabs} bind:current={tab} label="The title">
     {#snippet children(current)}
       {#if current === 'identification'}
-        <IdentificationDetail title={t} reload={changed} />
+        <!-- Identified again: the list is read again, its doubts and names change. -->
+        <IdentificationDetail title={t} {reload} />
       {:else if problem}
         <Notice warn>{problem}</Notice>
       {:else if !meta}

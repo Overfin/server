@@ -186,3 +186,58 @@ func TestTitlesStopWhenTMDBGoes(t *testing.T) {
 		t.Errorf("titles asked after TMDB went: %d", src.asked-1)
 	}
 }
+
+// SearchKind finds nothing: these tests' titles keep the IDs the library
+// gives them.
+func (f *fakeTitles) SearchKind(context.Context, string, string, int) ([]tmdb.Found, error) {
+	return nil, nil
+}
+
+// matchingTitles is TMDB knowing one series by name: Overfin's matching
+// finds it.
+type matchingTitles struct{ fakeTitles }
+
+func (f *matchingTitles) SearchKind(_ context.Context, kind, query string, _ int) ([]tmdb.Found, error) {
+	if kind == "series" && query == "Le Trône de fer" {
+		full, _ := f.Title(context.Background(), "series", 1399)
+		return []tmdb.Found{{Title: full.Title, Votes: 20000}}, nil
+	}
+	return nil, nil
+}
+
+// A series the library has no ID for is matched by its folder's name, in
+// the same pass as its page is fetched; the match is kept, and not made
+// again.
+func TestTitlesMatch(t *testing.T) {
+	box, _ := seal.New(bytes.Repeat([]byte{9}, 32))
+	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "t.db"), box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	one, two := 1, 2
+	st.PutCatalog(ctx, []store.CatalogItem{
+		{ID: id(1), Kind: "series", Name: "Le Trône de fer", SortName: "got", FolderName: "Le Trône de fer (2011)"},
+		{ID: id(2), Kind: "episode", Name: "E1", SortName: "e1", SeriesID: id(1), SeasonNumber: &one, EpisodeNumber: &one},
+		{ID: id(3), Kind: "episode", Name: "E2", SortName: "e2", SeriesID: id(1), SeasonNumber: &one, EpisodeNumber: &two},
+	}, 1)
+	st.RefreshTitleKeys(ctx)
+	src := &matchingTitles{}
+	k := NewTitles(func() TitleSource { return src }, st, slog.New(slog.NewTextHandler(io.Discard, nil)), time.Hour, 0)
+	if err := k.Once(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if keys, _ := st.TitleKeys(ctx, []string{id(1), id(3)}); keys[id(1)] != "series/tmdb/1399" || keys[id(3)] != "series/tmdb/1399/s1/e2" {
+		t.Errorf("keys: %v", keys)
+	}
+	if m, ok, _ := st.MatchOf(ctx, id(1)); !ok || m.TMDB != "1399" || !m.Sure {
+		t.Errorf("match: %+v %v", m, ok)
+	}
+	if title, _ := st.TitleByTMDB(ctx, "series", "1399"); title == nil {
+		t.Error("its page wasn't fetched in the same pass")
+	}
+	if todo, _ := st.ToMatch(ctx, 10); len(todo) != 0 {
+		t.Errorf("still to match: %+v", todo)
+	}
+}

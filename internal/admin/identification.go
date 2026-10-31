@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,23 +24,25 @@ import (
 // Confirming a suspect is choosing the title it already has.
 
 type identifiedJSON struct {
-	ItemID       string            `json:"itemId"`
-	Kind         string            `json:"kind"`
-	LibraryID    string            `json:"libraryId,omitempty"`
-	Name         string            `json:"name"`
-	FolderName   string            `json:"folderName,omitempty"`
-	FileName     string            `json:"fileName,omitempty"`
-	RuntimeMin   int               `json:"runtimeMin,omitempty"`
-	Episodes     int               `json:"episodes,omitempty"`
-	TMDB         string            `json:"tmdb,omitempty"`
-	JellyfinTMDB string            `json:"jellyfinTmdb,omitempty"`
-	Overridden   bool              `json:"overridden"`
-	Edited       bool              `json:"edited"`
-	TMDBName     string            `json:"tmdbName,omitempty"`
-	TMDBYear     int               `json:"tmdbYear,omitempty"`
-	OriginalName string            `json:"originalName,omitempty"`
-	Language     string            `json:"language,omitempty"`
-	Reasons      []identify.Reason `json:"reasons"`
+	ItemID       string `json:"itemId"`
+	Kind         string `json:"kind"`
+	LibraryID    string `json:"libraryId,omitempty"`
+	Name         string `json:"name"`
+	FolderName   string `json:"folderName,omitempty"`
+	FileName     string `json:"fileName,omitempty"`
+	RuntimeMin   int    `json:"runtimeMin,omitempty"`
+	Episodes     int    `json:"episodes,omitempty"`
+	TMDB         string `json:"tmdb,omitempty"`
+	JellyfinTMDB string `json:"jellyfinTmdb,omitempty"`
+	Overridden   bool   `json:"overridden"`
+	Edited       bool   `json:"edited"`
+	// Candidates are those Overfin weighed when it wasn't sure, best first.
+	Candidates   []store.MatchCandidate `json:"candidates,omitempty"`
+	TMDBName     string                 `json:"tmdbName,omitempty"`
+	TMDBYear     int                    `json:"tmdbYear,omitempty"`
+	OriginalName string                 `json:"originalName,omitempty"`
+	Language     string                 `json:"language,omitempty"`
+	Reasons      []identify.Reason      `json:"reasons"`
 }
 
 func (p *Panel) identification(w http.ResponseWriter, r *http.Request, _ *session) {
@@ -56,6 +59,19 @@ func (p *Panel) identification(w http.ResponseWriter, r *http.Request, _ *sessio
 			TMDB: t.TMDB, JellyfinTMDB: t.JellyfinTMDB, Overridden: t.Overridden, Edited: t.Edited,
 			TMDBName: t.TMDBName, TMDBYear: t.TMDBYear, OriginalName: t.Details.OriginalName, Language: t.Details.Language,
 			Reasons: identify.Reasons(t)}
+		if t.Unsure != nil {
+			// Overfin's own doubts first; the files' after, each once.
+			var own []identify.Reason
+			for _, r := range t.Unsure.Reasons {
+				own = append(own, identify.Reason{Code: r.Code, Text: r.Text})
+			}
+			for _, r := range j.Reasons {
+				if !slices.ContainsFunc(own, func(o identify.Reason) bool { return o.Code == r.Code }) {
+					own = append(own, r)
+				}
+			}
+			j.Reasons, j.Candidates = own, t.Unsure.Candidates
+		}
 		if j.Reasons == nil {
 			j.Reasons = []identify.Reason{}
 		} else {

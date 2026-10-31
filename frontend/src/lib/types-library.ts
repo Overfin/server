@@ -44,6 +44,8 @@ export interface Identified {
   jellyfinTmdb?: string;
   overridden?: boolean;
   edited?: boolean;
+  /** Those Overfin weighed when it wasn't sure of its match, best first. */
+  candidates?: Candidate[];
   runtimeMin?: number;
   episodes?: number;
   reasons: Reason[];
