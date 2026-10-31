@@ -84,7 +84,7 @@
   <Card title="Categories" description={'In the site\'s menu in this order, each with its page; a category with a home row also shows on the home page.'}>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Category</th><th>Titles</th><th></th><th></th></tr></thead>
+        <thead><tr><th>Category</th><th>Titles</th><th><span class="visually-hidden">Home row</span></th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {#each data.items as c, i (c.id)}
             <tr>

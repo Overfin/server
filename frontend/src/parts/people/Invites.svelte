@@ -149,7 +149,7 @@
     {#if !templates.length}<p class="notice">Create an invite template first, below.</p>{/if}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>For</th><th>Status</th><th>Gives</th><th>Link works until</th><th></th></tr></thead>
+        <thead><tr><th>For</th><th>Status</th><th>Gives</th><th>Link works until</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {#each invites as inv (inv.id)}
             {@const [text, kind] = status(inv)}
@@ -175,7 +175,7 @@
     {#snippet badge()}<button type="button" class="primary" onclick={() => editTemplate(null)}>New invite template</button>{/snippet}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Name</th><th>Access lasts</th><th>Link works</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Access lasts</th><th>Link works</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {#each templates as t (t.id)}
             <tr>

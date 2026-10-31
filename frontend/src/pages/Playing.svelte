@@ -92,7 +92,7 @@
   <Card title={plural(data.items.length, 'playback')} description={`${plural(data.transcodes, 'conversion')}${data.maxTranscodes ? ` of ${data.maxTranscodes} allowed` : ''} running.`}>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Who</th><th>What</th><th>How</th><th></th></tr></thead>
+        <thead><tr><th>Who</th><th>What</th><th>How</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {#each data.items as pb (pb.id)}
             {@const [method, kind] = methodNames[pb.method] || [pb.method, 'plain']}

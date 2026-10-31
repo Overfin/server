@@ -74,7 +74,7 @@
   <Card title="Keys">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>App</th><th>Made</th><th>Last used</th><th></th></tr></thead>
+        <thead><tr><th>App</th><th>Made</th><th>Last used</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {#each items as k (k.id)}
             <tr>

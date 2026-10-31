@@ -136,7 +136,7 @@
         {#each rows || [] as t (t.id)}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
           <tr data-id={t.id} class:selected={t.id === selected} onclick={() => (selected = t.id)}>
-            <td><div class="name">{valuedName(t)}</div>{#if !t.inLibrary}<div class="hint">Not in the libraries</div>{/if}</td>
+            <td><button type="button" class="pick name" aria-pressed={t.id === selected} onclick={(e) => { e.stopPropagation(); selected = t.id; }}>{valuedName(t)}</button>{#if !t.inLibrary}<div class="hint">Not in the libraries</div>{/if}</td>
             <td class="num">{t.score.toFixed(1)}</td>
           </tr>
         {:else}
@@ -200,7 +200,7 @@
         {@render list('Title', found, search.trim() ? 'Nothing matches.' : 'Search any title, in the libraries or not.')}
       </section>
     </div>
-    <aside class="detail">
+    <aside class="detail" aria-label="Why this value">
       {#if current}
         {@const t = current}
         <div class="detail-head"><div>
