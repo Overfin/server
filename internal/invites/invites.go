@@ -37,7 +37,7 @@ import (
 	"github.com/overfin/server/internal/feature"
 )
 
-//go:embed migrations/*.sql ui/panel.js
+//go:embed migrations/*.sql
 var files embed.FS
 
 // cookieName carries an opened invitation's code to the account's creation.
@@ -64,7 +64,6 @@ type Feature struct{}
 
 func (Feature) Info() feature.Info {
 	migrations, _ := fs.Sub(files, "migrations")
-	ui, _ := fs.Sub(files, "ui")
 	return feature.Info{
 		Name:        "invites",
 		Description: "Invitation links that let people set up an account, made from invite templates",
@@ -74,7 +73,6 @@ func (Feature) Info() feature.Info {
 			Hint:  "Without one, nobody can set up an account; bringing a previous account still works",
 		}},
 		Migrations: migrations,
-		AdminUI:    ui,
 	}
 }
 

@@ -7,3 +7,6 @@
 cmd/custom/
 !.env.example
 !internal/emails/texts/*.toml
+
+# The panel's npm packages (frontend/).
+node_modules/

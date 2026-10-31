@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -251,7 +252,12 @@ func TestPanelPage(t *testing.T) {
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Overfin control panel") {
 		t.Errorf("page: %d", rec.Code)
 	}
-	if rec := b.do("GET", "/admin/panel.js", "", nil); rec.Code != 200 {
+	// The page's built script loads.
+	script := regexp.MustCompile(`src="/admin/(assets/[^"]+\.js)"`).FindStringSubmatch(rec.Body.String())
+	if script == nil {
+		t.Fatalf("no script in the page: %s", rec.Body)
+	}
+	if rec := b.do("GET", "/admin/"+script[1], "", nil); rec.Code != 200 {
 		t.Errorf("script: %d", rec.Code)
 	}
 }
