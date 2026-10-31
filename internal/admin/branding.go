@@ -1,9 +1,15 @@
 package admin
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/jpeg" // branding files kept before as JPEGs
+	_ "image/png"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"slices"
@@ -12,12 +18,15 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/store"
 )
 
 // The operator's branding: a switch, their site's name, and their logo and
-// banners, uploaded as they are, any picture but SVG (emails can't show
-// it). The control panel itself always stays Overfin's.
+// banners: PNG or JPEG pictures (not SVG, which emails can't show), made
+// Overfin's like every image (images.Prepare): checked, no wider than
+// they're ever shown, kept as PNG for their transparency. The control
+// panel itself always stays Overfin's.
 
 // brandingFiles is where branding files are uploaded, shown and removed:
 // /admin/api/branding/files/{kind}.
@@ -25,6 +34,10 @@ const brandingFiles = "/admin/api/branding/files/"
 
 // maxBrandingFile is the largest branding file taken.
 const maxBrandingFile = 4 << 20
+
+// brandingWidths are the widest each branding file is kept at: as wide as
+// the site's header and the emails ever show it, on sharp screens.
+var brandingWidths = map[string]int{"logo": 512, "banner-dark": 1200, "banner-light": 1200}
 
 // maxBrandName is the longest name, in characters.
 const maxBrandName = 40
@@ -104,7 +117,7 @@ func brandingKind(w http.ResponseWriter, r *http.Request) string {
 	return kind
 }
 
-// uploadBrandingFile keeps a file as it's sent, with its image type.
+// uploadBrandingFile keeps a picture, made Overfin's (images.Prepare).
 func (p *Panel) uploadBrandingFile(w http.ResponseWriter, r *http.Request, s *session) {
 	kind := brandingKind(w, r)
 	if kind == "" {
@@ -128,7 +141,13 @@ func (p *Panel) uploadBrandingFile(w http.ResponseWriter, r *http.Request, s *se
 			"detail": "SVG isn't taken: emails can't show it. Use a PNG."})
 		return
 	}
-	if err := p.Store.SetBrandingFile(r.Context(), kind, mt, data, time.Now()); err != nil {
+	data, err = images.Prepare(data, brandingWidths[kind], "image/png")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
+			"detail": fmt.Sprintf("That isn't a PNG or a JPEG picture, or it's larger than %d pixels a side.", images.MaxDimension)})
+		return
+	}
+	if err := p.Store.SetBrandingFile(r.Context(), kind, "image/png", data, time.Now()); err != nil {
 		p.fail(w, "saving a branding file", err)
 		return
 	}
@@ -176,4 +195,37 @@ func (p *Panel) removeBrandingFile(w http.ResponseWriter, r *http.Request, s *se
 	}
 	p.Logger.Info("a branding file was removed in the control panel", "kind", kind, "by", s.logID)
 	p.branding(w, r, s)
+}
+
+// PrepareBranding makes the branding files kept before Overfin prepared
+// them (as they were uploaded) like those uploaded since: PNG, no wider
+// than brandingWidths. One it can't read (WebP, GIF…) is removed, and
+// said in the log: the operator uploads it again as a PNG.
+func PrepareBranding(ctx context.Context, st *store.Store, logger *slog.Logger) error {
+	for _, kind := range store.BrandingKinds {
+		f, ok, err := st.BrandingFileOf(ctx, kind)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		cfg, format, err := image.DecodeConfig(bytes.NewReader(f.Data))
+		if err == nil && format == "png" && f.ContentType == "image/png" && cfg.Width <= brandingWidths[kind] {
+			continue // prepared already
+		}
+		data, err := images.Prepare(f.Data, brandingWidths[kind], "image/png")
+		if err != nil {
+			logger.Warn("a branding file Overfin can't read was removed: upload it again as a PNG", "kind", kind, "type", f.ContentType)
+			if err := st.DeleteBrandingFile(ctx, kind); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := st.SetBrandingFile(ctx, kind, "image/png", data, time.Now()); err != nil {
+			return err
+		}
+		logger.Info("a branding file was made a PNG of its shown width", "kind", kind)
+	}
+	return nil
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"net/http"
@@ -140,8 +141,9 @@ func imageID(typ, path string) string {
 }
 
 // uploadedImage serves artwork an admin uploaded, to profiles that may see
-// a title it's the artwork of. It was re-encoded when uploaded, and one
-// size serves all.
+// a title it's the artwork of, at the width asked (?width=, rounded up to
+// one Overfin makes of its kind) or the one its size stands for, made
+// from the upload as TMDB's artwork is from its original.
 func (l Library) uploadedImage(w http.ResponseWriter, r *http.Request, p *store.Profile, id string) {
 	if _, ok := store.UploadID(store.UploadValue(id)); !ok {
 		problem.Send(w, problem.NotFound, "")
@@ -181,9 +183,26 @@ func (l Library) uploadedImage(w http.ResponseWriter, r *http.Request, p *store.
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
+	q := r.URL.Query()
+	width, ok := images.NamedWidth(u.Type, cmp.Or(q.Get("size"), "medium"))
+	if asked := q.Get("width"); asked != "" {
+		n, err := strconv.Atoi(asked)
+		width, ok = images.Width(u.Type, n)
+		ok = ok && err == nil && q.Get("size") == ""
+	}
+	if !ok {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	data, err := l.Images.Resized(ctx, uploadImage+id, u.Data, u.ContentType, width)
+	if err != nil {
+		l.Logger.Error("an uploaded image failed", "err", err)
+		problem.Send(w, problem.Internal, "")
+		return
+	}
 	// An upload never changes: a new one has a new ID.
 	w.Header().Set("Cache-Control", "private, max-age=604800, immutable")
 	w.Header().Set("Content-Type", u.ContentType)
-	w.Header().Set("Content-Length", strconv.Itoa(len(u.Data)))
-	_, _ = w.Write(u.Data)
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	_, _ = w.Write(data)
 }

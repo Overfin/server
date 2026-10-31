@@ -87,12 +87,14 @@ comes from the internet, and media files can be written by anyone.
     before decoding, and oversized images are refused. SVG, HTML and anything
     that fails to decode are never served. Trickplay sheets get the same
     treatment, re-encoded as JPEG.
-    Branding pictures an admin uploads are kept as they are, 4 MB at most,
-    any picture but SVG, and served with their image type under the API's
-    headers (no script in them ever runs). Titles' artwork an admin
-    uploads (the metadata editor), 10 MB at most, is re-encoded on the
-    way in like any image, and served only to profiles that may see a
-    title it's the artwork of.
+    What admins upload is treated the same way on the way in: branding
+    pictures (4 MB at most, PNG or JPEG, kept as PNG) and titles' artwork
+    (the metadata editor, 10 MB at most), each made no wider than it's
+    ever shown; titles' artwork is served only to profiles that may see a
+    title it's the artwork of. Overfin makes the sizes it serves of TMDB's
+    artwork and of uploads itself, from one original (images.Shrink);
+    Jellyfin's own pictures come at Jellyfin's sizes, and trickplay sheets
+    are never resized (the player reads them by position).
 11. Subtitles are served only as sanitized WebVTT. Fonts and other files
     attached to media are never served.
 12. From upstream responses, only the headers streaming needs are passed on: a

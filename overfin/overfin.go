@@ -158,6 +158,11 @@ func run(logger *slog.Logger) error {
 	} else if n > 0 {
 		logger.Info("kids profiles' rating ceilings became ages", "profiles", n)
 	}
+	// Branding files kept as they were uploaded, made Overfin's like every
+	// image.
+	if err := admin.PrepareBranding(context.Background(), db, logger); err != nil {
+		return err
+	}
 	moduleDBs, err := openModules(context.Background(), db, cfg.Storage.Path, logger)
 	if err != nil {
 		return err
