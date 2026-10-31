@@ -462,3 +462,39 @@ func TestTitleImages(t *testing.T) {
 		t.Errorf("not a kind: %v", err)
 	}
 }
+
+// A search by kind asks TMDB's search of that kind, with the year as
+// TMDB names it for each, and keeps popularity and votes.
+func TestSearchKind(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch {
+		case r.URL.Path == "/3/search/movie" && q.Get("query") == "heat" && q.Get("year") == "1995":
+			io.WriteString(w, `{"results":[{"id":949,"title":"Heat","release_date":"1995-12-15","original_language":"en","popularity":42.5,"vote_count":7000},
+				{"id":0,"title":"Bad id"}]}`)
+		case r.URL.Path == "/3/search/tv" && q.Get("query") == "19-2" && q.Get("first_air_date_year") == "2011" && q.Get("year") == "":
+			io.WriteString(w, `{"results":[{"id":38527,"name":"19-2","first_air_date":"2011-01-10","original_language":"fr","vote_count":-3}]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL+"/3", testToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	films, err := c.SearchKind(ctx, "movie", "heat", 1995)
+	if err != nil || len(films) != 1 || films[0].TMDBID != 949 || films[0].Year != 1995 || films[0].Popularity != 42.5 || films[0].Votes != 7000 {
+		t.Errorf("films: %+v %v", films, err)
+	}
+	series, err := c.SearchKind(ctx, "series", "19-2", 2011)
+	if err != nil || len(series) != 1 || series[0].Language != "fr" || series[0].Votes != 0 {
+		t.Errorf("series: %+v %v", series, err)
+	}
+	for _, kind := range []string{"season", ""} {
+		if _, err := c.SearchKind(ctx, kind, "x", 0); !errors.Is(err, ErrNotFound) {
+			t.Errorf("kind %q: %v", kind, err)
+		}
+	}
+}
