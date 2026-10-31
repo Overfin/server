@@ -19,13 +19,13 @@ func TestLibrariesAndHiddenTags(t *testing.T) {
 	fake.partnerSeesAll = true // the second profile below
 	ctx := context.Background()
 	films, music := fmt.Sprintf("%032x", 0xf1), fmt.Sprintf("%032x", 0xf2)
-	// Films 1 to 5 in the films library (5 tagged Horror), 6 in music; 7
-	// isn't in the index at all (Jellyfin puts it in music).
+	// Films 1 to 5 in the films library (5 tagged Horror on TMDB), 6 in
+	// music; 7 isn't in the index at all (Jellyfin puts it in music).
 	var items []store.CatalogItem
 	for i := 1; i <= 6; i++ {
 		it := store.CatalogItem{ID: fmt.Sprintf("%032x", i), Kind: "movie", Name: fmt.Sprint(i), SortName: fmt.Sprint(i), LibraryID: films}
 		if i == 5 {
-			it.Tags = []string{"Horror"}
+			it.TMDB = "5"
 		}
 		if i == 6 {
 			it.LibraryID = music
@@ -36,6 +36,7 @@ func TestLibrariesAndHiddenTags(t *testing.T) {
 		t.Fatal(err)
 	}
 	st.RefreshTitleKeys(ctx)
+	st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "5", Name: "5", Keywords: []string{"Horror"}}, []byte(`{}`), time.Now())
 	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
 
 	code, body := post(t, srv, "/api/v1/profiles", `{"name":"Partner"}`)
@@ -86,9 +87,9 @@ func TestLibrariesAndHiddenTags(t *testing.T) {
 	if code := get(t, srv, fmt.Sprintf("/api/v1/titles/title_item_%032x", 3), nil); code != 200 {
 		t.Errorf("title 3: %d", code)
 	}
-	for _, n := range []int{5, 6} { // a hidden tag, another library
-		if code := get(t, srv, fmt.Sprintf("/api/v1/titles/title_item_%032x", n), nil); code != 404 {
-			t.Errorf("title %d: %d", n, code)
+	for _, id := range []string{"title_movie_tmdb_5", fmt.Sprintf("title_item_%032x", 6)} { // a hidden tag, another library
+		if code := get(t, srv, "/api/v1/titles/"+id, nil); code != 404 {
+			t.Errorf("%s: %d", id, code)
 		}
 	}
 

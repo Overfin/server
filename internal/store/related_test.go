@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -36,11 +37,11 @@ func TestRelatedTitles(t *testing.T) {
 	var items []CatalogItem
 	for i, f := range films {
 		items = append(items, CatalogItem{ID: fmt.Sprintf("%032x", i+1), Kind: "movie", Name: f.name, SortName: f.name,
-			TMDB: f.tmdb, Tags: f.tags, People: f.people})
+			TMDB: f.tmdb})
 	}
 	// A series sharing everything with Heat: not a film, not related.
 	items = append(items, CatalogItem{ID: fmt.Sprintf("%032x", 99), Kind: "series", Name: "Heat, the series", SortName: "heat",
-		TMDB: "1", Tags: []string{"heist", "los angeles"}, People: []string{person(1), person(2)}})
+		TMDB: "1"})
 	if err := s.PutCatalog(ctx, items, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -50,9 +51,11 @@ func TestRelatedTitles(t *testing.T) {
 		for _, g := range f.genres {
 			genres = append(genres, TitleGenre{ID: g, Name: strconv.Itoa(g)})
 		}
-		s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: f.tmdb, Name: f.name, Year: f.year, Genres: genres}, []byte(`{"language":"en"}`), now)
+		s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: f.tmdb, Name: f.name, Year: f.year, Genres: genres, Keywords: f.tags},
+			[]byte(`{"language":"en","cast":`+castJSON(f.people)+`}`), now)
 	}
-	s.SetTitleDetails(ctx, Title{Kind: "series", TMDB: "1", Name: "Heat, the series", Genres: []TitleGenre{{ID: 80, Name: "80"}}}, []byte(`{}`), now)
+	s.SetTitleDetails(ctx, Title{Kind: "series", TMDB: "1", Name: "Heat, the series", Genres: []TitleGenre{{ID: 80, Name: "80"}},
+		Keywords: []string{"heist", "los angeles"}}, []byte(`{"cast":`+castJSON([]string{person(1), person(2)})+`}`), now)
 
 	got, err := s.RelatedTitles(ctx, "movie/tmdb/1", 10)
 	if err != nil {
@@ -91,10 +94,11 @@ func TestRelatedRefreshedInTheBackground(t *testing.T) {
 	s.now = func() time.Time { return clock }
 	add := func(id string, people ...string) {
 		t.Helper()
-		item := CatalogItem{ID: fmt.Sprintf("%032s", id), Kind: "movie", Name: "F" + id, SortName: "f", TMDB: id, People: people}
+		item := CatalogItem{ID: fmt.Sprintf("%032s", id), Kind: "movie", Name: "F" + id, SortName: "f", TMDB: id}
 		if err := s.PutCatalog(ctx, []CatalogItem{item}, 1); err != nil {
 			t.Fatal(err)
 		}
+		s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: id, Name: "F" + id}, []byte(`{"cast":`+castJSON(people)+`}`), clock)
 		s.RefreshTitleKeys(ctx)
 	}
 	director := fmt.Sprintf("%032x", 0xd1)
@@ -127,4 +131,13 @@ func TestRelatedRefreshedInTheBackground(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// castJSON is a title's cast, as its kept page lists it, by TMDB IDs.
+func castJSON(people []string) string {
+	var parts []string
+	for _, p := range people {
+		parts = append(parts, `{"tmdb":"`+p+`","name":"`+p+`"}`)
+	}
+	return "[" + strings.Join(parts, ",") + "]"
 }

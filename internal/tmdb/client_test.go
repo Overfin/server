@@ -70,7 +70,7 @@ func fakeTMDB(t *testing.T) *Client {
 			io.WriteString(w, `{"id":1399,"name":"Thrones","first_air_date":"2011-04-17","seasons":[{"season_number":1,"name":"Season 1","episode_count":10,"air_date":"2011-04-17"}],
 				"content_ratings":{"results":[{"iso_3166_1":"US","rating":"TV-MA"}]}}`)
 		case "/3/movie/550":
-			if r.URL.Query().Get("append_to_response") != "credits,images,alternative_titles,translations,release_dates,recommendations" || r.URL.Query().Get("language") != "fr" ||
+			if r.URL.Query().Get("append_to_response") != "credits,images,alternative_titles,translations,release_dates,recommendations,keywords" || r.URL.Query().Get("language") != "fr" ||
 				r.URL.Query().Get("include_image_language") != "fr,null,en" {
 				w.WriteHeader(http.StatusBadRequest)
 				return
@@ -80,6 +80,7 @@ func fakeTMDB(t *testing.T) *Client {
 				"alternative_titles":{"titles":[{"title":"El club de la lucha"},{"title":"Fight Club"}]},
 				"translations":{"translations":[{"data":{"title":"Club <i>de</i> combat"}},{"data":{"title":""}}]},
 				"overview":"An insomniac.","genres":[{"name":"Drame"}],
+				"keywords":{"keywords":[{"name":"based on novel"},{"name":"Based On Novel"},{"name":"<b>fight</b>"},{"name":""}]},
 				"credits":{"cast":[{"id":819,"name":"Edward Norton","character":"Narrator","profile_path":"/norton1234.jpg"}]},
 				"poster_path":"/posterfr12.jpg","backdrop_path":"/backdrop12.jpg",
 				"release_dates":{"results":[{"iso_3166_1":"CA","release_dates":[{"certification":"18A","type":3,"release_date":"1999-10-15T00:00:00.000Z"}]}]},
@@ -108,13 +109,13 @@ func fakeTMDB(t *testing.T) *Client {
 			}
 			io.WriteString(w, `{"movie_results":[],"tv_results":[{"id":1399}]}`)
 		case "/3/tv/1400":
-			if r.URL.Query().Get("append_to_response") != "aggregate_credits,images,alternative_titles,translations,content_ratings,external_ids,recommendations" {
+			if r.URL.Query().Get("append_to_response") != "aggregate_credits,images,alternative_titles,translations,content_ratings,external_ids,recommendations,keywords" {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 			io.WriteString(w, `{"id":1400,"name":"Seinfeld","first_air_date":"1989-07-05","original_name":"Seinfeld","original_language":"english",
 				"alternative_titles":{"results":[{"title":"Les Seinfeld"}]},"translations":{"translations":[{"data":{"name":"Seinfeld"}}]},
-				"credits":{"cast":[]},"external_ids":{"tvdb_id":79169},
+				"credits":{"cast":[]},"external_ids":{"tvdb_id":79169},"keywords":{"results":[{"name":"sitcom"}]},
 				"aggregate_credits":{"cast":[{"name":"Jerry Seinfeld","profile_path":"/jerry12345.jpg","roles":[{"character":"Jerry"}]},
 					{"name":"Guest","roles":[]}]}}`)
 		case "/3/tv/1399/season/1":
@@ -204,6 +205,10 @@ func TestClient(t *testing.T) {
 	if full.OriginalName != "Fight Club" || full.Language != "en" || !slices.Equal(full.Names, []string{"El club de la lucha", "Club de combat"}) {
 		t.Errorf("names: %q %q %q", full.OriginalName, full.Language, full.Names)
 	}
+	// Keywords: plain text, each once whatever its case, none empty.
+	if !slices.Equal(full.Keywords, []string{"based on novel", "fight"}) {
+		t.Errorf("keywords: %q", full.Keywords)
+	}
 	if full.Name != "Fight Club" || full.Year != 1999 || full.Runtime != 139 || full.Tagline != "Mischief." ||
 		full.ReleaseDate != "1999-10-15" || full.Rating != 8.4 || full.Votes != 31000 ||
 		full.Overview != "An insomniac." || len(full.Cast) != 1 || full.Cast[0].Profile != "/norton1234.jpg" || full.Cast[0].ID != 819 {
@@ -212,7 +217,7 @@ func TestClient(t *testing.T) {
 	// A series' cast is the one over all its seasons.
 	if s, err := c.Title(ctx, "series", 1400); err != nil || len(s.Cast) != 2 || s.Cast[0].Character != "Jerry" ||
 		s.Cast[0].Profile != "/jerry12345.jpg" || s.Cast[1].Character != "" || s.Language != "" ||
-		!slices.Equal(s.Names, []string{"Les Seinfeld"}) || s.TVDB != 79169 {
+		!slices.Equal(s.Names, []string{"Les Seinfeld"}) || s.TVDB != 79169 || !slices.Equal(s.Keywords, []string{"sitcom"}) {
 		t.Errorf("series cast: %+v %v", s, err)
 	}
 	person, err := c.Person(ctx, 1245)

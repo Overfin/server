@@ -73,7 +73,7 @@ func TestCatalogGenres(t *testing.T) {
 	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
 	s.PutCatalog(ctx, []CatalogItem{
 		{ID: id(0), Kind: "movie", Name: "A", SortName: "a", LibraryID: "films", TMDB: "1", Genres: []string{"Jellyfin's"}},
-		{ID: id(1), Kind: "movie", Name: "B", SortName: "b", LibraryID: "films", TMDB: "2", Tags: []string{"hidden"}},
+		{ID: id(1), Kind: "movie", Name: "B", SortName: "b", LibraryID: "films", TMDB: "2"},
 		{ID: id(2), Kind: "series", Name: "C", SortName: "c", LibraryID: "tv", TMDB: "3"},
 	}, 1)
 	// A page without genres (null in its JSON) counts for none.
@@ -88,6 +88,7 @@ func TestCatalogGenres(t *testing.T) {
 		}
 		s.SetTitleDetails(ctx, Title{Kind: kind, TMDB: tmdb, Name: tmdb}, det, time.Now())
 	}
+	keywordsOf(t, s, "movie", "2", "hidden")
 	got, err := s.CatalogGenres(ctx, "films", nil, nil)
 	if err != nil {
 		t.Fatal(err)

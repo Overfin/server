@@ -19,17 +19,10 @@ func TestSeriesUpNext(t *testing.T) {
 	ep := func(i, season, e int) CatalogItem {
 		return CatalogItem{ID: id(i), Kind: "episode", Name: "E", SortName: "e", SeriesID: id(0), SeasonNumber: n(season), EpisodeNumber: n(e)}
 	}
-	first := ep(2, 1, 1)
-	first.Tags = []string{"Pilot"}
 	s.PutCatalog(ctx, []CatalogItem{{ID: id(0), Kind: "series", Name: "S", SortName: "s", TMDB: "1"},
-		ep(1, 0, 1), first, ep(3, 1, 2), ep(4, 2, 1)}, 1)
+		ep(1, 0, 1), ep(2, 1, 1), ep(3, 1, 2), ep(4, 2, 1)}, 1)
 	s.RefreshTitleKeys(ctx)
 	series := TitleRef{Kind: "series", Source: "tmdb", ID: "1"}
-	// A profile the first episode is hidden from starts at the next one it
-	// may see.
-	if key, _, err := s.SeriesUpNext(ctx, prof.ID, series, &Access{BlockedTags: []string{"pilot"}}); key != "series/tmdb/1/s1/e2" || err != nil {
-		t.Errorf("first one hidden: %q %v", key, err)
-	}
 	check := func(about, want string, wantPos int64) {
 		t.Helper()
 		key, pos, err := s.SeriesUpNext(ctx, prof.ID, series, nil)

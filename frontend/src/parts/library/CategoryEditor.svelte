@@ -33,7 +33,7 @@
   let tagSearch = $state('');
   let preview = $state('');
 
-  // Tags can be many (TMDB's keywords, with Jellyfin's default metadata):
+  // Tags can be many (TMDB's keywords):
   // the ticked first, and a search.
   // svelte-ignore state_referenced_locally
   const tagList = [...data.tags].sort((a, b) => Number((r.tags || []).includes(b)) - Number((r.tags || []).includes(a)));

@@ -133,9 +133,11 @@ func (a Access) itemAllowed(table string) (string, []any) {
 		}
 	}
 	if len(a.BlockedTags) > 0 {
-		conds = append(conds, `NOT EXISTS (SELECT 1 FROM catalog_tags t
-			WHERE t.item_id IN (`+table+`.id, coalesce(`+table+`.series_id, ''), coalesce(`+table+`.season_id, ''))
-			AND fold(t.tag) IN (`+marks(len(a.BlockedTags))+`))`)
+		// TMDB's keywords of the film or the series (an episode's or a
+		// season's series).
+		conds = append(conds, `NOT EXISTS (SELECT 1 FROM catalog_items s JOIN catalog_title_keywords k ON k.kind = s.kind AND k.tmdb = s.tmdb
+			WHERE s.id IN (`+table+`.id, coalesce(`+table+`.series_id, '')) AND s.kind IN ('movie', 'series')
+			AND k.folded IN (`+marks(len(a.BlockedTags))+`))`)
 		for _, t := range a.BlockedTags {
 			args = append(args, FoldTag(t))
 		}
@@ -190,9 +192,12 @@ func (s *Store) AllowedItems(ctx context.Context, a Access, itemIDs []string) (a
 	return allowed, indexed, nil
 }
 
-// CatalogTags lists the library's tags, for choosing which to hide.
+// CatalogTags lists the library's tags (TMDB's keywords of its films and
+// series), for choosing which to hide.
 func (s *Store) CatalogTags(ctx context.Context) ([]string, error) {
-	return s.ids(ctx, `SELECT min(tag) FROM catalog_tags GROUP BY fold(tag) ORDER BY fold(tag)`)
+	return s.ids(ctx, `SELECT min(k.keyword) FROM catalog_title_keywords k
+		WHERE EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = k.kind AND i.tmdb = k.tmdb)
+		GROUP BY k.folded ORDER BY k.folded`)
 }
 
 // SetProfileAccess changes the libraries a profile gets (nil: every

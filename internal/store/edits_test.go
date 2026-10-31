@@ -172,3 +172,20 @@ func TestSearchEditedNames(t *testing.T) {
 		t.Errorf("TMDB's name: %v", got)
 	}
 }
+
+// keywordsOf gives a title TMDB's keywords, as its page brings them, for
+// tests of what goes by them; the title is kept bare if it wasn't.
+func keywordsOf(t testing.TB, s *Store, kind, tmdb string, words ...string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO catalog_titles (kind, tmdb, name, overview, status, seen_at)
+		VALUES (?, ?, ?, '', 0, ?)`, kind, tmdb, tmdb, time.Now().Unix()); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range words {
+		if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO catalog_title_keywords (kind, tmdb, keyword, folded) VALUES (?, ?, ?, ?)`,
+			kind, tmdb, w, FoldTag(w)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

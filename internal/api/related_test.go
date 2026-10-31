@@ -42,15 +42,22 @@ func TestSimilarFilledWithRelated(t *testing.T) {
 	var items []store.CatalogItem
 	for i, f := range films {
 		items = append(items, store.CatalogItem{ID: fmt.Sprintf("%032x", i+1), Kind: "movie", Name: f.name, SortName: f.name,
-			TMDB: f.tmdb, LibraryID: lib, People: f.people})
+			TMDB: f.tmdb, LibraryID: lib})
 	}
 	st.PutCatalog(ctx, items, 1)
 	st.RefreshTitleKeys(ctx)
 	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
 	for _, f := range films {
-		details := `{}`
+		cast := `[`
+		for i, p := range f.people {
+			if i > 0 {
+				cast += `,`
+			}
+			cast += `{"tmdb":"` + p + `","name":"` + p + `"}`
+		}
+		details := `{"cast":` + cast + `]}`
 		if f.tmdb == "1" {
-			details = `{"similar":["2"]}`
+			details = `{"similar":["2"],"cast":` + cast + `]}`
 		}
 		collection := 0
 		if f.tmdb == "1" || f.tmdb == "4" {

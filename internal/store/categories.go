@@ -308,8 +308,8 @@ func (r CategoryRules) itemFits(table string) (string, []any) {
 		args = append(args, anyOf(r.Languages)...)
 	}
 	if len(r.Tags) > 0 {
-		conds = append(conds, `EXISTS (SELECT 1 FROM catalog_tags t WHERE t.item_id = `+table+`.id
-			AND fold(t.tag) IN (`+marks(len(r.Tags))+`))`)
+		conds = append(conds, `EXISTS (SELECT 1 FROM catalog_title_keywords k WHERE k.kind = `+table+`.kind AND k.tmdb = `+table+`.tmdb
+			AND k.folded IN (`+marks(len(r.Tags))+`))`)
 		for _, t := range r.Tags {
 			args = append(args, FoldTag(t))
 		}
@@ -369,10 +369,10 @@ func dropCategory(ctx context.Context, tx *sql.Tx, table, id string) error {
 
 // TitleCategories returns, for TMDB titles ("movie/1", "series/2"), the
 // categories each fits (their IDs, in the categories' order), by what
-// TMDB says of it: kind, genres, original language, age. Rules on
-// libraries and Jellyfin tags need the title in a library: a category with
-// one of them fits none of these titles (Overswell, say, asks before
-// adding them).
+// TMDB says of it: kind, genres, original language, age, tags (its
+// keywords, once its page is kept). Rules on libraries need the title in a
+// library: a category with one fits none of these titles (Overswell, say,
+// asks before adding them).
 func (s *Store) TitleCategories(ctx context.Context, keys []string) (map[string][]string, error) {
 	out := map[string][]string{}
 	// A series comes once per season it's asked for: once is enough.
