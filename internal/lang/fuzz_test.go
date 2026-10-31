@@ -11,7 +11,7 @@ func FuzzBase(f *testing.F) {
 	f.Fuzz(func(t *testing.T, tag, country string) {
 		b := Base(tag)
 		if b != "" {
-			if _, ok := known[b]; !ok {
+			if _, ok := byTwo[b]; !ok {
 				t.Fatalf("Base(%q) = %q", tag, b)
 			}
 			if Base(b) != b || !Same(tag, b) {
@@ -20,6 +20,14 @@ func FuzzBase(f *testing.F) {
 		}
 		if r := Region(tag, country); r != "" && (!Offered(r) || !Same(r, tag)) {
 			t.Fatalf("Region(%q, %q) = %q", tag, country, r)
+		}
+		// A tag read is one again, the same language; every language has a
+		// name.
+		if tg := Tag(tag); tg != "" && (Tag(tg) != tg || Base(tg) != b) {
+			t.Fatalf("Tag(%q) = %q", tag, tg)
+		}
+		if Name(tag) == "" {
+			t.Fatalf("Name(%q) is empty", tag)
 		}
 	})
 }
