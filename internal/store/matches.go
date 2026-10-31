@@ -19,6 +19,9 @@ type MatchTarget struct {
 	RuntimeMs            int64
 	// Episodes counts a series' episodes, by season.
 	Episodes map[int]int
+	// Audio are the languages of its audio (a series', of its episodes'),
+	// two letters each.
+	Audio []string
 }
 
 // MatchReason is why a match isn't sure, as identify says it.
@@ -50,7 +53,7 @@ type Match struct {
 // since.
 func (s *Store) ToMatch(ctx context.Context, limit int) ([]MatchTarget, error) {
 	rows, err := s.read.QueryContext(ctx, `SELECT i.id, i.kind, coalesce(i.folder_name, ''), coalesce(i.file_name, ''),
-			coalesce(i.runtime_ms, 0)
+			coalesce(i.runtime_ms, 0), i.audio_languages
 		FROM catalog_items i LEFT JOIN title_matches m ON m.item_id = i.id
 		WHERE i.kind IN ('movie', 'series')
 			AND NOT EXISTS (SELECT 1 FROM title_overrides o WHERE o.item_id = i.id)
@@ -62,10 +65,12 @@ func (s *Store) ToMatch(ctx context.Context, limit int) ([]MatchTarget, error) {
 	var out []MatchTarget
 	for rows.Next() {
 		var t MatchTarget
-		if err := rows.Scan(&t.ItemID, &t.Kind, &t.FolderName, &t.FileName, &t.RuntimeMs); err != nil {
+		var audio *string
+		if err := rows.Scan(&t.ItemID, &t.Kind, &t.FolderName, &t.FileName, &t.RuntimeMs, &audio); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		t.Audio = scanList(audio)
 		out = append(out, t)
 	}
 	rows.Close()
@@ -77,6 +82,10 @@ func (s *Store) ToMatch(ctx context.Context, limit int) ([]MatchTarget, error) {
 			continue
 		}
 		if out[i].Episodes, err = s.seasonEpisodes(ctx, out[i].ItemID); err != nil {
+			return nil, err
+		}
+		if out[i].Audio, err = s.ids(ctx, `SELECT DISTINCT l.value FROM catalog_items e, json_each(e.audio_languages) l
+			WHERE e.kind = 'episode' AND e.series_id = ? AND e.audio_languages IS NOT NULL ORDER BY l.value`, out[i].ItemID); err != nil {
 			return nil, err
 		}
 	}

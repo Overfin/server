@@ -8,8 +8,10 @@ import (
 	"time"
 )
 
-// catalogFields are the fields the catalog's index asks for.
-const catalogFields = "ProviderIds,SortName,ParentId,Genres,Studios,DateCreated,Tags,People,Path"
+// catalogFields are the fields the catalog's index asks for: what the
+// files say (their path, their streams), never Jellyfin's metadata
+// (genres, tags, people: Overfin reads TMDB's itself).
+const catalogFields = "ProviderIds,SortName,ParentId,DateCreated,Path,MediaStreams"
 
 // CatalogTypes are the item types Overfin's catalog indexes, for now.
 var CatalogTypes = []string{"Movie", "Series", "Season", "Episode"}

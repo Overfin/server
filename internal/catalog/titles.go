@@ -450,7 +450,7 @@ func (a *Titles) match(ctx context.Context, src TitleSource) error {
 	matched, unsure := 0, 0
 	for _, t := range todo {
 		r, err := identify.Match(ctx, src, identify.Files{Kind: t.Kind, Folder: t.FolderName, File: t.FileName,
-			RuntimeMs: t.RuntimeMs, Episodes: t.Episodes})
+			RuntimeMs: t.RuntimeMs, Episodes: t.Episodes, Audio: t.Audio})
 		if err != nil {
 			// TMDB unreachable, or failing: tried again next pass.
 			return err

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,10 +14,13 @@ func TestMatchesUpgrade(t *testing.T) {
 	s := openAt(t, 71)
 	ctx := context.Background()
 	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
-	s.PutCatalog(ctx, []CatalogItem{
-		{ID: id(0), Kind: "movie", Name: "Heat", SortName: "a", TMDB: "949", FolderName: "Heat (1995)"},
-		{ID: id(1), Kind: "movie", Name: "Unknown", SortName: "b", FolderName: "Unknown (2001)"},
-	}, 1)
+	// As a database of then holds them (PutCatalog writes what came after).
+	for _, row := range [][]any{{id(0), "Heat", "949", "Heat (1995)"}, {id(1), "Unknown", nil, "Unknown (2001)"}} {
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO catalog_items (id, kind, name, sort_name, seen, tmdb, jellyfin_tmdb, folder_name, rating)
+			VALUES (?, 'movie', ?, ?, 1, ?, ?, ?, '')`, row[0], row[1], row[1], row[2], row[2], row[3]); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := s.migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -90,5 +94,27 @@ func TestSetMatch(t *testing.T) {
 	s.PutCatalog(ctx, items, 4)
 	if todo, _ := s.ToMatch(ctx, 10); len(todo) != 1 || todo[0].ItemID != id(2) {
 		t.Errorf("renamed: %+v", todo)
+	}
+}
+
+// What a match is told of the files' audio: a film's own languages, a
+// series' episodes' together.
+func TestToMatchAudio(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
+	one, two := 1, 2
+	s.PutCatalog(ctx, []CatalogItem{
+		{ID: id(0), Kind: "movie", Name: "Film", SortName: "a", FolderName: "Film", AudioLanguages: []string{"fr", "en"}},
+		{ID: id(1), Kind: "series", Name: "19-2", SortName: "b", FolderName: "19-2"},
+		{ID: id(2), Kind: "episode", Name: "E1", SortName: "c", SeriesID: id(1), SeasonNumber: &one, EpisodeNumber: &one, AudioLanguages: []string{"fr"}},
+		{ID: id(3), Kind: "episode", Name: "E2", SortName: "d", SeriesID: id(1), SeasonNumber: &one, EpisodeNumber: &two, AudioLanguages: []string{"fr", "en"}},
+	}, 1)
+	todo, err := s.ToMatch(ctx, 10)
+	if err != nil || len(todo) != 2 {
+		t.Fatalf("%+v %v", todo, err)
+	}
+	if !slices.Equal(todo[0].Audio, []string{"fr", "en"}) || !slices.Equal(todo[1].Audio, []string{"en", "fr"}) {
+		t.Errorf("film %v, series %v", todo[0].Audio, todo[1].Audio)
 	}
 }
