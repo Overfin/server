@@ -41,6 +41,12 @@ func Reasons(t store.LibraryTitle) []Reason {
 		}
 		return []Reason{{"tmdb-tag", fmt.Sprintf("Its folder or file says TMDB %s; it's taken for TMDB %s.", tags[0], t.TMDB)}}
 	}
+	return checks(t, named)
+}
+
+// checks are the doubts the files raise about the TMDB title they're taken
+// for: its name, its year, a series' seasons, a film's length.
+func checks(t store.LibraryTitle, named named) []Reason {
 	var out []Reason
 	if t.TMDBName != "" && named.name != "" && !matches(named.name, t) {
 		text := fmt.Sprintf("Named “%s” here; TMDB calls it “%s”", named.name, t.TMDBName)
@@ -55,15 +61,24 @@ func Reasons(t store.LibraryTitle) []Reason {
 	if r, ok := seasons(t); ok {
 		out = append(out, r)
 	}
-	if t.Kind == "movie" && t.RuntimeMs > 0 && t.Details.Runtime > 0 {
-		// Half again as long, or less than two thirds: not another cut of
-		// it (an extended edition runs about a third longer).
-		here, there := int(t.RuntimeMs/60_000), t.Details.Runtime
-		if abs(here-there) > 15 && (2*here > 3*there || 3*here < 2*there) {
-			out = append(out, Reason{"runtime", fmt.Sprintf("%d minutes here; TMDB says %d.", here, there)})
-		}
+	if r, ok := runtimeDoubt(t); ok {
+		out = append(out, r)
 	}
 	return out
+}
+
+// runtimeDoubt compares a film's length with TMDB's: half again as long,
+// or less than two thirds, isn't another cut of it (an extended edition
+// runs about a third longer).
+func runtimeDoubt(t store.LibraryTitle) (Reason, bool) {
+	if t.Kind != "movie" || t.RuntimeMs <= 0 || t.Details.Runtime <= 0 {
+		return Reason{}, false
+	}
+	here, there := int(t.RuntimeMs/60_000), t.Details.Runtime
+	if abs(here-there) > 15 && (2*here > 3*there || 3*here < 2*there) {
+		return Reason{"runtime", fmt.Sprintf("%d minutes here; TMDB says %d.", here, there)}, true
+	}
+	return Reason{}, false
 }
 
 // seasons compares a series' episodes with TMDB's: far more here than TMDB

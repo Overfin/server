@@ -356,6 +356,9 @@ type rawTitle struct {
 	OriginalTitle    string `json:"original_title"`
 	OriginalName     string `json:"original_name"`
 	OriginalLanguage string `json:"original_language"`
+	// Popularity and VoteCount come with searches and lists.
+	Popularity float64 `json:"popularity"`
+	VoteCount  int     `json:"vote_count"`
 }
 
 func (r rawTitle) title(kind string) (Title, bool) {

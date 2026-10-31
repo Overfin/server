@@ -561,6 +561,45 @@ type PersonHit struct {
 	First bool
 }
 
+// Found is a title a search found, with how much TMDB's users know it:
+// its popularity, and how many voted on it.
+type Found struct {
+	Title
+	Popularity float64
+	Votes      int
+}
+
+// SearchKind finds films ("movie") or series ("series") whose names match
+// query, in TMDB's order of relevance and the client's language (its
+// first page): from year only, when year isn't 0 (a series' first year).
+func (c *Client) SearchKind(ctx context.Context, kind, query string, year int) ([]Found, error) {
+	k := tv(kind)
+	if k == "" || strings.TrimSpace(query) == "" || year < 0 || year > 9999 {
+		return nil, ErrNotFound
+	}
+	q := c.withLanguage(url.Values{"query": {query}, "include_adult": {"false"}})
+	if year > 0 {
+		if kind == "movie" {
+			q.Set("year", strconv.Itoa(year))
+		} else {
+			q.Set("first_air_date_year", strconv.Itoa(year))
+		}
+	}
+	var raw struct {
+		Results []rawTitle `json:"results"`
+	}
+	if err := c.get(ctx, "/search/"+k, q, &raw); err != nil {
+		return nil, err
+	}
+	var out []Found
+	for _, r := range raw.Results {
+		if t, ok := r.title(kind); ok {
+			out = append(out, Found{Title: t, Popularity: max(r.Popularity, 0), Votes: max(r.VoteCount, 0)})
+		}
+	}
+	return out, nil
+}
+
 // Search finds films, series and people whose names match query, in
 // TMDB's order of relevance, in the client's language (its first page).
 func (c *Client) Search(ctx context.Context, query string) ([]Title, []PersonHit, error) {
