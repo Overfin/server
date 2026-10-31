@@ -182,3 +182,34 @@ func bestSubtitles(all []Track) []Track {
 	}
 	return out
 }
+
+// Pick is the track in a language (a tag, "fr-CA"): the same variant,
+// else the same language from anywhere; for audio, the film's own sound
+// only (never a commentary or a description).
+func Pick(ts []Track, language string) (Track, bool) {
+	want := lang.Tag(language)
+	if want == "" {
+		return Track{}, false
+	}
+	ok := func(t Track) bool { return t.Role == "" || t.Role == Main }
+	for _, t := range ts {
+		if ok(t) && t.Language == want {
+			return t, true
+		}
+	}
+	for _, t := range ts {
+		if ok(t) && t.Language != "" && lang.Base(t.Language) == lang.Base(want) {
+			return t, true
+		}
+	}
+	return Track{}, false
+}
+
+// Find is the track with a stream index.
+func Find(ts []Track, index int) (Track, bool) {
+	i := slices.IndexFunc(ts, func(t Track) bool { return t.Index == index })
+	if i < 0 {
+		return Track{}, false
+	}
+	return ts[i], true
+}

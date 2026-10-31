@@ -998,6 +998,57 @@ func TestPlaybackLanguages(t *testing.T) {
 			t.Errorf("%s: %d", bad, code)
 		}
 	}
+
+	// The profile's own preferences, set by itself: English audio over
+	// the site's French; French subtitles, Canada's, from a track that
+	// only says French.
+	var who struct{ ActiveProfile struct{ ID string } }
+	get(t, srv, "/api/v1/me", &who)
+	profile := "/api/v1/profiles/" + who.ActiveProfile.ID
+	if code, body := put(t, srv, "PATCH", profile, `{"audioLanguage":"en","subtitleLanguage":"fr-ca"}`); code != 200 ||
+		!strings.Contains(body, `"audioLanguage":"en"`) || !strings.Contains(body, `"subtitleLanguage":"fr-CA"`) {
+		t.Fatalf("preferences: %d %s", code, body)
+	}
+	if a, s := start(`,"audioLanguage":"fr-CA"`); a != "a2" || s != "" {
+		t.Errorf("preferred: %q %q", a, s)
+	}
+	for _, bad := range []string{`{"audioLanguage":"klingon"}`, `{"subtitleLanguage":"original"}`, `{"audioLanguage":"und"}`} {
+		if code, _ := put(t, srv, "PATCH", profile, bad); code != 400 {
+			t.Errorf("%s: %d", bad, code)
+		}
+	}
+	// Chosen while watching: kept for the title, over the preferences.
+	code, body := post(t, srv, "/api/v1/playback", `{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{}}`)
+	var pb struct{ ID string }
+	json.Unmarshal([]byte(body), &pb)
+	if code != 201 {
+		t.Fatalf("start: %d", code)
+	}
+	choose := func(body string) int {
+		t.Helper()
+		code, _ := put(t, srv, "PUT", "/api/v1/playback/"+pb.ID+"/tracks", body)
+		return code
+	}
+	if code := choose(`{"audioTrack":"a1","subtitleTrack":"s3"}`); code != 204 {
+		t.Fatalf("choose: %d", code)
+	}
+	if a, s := start(``); a != "a1" || s != "s3" {
+		t.Errorf("chosen: %q %q", a, s)
+	}
+	if code := choose(`{"subtitleTrack":""}`); code != 204 {
+		t.Fatalf("choose none: %d", code)
+	}
+	if a, s := start(``); a != "a1" || s != "" {
+		t.Errorf("chosen, none: %q %q", a, s)
+	}
+	for _, bad := range []string{`{}`, `{"audioTrack":"s1"}`, `{"subtitleTrack":"a3"}`, `{"audioTrack":""}`} {
+		if code := choose(bad); code != 400 {
+			t.Errorf("%s: %d", bad, code)
+		}
+	}
+	if code, _ := put(t, srv, "PUT", "/api/v1/playback/play_unknown/tracks", `{"audioTrack":"a1"}`); code != 404 {
+		t.Errorf("unknown playback: %d", code)
+	}
 }
 
 // The audio asked for, by the site's language or from the menu, is the

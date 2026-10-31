@@ -14,6 +14,7 @@ import (
 	"github.com/overfin/server/internal/ids"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/jellyfin"
+	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/library"
 	"github.com/overfin/server/internal/pin"
 	"github.com/overfin/server/internal/plugin"
@@ -119,6 +120,12 @@ type profileRequest struct {
 	// recommendations; null, off. Each profile may change
 	// its own.
 	KidsTitles optionalBool `json:"kidsTitles"`
+	// AudioLanguage is the audio the profile prefers: "" the site's
+	// language, "original" each title's own, or a language tag;
+	// SubtitleLanguage, its subtitles: a language tag, "" none. Each
+	// profile may change its own.
+	AudioLanguage    *string `json:"audioLanguage"`
+	SubtitleLanguage *string `json:"subtitleLanguage"`
 	// PIN is the owner's PIN, needed to change a profile's limits when the
 	// owner has one.
 	PIN string `json:"pin"`
@@ -375,7 +382,10 @@ func (p Profiles) update(w http.ResponseWriter, r *http.Request) {
 	var req profileRequest
 	if !decode(r, &req) ||
 		(req.Name == nil && req.Language == nil && req.Theme == nil && req.Kind == nil && req.MaxAge == nil &&
-			!req.Libraries.Set && !req.BlockedTags.Set && !req.Categories.Set && !req.KidsTitles.Set) || !validAge(req.MaxAge) ||
+			!req.Libraries.Set && !req.BlockedTags.Set && !req.Categories.Set && !req.KidsTitles.Set &&
+			req.AudioLanguage == nil && req.SubtitleLanguage == nil) || !validAge(req.MaxAge) ||
+		(req.AudioLanguage != nil && *req.AudioLanguage != "" && *req.AudioLanguage != "original" && lang.Tag(*req.AudioLanguage) == "") ||
+		(req.SubtitleLanguage != nil && *req.SubtitleLanguage != "" && lang.Tag(*req.SubtitleLanguage) == "") ||
 		(req.Theme != nil && *req.Theme != "" && *req.Theme != "light" && *req.Theme != "dark") ||
 		!tidyName(req.Name) ||
 		(req.Language != nil && *req.Language != "" && !languageTagRe.MatchString(*req.Language)) ||
@@ -394,8 +404,9 @@ func (p Profiles) update(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	// A profile's own look is its own business; the rest is the owner's.
-	ownLook := (req.Theme != nil || req.KidsTitles.Set) && req.Name == nil && req.Language == nil && req.Kind == nil &&
+	// A profile's own look and languages are its own business; the rest
+	// is the owner's.
+	ownLook := (req.Theme != nil || req.KidsTitles.Set || req.AudioLanguage != nil || req.SubtitleLanguage != nil) && req.Name == nil && req.Language == nil && req.Kind == nil &&
 		req.MaxAge == nil && !req.Libraries.Set && !req.BlockedTags.Set && !req.Categories.Set &&
 		c.Profile != nil && c.Profile.ID == pr.ID
 	if !c.IsOwner() && !ownLook {
@@ -426,6 +437,22 @@ func (p Profiles) update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Theme != nil {
 		if err := p.Store.SetProfileTheme(ctx, c.Account.ID, id, *req.Theme); err != nil {
+			problem.Send(w, problem.NotFound, "")
+			return
+		}
+	}
+	if req.AudioLanguage != nil {
+		audio := *req.AudioLanguage
+		if audio != "original" {
+			audio = lang.Tag(audio)
+		}
+		if err := p.Store.SetAudioLanguage(ctx, c.Account.ID, id, audio); err != nil {
+			problem.Send(w, problem.NotFound, "")
+			return
+		}
+	}
+	if req.SubtitleLanguage != nil {
+		if err := p.Store.SetSubtitleLanguage(ctx, c.Account.ID, id, lang.Tag(*req.SubtitleLanguage)); err != nil {
 			problem.Send(w, problem.NotFound, "")
 			return
 		}

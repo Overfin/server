@@ -92,7 +92,9 @@ type exportProfileJSON struct {
 	Kind     string `json:"kind"`
 	Owner    bool   `json:"owner"`
 	Language string `json:"language,omitempty"`
-	// SubtitleLanguage is the language it last chose for subtitles.
+	// AudioLanguage and SubtitleLanguage are the audio and subtitles it
+	// prefers (see the profile's own).
+	AudioLanguage    string `json:"audioLanguage,omitempty"`
 	SubtitleLanguage string `json:"subtitleLanguage,omitempty"`
 	MaxAge           *int   `json:"maxAge,omitempty"`
 	// Categories and Libraries, when present, are the only ones it sees
@@ -108,6 +110,9 @@ type exportProfileJSON struct {
 	// OutOfContinue are the series it took out of Continue Watching (by
 	// title key), and when.
 	OutOfContinue map[string]string `json:"outOfContinueWatching,omitempty"`
+	// Tracks are the audio and subtitles it chose while watching a title
+	// (by title key): languages, subtitles "" when turned off.
+	Tracks map[string]exportTracksJSON `json:"tracks,omitempty"`
 	// WatchHistory is read from the media server for this download.
 	WatchHistory []exportItemJSON `json:"watchHistory"`
 	// Titles is what Overfin keeps about what the profile did with each
@@ -120,6 +125,11 @@ type exportProfileJSON struct {
 	// Modules holds what each switched-on module keeps about the profile,
 	// by module name (the watchlist, say).
 	Modules map[string]any `json:"modules,omitempty"`
+}
+
+type exportTracksJSON struct {
+	Audio     string  `json:"audio,omitempty"`
+	Subtitles *string `json:"subtitles,omitempty"`
 }
 
 type exportRequestJSON struct {
@@ -277,12 +287,23 @@ func (a Account) export(w http.ResponseWriter, r *http.Request) {
 			problem.Send(w, problem.Internal, "")
 			return
 		}
+		chosen, err := a.Sessions.Store.AllTitleTracks(ctx, p.ID)
+		if err != nil {
+			a.Logger.Error("reading a profile's tracks chosen for an export failed", "err", err)
+			problem.Send(w, problem.Internal, "")
+			return
+		}
+		trackChoices := map[string]exportTracksJSON{}
+		for k, t := range chosen {
+			trackChoices[k] = exportTracksJSON{Audio: t.Audio, Subtitles: t.Subtitles}
+		}
 		hidden := map[string]string{}
 		for k, at := range dismissed {
 			hidden[k] = at.Format(time.RFC3339)
 		}
 		out.Profiles = append(out.Profiles, exportProfileJSON{
-			ID: p.ID, Name: p.Name, Kind: p.Kind, Owner: p.Owner, Language: p.Language, SubtitleLanguage: p.SubtitleLanguage,
+			ID: p.ID, Name: p.Name, Kind: p.Kind, Owner: p.Owner, Language: p.Language,
+			AudioLanguage: p.AudioLanguage, SubtitleLanguage: p.SubtitleLanguage, Tracks: trackChoices,
 			MaxAge: p.MaxAge, Categories: p.Categories, Libraries: p.Libraries, BlockedTags: p.BlockedTags,
 			KidsTitles: p.KidsTitles, Theme: p.Theme, HasPIN: p.HasPIN, CreatedAt: p.Created.Format(time.RFC3339),
 			WatchHistory: history, Titles: titles, Requests: requests, Modules: mods, OutOfContinue: hidden,

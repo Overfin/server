@@ -98,6 +98,11 @@ type profileJSON struct {
 	KidsTitles *bool `json:"kidsTitles,omitempty"`
 	// Theme is its look: "light" or "dark"; absent, it follows the device.
 	Theme string `json:"theme,omitempty"`
+	// AudioLanguage is the audio it prefers: "original" (each title's
+	// own) or a language tag ("fr-CA"); absent, the site's language.
+	// SubtitleLanguage, the subtitles: a language tag; absent, none.
+	AudioLanguage    string `json:"audioLanguage,omitempty"`
+	SubtitleLanguage string `json:"subtitleLanguage,omitempty"`
 }
 
 type meJSON struct {
@@ -254,7 +259,8 @@ func decode(r *http.Request, v any) bool {
 func toProfileJSON(p *store.Profile) profileJSON {
 	out := profileJSON{ID: p.ID, Name: p.Name, Kind: p.Kind, Owner: p.Owner, HasPIN: p.HasPIN,
 		MaxAge: p.MaxAge, AgeNeeded: p.Kind == "kids" && p.MaxAge == nil,
-		BlockedTags: p.BlockedTags, Theme: p.Theme, KidsTitles: p.KidsTitles}
+		BlockedTags: p.BlockedTags, Theme: p.Theme, KidsTitles: p.KidsTitles,
+		AudioLanguage: p.AudioLanguage, SubtitleLanguage: p.SubtitleLanguage}
 	if p.Libraries != nil {
 		libs := make([]string, 0, len(p.Libraries))
 		for _, id := range p.Libraries {

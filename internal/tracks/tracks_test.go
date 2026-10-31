@@ -119,3 +119,28 @@ func TestSubtitles(t *testing.T) {
 		t.Errorf("subtitles %v, forced %v", indexes(subs), indexes(forced))
 	}
 }
+
+// Pick: the same variant, else the same language; never a commentary.
+func TestPick(t *testing.T) {
+	audio, subs, _ := Read([]jellyfin.MediaStream{
+		{Index: 1, Type: "Audio", Language: "eng", Title: "Commentary", Channels: 2},
+		{Index: 2, Type: "Audio", Language: "fre", Title: "VFF", Channels: 6},
+		{Index: 3, Type: "Audio", Language: "fre", Title: "VFQ", Channels: 6},
+		{Index: 4, Type: "Subtitle", Language: "fre", IsTextSubtitleStream: true},
+	})
+	for _, c := range []struct {
+		language string
+		want     int
+	}{{"fr-CA", 3}, {"fr-FR", 2}, {"fr-BE", 2}, {"fr", 2}, {"en", -1}, {"", -1}, {"xx", -1}} {
+		got, ok := Pick(audio, c.language)
+		if (c.want < 0 && ok) || (c.want >= 0 && got.Index != c.want) {
+			t.Errorf("%q: %d %v, want %d", c.language, got.Index, ok, c.want)
+		}
+	}
+	if s, ok := Pick(subs, "fr-CA"); !ok || s.Index != 4 {
+		t.Errorf("subtitles: %+v", s)
+	}
+	if _, ok := Find(audio, 3); !ok {
+		t.Error("find")
+	}
+}
