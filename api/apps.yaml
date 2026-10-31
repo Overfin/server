@@ -460,8 +460,9 @@ components:
           description: |
             With `list=suggestions` only: the operator's categories it fits
             (their IDs, see `/apps/v1/categories`), by what TMDB says of it
-            (kind, genres, original language, age). A category with a rule
-            on libraries or Jellyfin tags fits no title the libraries lack.
+            (kind, genres, original language, age, tags: its keywords). A
+            category with a rule on libraries fits no title the libraries
+            lack.
 
     AppWatchStats:
       description: |

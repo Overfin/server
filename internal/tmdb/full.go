@@ -55,10 +55,17 @@ type Full struct {
 	// Collection is the collection a film belongs to (TMDB's series of
 	// films); 0 for none, and for a series.
 	Collection int
+	// Keywords are TMDB's words for what it's about ("anime",
+	// "christmas", "based on novel"), each once.
+	Keywords []string
 }
 
-// maxNames caps how many other names a title keeps.
-const maxNames = 60
+// maxNames caps how many other names a title keeps; maxKeywords, how many
+// keywords.
+const (
+	maxNames    = 60
+	maxKeywords = 80
+)
 
 // Title returns everything about a film ("movie") or a series ("series"),
 // in the client's language.
@@ -101,6 +108,11 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 		ExternalIDs struct {
 			TVDB int `json:"tvdb_id"`
 		} `json:"external_ids"`
+		// Films list their keywords under keywords, series under results.
+		Keywords struct {
+			Keywords []struct{ Name string } `json:"keywords"`
+			Results  []struct{ Name string } `json:"results"`
+		} `json:"keywords"`
 		BelongsToCollection *struct {
 			ID int `json:"id"`
 		} `json:"belongs_to_collection"`
@@ -118,9 +130,9 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 		} `json:"translations"`
 	}
 	// The certifications and release dates come along: one request.
-	extra := "credits,images,alternative_titles,translations,release_dates,recommendations"
+	extra := "credits,images,alternative_titles,translations,release_dates,recommendations,keywords"
 	if kind == "series" {
-		extra = "aggregate_credits,images,alternative_titles,translations,content_ratings,external_ids,recommendations"
+		extra = "aggregate_credits,images,alternative_titles,translations,content_ratings,external_ids,recommendations,keywords"
 	}
 	q := c.withLanguage(url.Values{"append_to_response": {extra}, "include_image_language": {c.imageLanguages(lang, true)}})
 	path := "/" + k + "/" + strconv.Itoa(tmdbID)
@@ -216,6 +228,14 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 	for _, tr := range raw.Translations.Translations {
 		add(tr.Data.Title)
 		add(tr.Data.Name)
+	}
+	keywords := map[string]bool{}
+	for _, kw := range append(raw.Keywords.Keywords, raw.Keywords.Results...) {
+		name := textclean.Plain(kw.Name, 100)
+		if name != "" && !keywords[strings.ToLower(name)] && len(out.Keywords) < maxKeywords {
+			keywords[strings.ToLower(name)] = true
+			out.Keywords = append(out.Keywords, name)
+		}
 	}
 	// The poster TMDB picks for the language, else the best one listed.
 	out.Artwork = Artwork{Poster: t.Poster, Backdrop: t.Backdrop, Logo: pickLogo(raw.Images.Logos, lang, c.languages()...)}

@@ -23,7 +23,7 @@ func TestCategoriesListing(t *testing.T) {
 	for i := 1; i <= 4; i++ {
 		it := store.CatalogItem{ID: fmt.Sprintf("%032x", i), Kind: "movie", Name: fmt.Sprint(i), SortName: fmt.Sprint(i), LibraryID: films}
 		if i == 4 {
-			it.LibraryID, it.Tags = other, []string{"Noël"}
+			it.LibraryID, it.TMDB = other, "4"
 		}
 		items = append(items, it)
 	}
@@ -31,6 +31,7 @@ func TestCategoriesListing(t *testing.T) {
 		t.Fatal(err)
 	}
 	st.RefreshTitleKeys(ctx)
+	st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "4", Name: "4", Keywords: []string{"Noël"}}, []byte(`{}`), time.Now())
 	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
 
 	var empty struct {
@@ -58,7 +59,7 @@ func TestCategoriesListing(t *testing.T) {
 		}
 		var out []string
 		for _, it := range page.Items {
-			out = append(out, strings.TrimLeft(strings.TrimPrefix(it.ID, "title_item_"), "0"))
+			out = append(out, strings.TrimPrefix(strings.TrimLeft(strings.TrimPrefix(it.ID, "title_item_"), "0"), "title_movie_tmdb_"))
 		}
 		return out
 	}
@@ -91,12 +92,13 @@ func TestProfileLimitedToCategories(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		it := store.CatalogItem{ID: fmt.Sprintf("%032x", i), Kind: "movie", Name: fmt.Sprint(i), SortName: fmt.Sprint(i), LibraryID: fmt.Sprintf("%032x", 0xf1)}
 		if i == 3 {
-			it.Tags = []string{"Noël"}
+			it.TMDB = "3"
 		}
 		items = append(items, it)
 	}
 	st.PutCatalog(ctx, items, 1)
 	st.RefreshTitleKeys(ctx)
+	st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "3", Name: "3", Keywords: []string{"Noël"}}, []byte(`{}`), time.Now())
 	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
 	xmas := &store.Category{Names: map[string]string{"en": "Christmas"}, Rules: store.CategoryRules{Tags: []string{"noël"}}}
 	st.SaveCategory(ctx, xmas)
@@ -271,9 +273,6 @@ func TestLimitsInRecommendedAndSimilar(t *testing.T) {
 	for i, f := range films {
 		if f.have {
 			it := store.CatalogItem{ID: fmt.Sprintf("%032x", i+1), Kind: "movie", Name: f.name, SortName: f.name, TMDB: f.tmdb, LibraryID: lib}
-			if f.rating == "G" {
-				it.Tags = []string{"Family"}
-			}
 			items = append(items, it)
 		}
 	}
@@ -283,7 +282,7 @@ func TestLimitsInRecommendedAndSimilar(t *testing.T) {
 	for _, f := range films {
 		st.PutTitles(ctx, []store.Title{{Kind: "movie", TMDB: f.tmdb, Name: f.name, Year: 2000}}, now)
 		st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: f.tmdb, Name: f.name, Year: 2000,
-			Genres: []store.TitleGenre{{ID: 10751, Name: "Family"}}}, []byte(`{"similar":["1","3","4","5","6"]}`), now)
+			Genres: []store.TitleGenre{{ID: 10751, Name: "Family"}}, Keywords: family(f.rating)}, []byte(`{"similar":["1","3","4","5","6"]}`), now)
 		st.SetTitleRatings(ctx, store.RatedTitle{Kind: "movie", TMDB: f.tmdb}, map[string][]string{"US": {f.rating}}, "2000-01-01", "2000-01-01", now)
 	}
 	st.SetHomeMissing(ctx, true)
@@ -350,4 +349,12 @@ func TestLimitsInRecommendedAndSimilar(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("the owner, by the template", nil, []string{"Bluey film"})
+}
+
+// family is a film's keywords in these tests: "Family" for those rated G.
+func family(rating string) []string {
+	if rating == "G" {
+		return []string{"Family"}
+	}
+	return nil
 }

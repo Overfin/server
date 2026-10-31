@@ -50,10 +50,12 @@ func TestHiddenTagAnyCase(t *testing.T) {
 	ctx := context.Background()
 	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
 	s.PutCatalog(ctx, []CatalogItem{
-		{ID: id(0), Kind: "movie", Name: "Peur", SortName: "a", TMDB: "1", LibraryID: "films", Tags: []string{"épouvante"}},
-		{ID: id(1), Kind: "movie", Name: "Effroi", SortName: "b", TMDB: "2", LibraryID: "films", Tags: []string{"Épouvante"}},
+		{ID: id(0), Kind: "movie", Name: "Peur", SortName: "a", TMDB: "1", LibraryID: "films"},
+		{ID: id(1), Kind: "movie", Name: "Effroi", SortName: "b", TMDB: "2", LibraryID: "films"},
 		{ID: id(2), Kind: "movie", Name: "Rire", SortName: "c", TMDB: "3", LibraryID: "films"},
 	}, 1)
+	keywordsOf(t, s, "movie", "1", "épouvante")
+	keywordsOf(t, s, "movie", "2", "Épouvante")
 	if err := s.RefreshTitleKeys(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -80,13 +82,15 @@ func TestAccessAndListings(t *testing.T) {
 	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
 	one, two := 1, 2
 	s.PutCatalog(ctx, []CatalogItem{
-		{ID: id(0), Kind: "movie", Name: "Heat", SortName: "a", TMDB: "1", LibraryID: "films", People: []string{"p1"}},
-		{ID: id(1), Kind: "movie", Name: "Gore", SortName: "b", TMDB: "2", LibraryID: "films", Tags: []string{"Horror"}},
-		{ID: id(2), Kind: "series", Name: "Show", SortName: "c", TMDB: "3", LibraryID: "tv", Tags: []string{"horror"}, People: []string{"p1"}},
+		{ID: id(0), Kind: "movie", Name: "Heat", SortName: "a", TMDB: "1", LibraryID: "films"},
+		{ID: id(1), Kind: "movie", Name: "Gore", SortName: "b", TMDB: "2", LibraryID: "films"},
+		{ID: id(2), Kind: "series", Name: "Show", SortName: "c", TMDB: "3", LibraryID: "tv"},
 		{ID: id(3), Kind: "episode", Name: "E1", SortName: "d", SeriesID: id(2), SeasonNumber: &one, EpisodeNumber: &one, LibraryID: "tv"},
 		{ID: id(4), Kind: "episode", Name: "E2", SortName: "e", SeriesID: id(2), SeasonNumber: &one, EpisodeNumber: &two, LibraryID: "tv"},
 		{ID: id(5), Kind: "series", Name: "Other", SortName: "f", TMDB: "4", LibraryID: "tv"},
 	}, 1)
+	keywordsOf(t, s, "movie", "2", "Horror")
+	keywordsOf(t, s, "series", "3", "horror")
 	if err := s.RefreshTitleKeys(ctx); err != nil {
 		t.Fatal(err)
 	}

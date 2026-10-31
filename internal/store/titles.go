@@ -39,6 +39,8 @@ type Title struct {
 	// Collection is the collection a film belongs to (TMDB's ID), 0 for
 	// none; it comes with a film's page.
 	Collection int
+	// Keywords are TMDB's, with a title's page.
+	Keywords []string
 }
 
 // TitleGenre is one of TMDB's genres.
@@ -112,6 +114,15 @@ func (s *Store) SetTitleDetails(ctx context.Context, t Title, details []byte, at
 	}
 	if err := genreNamesFromTexts(ctx, tx, t); err != nil {
 		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM catalog_title_keywords WHERE kind = ? AND tmdb = ?`, t.Kind, t.TMDB); err != nil {
+		return err
+	}
+	for _, k := range t.Keywords {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO catalog_title_keywords (kind, tmdb, keyword, folded) VALUES (?, ?, ?, ?)`,
+			t.Kind, t.TMDB, k, FoldTag(k)); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

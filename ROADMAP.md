@@ -874,8 +874,8 @@ nothing beyond what that needs.
 - ~~**Custom categories**~~ Done, first step (0.6): the operator makes
   categories (Films, Series, Anime, Kids…) in the panel from rules on
   what the catalog already knows: films or series, TMDB's genres, the
-  original language, the library, Jellyfin's tags (often TMDB's
-  keywords), for ages up to, and except other categories. Each is named
+  original language, the library, tags (TMDB's keywords; Jellyfin's
+  until the identification by Overfin), for ages up to, and except other categories. Each is named
   in every language offered, has its page and its place in the site's
   menu, and can be a row on the home page; the libraries can leave the
   menu. Nothing moves on disk: one library can hold everything. An

@@ -42,9 +42,6 @@ func TestCollectionImagesAccess(t *testing.T) {
 	for i, f := range films {
 		if f.have {
 			it := store.CatalogItem{ID: fmt.Sprintf("%032x", i+1), Kind: "movie", Name: f.name, SortName: f.name, TMDB: f.tmdb, LibraryID: lib}
-			if f.rating == "G" {
-				it.Tags = []string{"Family"}
-			}
 			items = append(items, it)
 		}
 	}
@@ -57,7 +54,8 @@ func TestCollectionImagesAccess(t *testing.T) {
 		os.WriteFile(file, []byte("jpeg"), 0o600)
 	}
 	for _, f := range films {
-		st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: f.tmdb, Name: f.name, Year: 2000, Poster: f.poster, Collection: f.collection}, []byte(`{}`), now)
+		st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: f.tmdb, Name: f.name, Year: 2000, Poster: f.poster, Collection: f.collection,
+			Keywords: family(f.rating)}, []byte(`{}`), now)
 		st.SetTitleRatings(ctx, store.RatedTitle{Kind: "movie", TMDB: f.tmdb}, map[string][]string{"US": {f.rating}}, f.released, f.released, now)
 		keep(f.poster)
 	}

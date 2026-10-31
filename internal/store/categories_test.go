@@ -18,7 +18,7 @@ func TestCategories(t *testing.T) {
 	s.SetRatingScales(ctx, "series", map[string][]RatingLevel{"US": {{"TV-Y", "", 1}, {"TV-14", "", 4}}})
 	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
 	s.PutCatalog(ctx, []CatalogItem{
-		{ID: id(0), Kind: "movie", Name: "Heat", SortName: "a", TMDB: "1", LibraryID: "films", Tags: []string{"Classique"}},
+		{ID: id(0), Kind: "movie", Name: "Heat", SortName: "a", TMDB: "1", LibraryID: "films"},
 		{ID: id(1), Kind: "movie", Name: "Totoro", SortName: "b", TMDB: "2", LibraryID: "films"},
 		{ID: id(2), Kind: "series", Name: "Bluey", SortName: "c", TMDB: "3", LibraryID: "series"},
 		{ID: id(3), Kind: "series", Name: "Frieren", SortName: "d", TMDB: "4", LibraryID: "anime"},
@@ -40,6 +40,7 @@ func TestCategories(t *testing.T) {
 		s.SetTitleDetails(ctx, Title{Kind: d.kind, TMDB: d.tmdb, Name: d.tmdb, Genres: d.genres}, []byte(`{"language":"`+d.lang+`"}`), now)
 		s.SetTitleRatings(ctx, RatedTitle{d.kind, d.tmdb}, map[string][]string{"US": {d.rating}}, "", "", now)
 	}
+	keywordsOf(t, s, "movie", "1", "Classique")
 	save := func(names string, r CategoryRules) *Category {
 		c := &Category{Names: map[string]string{"en": names}, Rules: r}
 		if err := s.SaveCategory(ctx, c); err != nil {

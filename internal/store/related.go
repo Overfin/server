@@ -218,12 +218,15 @@ func (s *Store) readRelated(ctx context.Context) (*relatedCache, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// Its tags and people, over all its copies.
+	// Its keywords and its first billed cast (15), as TMDB lists them.
 	for _, q := range []struct{ prefix, sql string }{
-		{"t:", `SELECT DISTINCT i.title_key, lower(t.tag) FROM catalog_tags t JOIN catalog_items i ON i.id = t.item_id
+		{"t:", `SELECT DISTINCT i.title_key, k.folded FROM catalog_title_keywords k
+			JOIN catalog_items i ON i.kind = k.kind AND i.tmdb = k.tmdb
 			WHERE i.kind IN ('movie', 'series') AND i.title_key IS NOT NULL`},
-		{"p:", `SELECT DISTINCT i.title_key, p.person_id FROM catalog_people p JOIN catalog_items i ON i.id = p.item_id
-			WHERE i.kind IN ('movie', 'series') AND i.title_key IS NOT NULL`},
+		{"p:", `SELECT DISTINCT i.title_key, coalesce(json_extract(c.value, '$.tmdb'), '') FROM catalog_items i
+			JOIN catalog_titles t ON t.kind = i.kind AND t.tmdb = i.tmdb, json_each(t.details, '$.cast') c
+			WHERE i.kind IN ('movie', 'series') AND i.title_key IS NOT NULL AND t.details IS NOT NULL
+				AND c.key < 15`},
 	} {
 		rows, err := s.read.QueryContext(ctx, q.sql)
 		if err != nil {
