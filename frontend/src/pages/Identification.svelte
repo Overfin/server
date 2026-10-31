@@ -67,7 +67,7 @@
           <tbody>
             {#each shown.slice(0, 500) as t (t.itemId)}
               <tr data-id={t.itemId} class:selected={t.itemId === selected} onclick={() => (selected = t.itemId)}>
-                <td><div class="name">{titleOf(t)}</div><div class="hint">{t.folderName || t.fileName || ''}</div></td>
+                <td><button type="button" class="pick name" aria-pressed={t.itemId === selected} onclick={(e) => { e.stopPropagation(); selected = t.itemId; }}>{titleOf(t)}</button><div class="hint">{t.folderName || t.fileName || ''}</div></td>
                 <td class="hide-narrow">{t.kind === 'movie' ? 'Film' : 'Series'}</td>
                 <td>
                   {#if t.overridden}<Badge kind="ok">Fixed here</Badge>
@@ -85,7 +85,7 @@
         </table>
       </div>
     </div>
-    <aside class="detail">
+    <aside class="detail" aria-label="The title">
       {#if current}
         {#key current}<IdentificationDetail title={current} reload={load} />{/key}
       {:else}

@@ -53,7 +53,7 @@
   <Card title="Templates">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Template</th><th>Streams</th><th>Profiles</th><th>Accounts</th><th></th></tr></thead>
+        <thead><tr><th>Template</th><th>Streams</th><th>Profiles</th><th>Accounts</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {#each items as t (t.id)}
             <tr>

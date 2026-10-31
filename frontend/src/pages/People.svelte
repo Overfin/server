@@ -101,7 +101,7 @@
                   <div class="who">
                     <Avatar name={nameOf(a)} />
                     <div>
-                      <div class="name">{nameOf(a)}</div>
+                      <button type="button" class="pick name" aria-pressed={a.id === selected} onclick={(e) => { e.stopPropagation(); selected = a.id; }}>{nameOf(a)}</button>
                       <div class="hint">{subline(a) || (a.person ? '' : 'name unknown')}</div>
                     </div>
                   </div>
@@ -130,7 +130,7 @@
         </Card>
       {/if}
     </div>
-    <aside class="detail">
+    <aside class="detail" aria-label="The account">
       {#if current}
         {#key current}
           <AccountDetail account={current} {templates} {people} reload={(id) => load(id)} />

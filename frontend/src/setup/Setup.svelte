@@ -282,7 +282,7 @@
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <main class="single" onkeydown={enter}>
-  <div class="brand"><img class="logo" src="/admin/logo.svg" alt="" /><div><strong>Overfin</strong><small>Setup</small></div></div>
+  <div class="brand"><img class="logo" src="/admin/logo.svg" alt="" /><div><h1>Overfin</h1><small>Setup</small></div></div>
   {#if setup.steps.length}
     <Progress value={Math.round((at / (setup.steps.length - 1)) * 100)} label="Setup" />
     <p class="hint">Step {at + 1} of {setup.steps.length}</p>
