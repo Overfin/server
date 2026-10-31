@@ -2,10 +2,12 @@ package images
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/overfin/server/internal/jellyfin"
@@ -104,9 +106,34 @@ func contentTypeOf(typ string) string {
 	return "image/jpeg"
 }
 
+// tmdbLarger are TMDB's widths of each type, from the smallest: where
+// fetchTMDB goes when one isn't JPEG or PNG.
+var tmdbLarger = map[string][]string{
+	"poster":   {"w185", "w342", "w500", "w780"},
+	"backdrop": {"w780", "w1280"},
+	"logo":     {"w185", "w300", "w500"},
+	"still":    {"w185", "w300"},
+	"profile":  {"w185", "h632"},
+}
+
 // fetchTMDB fetches a TMDB image at width and re-encodes it, in one of
-// slots.
+// slots. TMDB serves some of its sizes as WebP, whatever their name
+// says, which Overfin doesn't take (Reencode): the next larger size is
+// asked then, once.
 func (p *Pipeline) fetchTMDB(ctx context.Context, ref TMDBRef, width string, slots chan struct{}) ([]byte, error) {
+	data, err := p.fetchTMDBAt(ctx, ref, width, slots)
+	if !errors.Is(err, ErrUnsafe) {
+		return data, err
+	}
+	widths := tmdbLarger[ref.Type]
+	if i := slices.Index(widths, width); i >= 0 && i+1 < len(widths) {
+		return p.fetchTMDBAt(ctx, ref, widths[i+1], slots)
+	}
+	return nil, err
+}
+
+// fetchTMDBAt is fetchTMDB, at width only.
+func (p *Pipeline) fetchTMDBAt(ctx context.Context, ref TMDBRef, width string, slots chan struct{}) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tmdbImageBase+width+ref.Path, nil)
 	if err != nil {
 		return nil, err
