@@ -841,6 +841,31 @@ nothing beyond what that needs.
   how many are left to share), for "Who's watching?" to tell. Sharing a
   login also costs the owner a stream of theirs.
 
+- **Subtitles that are pictures (PGS), never burned in** (designed).
+  Today, choosing a PGS track (Blu-ray subtitles: pictures, not text) has
+  Jellyfin burn it into the picture, re-encoding the whole video. Never
+  again:
+  - One subtitle choice per language: text wins when a language has both
+    (Predator: Badlands' French is shown from its SRT).
+  - Forced subtitles are always on, in the audio's language, even with
+    subtitles off (an invented language translated); full subtitles in
+    that language take their place when chosen; none matching the audio,
+    nothing shown by itself.
+  - A language with PGS only: the track Jellyfin extracts as it is
+    (`.sup`), checked whole by Overfin (every segment well-formed, each
+    picture's run-length data within its declared size, sizes capped)
+    and refused otherwise (SECURITY.md rule 11), drawn by the player over
+    the video. The decoder lives in the JavaScript SDK, so every web app
+    gets it; native SDKs get theirs. About 0.1 second a track to check.
+  - No PGS track ever burned in; DVD subtitles may follow the same way.
+  - Turning them into text (OCR) was tried and set aside: 92% of
+    subtitles exactly right, not good enough.
+  - Order: Overfin's check and its route; the decoder in the SDK; the
+    player (one choice per language, forced subtitles, drawing); the
+    burn-in path removed.
+  - Part of a wider plan: languages named the same way everywhere
+    ("Français (Québec)"), to design with it.
+
 ## Planned, not designed yet
 
 - **Playback extras:** changing tracks or quality mid-playback (`PATCH`),
