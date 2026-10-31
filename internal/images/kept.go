@@ -120,7 +120,28 @@ func (p *Pipeline) Keep(ctx context.Context, wanted []TMDBRef, refetch time.Time
 		}
 		return nil
 	})
-	return fetched, deleted, err
+	if err != nil {
+		return fetched, deleted, err
+	}
+	// An older layout's folders, emptied: gone too.
+	types, err := os.ReadDir(p.ArtworkDir)
+	if err != nil {
+		return fetched, deleted, err
+	}
+	for _, t := range types {
+		sizes, err := os.ReadDir(filepath.Join(p.ArtworkDir, t.Name()))
+		if err != nil {
+			continue
+		}
+		for _, size := range sizes {
+			w, convErr := strconv.Atoi(size.Name())
+			if size.IsDir() && size.Name() != "original" && (convErr != nil || !slices.Contains(ladders[t.Name()], w)) {
+				// Only empty ones: os.Remove leaves the others.
+				_ = os.Remove(filepath.Join(p.ArtworkDir, t.Name(), size.Name()))
+			}
+		}
+	}
+	return fetched, deleted, nil
 }
 
 // stillKept says whether a file under ArtworkDir is a wanted original, or

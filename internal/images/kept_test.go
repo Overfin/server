@@ -112,9 +112,7 @@ func TestKeep(t *testing.T) {
 		t.Errorf("still's original: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "poster", "w185")); err == nil {
-		if left, _ := os.ReadDir(filepath.Join(dir, "poster", "w185")); len(left) != 0 {
-			t.Errorf("an older layout's file kept: %v", left)
-		}
+		t.Error("an older layout's folder kept")
 	}
 
 	// A size: made from the original, kept beside it, TMDB not asked.
