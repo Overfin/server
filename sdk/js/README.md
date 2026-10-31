@@ -15,6 +15,9 @@ carries the behavior every client needs, so your site only handles screens:
   lacks native HLS) and subtitles, reports progress, restarts a stream the
   server freed at the same place without a word, switches audio and
   subtitles, and reports a takeover by another device.
+- **Picture subtitles (PGS):** `decodePGS()` reads a track Overfin serves,
+  and `PictureSubtitles` draws it on a canvas over the video, so the video
+  is never converted for them.
 
 ```js
 import { Overfin } from './overfin.js';

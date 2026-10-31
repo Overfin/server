@@ -644,6 +644,248 @@ export class Player {
   }
 }
 
+// ---- Picture subtitles (PGS) ---------------------------------------------
+
+// Subtitles that are pictures, as Blu-rays carry them: Overfin serves the
+// track as the file has it (checked whole first), and the player draws it
+// over the video, so the video is never converted for them. decodePGS
+// reads a track into cues; each picture stays compressed until it's shown
+// (a whole track as pixels would take hundreds of MB).
+
+const PGS_PALETTE = 0x14, PGS_OBJECT = 0x15, PGS_PRESENTATION = 0x16, PGS_END = 0x80;
+const PGS_MAX_SIDE = 4096;
+
+/**
+ * Reads a PGS track (the bytes Overfin serves) into cues, in order: each
+ * { startMs, endMs, width, height, forced, pictures: [{ x, y, width,
+ * height, crop?, palette, data }] }, width and height being the screen's.
+ * The last cue ends at Infinity. Throws on a malformed track.
+ */
+export function decodePGS(bytes) {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const u16 = (i) => (b[i] << 8) | b[i + 1];
+  const bad = () => { throw new Error('not a well-formed PGS track'); };
+  const cues = [];
+  // What an epoch keeps from one display set to the next: palettes and
+  // pictures by id. A picture is whole once its last fragment came.
+  let palettes = new Map(), objects = new Map();
+  let shown = null; // the display set being read: its presentation
+  for (let pos = 0; pos < b.length;) {
+    if (pos + 13 > b.length || b[pos] !== 0x50 || b[pos + 1] !== 0x47) bad();
+    const ms = Math.round(((b[pos + 2] * 2 ** 24) + (b[pos + 3] << 16 | b[pos + 4] << 8 | b[pos + 5])) / 90);
+    const type = b[pos + 10];
+    const size = u16(pos + 11);
+    const s = pos + 13;
+    pos = s + size;
+    if (pos > b.length) bad();
+    switch (type) {
+      case PGS_PRESENTATION: {
+        if (size < 11) bad();
+        // Width, height, rate, number, state (0x80: a new epoch), palette
+        // update, palette, then each picture shown.
+        if (b[s + 7] & 0x80) { palettes = new Map(); objects = new Map(); }
+        const show = { ms, width: u16(s), height: u16(s + 2), palette: b[s + 9], forced: false, refs: [] };
+        let o = s + 11;
+        for (let n = b[s + 10]; n > 0; n--) {
+          if (o + 8 > pos) bad();
+          const ref = { id: u16(o), x: u16(o + 4), y: u16(o + 6) };
+          if (b[o + 3] & 0x40) show.forced = true;
+          if (b[o + 3] & 0x80) {
+            if (o + 16 > pos) bad();
+            ref.crop = { x: u16(o + 8), y: u16(o + 10), width: u16(o + 12), height: u16(o + 14) };
+            o += 8;
+          }
+          show.refs.push(ref);
+          o += 8;
+        }
+        shown = show;
+        break;
+      }
+      case PGS_PALETTE: {
+        if (size < 2 || (size - 2) % 5) bad();
+        // Entries: index, Y, Cr, Cb, alpha. Unset entries are clear.
+        const id = b[s];
+        const rgba = new Uint8ClampedArray((palettes.get(id) || new Uint8ClampedArray(1024)));
+        for (let e = s + 2; e < pos; e += 5) {
+          yuvToRGBA(b[e + 1], b[e + 3], b[e + 2], b[e + 4], rgba, b[e] * 4, shown ? shown.height > 576 : true);
+        }
+        palettes.set(id, rgba);
+        break;
+      }
+      case PGS_OBJECT: {
+        if (size < 4) bad();
+        const id = u16(s), flags = b[s + 3];
+        if (flags & 0x80) { // its first fragment: its size, then data
+          if (size < 11) bad();
+          const width = u16(s + 7), height = u16(s + 9);
+          if (!width || !height || width > PGS_MAX_SIDE || height > PGS_MAX_SIDE) bad();
+          objects.set(id, { width, height, parts: [b.subarray(s + 11, pos)], data: null });
+        } else {
+          const obj = objects.get(id);
+          if (!obj || obj.data) bad();
+          obj.parts.push(b.subarray(s + 4, pos));
+        }
+        if (flags & 0x40) { // its last
+          const obj = objects.get(id);
+          if (!obj) bad();
+          obj.data = concat(obj.parts);
+          obj.parts = null;
+        }
+        break;
+      }
+      case PGS_END: {
+        if (!shown) break;
+        const prev = cues[cues.length - 1];
+        if (prev && prev.endMs === Infinity) prev.endMs = shown.ms;
+        const palette = palettes.get(shown.palette);
+        const pictures = [];
+        for (const ref of shown.refs) {
+          const obj = objects.get(ref.id);
+          if (!obj?.data || !palette) continue;
+          pictures.push({ x: ref.x, y: ref.y, width: obj.width, height: obj.height, crop: ref.crop, palette, data: obj.data });
+        }
+        if (pictures.length) {
+          cues.push({ startMs: shown.ms, endMs: Infinity, width: shown.width, height: shown.height, forced: shown.forced, pictures });
+        }
+        shown = null;
+        break;
+      }
+      case 0x17: break; // windows: where pictures may go; their own places say it
+      default: bad();
+    }
+  }
+  return cues;
+}
+
+/**
+ * A picture's pixels, RGBA, from its run-length data: width × height × 4
+ * bytes, ready for an ImageData. Throws when the data overflows its size.
+ */
+export function pgsPixels(picture) {
+  const { width, height, data, palette } = picture;
+  const out = new Uint8ClampedArray(width * height * 4);
+  const bad = () => { throw new Error('PGS picture overflows its size'); };
+  let x = 0, y = 0;
+  const put = (n, color) => {
+    if (x + n > width || y >= height) bad();
+    const c = color * 4;
+    if (palette[c + 3]) { // clear pixels stay as they are: zero
+      for (let p = (y * width + x) * 4, end = p + n * 4; p < end; p += 4) {
+        out[p] = palette[c]; out[p + 1] = palette[c + 1]; out[p + 2] = palette[c + 2]; out[p + 3] = palette[c + 3];
+      }
+    }
+    x += n;
+  };
+  for (let i = 0; i < data.length;) {
+    const v = data[i++];
+    if (v) { put(1, v); continue; }
+    if (i >= data.length) bad();
+    const f = data[i++];
+    if (!f) { x = 0; y++; continue; } // end of a line
+    let n = f & 0x3f;
+    if (f & 0x40) { if (i >= data.length) bad(); n = (n << 8) | data[i++]; }
+    let color = 0;
+    if (f & 0x80) { if (i >= data.length) bad(); color = data[i++]; }
+    put(n, color);
+  }
+  return out;
+}
+
+/**
+ * Draws a PGS track over a video, on a canvas laid over it (the same box;
+ * the SDK sets its object-fit so the screen matches the picture's): the
+ * cue of the moment, drawn when it changes, cleared between cues.
+ */
+export class PictureSubtitles {
+  constructor(video, canvas) {
+    this.video = video;
+    this.canvas = canvas;
+    canvas.style.objectFit = 'contain';
+    canvas.style.pointerEvents = 'none';
+    this.cues = [];
+    this.current = null;
+    this.frame = 0;
+    this.loads = 0;
+  }
+
+  /** Loads a track (its URL); resolves once its cues are read. */
+  async load(url) {
+    this.hide();
+    const run = ++this.loads;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`picture subtitles: HTTP ${res.status}`);
+    const cues = decodePGS(new Uint8Array(await res.arrayBuffer()));
+    if (run !== this.loads) return;
+    this.cues = cues;
+    this.tick();
+  }
+
+  /** Stops drawing and clears the canvas; load() starts again. */
+  hide() {
+    this.loads++;
+    cancelAnimationFrame(this.frame);
+    this.frame = 0;
+    this.cues = [];
+    this.draw(null);
+  }
+
+  // tick draws the cue of the moment, every frame the page shows.
+  tick() {
+    this.draw(cueAt(this.cues, this.video.currentTime * 1000));
+    this.frame = requestAnimationFrame(() => this.tick());
+  }
+
+  draw(cue) {
+    if (cue === this.current) return;
+    this.current = cue;
+    const ctx = this.canvas.getContext('2d');
+    if (!cue) { ctx.clearRect(0, 0, this.canvas.width, this.canvas.height); return; }
+    if (this.canvas.width !== cue.width || this.canvas.height !== cue.height) {
+      this.canvas.width = cue.width;
+      this.canvas.height = cue.height;
+    } else {
+      ctx.clearRect(0, 0, cue.width, cue.height);
+    }
+    for (const p of cue.pictures) {
+      let image;
+      try { image = new ImageData(pgsPixels(p), p.width, p.height); } catch { continue; }
+      const c = p.crop || { x: 0, y: 0, width: p.width, height: p.height };
+      ctx.putImageData(image, p.x - c.x, p.y - c.y, c.x, c.y, c.width, c.height);
+    }
+  }
+}
+
+/** The cue showing at a time (ms), or null. */
+export function cueAt(cues, ms) {
+  let lo = 0, hi = cues.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (cues[mid].startMs > ms) hi = mid - 1;
+    else if (cues[mid].endMs <= ms) lo = mid + 1;
+    else return cues[mid];
+  }
+  return null;
+}
+
+// yuvToRGBA writes a palette entry: studio-range Y'CbCr to RGB, by BT.709
+// for HD screens (taller than 576), else BT.601.
+function yuvToRGBA(Y, Cb, Cr, A, out, at, hd) {
+  const y = (Y - 16) * 255 / 219, cb = (Cb - 128) * 255 / 224, cr = (Cr - 128) * 255 / 224;
+  const [kr, kgb, kgr, kb] = hd ? [1.5748, 0.1873, 0.4681, 1.8556] : [1.402, 0.3441, 0.7141, 1.772];
+  out[at] = y + kr * cr;
+  out[at + 1] = y - kgb * cb - kgr * cr;
+  out[at + 2] = y + kb * cb;
+  out[at + 3] = A;
+}
+
+function concat(parts) {
+  if (parts.length === 1) return parts[0];
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) { out.set(p, at); at += p.length; }
+  return out;
+}
+
 // ---- Helpers ---------------------------------------------------------------
 
 const enc = encodeURIComponent;
