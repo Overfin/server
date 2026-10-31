@@ -63,6 +63,7 @@ type fakeJellyfin struct {
 	lastQury  url.Values
 	calls     []string       // playstate and encoding calls, in order
 	lastToken string         // the token of the last library call
+	pgs       []byte         // the PGS track it extracts (subtitle 4)
 	policy    map[string]any // the last policy set by the admin
 	// partnerSeesAll gives the second profile the same library as the
 	// first, instead of an empty one.
@@ -244,6 +245,8 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "SEGMENT-ZERO")
 	case r.URL.Path == "/Videos/"+fmt.Sprintf("%032x", 1)+"/"+fmt.Sprintf("%032x", 1)+"/Subtitles/3/Stream.vtt":
 		fmt.Fprint(w, "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<b>Hi</b>\n")
+	case r.URL.Path == "/Videos/"+fmt.Sprintf("%032x", 1)+"/"+fmt.Sprintf("%032x", 1)+"/Subtitles/4/Stream.pgssub":
+		w.Write(f.pgs)
 	case r.URL.Path == "/MediaSegments/"+fmt.Sprintf("%032x", 1):
 		json.NewEncoder(w).Encode(map[string]any{"Items": []map[string]any{
 			{"Type": "Intro", "StartTicks": 50000000, "EndTicks": 900000000},
@@ -824,7 +827,7 @@ func getAs(t *testing.T, srv *httptest.Server, who, path string) (int, string) {
 }
 
 func TestStreamingThroughRewrittenPlaylists(t *testing.T) {
-	srv, _ := newServer(t)
+	srv, fake := newServer(t)
 	_, body := post(t, srv, "/api/v1/playback", `{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{}}`)
 	var s struct {
 		Stream         struct{ URL string }
@@ -858,9 +861,25 @@ func TestStreamingThroughRewrittenPlaylists(t *testing.T) {
 	if code != 200 || vtt != "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n" {
 		t.Errorf("subtitles: %d %q", code, vtt)
 	}
-	// Track 4 is image-based (burned in), so it has no WebVTT.
+	// Track 4 is pictures (PGS): no WebVTT, but the track itself, checked
+	// whole; one that isn't well-formed is refused; text track 3 has no
+	// pictures.
 	if code, _ := getAs(t, srv, subject, base+"subtitles/s4"); code != http.StatusNotFound {
-		t.Errorf("image subtitles: status %d", code)
+		t.Errorf("image subtitles as WebVTT: status %d", code)
+	}
+	fake.mu.Lock()
+	fake.pgs = pgsTrack()
+	fake.mu.Unlock()
+	if code, body := getAs(t, srv, subject, base+"pictures/s4"); code != 200 || body != string(fake.pgs) {
+		t.Errorf("picture subtitles: %d, %d bytes", code, len(body))
+	}
+	fake.mu.Lock()
+	fake.pgs = append(pgsTrack(), "PX"...)
+	fake.mu.Unlock()
+	for _, p := range []string{base + "pictures/s4", base + "pictures/s3", base + "pictures/s9", base + "pictures/s4?x=1"} {
+		if code, _ := getAs(t, srv, subject, p); code != http.StatusNotFound {
+			t.Errorf("%s: status %d, want 404", p, code)
+		}
 	}
 
 	// Names that were never in a playlist, and other accounts, get nothing.
@@ -1224,4 +1243,18 @@ func solve(t *testing.T, srv *httptest.Server) map[string]string {
 			return map[string]string{"challenge": c.Challenge, "answer": a}
 		}
 	}
+}
+
+// pgsTrack is a well-formed PGS track: one 1 by 1 picture shown, then
+// hidden.
+func pgsTrack() []byte {
+	seg := func(typ byte, body ...byte) []byte {
+		return append([]byte{'P', 'G', 0, 0, 0, 0, 0, 0, 0, 0, typ, 0, byte(len(body))}, body...)
+	}
+	var t []byte
+	t = append(t, seg(0x16, 7, 128, 4, 56, 16, 0, 0, 0x80, 0, 0, 1, 0, 1, 0, 0, 1, 0, 2, 0)...)
+	t = append(t, seg(0x14, 0, 0, 1, 235, 128, 128, 255)...)
+	t = append(t, seg(0x15, 0, 1, 0, 0xC0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0)...)
+	t = append(t, seg(0x80)...)
+	return append(t, seg(0x16, 7, 128, 4, 56, 16, 0, 1, 0, 0, 0, 0)...)
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -79,6 +80,27 @@ func (s *Stream) TextSubtitle(index int) bool {
 		if ms.Type == "Subtitle" && ms.Index == index && ms.IsTextSubtitleStream {
 			return true
 		}
+	}
+	return false
+}
+
+// PictureSubtitle reports whether index is a subtitle track of pictures
+// (PGS) of the stream's version, served as the track itself, checked
+// (CheckPGS).
+func (s *Stream) PictureSubtitle(index int) bool {
+	for _, ms := range s.Decision.Source.MediaStreams {
+		if ms.Type == "Subtitle" && ms.Index == index && !ms.IsTextSubtitleStream && isPGSCodec(ms.Codec) {
+			return true
+		}
+	}
+	return false
+}
+
+// isPGSCodec says whether a codec, as Jellyfin names it, is PGS.
+func isPGSCodec(codec string) bool {
+	switch strings.ToLower(codec) {
+	case "pgssub", "hdmv_pgs_subtitle", "pgs":
+		return true
 	}
 	return false
 }
