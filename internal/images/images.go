@@ -235,6 +235,16 @@ func imageTags(it *jellyfin.RawItem) map[string]string {
 // before anything is decoded. Nothing from the original file survives except
 // its pixels.
 func Reencode(raw []byte, contentType string) ([]byte, error) {
+	img, err := decodeChecked(raw)
+	if err != nil {
+		return nil, err
+	}
+	return encode(img, contentType)
+}
+
+// decodeChecked decodes an image Reencode would take: a JPEG or a PNG, its
+// dimensions checked from its header first; ErrUnsafe otherwise.
+func decodeChecked(raw []byte) (image.Image, error) {
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(raw))
 	if err != nil || (format != "jpeg" && format != "png") {
 		return nil, ErrUnsafe
@@ -247,8 +257,13 @@ func Reencode(raw []byte, contentType string) ([]byte, error) {
 	if err != nil {
 		return nil, ErrUnsafe
 	}
+	return img, nil
+}
 
+// encode writes img as contentType: a PNG, else a JPEG.
+func encode(img image.Image, contentType string) ([]byte, error) {
 	var out bytes.Buffer
+	var err error
 	switch contentType {
 	case "image/png":
 		err = png.Encode(&out, img)

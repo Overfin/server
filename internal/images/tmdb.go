@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/overfin/server/internal/jellyfin"
@@ -54,13 +56,68 @@ func ArtworkID(typ, path string) string {
 
 var tmdbPath = regexp.MustCompile(`^/([A-Za-z0-9]{8,64})\.(jpg|png)$`)
 
-// tmdbWidths are TMDB's own sizes nearest to each of Overfin's.
-var tmdbWidths = map[string]map[string]string{
-	"poster":   {"small": "w185", "medium": "w342", "large": "w780"},
-	"backdrop": {"small": "w780", "medium": "w1280", "large": "w1280"},
-	"logo":     {"small": "w185", "medium": "w300", "large": "w500"},
-	"still":    {"small": "w185", "medium": "w300", "large": "original"},
-	"profile":  {"small": "w185", "medium": "h632", "large": "h632"},
+// Overfin makes TMDB's images the sizes it wants itself (Shrink), from one
+// original each: TMDB's original, made smaller on arrival when it's
+// larger than any size Overfin serves. Sizes are widths, each type's
+// from a few (ladders), so only those are ever made and kept.
+
+// ladders are the widths Overfin serves of each type of TMDB image, from
+// the smallest.
+var ladders = map[string][]int{
+	"poster":   {200, 400, 800, 1200, 2000},
+	"backdrop": {320, 640, 1280, 1920, 3840},
+	"logo":     {250, 500, 1000, 2000},
+	"still":    {320, 640, 1280},
+	"profile":  {200, 400, 800},
+}
+
+// named are the widths the size names small, medium and large stand for.
+var named = map[string]map[string]int{
+	"poster":   {"small": 200, "medium": 400, "large": 800},
+	"backdrop": {"small": 640, "medium": 1280, "large": 1920},
+	"logo":     {"small": 250, "medium": 500, "large": 1000},
+	"still":    {"small": 320, "medium": 640, "large": 1280},
+	"profile":  {"small": 200, "medium": 400, "large": 800},
+}
+
+// originals are what Overfin keeps of each type as its original: TMDB's
+// original, at most the largest width it serves (an episode's still, a
+// thumbnail, 1280); the fallback, TMDB's largest ready-made size, for an
+// original Overfin doesn't take (over MaxDimension, or WebP).
+var originals = map[string]struct{ fallback string }{
+	"poster": {"w780"}, "backdrop": {"w1280"}, "logo": {"w500"}, "still": {"w300"}, "profile": {"h632"},
+}
+
+// Width is the width Overfin serves of a type of TMDB image for one asked
+// for: the next in its ladder, or its largest; false for a type it has
+// none of, or a width that isn't one.
+func Width(typ string, asked int) (int, bool) {
+	ladder, ok := ladders[typ]
+	if !ok || asked <= 0 {
+		return 0, false
+	}
+	for _, w := range ladder {
+		if w >= asked {
+			return w, true
+		}
+	}
+	return ladder[len(ladder)-1], true
+}
+
+// NamedWidth is the width a size name (small, medium, large) stands for,
+// for a type of TMDB image.
+func NamedWidth(typ, size string) (int, bool) {
+	w, ok := named[typ][size]
+	return w, ok
+}
+
+// Smallest is the smallest width served of a type: the control panel's
+// thumbnails.
+func Smallest(typ string) int {
+	if l := ladders[typ]; len(l) > 0 {
+		return l[0]
+	}
+	return 0
 }
 
 var tmdbHTTP = &http.Client{
@@ -69,32 +126,85 @@ var tmdbHTTP = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
-// TMDB returns a TMDB image, re-encoded. check runs first, every time, even
-// for cached images: it says whether the profile may see the title, and
-// that ref's path is the title's real one, so invented paths never reach
-// TMDB or the cache.
-func (p *Pipeline) TMDB(ctx context.Context, ref TMDBRef, size string, check func(ctx context.Context) error) ([]byte, string, error) {
-	width, ok := tmdbWidths[ref.Type][size]
-	if !ok {
+// TMDB returns a TMDB image, width pixels wide (one of Width's), made by
+// Overfin from its original. check runs first, every time, even for cached
+// images: it says whether the profile may see the title, and that ref's
+// path is the title's real one, so invented paths never reach TMDB or the
+// cache. An image whose original is kept on disk (a library title's, Keep)
+// has its sizes kept there too, made the first time they're asked for.
+func (p *Pipeline) TMDB(ctx context.Context, ref TMDBRef, width int, check func(ctx context.Context) error) ([]byte, string, error) {
+	if !slices.Contains(ladders[ref.Type], width) {
 		return nil, "", ErrInvalid
 	}
 	if err := check(ctx); err != nil {
 		return nil, "", err
 	}
-	key := "tmdb/" + ref.Path + "/" + width
+	contentType := contentTypeOf(ref.Type)
+	key := "tmdb/" + ref.Path + "/" + strconv.Itoa(width)
 	if e, ok := p.cache.get(key); ok {
 		return e.data, e.contentType, nil
 	}
-	if data, ok := p.readKept(ref, width); ok {
-		p.cache.put(key, entry{data: data, contentType: contentTypeOf(ref.Type)})
-		return data, contentTypeOf(ref.Type), nil
+	made := p.keptFile(ref, strconv.Itoa(width))
+	if made != "" {
+		if data, err := os.ReadFile(made); err == nil {
+			p.cache.put(key, entry{data: data, contentType: contentType})
+			return data, contentType, nil
+		}
 	}
-	data, err := p.fetchTMDB(ctx, ref, width, p.slots)
+	original, kept, err := p.original(ctx, ref, p.slots)
 	if err != nil {
 		return nil, "", err
 	}
+	data, err := p.sized(ctx, original, contentType, width, p.slots)
+	if err != nil {
+		return nil, "", err
+	}
+	if kept && made != "" {
+		// Not kept is only slower next time: never a failure.
+		_ = writeKept(made, data)
+	}
+	p.cache.put(key, entry{data: data, contentType: contentType})
+	return data, contentType, nil
+}
+
+// original is a TMDB image's original as Overfin keeps it: from disk when
+// it's kept there (true), else from memory, else fetched now.
+func (p *Pipeline) original(ctx context.Context, ref TMDBRef, slots chan struct{}) ([]byte, bool, error) {
+	if file := p.keptFile(ref, "original"); file != "" {
+		if data, err := os.ReadFile(file); err == nil {
+			return data, true, nil
+		}
+	}
+	key := "tmdb/" + ref.Path + "/original"
+	if e, ok := p.cache.get(key); ok {
+		return e.data, false, nil
+	}
+	data, err := p.fetchOriginal(ctx, ref, slots)
+	if err != nil {
+		return nil, false, err
+	}
 	p.cache.put(key, entry{data: data, contentType: contentTypeOf(ref.Type)})
-	return data, contentTypeOf(ref.Type), nil
+	return data, false, nil
+}
+
+// sized makes an original width pixels wide (never wider than it is), in
+// one of slots.
+func (p *Pipeline) sized(ctx context.Context, original []byte, contentType string, width int, slots chan struct{}) ([]byte, error) {
+	select {
+	case slots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-slots }()
+	// An original is Overfin's own encoding, checked when it arrived.
+	img, err := decodeChecked(original)
+	if err != nil {
+		return nil, err
+	}
+	if img.Bounds().Dx() <= width {
+		return original, nil
+	}
+	return encode(Shrink(img, width), contentType)
 }
 
 // contentTypeOf is what an image of type typ is encoded as: logos keep
@@ -106,35 +216,42 @@ func contentTypeOf(typ string) string {
 	return "image/jpeg"
 }
 
-// tmdbLarger are TMDB's widths of each type, from the smallest: where
-// fetchTMDB goes when one isn't JPEG or PNG.
-var tmdbLarger = map[string][]string{
-	"poster":   {"w185", "w342", "w500", "w780"},
-	"backdrop": {"w780", "w1280"},
-	"logo":     {"w185", "w300", "w500"},
-	"still":    {"w185", "w300"},
-	"profile":  {"w185", "h632"},
+// fetchOriginal fetches a TMDB image's original and makes it Overfin's:
+// checked, no wider than the largest width served of its type, encoded
+// again. TMDB's largest ready-made size stands in for an original Overfin
+// doesn't take (over MaxDimension, or WebP whatever its name says).
+func (p *Pipeline) fetchOriginal(ctx context.Context, ref TMDBRef, slots chan struct{}) ([]byte, error) {
+	ladder := ladders[ref.Type]
+	if len(ladder) == 0 {
+		return nil, ErrInvalid
+	}
+	raw, err := p.download(ctx, ref, "original")
+	if err != nil {
+		return nil, err
+	}
+	select {
+	case slots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-slots }()
+	img, err := decodeChecked(raw)
+	if errors.Is(err, ErrUnsafe) {
+		if raw, err = p.download(ctx, ref, originals[ref.Type].fallback); err != nil {
+			return nil, err
+		}
+		img, err = decodeChecked(raw)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return encode(Shrink(img, ladder[len(ladder)-1]), contentTypeOf(ref.Type))
 }
 
-// fetchTMDB fetches a TMDB image at width and re-encodes it, in one of
-// slots. TMDB serves some of its sizes as WebP, whatever their name
-// says, which Overfin doesn't take (Reencode): the next larger size is
-// asked then, once.
-func (p *Pipeline) fetchTMDB(ctx context.Context, ref TMDBRef, width string, slots chan struct{}) ([]byte, error) {
-	data, err := p.fetchTMDBAt(ctx, ref, width, slots)
-	if !errors.Is(err, ErrUnsafe) {
-		return data, err
-	}
-	widths := tmdbLarger[ref.Type]
-	if i := slices.Index(widths, width); i >= 0 && i+1 < len(widths) {
-		return p.fetchTMDBAt(ctx, ref, widths[i+1], slots)
-	}
-	return nil, err
-}
-
-// fetchTMDBAt is fetchTMDB, at width only.
-func (p *Pipeline) fetchTMDBAt(ctx context.Context, ref TMDBRef, width string, slots chan struct{}) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tmdbImageBase+width+ref.Path, nil)
+// download fetches a TMDB image at one of TMDB's sizes, as it is: at most
+// jellyfin.MaxImageBytes (ErrUnsafe beyond), ErrHidden when TMDB has none.
+func (p *Pipeline) download(ctx context.Context, ref TMDBRef, size string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tmdbImageBase+size+ref.Path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -154,12 +271,5 @@ func (p *Pipeline) fetchTMDBAt(ctx context.Context, ref TMDBRef, width string, s
 	if len(raw) > jellyfin.MaxImageBytes {
 		return nil, ErrUnsafe
 	}
-	select {
-	case slots <- struct{}{}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	data, err := Reencode(raw, contentTypeOf(ref.Type))
-	<-slots
-	return data, err
+	return raw, nil
 }

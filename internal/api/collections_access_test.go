@@ -1,9 +1,12 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -49,9 +52,12 @@ func TestCollectionImagesAccess(t *testing.T) {
 	st.RefreshTitleKeys(ctx)
 	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
 	keep := func(path string) {
-		file := filepath.Join(dir, "poster", "w342", path[1:])
+		// Kept as an original: the sizes are made from it.
+		file := filepath.Join(dir, "poster", "original", path[1:])
 		os.MkdirAll(filepath.Dir(file), 0o700)
-		os.WriteFile(file, []byte("jpeg"), 0o600)
+		var b bytes.Buffer
+		jpeg.Encode(&b, image.NewRGBA(image.Rect(0, 0, 20, 30)), nil)
+		os.WriteFile(file, b.Bytes(), 0o600)
 	}
 	for _, f := range films {
 		st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: f.tmdb, Name: f.name, Year: 2000, Poster: f.poster, Collection: f.collection,
@@ -88,6 +94,13 @@ func TestCollectionImagesAccess(t *testing.T) {
 	for _, id := range []string{"5", "7", "8", "9"} {
 		if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_"+id, nil); code != 404 {
 			t.Errorf("owner, a film not out yet (%s): %d", id, code)
+		}
+	}
+	// Widths: any above 0, alone; the width made is the next one up.
+	for query, want := range map[string]int{"?width=1": 200, "?width=300": 200, "?width=5000": 200, "?size=large": 200,
+		"?width=0": 404, "?width=-4": 404, "?width=big": 404, "?width=300&size=small": 404, "?size=huge": 404} {
+		if code := get(t, srv, "/api/v1/images/tmdbart_poster_sagaposter1_jpg"+query, nil); code != want {
+			t.Errorf("%s: %d, want %d", query, code, want)
 		}
 	}
 

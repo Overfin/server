@@ -200,7 +200,7 @@ func (p *Panel) poster(w http.ResponseWriter, r *http.Request, _ *session) {
 		notFound(w, "No such poster")
 		return
 	}
-	data, contentType, err := p.Images.TMDB(r.Context(), ref, "small", func(context.Context) error { return nil })
+	data, contentType, err := p.Images.TMDB(r.Context(), ref, images.Smallest("poster"), func(context.Context) error { return nil })
 	if err != nil {
 		notFound(w, "No such poster")
 		return

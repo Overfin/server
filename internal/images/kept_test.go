@@ -1,37 +1,98 @@
 package images
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
-	"sync/atomic"
+	"sync"
 	"testing"
 	"time"
 )
 
-// Library artwork kept on disk: fetched once at the kept sizes, served
-// from disk after, fetched again when old, deleted once unwanted.
-func TestKeep(t *testing.T) {
-	jpg := sampleJPEG(t)
-	var asked atomic.Int32
+// sizedJPEG is a JPEG w pixels wide, h high.
+func sizedJPEG(t *testing.T, w, h int) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	if err := jpeg.Encode(&b, image.NewRGBA(image.Rect(0, 0, w, h)), nil); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
+// fakeImages is TMDB's image server: each path at "original" (and any
+// size), counting what's asked.
+type fakeImages struct {
+	mu    sync.Mutex
+	asked []string
+	serve func(size, path string) []byte // nil: 404
+}
+
+func (f *fakeImages) start(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		asked.Add(1)
-		if r.URL.Path == "/w185/missing1234.jpg" {
-			w.WriteHeader(http.StatusNotFound)
+		f.mu.Lock()
+		f.asked = append(f.asked, r.URL.Path)
+		f.mu.Unlock()
+		size, path, _ := cut(r.URL.Path[1:])
+		if data := f.serve(size, "/"+path); data != nil {
+			w.Write(data)
 			return
 		}
-		w.Write(jpg)
+		w.WriteHeader(http.StatusNotFound)
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 	old := tmdbImageBase
 	tmdbImageBase = srv.URL + "/"
-	defer func() { tmdbImageBase = old }()
+	t.Cleanup(func() { tmdbImageBase = old })
+}
 
+func (f *fakeImages) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.asked)
+}
+
+func cut(s string) (string, string, bool) {
+	for i := range s {
+		if s[i] == '/' {
+			return s[:i], s[i+1:], true
+		}
+	}
+	return s, "", false
+}
+
+func width(t *testing.T, data []byte) int {
+	t.Helper()
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg.Width
+}
+
+// Library artwork: its original kept on disk (TMDB's, no wider than the
+// largest size served), each size made from it the first time it's asked
+// for and kept beside it; served from disk after; fetched again when old;
+// deleted with what was made of it once unwanted, and an older layout's
+// files too.
+func TestKeep(t *testing.T) {
+	big := sizedJPEG(t, 2600, 3900) // a poster larger than any size served
+	f := &fakeImages{serve: func(size, path string) []byte {
+		if path == "/missing1234.jpg" {
+			return nil
+		}
+		return big
+	}}
+	f.start(t)
 	dir := t.TempDir()
+	// An older layout's file: TMDB's own size names.
+	os.MkdirAll(filepath.Join(dir, "poster", "w185"), 0o700)
+	os.WriteFile(filepath.Join(dir, "poster", "w185", "poster1234.jpg"), []byte("old"), 0o600)
 	p := New(nil, 1<<20)
 	p.ArtworkDir = dir
 	ctx := context.Background()
@@ -40,46 +101,60 @@ func TestKeep(t *testing.T) {
 	wanted := []TMDBRef{poster, still, poster, {Type: "still", Path: "/missing1234.jpg"}, {Type: "poster", Path: "../../etc"}}
 
 	fetched, deleted, err := p.Keep(ctx, wanted, time.Now().Add(-time.Hour))
-	if err != nil || fetched != 3 || deleted != 0 {
+	if err != nil || fetched != 2 || deleted != 1 {
 		t.Fatalf("first pass: %d %d %v", fetched, deleted, err)
 	}
-	for _, f := range []string{"poster/w185/poster1234.jpg", "poster/w342/poster1234.jpg", "still/w185/still12345.jpg"} {
-		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
-			t.Errorf("not kept: %s", f)
+	original, err := os.ReadFile(filepath.Join(dir, "poster", "original", "poster1234.jpg"))
+	if err != nil || width(t, original) != 2000 {
+		t.Fatalf("poster's original: %v", err)
+	}
+	if s, err := os.ReadFile(filepath.Join(dir, "still", "original", "still12345.jpg")); err != nil || width(t, s) != 1280 {
+		t.Errorf("still's original: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "poster", "w185")); err == nil {
+		if left, _ := os.ReadDir(filepath.Join(dir, "poster", "w185")); len(left) != 0 {
+			t.Errorf("an older layout's file kept: %v", left)
 		}
 	}
 
-	// Served from disk: TMDB isn't asked. The check still runs.
-	n := asked.Load()
-	if data, ct, err := p.TMDB(ctx, poster, "medium", func(context.Context) error { return nil }); err != nil || ct != "image/jpeg" || len(data) == 0 {
-		t.Fatalf("served: %v", err)
+	// A size: made from the original, kept beside it, TMDB not asked.
+	n := f.count()
+	ok := func(context.Context) error { return nil }
+	data, ct, err := p.TMDB(ctx, poster, 400, ok)
+	if err != nil || ct != "image/jpeg" || width(t, data) != 400 {
+		t.Fatalf("400: %v", err)
 	}
-	if asked.Load() != n {
+	if f.count() != n {
 		t.Error("asked TMDB for a kept image")
 	}
-	if _, _, err := p.TMDB(ctx, still, "small", func(context.Context) error { return ErrHidden }); err != ErrHidden {
+	if made, err := os.ReadFile(filepath.Join(dir, "poster", "400", "poster1234.jpg")); err != nil || !bytes.Equal(made, data) {
+		t.Errorf("size not kept: %v", err)
+	}
+	if _, _, err := p.TMDB(ctx, poster, 300, ok); !errors.Is(err, ErrInvalid) {
+		t.Errorf("a width not served: %v", err)
+	}
+	if _, _, err := p.TMDB(ctx, still, 320, func(context.Context) error { return ErrHidden }); err != ErrHidden {
 		t.Errorf("check skipped: %v", err)
 	}
 
-	// Fresh: nothing fetched again. Old: fetched again.
+	// Fresh: nothing fetched again. Old: fetched again, sizes left.
 	if fetched, _, _ := p.Keep(ctx, wanted, time.Now().Add(-time.Hour)); fetched != 0 {
 		t.Errorf("fetched again while fresh: %d", fetched)
 	}
-	if fetched, _, _ := p.Keep(ctx, wanted, time.Now().Add(time.Hour)); fetched != 3 {
+	if fetched, _, _ := p.Keep(ctx, wanted, time.Now().Add(time.Hour)); fetched != 2 {
 		t.Errorf("old ones: %d", fetched)
 	}
 
-	// The still's title left the libraries: deleted; nothing wanted at all
-	// deletes nothing.
-	os.WriteFile(filepath.Join(dir, "poster", "w185", ".new-123"), []byte("half"), 0o600)
-	if _, deleted, err := p.Keep(ctx, []TMDBRef{poster}, time.Now().Add(-time.Hour)); err != nil || deleted != 1 {
+	// The poster's title left the libraries: its original and its size
+	// go, the still stays; nothing wanted at all deletes nothing.
+	os.WriteFile(filepath.Join(dir, "still", "original", ".new-123"), []byte("half"), 0o600)
+	if _, deleted, err := p.Keep(ctx, []TMDBRef{still}, time.Now().Add(-time.Hour)); err != nil || deleted != 2 {
 		t.Errorf("unwanted: %d %v", deleted, err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "still/w185/still12345.jpg")); err == nil {
-		t.Error("unwanted still kept")
-	}
-	if _, err := os.Stat(filepath.Join(dir, "poster", "w185", ".new-123")); err == nil {
-		t.Error("half-written file kept")
+	for _, gone := range []string{"poster/original/poster1234.jpg", "poster/400/poster1234.jpg", "still/original/.new-123"} {
+		if _, err := os.Stat(filepath.Join(dir, gone)); err == nil {
+			t.Errorf("kept: %s", gone)
+		}
 	}
 	if _, deleted, _ := p.Keep(ctx, nil, time.Now().Add(-time.Hour)); deleted != 0 {
 		t.Errorf("empty wanted deleted %d", deleted)
@@ -97,40 +172,80 @@ func TestKeep(t *testing.T) {
 	}
 }
 
-// TMDB serves some sizes as WebP whatever their name says: the next
-// larger one is asked then, once, and nothing that isn't JPEG or PNG is
-// ever served.
-func TestTMDBWebPSize(t *testing.T) {
-	jpg := sampleJPEG(t)
-	webp := []byte("RIFF\x24\x00\x00\x00WEBPVP8 ")
-	var asked []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		asked = append(asked, r.URL.Path)
-		switch r.URL.Path {
-		case "/w500/poster1234.jpg", "/w1280/backdrop12.jpg":
-			w.Write(jpg)
-		default:
-			w.Write(webp)
-		}
-	}))
-	defer srv.Close()
-	old := tmdbImageBase
-	tmdbImageBase = srv.URL + "/"
-	defer func() { tmdbImageBase = old }()
+// An image no library has: its original and sizes in memory only; a
+// size wider than the original is the original.
+func TestTMDBNotKept(t *testing.T) {
+	f := &fakeImages{serve: func(size, path string) []byte { return sizedJPEG(t, 900, 500) }}
+	f.start(t)
+	dir := t.TempDir()
 	p := New(nil, 1<<20)
+	p.ArtworkDir = dir
+	ctx := context.Background()
 	ok := func(context.Context) error { return nil }
-	if data, _, err := p.TMDB(context.Background(), TMDBRef{Type: "poster", Path: "/poster1234.jpg"}, "medium", ok); err != nil || len(data) == 0 {
+	backdrop := TMDBRef{Type: "backdrop", Path: "/backdrop12.jpg"}
+	if data, _, err := p.TMDB(ctx, backdrop, 320, ok); err != nil || width(t, data) != 320 {
+		t.Fatalf("320: %v", err)
+	}
+	if data, _, err := p.TMDB(ctx, backdrop, 1920, ok); err != nil || width(t, data) != 900 {
+		t.Fatalf("wider than the original: %v", err)
+	}
+	if f.count() != 1 {
+		t.Errorf("TMDB asked %d times", f.count())
+	}
+	if left, _ := os.ReadDir(dir); len(left) != 0 {
+		t.Errorf("kept on disk: %v", left)
+	}
+}
+
+// An original Overfin doesn't take (WebP whatever its name says, or over
+// MaxDimension) gives way to TMDB's largest ready-made size; nothing that
+// isn't JPEG or PNG is ever served.
+func TestTMDBOriginalFallback(t *testing.T) {
+	webp := []byte("RIFF\x24\x00\x00\x00WEBPVP8 ")
+	f := &fakeImages{serve: func(size, path string) []byte {
+		switch {
+		case size == "original":
+			return webp
+		case size == "w780" && path == "/poster1234.jpg":
+			return sizedJPEG(t, 780, 1170)
+		}
+		return nil
+	}}
+	f.start(t)
+	p := New(nil, 1<<20)
+	ctx := context.Background()
+	ok := func(context.Context) error { return nil }
+	if data, _, err := p.TMDB(ctx, TMDBRef{Type: "poster", Path: "/poster1234.jpg"}, 400, ok); err != nil || width(t, data) != 400 {
 		t.Errorf("poster: %v", err)
 	}
-	if want := []string{"/w342/poster1234.jpg", "/w500/poster1234.jpg"}; !slices.Equal(asked, want) {
-		t.Errorf("asked %v, want %v", asked, want)
+	if _, _, err := p.TMDB(ctx, TMDBRef{Type: "logo", Path: "/logo123456.png"}, 250, ok); err == nil {
+		t.Error("a logo with no image Overfin takes was served")
 	}
-	// The largest already: nothing else to ask.
-	asked = nil
-	if _, _, err := p.TMDB(context.Background(), TMDBRef{Type: "logo", Path: "/logo123456.png"}, "large", ok); !errors.Is(err, ErrUnsafe) {
-		t.Errorf("logo: %v", err)
+}
+
+// Widths asked are served as the next one made, the largest beyond; size
+// names stand for fixed ones.
+func TestWidths(t *testing.T) {
+	for _, tc := range []struct {
+		typ         string
+		asked, want int
+		ok          bool
+	}{
+		{"poster", 1, 200, true}, {"poster", 200, 200, true}, {"poster", 201, 400, true}, {"poster", 5000, 2000, true},
+		{"backdrop", 700, 1280, true}, {"still", 4000, 1280, true}, {"poster", 0, 0, false}, {"trailer", 100, 0, false},
+	} {
+		if got, ok := Width(tc.typ, tc.asked); got != tc.want || ok != tc.ok {
+			t.Errorf("%s %d: %d %v", tc.typ, tc.asked, got, ok)
+		}
 	}
-	if len(asked) != 1 {
-		t.Errorf("asked %v", asked)
+	for typ, sizes := range named {
+		for _, w := range sizes {
+			if got, _ := Width(typ, w); got != w {
+				t.Errorf("%s: %d isn't served", typ, w)
+			}
+		}
+	}
+	if Smallest("backdrop") != 320 || Smallest("nothing") != 0 {
+		t.Error("smallest")
 	}
 }

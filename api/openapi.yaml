@@ -2487,7 +2487,11 @@ paths:
       summary: An image, re-encoded and access-checked
       description: Use the URL from an `ImageRef`. Sizes come from
         `Info.imageSizes`. Checked against the active profile on every
-        request, also when cached.
+        request, also when cached. A title's artwork from TMDB (its ID
+        starts with `tmdbart_`) can be asked by `width` instead, in
+        pixels, for each screen to get its own (`srcset`); Overfin serves
+        the next of the widths it makes of that kind of image, the
+        largest beyond, never wider than the original.
       tags: [library]
       parameters:
         - name: size
@@ -2496,6 +2500,13 @@ paths:
             type: string
             enum: [small, medium, large]
             default: medium
+        - name: width
+          in: query
+          description: The width wanted, in pixels, for a title's artwork
+            from TMDB only; not with `size`.
+          schema:
+            type: integer
+            minimum: 1
       responses:
         "200":
           description: The image.
@@ -2510,7 +2521,7 @@ paths:
                 format: binary
         "404":
           description: The image doesn't exist, the profile may not see it,
-            or `size` isn't one of the sizes (`not-found`).
+            or `size` or `width` isn't one it's served at (`not-found`).
           content:
             application/problem+json:
               schema:
