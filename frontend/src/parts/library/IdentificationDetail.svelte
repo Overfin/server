@@ -3,7 +3,7 @@
 <script lang="ts">
   import { Badge, Busy, ask, toast } from '@overfin/ui';
   import { api } from '../../lib/api';
-  import { message } from '../../lib/format';
+  import { languageName, message } from '../../lib/format';
   import type { Candidate, Identified } from '../../lib/types-library';
 
   let { title: t, reload }: { title: Identified; reload: () => Promise<void> } = $props();
@@ -14,7 +14,7 @@
     t.runtimeMin && ['Length', `${t.runtimeMin} min`],
     t.episodes && ['Episodes here', String(t.episodes)],
     ['TMDB', t.tmdb ? `${t.tmdb}${t.overridden && t.jellyfinTmdb !== t.tmdb ? ` (Jellyfin said ${t.jellyfinTmdb || 'none'})` : ''}` : 'none'],
-    t.originalName && ['Original title', `${t.originalName}${t.language ? ` (${t.language})` : ''}`],
+    t.originalName && ['Original title', `${t.originalName}${t.language ? ` (${languageName(t.language)})` : ''}`],
   ].filter(Boolean) as [string, string][]);
 
   // TMDB, searched from the folder's name by default.
@@ -83,7 +83,7 @@
       <li>
         <div>
           <div class="name">{`${c.name}${c.year ? ` (${c.year})` : ''}`}</div>
-          <div class="hint">{[c.originalName && c.originalName !== c.name ? c.originalName : '', c.language, `TMDB ${c.tmdb}`].filter(Boolean).join(' · ')}</div>
+          <div class="hint">{[c.originalName && c.originalName !== c.name ? c.originalName : '', c.language && languageName(c.language), `TMDB ${c.tmdb}`].filter(Boolean).join(' · ')}</div>
         </div>
         {#if c.tmdb === t.tmdb}<Busy small action={() => act('PUT', { tmdb: c.tmdb }, 'Kept as it is.')}>It's right</Busy>{:else}<Busy small action={() => retitle(c.tmdb)}>Use this</Busy>{/if}
       </li>
@@ -106,7 +106,7 @@
         {#if c.poster}<img src={c.poster} alt="" loading="lazy" />{:else}<span class="noposter"></span>{/if}
         <div>
           <div class="name">{`${c.name}${c.year ? ` (${c.year})` : ''}`}</div>
-          <div class="hint">{[c.originalName && c.originalName !== c.name ? c.originalName : '', c.language, `TMDB ${c.tmdb}`].filter(Boolean).join(' · ')}</div>
+          <div class="hint">{[c.originalName && c.originalName !== c.name ? c.originalName : '', c.language && languageName(c.language), `TMDB ${c.tmdb}`].filter(Boolean).join(' · ')}</div>
           {#if c.overview}<div class="hint clamp">{c.overview}</div>{/if}
         </div>
         {#if c.tmdb === t.tmdb}<Badge kind="info">Current</Badge>{:else}<Busy small action={() => retitle(c.tmdb)}>Use this</Busy>{/if}

@@ -35,6 +35,7 @@ import (
 	"github.com/overfin/server/internal/cookie"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/introskipper"
+	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/notices"
 	"github.com/overfin/server/internal/oidc"
 	"github.com/overfin/server/internal/provision"
@@ -706,8 +707,10 @@ func (p *Panel) logout(w http.ResponseWriter, r *http.Request) {
 
 // ---- API --------------------------------------------------------------------
 
+// whoami is who's signed in, with every language's name (lang.List): the
+// panel names languages as the site and the player do.
 func (p *Panel) whoami(w http.ResponseWriter, r *http.Request, s *session) {
-	writeJSON(w, http.StatusOK, map[string]any{"name": s.name})
+	writeJSON(w, http.StatusOK, map[string]any{"name": s.name, "languages": lang.List()})
 }
 
 // pluginInfo describes a plugin for the panel.
