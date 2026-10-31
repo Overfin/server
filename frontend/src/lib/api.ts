@@ -79,10 +79,11 @@ export async function api<T = any>(method: string, path: string, body?: unknown)
   return data as T;
 }
 
-/** upload sends a file as it is (branding), with its own type. */
+/** upload sends a file as it is (branding, titles' images), with its own
+ * type. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function upload<T = any>(path: string, file: File): Promise<T> {
-  const res = await fetch(path, { method: 'PUT', headers: { 'Content-Type': file.type || 'image/png' }, body: file });
+export async function upload<T = any>(path: string, file: File, method = 'PUT'): Promise<T> {
+  const res = await fetch(path, { method, headers: { 'Content-Type': file.type || 'image/png' }, body: file });
   sessionLeft(res);
   const out = await res.json().catch(() => ({}));
   if (res.status === 401) {

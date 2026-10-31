@@ -178,8 +178,22 @@ type TitleInfo struct {
 
 // TitleInfos returns the titles of keys (those that parse), as of today
 // (YYYY-MM-DD, for what has aired), their texts in language where they're
-// kept ("" for the default language).
+// kept ("" for the default language), as admins changed them where they
+// did (the metadata editor).
 func (s *Store) TitleInfos(ctx context.Context, keys []string, today, language string) (map[string]*TitleInfo, error) {
+	out, err := s.titleInfos(ctx, keys, today, language, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.applyEdits(ctx, out, language); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// TMDBTitleInfos is TitleInfos without admins' changes: as TMDB says, for
+// the metadata editor to show beside them.
+func (s *Store) TMDBTitleInfos(ctx context.Context, keys []string, today, language string) (map[string]*TitleInfo, error) {
 	return s.titleInfos(ctx, keys, today, language, true)
 }
 
@@ -513,18 +527,21 @@ func (s *Store) InLibrary(ctx context.Context, kind, tmdb string) (bool, error) 
 }
 
 // ImageTitles lists the titles (by key) an image of TMDB's, at path, is
-// one of: a title's poster, backdrop or logo, a season's poster, an
-// episode's still, a cast member's photo. At most limit.
+// one of: a title's poster, backdrop or logo (TMDB's, or one an admin
+// chose), a season's poster, an episode's still, a cast member's photo.
+// At most limit.
 func (s *Store) ImageTitles(ctx context.Context, typ, path string, limit int) ([]string, error) {
 	var q string
 	switch typ {
 	case "poster", "backdrop":
 		q = `SELECT key FROM artwork WHERE (type = ?1 OR (?1 = 'poster' AND type = 'textless')) AND path = ?2
 			UNION SELECT kind || '/tmdb/' || tmdb FROM catalog_titles WHERE (?1 = 'poster' AND poster = ?2) OR (?1 = 'backdrop' AND backdrop = ?2)
-			UNION SELECT 'series/tmdb/' || series || '/s' || season FROM catalog_seasons WHERE ?1 = 'poster' AND poster = ?2`
+			UNION SELECT 'series/tmdb/' || series || '/s' || season FROM catalog_seasons WHERE ?1 = 'poster' AND poster = ?2
+			UNION SELECT kind || '/tmdb/' || tmdb FROM title_edits WHERE field = ?1 AND value = ?2`
 	case "logo":
 		q = `SELECT key FROM artwork WHERE type = ?1 AND path = ?2
-			UNION SELECT kind || '/tmdb/' || tmdb FROM catalog_title_texts WHERE ?1 = 'logo' AND logo = ?2`
+			UNION SELECT kind || '/tmdb/' || tmdb FROM catalog_title_texts WHERE ?1 = 'logo' AND logo = ?2
+			UNION SELECT kind || '/tmdb/' || tmdb FROM title_edits WHERE field = ?1 AND value = ?2`
 	case "profile":
 		// A film's or a series' cast member.
 		q = `SELECT key FROM cast_photos WHERE ?1 = 'profile' AND path = ?2`

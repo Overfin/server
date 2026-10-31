@@ -424,3 +424,41 @@ func TestLogo(t *testing.T) {
 		}
 	}
 }
+
+// A title's images are listed in every language, TMDB's paths only, and
+// the answer must be the title's.
+func TestTitleImages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/3/movie/550988/images" && r.URL.RawQuery == "":
+			io.WriteString(w, `{"id":550988,"posters":[{"file_path":"/frposter12.jpg","iso_639_1":"fr","width":2000,"height":3000},
+				{"file_path":"../../etc/passwd","iso_639_1":"fr"},{"file_path":"/xxposter12.jpg","iso_639_1":"<b>"},
+				{"file_path":"/noposter12.jpg","iso_639_1":null}],"logos":[{"file_path":"/enlogo1234.png","iso_639_1":"en"}]}`)
+		case r.URL.Path == "/3/tv/1/images":
+			io.WriteString(w, `{"id":2,"posters":[]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL+"/3", testToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.TitleImages(context.Background(), "movie", 550988)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got["poster"]) != 2 || got["poster"][0] != (Image{"/frposter12.jpg", "fr", 2000, 3000}) || got["poster"][1].Language != "" {
+		t.Errorf("posters: %+v", got["poster"])
+	}
+	if len(got["backdrop"]) != 0 || len(got["logo"]) != 1 {
+		t.Errorf("backdrops, logos: %+v", got)
+	}
+	if _, err := c.TitleImages(context.Background(), "series", 1); !errors.Is(err, ErrNotFound) {
+		t.Errorf("another title's answer: %v", err)
+	}
+	if _, err := c.TitleImages(context.Background(), "season", 1); !errors.Is(err, ErrNotFound) {
+		t.Errorf("not a kind: %v", err)
+	}
+}

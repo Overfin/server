@@ -530,6 +530,14 @@ func run(logger *slog.Logger) error {
 		}
 		p.Images = sh.images
 		p.OnRetitled = sh.titles.Wake
+		// The metadata editor: TMDB's images of a title, from TMDB itself.
+		p.TitleImages = func(ctx context.Context, kind string, tmdbID int) (map[string][]tmdb.Image, error) {
+			c, ok := gw.titleSource().(*tmdb.Client)
+			if !ok || c == nil {
+				return nil, admin.ErrNoTMDB
+			}
+			return c.TitleImages(ctx, kind, tmdbID)
+		}
 		switch {
 		case managed && a.Enabled():
 			// Only on its own listener, private, which serves the site's

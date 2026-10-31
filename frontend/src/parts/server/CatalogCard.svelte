@@ -27,7 +27,7 @@
   {/snippet}
   <Stats items={stats} />
   {#if parts.length}
-    <p class="hint">Can't be matched yet: {parts.join('; ')}. Refreshing their metadata in Jellyfin usually fixes it; Identification lists them.</p>
+    <p class="hint">Can't be matched yet: {parts.join('; ')}. Refreshing their metadata in Jellyfin usually fixes it; Metadata lists them.</p>
   {/if}
   {#if c.error}<p class="error">{c.error}</p>{/if}
 </Card>

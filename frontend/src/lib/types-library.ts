@@ -43,6 +43,7 @@ export interface Identified {
   tmdb?: string;
   jellyfinTmdb?: string;
   overridden?: boolean;
+  edited?: boolean;
   runtimeMin?: number;
   episodes?: number;
   reasons: Reason[];
@@ -74,4 +75,46 @@ export interface Valuation {
   discoveryShare: number;
   accounts: number;
   titles: number;
+}
+
+// The metadata editor: a title's texts and artwork in each language.
+export interface MetadataText {
+  language: string;
+  default: boolean;
+  name: string;
+  overview: string;
+  tmdbName: string;
+  tmdbOverview: string;
+  nameEdited: boolean;
+  overviewEdited: boolean;
+  untranslated: boolean;
+}
+
+export type ImageType = 'poster' | 'backdrop' | 'logo';
+
+export interface MetadataImage {
+  url?: string;
+  edited: '' | 'language' | 'all';
+}
+
+export interface MetadataArtwork {
+  language: string; // a regional tag, or '*' for every language
+  images: Record<ImageType, MetadataImage>;
+}
+
+export interface Metadata {
+  kind: string;
+  tmdb: string;
+  name: string;
+  year?: number;
+  texts: MetadataText[];
+  artwork: MetadataArtwork[];
+}
+
+export interface ImageChoice {
+  value: string;
+  url: string;
+  language?: string;
+  width?: number;
+  height?: number;
 }

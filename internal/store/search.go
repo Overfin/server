@@ -57,8 +57,9 @@ func likeWords(query string) string {
 
 // SearchLibrary finds the library's films and series (by title key) whose
 // name matches query: TMDB's name, or a file's own for one TMDB doesn't
-// know. Whole names first, then names that start so, then the others,
-// the best rated first. At most limit.
+// know, or a name an admin gave it, in any language. Whole names first,
+// then names that start so, then the others, the best rated first. At
+// most limit.
 func (s *Store) SearchLibrary(ctx context.Context, query string, limit int) ([]string, error) {
 	q := Fold(query)
 	if q == "" {
@@ -66,14 +67,20 @@ func (s *Store) SearchLibrary(ctx context.Context, query string, limit int) ([]s
 	}
 	pattern, prefix := likeWords(q), strings.TrimSuffix(likePrefix(q), "%")+"%"
 	name := `coalesce(t.search_name, lower(i.name))`
+	rank := func(name string) string {
+		return `CASE WHEN ` + name + ` = ?1 THEN 0 WHEN ` + name + ` LIKE ?2 ESCAPE '\' THEN 1 WHEN ` + name + ` LIKE ?3 ESCAPE '\' THEN 2 ELSE 3 END`
+	}
+	edited := `(SELECT min(` + rank("e.folded") + `) FROM title_edits e
+		WHERE e.kind = i.kind AND e.tmdb = i.tmdb AND e.field = 'name')`
 	// TMDB's names and ratings from their index (see fromTMDB).
 	return s.ids(ctx, `SELECT title_key FROM (
-			SELECT i.title_key, min(CASE WHEN `+name+` = ? THEN 0 WHEN `+name+` LIKE ? ESCAPE '\' THEN 1 ELSE 2 END) AS rank,
-				max(coalesce(t.rating, i.community_rating, 0)) AS rating
-			FROM catalog_items i LEFT JOIN catalog_titles t INDEXED BY catalog_titles_listing ON t.kind = i.kind AND t.tmdb = i.tmdb
-			WHERE i.kind IN ('movie', 'series') AND i.title_key IS NOT NULL AND `+name+` LIKE ? ESCAPE '\'
-			GROUP BY i.title_key)
-		ORDER BY rank, rating DESC, title_key LIMIT ?`, q, prefix, pattern, limit)
+			SELECT title_key, min(rank) AS rank, max(rating) AS rating FROM (
+				SELECT i.title_key, min(`+rank(name)+`, coalesce(`+edited+`, 3)) AS rank,
+					coalesce(t.rating, i.community_rating, 0) AS rating
+				FROM catalog_items i LEFT JOIN catalog_titles t INDEXED BY catalog_titles_listing ON t.kind = i.kind AND t.tmdb = i.tmdb
+				WHERE i.kind IN ('movie', 'series') AND i.title_key IS NOT NULL)
+			WHERE rank < 3 GROUP BY title_key)
+		ORDER BY rank, rating DESC, title_key LIMIT ?4`, q, prefix, pattern, limit)
 }
 
 // PersonHit is a person a search found.

@@ -158,11 +158,13 @@ func (s *Store) Artwork(ctx context.Context, keys []string) (map[string]map[stri
 // ArtworkItems lists library items (by Jellyfin ID) the image at path
 // (of type typ) belongs to: the titles with that key, and for a series'
 // own image, its seasons and episodes too. At most limit. A text-free
-// poster is a poster.
+// poster is a poster; one an admin chose (title_edits), the title's.
 func (s *Store) ArtworkItems(ctx context.Context, typ, path string, limit int) ([]string, error) {
-	return s.ids(ctx, `SELECT i.id FROM artwork a JOIN catalog_items i
-			ON i.title_key = a.key OR (i.title_key >= a.key || '/' AND i.title_key < a.key || '0')
-		WHERE (a.type = ?1 OR (?1 = 'poster' AND a.type = 'textless')) AND a.path = ?2 LIMIT ?3`, typ, path, limit)
+	return s.ids(ctx, `SELECT i.id FROM (
+			SELECT key FROM artwork WHERE (type = ?1 OR (?1 = 'poster' AND type = 'textless')) AND path = ?2
+			UNION SELECT kind || '/tmdb/' || tmdb FROM title_edits WHERE field = ?1 AND value = ?2) a
+		JOIN catalog_items i ON i.title_key = a.key OR (i.title_key >= a.key || '/' AND i.title_key < a.key || '0')
+		LIMIT ?3`, typ, path, limit)
 }
 
 // TextlessKnown says whether a title's text-free poster was asked of TMDB

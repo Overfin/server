@@ -17,3 +17,14 @@
 /* Identification: TMDB's candidates, with their posters. */
 .candidates li { align-items: flex-start; }
 .candidates img, .candidates .noposter { width: 3.4rem; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 6px; background: var(--panel-3); flex: none; }
+
+/* Metadata: a title's window starts with its poster; its artwork rows
+   show each picture small, a logo on a checkered ground (the kit's). */
+.title-window-head { display: flex; align-items: center; gap: .9rem; margin-bottom: 1rem; }
+.title-window-head img, .title-window-head .noposter { width: 4.2rem; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 6px; background: var(--panel-3); flex: none; }
+.artwork-rows li { flex-wrap: wrap; }
+.artwork-thumb { width: 3.4rem; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 6px; background: var(--panel-3); flex: none; }
+.artwork-thumb.backdrop, .artwork-thumb.logo { width: 7rem; aspect-ratio: 16 / 9; }
+.artwork-thumb.logo { object-fit: contain; }
+.artwork-rows .row-actions { margin-left: auto; }
+@media (max-width: 640px) { .artwork-rows .row-actions { flex-basis: 100%; text-align: right; } }

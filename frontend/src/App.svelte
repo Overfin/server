@@ -17,7 +17,7 @@
   import Playing from './pages/Playing.svelte';
   import Libraries from './pages/Libraries.svelte';
   import Categories from './pages/Categories.svelte';
-  import Identification from './pages/Identification.svelte';
+  import Metadata from './pages/Metadata.svelte';
   import Valuation from './pages/Valuation.svelte';
   import Apps from './pages/Apps.svelte';
 
@@ -32,7 +32,7 @@
     playing: { label: 'Now playing', icon: icons.play, page: Playing },
     libraries: { label: 'Libraries', icon: icons.folder, page: Libraries },
     categories: { label: 'Categories', icon: icons.grid, page: Categories },
-    identification: { label: 'Identification', icon: icons.check, page: Identification },
+    metadata: { label: 'Metadata', icon: icons.check, page: Metadata },
     valuation: { label: 'Valuation', icon: icons.scale, page: Valuation },
     apps: { label: 'Apps', icon: icons.key, page: Apps },
   };
@@ -41,7 +41,7 @@
   const nav: NavGroup[] = [
     group('Server', ['server', 'features', 'branding']),
     group('People', ['people', 'registration', 'templates', 'notices', 'playing']),
-    group('Library', ['libraries', 'categories', 'identification', 'valuation', 'apps']),
+    group('Library', ['libraries', 'categories', 'metadata', 'valuation', 'apps']),
   ];
 
   let who = $state<string | null>(null);

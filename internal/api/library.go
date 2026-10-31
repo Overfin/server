@@ -310,6 +310,16 @@ func (l Library) image(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if id, ok := strings.CutPrefix(r.PathValue("id"), uploadImage); ok {
+		if !slices.Contains(images.Sizes, size) {
+			problem.Send(w, problem.NotFound, "")
+			return
+		}
+		if p := l.active(w, r); p != nil {
+			l.uploadedImage(w, r, p, id)
+		}
+		return
+	}
 	ref, err := images.Parse(r.PathValue("id"))
 	if err != nil || !slices.Contains(images.Sizes, size) {
 		problem.Send(w, problem.NotFound, "")

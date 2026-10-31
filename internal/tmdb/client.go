@@ -657,6 +657,61 @@ func (c *Client) TextlessPoster(ctx context.Context, kind string, tmdbID int) (s
 	return pickTextless(raw.Posters), nil
 }
 
+// Image is one of TMDB's images of a title, as the metadata editor lists
+// them.
+type Image struct {
+	Path string
+	// Language is TMDB's two-letter code for the text on it; "" when it
+	// has none.
+	Language      string
+	Width, Height int
+}
+
+// maxImages is how many of each kind TitleImages gives at most.
+const maxImages = 120
+
+// TitleImages lists a film's ("movie") or a series' ("series") posters,
+// backdrops and logos (by those names), in every language, best first as
+// TMDB orders them; those with a path that isn't TMDB's are left out.
+func (c *Client) TitleImages(ctx context.Context, kind string, tmdbID int) (map[string][]Image, error) {
+	k := tv(kind)
+	if k == "" || !ValidID(tmdbID) {
+		return nil, ErrNotFound
+	}
+	type sized struct {
+		rawImage
+		Width  int `json:"width"`
+		Height int `json:"height"`
+	}
+	var raw struct {
+		ID        int     `json:"id"`
+		Posters   []sized `json:"posters"`
+		Backdrops []sized `json:"backdrops"`
+		Logos     []sized `json:"logos"`
+	}
+	// Without a language, TMDB gives them all.
+	if err := c.get(ctx, "/"+k+"/"+strconv.Itoa(tmdbID)+"/images", nil, &raw); err != nil {
+		return nil, err
+	}
+	if raw.ID != tmdbID {
+		return nil, ErrNotFound
+	}
+	out := map[string][]Image{}
+	for typ, list := range map[string][]sized{"poster": raw.Posters, "backdrop": raw.Backdrops, "logo": raw.Logos} {
+		out[typ] = []Image{}
+		for _, im := range list {
+			if !imagePath.MatchString(im.FilePath) || (im.Language != "" && !isoLanguage.MatchString(im.Language)) {
+				continue
+			}
+			if len(out[typ]) == maxImages {
+				break
+			}
+			out[typ] = append(out[typ], Image{Path: im.FilePath, Language: im.Language, Width: max(im.Width, 0), Height: max(im.Height, 0)})
+		}
+	}
+	return out, nil
+}
+
 // rawImage is one of TMDB's images of a title.
 type rawImage struct {
 	FilePath string `json:"file_path"`

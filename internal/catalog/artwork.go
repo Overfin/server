@@ -50,8 +50,8 @@ func (k *LibraryArtwork) Once(ctx context.Context) error {
 	return err
 }
 
-// wanted is the artwork to keep: the library titles', and their
-// collections'.
+// wanted is the artwork to keep: the library titles', their
+// collections', and the images admins chose for titles.
 func (k *LibraryArtwork) wanted(ctx context.Context) ([]images.TMDBRef, error) {
 	keys, err := k.Store.LibraryTitleKeys(ctx)
 	if err != nil {
@@ -84,6 +84,16 @@ func (k *LibraryArtwork) wanted(ctx context.Context) ([]images.TMDBRef, error) {
 	}
 	for _, c := range collections {
 		wanted = append(wanted, images.TMDBRef{Type: "poster", Path: c.Poster}, images.TMDBRef{Type: "backdrop", Path: c.Backdrop})
+	}
+	// The TMDB images admins chose, in every language.
+	edited, err := k.Store.EditedArtwork(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for typ, paths := range edited {
+		for _, path := range paths {
+			wanted = append(wanted, images.TMDBRef{Type: typ, Path: path})
+		}
 	}
 	return wanted, nil
 }
