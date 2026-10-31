@@ -6,9 +6,7 @@ package identify
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"unicode"
 
@@ -152,47 +150,6 @@ func simple(s string) string {
 		}
 	}
 	return b.String()
-}
-
-// named is what a folder or a file name says: a title, its year, and a
-// TMDB ID when it carries one ("[tmdbid-949]", as Jellyfin names them).
-type named struct {
-	name string
-	year int
-	tmdb string
-}
-
-var (
-	tmdbTag   = regexp.MustCompile(`(?i)[\[{(]\s*tmdb(?:id)?\s*[-=:]\s*(\d{1,9})\s*[\]})]`)
-	brackets  = regexp.MustCompile(`[\[{][^\]}]*[\]}]`)
-	extension = regexp.MustCompile(`\.[A-Za-z0-9]{2,4}$`)
-	yearIn    = regexp.MustCompile(`(?:^|[\s._(\[-])((?:19|20)\d{2})(?:$|[\s._)\]-])`)
-)
-
-// parse reads a folder or file name such as "Heat (1995) [tmdbid-949]" or
-// "The.Candidate.2023.1080p.mkv".
-func parse(s string) named {
-	var n named
-	if m := tmdbTag.FindStringSubmatch(s); m != nil {
-		// As TMDB writes it: "0949" is 949, and 0 is none.
-		if id, _ := strconv.Atoi(m[1]); id > 0 {
-			n.tmdb = strconv.Itoa(id)
-		}
-	}
-	s = brackets.ReplaceAllString(s, " ")
-	s = extension.ReplaceAllString(s, "")
-	// The year: the last one with a name before it ("1917 (2019)" is
-	// 1917, from 2019; "1917" alone is a name).
-	cut := len(s)
-	for _, m := range yearIn.FindAllStringSubmatchIndex(s, -1) {
-		if strings.Trim(s[:m[2]], " ._([-") != "" {
-			n.year, _ = strconv.Atoi(s[m[2]:m[3]])
-			cut = m[2]
-		}
-	}
-	name := strings.NewReplacer(".", " ", "_", " ").Replace(s[:cut])
-	n.name = strings.Trim(strings.Join(strings.Fields(name), " "), " -([")
-	return n
 }
 
 // tagsOf are the TMDB IDs a title's folder and file name.
