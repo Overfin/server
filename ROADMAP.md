@@ -894,6 +894,14 @@ nothing beyond what that needs.
 - **Metadata editor** in the panel: the operator changes a title's
   details by hand, and Overfin keeps the changes itself, over what TMDB
   says.
+- **Images resized by Overfin itself** (next). Today Overfin re-encodes
+  every image at the size it gets it: TMDB's ready-made sizes, Jellyfin's
+  own resizing, and uploads (titles' artwork, branding) as large as they
+  came. Overfin resizes them itself, as it re-encodes them, to the sizes
+  it wants: the panel's thumbnails first (its Artwork tab and image
+  picker load backdrops 1280 pixels wide), uploads, then whichever of
+  the site's sizes fit better than TMDB's. Written for Overfin, without
+  a new dependency.
 
 ## Companion projects
 
