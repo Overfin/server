@@ -25,6 +25,9 @@ type LibraryTitle struct {
 	Overridden         bool
 	// Edited: an admin changed its TMDB title's texts or artwork.
 	Edited bool
+	// Unsure is Overfin's own match when it wasn't sure of it: why, and
+	// the candidates it weighed; nil otherwise.
+	Unsure *Match
 	// The TMDB title's name, year and details, when kept.
 	TMDBName string
 	TMDBYear int
@@ -40,8 +43,10 @@ func (s *Store) LibraryTitles(ctx context.Context) ([]LibraryTitle, error) {
 			coalesce(i.folder_name, ''), coalesce(i.file_name, ''), coalesce(i.runtime_ms, 0),
 			coalesce(i.tmdb, ''), coalesce(i.jellyfin_tmdb, ''), o.item_id IS NOT NULL,
 			coalesce(t.name, ''), coalesce(t.year, 0), t.details,
-			EXISTS (SELECT 1 FROM title_edits e WHERE e.kind = i.kind AND e.tmdb = i.tmdb)
+			EXISTS (SELECT 1 FROM title_edits e WHERE e.kind = i.kind AND e.tmdb = i.tmdb),
+			coalesce(m.source = 'overfin' AND NOT m.sure, 0), coalesce(m.reasons, '[]'), coalesce(m.candidates, '[]')
 		FROM catalog_items i
+		LEFT JOIN title_matches m ON m.item_id = i.id
 		LEFT JOIN title_overrides o ON o.item_id = i.id
 		LEFT JOIN catalog_titles t ON t.kind = i.kind AND t.tmdb = i.tmdb
 		WHERE i.kind IN ('movie', 'series')
@@ -54,13 +59,22 @@ func (s *Store) LibraryTitles(ctx context.Context) ([]LibraryTitle, error) {
 	for rows.Next() {
 		var t LibraryTitle
 		var details sql.NullString
+		var unsure bool
+		var reasons, candidates string
 		if err := rows.Scan(&t.ItemID, &t.Kind, &t.LibraryID, &t.Name, &t.Year, &t.FolderName, &t.FileName, &t.RuntimeMs,
-			&t.TMDB, &t.JellyfinTMDB, &t.Overridden, &t.TMDBName, &t.TMDBYear, &details, &t.Edited); err != nil {
+			&t.TMDB, &t.JellyfinTMDB, &t.Overridden, &t.TMDBName, &t.TMDBYear, &details, &t.Edited,
+			&unsure, &reasons, &candidates); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		if details.Valid {
 			json.Unmarshal([]byte(details.String), &t.Details)
+		}
+		if unsure && !t.Overridden {
+			m := &Match{TMDB: t.TMDB}
+			json.Unmarshal([]byte(reasons), &m.Reasons)
+			json.Unmarshal([]byte(candidates), &m.Candidates)
+			t.Unsure = m
 		}
 		out = append(out, t)
 	}

@@ -78,8 +78,9 @@ func (s *Store) SetFound(ctx context.Context, t FindTarget, tmdb string, at time
 }
 
 // foundTMDB is the TMDB ID an item is known by: the one an admin chose
-// (title_overrides), else Jellyfin's, else the one found for its other
-// IDs; "" when there's none.
+// (title_overrides), else the one Overfin matched it to (title_matches),
+// else Jellyfin's, else the one found for its other IDs; "" when there's
+// none.
 func (s *Store) foundTMDB(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, it CatalogItem) string {
@@ -88,6 +89,9 @@ func (s *Store) foundTMDB(ctx context.Context, q interface {
 	}
 	var tmdb sql.NullString
 	if q.QueryRowContext(ctx, `SELECT tmdb FROM title_overrides WHERE item_id = ?`, it.ID).Scan(&tmdb); tmdb.Valid {
+		return tmdb.String
+	}
+	if q.QueryRowContext(ctx, `SELECT tmdb FROM title_matches WHERE item_id = ?`, it.ID).Scan(&tmdb); tmdb.Valid {
 		return tmdb.String
 	}
 	if it.TMDB != "" {

@@ -76,6 +76,20 @@
     {#if t.overridden}<Busy action={back}>Back to Jellyfin's</Busy>{/if}
   </div>
 {/if}
+{#if t.candidates?.length}
+  <h3>Candidates Overfin weighed</h3>
+  <ul class="list candidates">
+    {#each t.candidates as c (c.tmdb)}
+      <li>
+        <div>
+          <div class="name">{`${c.name}${c.year ? ` (${c.year})` : ''}`}</div>
+          <div class="hint">{[c.originalName && c.originalName !== c.name ? c.originalName : '', c.language, `TMDB ${c.tmdb}`].filter(Boolean).join(' · ')}</div>
+        </div>
+        {#if c.tmdb === t.tmdb}<Busy small action={() => act('PUT', { tmdb: c.tmdb }, 'Kept as it is.')}>It's right</Busy>{:else}<Busy small action={() => retitle(c.tmdb)}>Use this</Busy>{/if}
+      </li>
+    {/each}
+  </ul>
+{/if}
 <h3>Find the right one on TMDB</h3>
 <form class="toolbar" onsubmit={find}>
   <input type="search" bind:value={query} aria-label="Search TMDB" />

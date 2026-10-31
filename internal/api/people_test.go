@@ -165,3 +165,7 @@ func TestSearch(t *testing.T) {
 		t.Errorf("too long: %d", code)
 	}
 }
+
+func (f *fakePeople) SearchKind(context.Context, string, string, int) ([]tmdb.Found, error) {
+	return nil, nil
+}
