@@ -86,10 +86,13 @@ type MediaSource struct {
 }
 
 type MediaStream struct {
-	Index                int
-	Type                 string
-	Codec                string
-	Language             string
+	Index    int
+	Type     string
+	Codec    string
+	Language string
+	// Title is the track's own, as the file names it ("VFQ", "Commentary");
+	// DisplayTitle, Jellyfin's, made of its language and format.
+	Title                string
 	DisplayTitle         string
 	Channels             int
 	IsDefault            bool
