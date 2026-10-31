@@ -860,9 +860,8 @@ nothing beyond what that needs.
     Subtitles: one entry per language, text first; those for the hard of
     hearing only when a language has nothing else.
   - Forced subtitles always on, in the audio's language, even with
-    subtitles off (an invented language translated); full subtitles in
-    that language take their place when chosen; none matching the audio,
-    nothing shown by itself.
+    subtitles off (an invented language translated); any subtitles chosen
+    take their place; none matching the audio, nothing shown by itself.
   - A profile's audio: as the site, the original version (TMDB's original
     language), or a language; its subtitles: off, or a language; both with
     their region, the same language from elsewhere when a file lacks it.
