@@ -659,19 +659,9 @@ writes a PIN to a `passwordreset*.json` file in Jellyfin's config folder;
 `POST /Users/ForgotPassword/Pin` with `{"Pin":"…"}` makes that PIN the
 password. `-recover-tokens` prints these steps too.
 
-## AI-assisted development
+## How it's made
 
-Said plainly: Overfin is written by Claude (Anthropic's AI): its code, its
-tests and its documentation. The maintainer gives directions (what to build,
-how it should behave, what to change) and uses Overfin day to day, on a real
-server with a real library, but doesn't write the code or review it line by
-line. Commits Claude wrote carry a `Co-Authored-By: Claude` trailer.
-
-What checks the code is what runs before every push: the tests, vet,
-staticcheck and govulncheck; and the rules in [SECURITY.md](SECURITY.md)
-and [THREAT_MODEL.md](THREAT_MODEL.md), written down so the code can be
-checked against them. That isn't an independent security review, and
-Overfin hasn't had one yet: reviews and reports are very welcome.
+Overfin is designed by its maintainer, who makes the architecture, security and product decisions, and written by Claude (Anthropic's AI); Claude's commits carry a `Co-Authored-By: Claude` trailer. The code is checked by its tests, linters and the rules in [SECURITY.md](SECURITY.md); it hasn't had an independent security review yet.
 
 ## License
 
