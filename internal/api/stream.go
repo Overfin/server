@@ -28,7 +28,10 @@ func (s Stream) Register(r *plugin.Registrar) error {
 	if err := r.HandleFunc("GET /api/v1/stream/{ticket}/{name}", s.serve); err != nil {
 		return err
 	}
-	return r.HandleFunc("GET /api/v1/stream/{ticket}/subtitles/{track}", s.subtitles)
+	if err := r.HandleFunc("GET /api/v1/stream/{ticket}/subtitles/{track}", s.subtitles); err != nil {
+		return err
+	}
+	return r.HandleFunc("GET /api/v1/stream/{ticket}/pictures/{track}", s.pictures)
 }
 
 const (
@@ -222,6 +225,46 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
 	w.Header().Set("Content-Length", strconv.Itoa(len(vtt)))
 	_, _ = w.Write(vtt)
+}
+
+// pictures serves one subtitle track of pictures (PGS) as Jellyfin
+// extracts it, once Overfin read it whole and found every part of it
+// well-formed and within its limits (SECURITY.md rule 11). The player
+// decodes and draws it: sent as opaque bytes, never as anything a browser
+// would render.
+func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
+	if len(r.URL.Query()) > 0 {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	index, ok := trackIndex(r.PathValue("track"), 's')
+	if !ok {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	st, a := s.stream(w, r)
+	if st == nil {
+		return
+	}
+	if !st.PictureSubtitle(index) {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	l := s.Playback.Library
+	path := "/Videos/" + st.ItemID + "/" + st.SourceID + "/Subtitles/" + strconv.Itoa(index) + "/Stream.pgssub"
+	body, err := l.Jellyfin.ReadSmall(r.Context(), *a, path, nil, playback.MaxPGS)
+	if err != nil {
+		l.upstreamError(w, err)
+		return
+	}
+	if err := playback.CheckPGS(body); err != nil {
+		l.Logger.Warn("refused upstream picture subtitles", "playback", st.ID)
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	_, _ = w.Write(body)
 }
 
 // validRange says whether a Range header is one range of bytes Jellyfin
