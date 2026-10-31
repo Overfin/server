@@ -163,7 +163,7 @@ func (s *Setup) PrivateSiteHandler() http.Handler { return privateOnly(s.handler
 
 func (s *Setup) handler(public bool) http.Handler {
 	mux := http.NewServeMux()
-	ui, _ := fs.Sub(uiFiles, "ui")
+	ui, _ := fs.Sub(uiFiles, "dist")
 	files := http.StripPrefix("/admin/", http.FileServerFS(ui))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
@@ -171,9 +171,9 @@ func (s *Setup) handler(public bool) http.Handler {
 	mux.HandleFunc("GET /admin/{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFileFS(w, r, ui, "setup.html")
 	})
-	for _, f := range []string{"setup.js", "panel.css", "logo.svg"} {
-		mux.Handle("GET /admin/"+f, files)
-	}
+	// The page's built script and styles, and the logo.
+	mux.Handle("GET /admin/assets/", files)
+	mux.Handle("GET /admin/logo.svg", files)
 	mux.Handle("GET /admin/theme.css", theme.Handler())
 	mux.HandleFunc("GET /admin/api/setup", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()

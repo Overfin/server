@@ -34,6 +34,13 @@ limits); apps, official or not, use only its public API. MIT, public.
 - After editing `api/openapi.yaml`, check it still parses:
   `python3 -c "import yaml; yaml.safe_load(open('api/openapi.yaml'))"`.
   A colon followed by a space inside a plain-text description breaks it.
+- The control panel and the setup page are a Svelte app in `frontend/`, on
+  Overfin UI (github.com/overfin/ui), the look and components every
+  Overfin panel shares (Overtide and Overswell too): never restyled here.
+  Lists with Edit/Delete, forms in a `FormModal`, confirmations with `ask`.
+  After a change: `npm run check` and `npm run build` in `frontend/`, and
+  commit `internal/admin/dist` (Go embeds it; `go build` needs no Node);
+  screenshots dark, light and on a phone.
 - CI (`.github/workflows/ci.yml`) runs all of the above on every push.
 - Layout: the package `overfin` (in `overfin/`) is Overfin (startup,
   gateway, every feature built in); `cmd/overfin` is the official build
@@ -45,5 +52,7 @@ limits); apps, official or not, use only its public API. MIT, public.
 ## Layout
 - `cmd/overfin`: entry point
 - `overfin`: Overfin itself (startup, the gateway, wiring every feature)
+- `frontend/`: the control panel and the setup page (Svelte), built into
+  `internal/admin/dist`
 - `internal/server`: HTTP handler, middleware
 - `internal/plugin`: plugin interface and the route registrar

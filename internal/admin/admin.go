@@ -43,7 +43,10 @@ import (
 	"github.com/overfin/server/internal/tmdb"
 )
 
-//go:embed ui
+// uiFiles are the control panel and the setup page, built from frontend/
+// (npm run build there).
+//
+//go:embed all:dist
 var uiFiles embed.FS
 
 // Features is where the panel reads and changes the feature settings.
@@ -233,7 +236,7 @@ func (p *Panel) SiteHandler(private bool) http.Handler {
 
 func (p *Panel) handler() http.Handler {
 	mux := http.NewServeMux()
-	ui, _ := fs.Sub(uiFiles, "ui")
+	ui, _ := fs.Sub(uiFiles, "dist")
 	mux.Handle("GET /admin/", http.StripPrefix("/admin/", http.FileServerFS(ui)))
 	mux.Handle("GET /admin/theme.css", theme.Handler())
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
