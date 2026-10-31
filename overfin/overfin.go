@@ -477,7 +477,9 @@ func run(logger *slog.Logger) error {
 	// it's out of reach), and whole once a day.
 	cat := &catalog.Sync{Jellyfin: sh.jf, Store: db, Logger: logger,
 		Service:      sh.service,
-		ChangesEvery: 5 * time.Minute, FullEvery: 24 * time.Hour}
+		ChangesEvery: 5 * time.Minute, FullEvery: 24 * time.Hour,
+		// New titles matched, and their pages fetched, at once.
+		Read: sh.titles.Wake}
 	go cat.Run(ctx)
 	go cat.Watch(ctx)
 	// Discovery's lists, from TMDB: 10 pages (200 titles) per list, every
