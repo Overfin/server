@@ -301,15 +301,19 @@ type startRequest struct {
 
 // Shapes from the API specification.
 type trackJSON struct {
-	ID              string `json:"id"`
-	Label           string `json:"label"`
-	Language        string `json:"language,omitempty"`
-	Codec           string `json:"codec,omitempty"`
-	Channels        int    `json:"channels,omitempty"`
+	ID string `json:"id"`
+	// Label is its language's name in itself ("Français (Canada)").
+	Label    string `json:"label"`
+	Language string `json:"language,omitempty"`
+	Channels int    `json:"channels,omitempty"`
+	// Role, for audio besides the film's own: commentary, description.
+	Role            string `json:"role,omitempty"`
 	Default         bool   `json:"default,omitempty"`
 	Forced          bool   `json:"forced,omitempty"`
 	HearingImpaired bool   `json:"hearingImpaired,omitempty"`
-	URL             string `json:"url,omitempty"`
+	// Pictures: subtitles that are pictures (PGS), for the client to draw.
+	Pictures bool   `json:"pictures,omitempty"`
+	URL      string `json:"url,omitempty"`
 }
 
 type versionJSON struct {
@@ -399,9 +403,14 @@ type sessionJSON struct {
 	AudioTrack     string                `json:"audioTrack,omitempty"`
 	SubtitleTracks []trackJSON           `json:"subtitleTracks,omitempty"`
 	SubtitleTrack  string                `json:"subtitleTrack,omitempty"`
-	MaxBitrateKbps int                   `json:"maxBitrateKbps,omitempty"`
-	Segments       []segmentJSON         `json:"segments,omitempty"`
-	Trickplay      *trickplayJSON        `json:"trickplay,omitempty"`
+	// ForcedTracks are subtitles for the lines in another language only;
+	// ForcedTrack, the one in the audio's language, shown whenever no
+	// other subtitles are.
+	ForcedTracks   []trackJSON    `json:"forcedTracks,omitempty"`
+	ForcedTrack    string         `json:"forcedTrack,omitempty"`
+	MaxBitrateKbps int            `json:"maxBitrateKbps,omitempty"`
+	Segments       []segmentJSON  `json:"segments,omitempty"`
+	Trickplay      *trickplayJSON `json:"trickplay,omitempty"`
 	// Next is the episode after this one, when it's one the profile may
 	// see: the rest of the season, then the next season's.
 	Next *library.TitleSummary `json:"next,omitempty"`
@@ -574,6 +583,26 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 			pr.AudioStreamIndex, again = &n, true
 		}
 	}
+	// The audio playing is always one listed: a variant merged away (a
+	// stereo beside the 5.1) gives way to the one kept.
+	if req.AudioTrack == "" && pr.AudioStreamIndex == nil {
+		if i := defaultAudio(dec.Source); i >= 0 {
+			if _, listed := tracks.Find(audioTracks, i); !listed {
+				for _, ms := range dec.Source.MediaStreams {
+					if ms.Type != "Audio" || ms.Index != i {
+						continue
+					}
+					a := tracks.Audio(ms)
+					for _, t := range audioTracks {
+						if t.Language == a.Language && t.Role == a.Role {
+							n := t.Index
+							pr.AudioStreamIndex, again = &n, true
+						}
+					}
+				}
+			}
+		}
+	}
 	if req.SubtitleTrack == "" && wantSubtitles != "" {
 		if t, ok := tracks.Pick(subtitleTracks, wantSubtitles); ok {
 			shownSubtitle = "s" + strconv.Itoa(t.Index)
@@ -671,28 +700,40 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 			out.Versions = append(out.Versions, versionJSON{ID: "ver_" + id, Name: name})
 		}
 	}
-	for _, ms := range dec.Source.MediaStreams {
-		t := trackJSON{
-			Label: textclean.Plain(ms.DisplayTitle, 200), Language: languageTag(ms.Language),
-			Codec: textclean.Plain(ms.Codec, 32), Channels: ms.Channels,
-			Default: ms.IsDefault, Forced: ms.IsForced, HearingImpaired: ms.IsHearingImpaired,
-		}
-		switch ms.Type {
-		case "Audio":
-			t.ID = "a" + strconv.Itoa(ms.Index)
-			out.AudioTracks = append(out.AudioTracks, t)
-		case "Subtitle":
-			t.ID = "s" + strconv.Itoa(ms.Index)
-			if ms.IsTextSubtitleStream {
-				t.URL = base + "subtitles/" + t.ID // sanitized WebVTT (rule 11)
-			}
-			out.SubtitleTracks = append(out.SubtitleTracks, t)
-		}
+	// The tracks as the player lists them (tracks.Read), read again from
+	// the version streamed.
+	audioTracks, subtitleTracks, forcedTracks := tracks.Read(dec.Source.MediaStreams)
+	for _, a := range audioTracks {
+		out.AudioTracks = append(out.AudioTracks, trackJSON{ID: "a" + strconv.Itoa(a.Index), Label: a.Name,
+			Language: a.Language, Channels: a.Channels, Role: roleJSON(a.Role), Default: a.Default})
 	}
+	subtitle := func(t tracks.Track) trackJSON {
+		j := trackJSON{ID: "s" + strconv.Itoa(t.Index), Label: t.Name, Language: t.Language, Default: t.Default,
+			Forced: t.Forced, HearingImpaired: t.HearingImpaired, Pictures: !t.Text}
+		if t.Text {
+			j.URL = base + "subtitles/" + j.ID // sanitized WebVTT (rule 11)
+		} else {
+			j.URL = base + "pictures/" + j.ID // PGS, checked whole (rule 11)
+		}
+		return j
+	}
+	for _, t := range subtitleTracks {
+		out.SubtitleTracks = append(out.SubtitleTracks, subtitle(t))
+	}
+	for _, t := range forcedTracks {
+		out.ForcedTracks = append(out.ForcedTracks, subtitle(t))
+	}
+	playing := defaultAudio(dec.Source)
 	if pr.AudioStreamIndex != nil {
-		out.AudioTrack = "a" + strconv.Itoa(*pr.AudioStreamIndex)
-	} else if i := defaultAudio(dec.Source); i >= 0 {
-		out.AudioTrack = "a" + strconv.Itoa(i)
+		playing = *pr.AudioStreamIndex
+	}
+	if playing >= 0 {
+		out.AudioTrack = "a" + strconv.Itoa(playing)
+		if a, ok := tracks.Find(audioTracks, playing); ok {
+			if f, ok := tracks.Pick(forcedTracks, a.Language); ok {
+				out.ForcedTrack = "s" + strconv.Itoa(f.Index)
+			}
+		}
 	}
 	switch {
 	case shownSubtitle != "":
@@ -819,6 +860,15 @@ func (pb Playback) trickplaySheet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, max-age=3600")
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.Write(data)
+}
+
+// roleJSON is an audio track's role as the API says it: none for the
+// film's own sound.
+func roleJSON(role string) string {
+	if role == tracks.Main {
+		return ""
+	}
+	return role
 }
 
 // defaultAudio is the index of the audio track a version plays unless

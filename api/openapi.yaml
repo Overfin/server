@@ -2313,6 +2313,38 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /languages:
+    get:
+      operationId: listLanguages
+      summary: Every language Overfin names, for choosing one
+      description: >-
+        Each language named in itself, followed by its regional variants
+        (those the site can be in, and those files tell apart, such as
+        `es-419`), in the order of their names: the same names as tracks'
+        labels. For a profile's audio and subtitle preferences.
+      tags: [library]
+      responses:
+        "200":
+          description: The languages.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [languages]
+                properties:
+                  languages:
+                    type: array
+                    items:
+                      type: object
+                      required: [tag, name]
+                      properties:
+                        tag:
+                          type: string
+                          examples: [fr-CA]
+                        name:
+                          type: string
+                          examples: [Français (Canada)]
+
   /categories:
     get:
       operationId: listCategories
@@ -4680,25 +4712,39 @@ components:
           type: string
         label:
           type: string
-          description: Readable, e.g. `English (5.1)` or `Français, forced`.
+          description: The language's name in itself, with its country for
+            a regional variant (`Français (Canada)`, `日本語`); a language
+            Overfin doesn't know, its code; none, `?`. The same names
+            everywhere in Overfin.
         language:
           type: string
-          description: BCP 47 language tag, when known.
-        codec:
-          type: string
+          description: Its language tag, with its region when the file says
+            it (its tag, or its title's markers such as VFQ or Latino);
+            absent when unknown.
+          examples: [fr-CA]
         channels:
           type: integer
           minimum: 1
+        role:
+          type: string
+          description: Audio besides the film's own sound; never chosen by
+            default. Open set.
+          examples: [commentary, description]
         default:
           type: boolean
         forced:
           type: boolean
         hearingImpaired:
           type: boolean
+        pictures:
+          type: boolean
+          description: Subtitles that are pictures (PGS), at `url`, for
+            the client to draw over the video; never burned in.
         url:
           type: string
           format: uri-reference
-          description: For subtitles delivered separately, the WebVTT URL.
+          description: Subtitles' own file, WebVTT for text, PGS for
+            pictures, each checked whole by Overfin first.
 
     MediaSegment:
       description: A marked part of the media, e.g. for a "Skip intro"
@@ -4766,18 +4812,32 @@ components:
           type: string
         audioTracks:
           type: array
+          description: One per language variant (the most channels), then
+            commentaries and audio descriptions apart.
           items:
             $ref: "#/components/schemas/Track"
         audioTrack:
           type: string
         subtitleTracks:
           type: array
+          description: One per language variant, text before pictures,
+            those for the hard of hearing only when there's nothing else.
           items:
             $ref: "#/components/schemas/Track"
         subtitleTrack:
           type: string
-          description: The subtitles on. A text track (with a `url`) is
-            shown by the client; a picture track is burned in.
+          description: The subtitles to show (chosen for the title, else the
+            profile's preference); the client shows them from their `url`.
+        forcedTracks:
+          type: array
+          description: Subtitles for the lines in another language only,
+            one per language variant.
+          items:
+            $ref: "#/components/schemas/Track"
+        forcedTrack:
+          type: string
+          description: The forced subtitles in the audio's language, to show
+            whenever no other subtitles are, subtitles off included.
         maxBitrateKbps:
           type: integer
         segments:

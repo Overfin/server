@@ -63,6 +63,7 @@ func (l Library) Register(r *plugin.Registrar) error {
 		"GET /api/v1/libraries":   l.libraries,
 		"GET /api/v1/genres":      l.genres,
 		"GET /api/v1/categories":  l.categories,
+		"GET /api/v1/languages":   l.languages,
 		"GET /api/v1/images/{id}": l.image,
 		// Titles, in a library or not (milestone 5).
 		"GET /api/v1/titles":              l.titles,

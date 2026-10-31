@@ -224,6 +224,8 @@ export class Overfin {
   async genres(libraryId, categoryId) { return (await this.request('GET', `/genres${toQuery({ library: libraryId, category: categoryId })}`)).items; }
   /** The operator's categories, and whether the menu shows the libraries. */
   categories() { return this.request('GET', '/categories'); }
+  /** Every language Overfin names, each in itself: { languages: [{ tag, name }] }. */
+  languages() { return this.request('GET', '/languages'); }
   /** What's new: films and series, a series by its newest episode. */
   async latest(libraryId, limit = 16) { return (await this.request('GET', `/titles/latest${toQuery({ library: libraryId, limit })}`)).items; }
 
@@ -291,6 +293,12 @@ export class Overfin {
    * none): its next playbacks start with them, when the video has them.
    */
   setSubtitleLanguage(language) { return this.request('PUT', '/me/subtitles', { language }); }
+  /**
+   * Keeps the audio or subtitles chosen while watching for the playback's
+   * title ({ audioTrack } or { subtitleTrack }, '' for none): its next
+   * playbacks start with them. Player does it for you.
+   */
+  chooseTracks(id, choice) { return this.request('PUT', `/playback/${enc(id)}/tracks`, choice); }
   playback(id) { return this.request('GET', `/playback/${enc(id)}`); }
   currentPlayback() { return this.request('GET', '/playback/current'); }
   reportProgress(id, report) { return this.request('POST', `/playback/${enc(id)}/progress`, report); }
@@ -404,11 +412,11 @@ export class Player {
     this.video = video;
     this.titleId = titleId;
     this.options = options;
-    // What the server is asked for (audio, and a burned-in subtitle track),
-    // and which text subtitle track the browser shows.
+    // What the server is asked for (audio, a bitrate), and the subtitles
+    // shown: chosen ('' none), or null, the playback's own.
     this.choice = { audioTrack: options.audioTrack };
-    this.textTrack = null;
-    this.wanted = options.subtitleTrack || null;
+    this.shown = options.subtitleTrack ?? null;
+    this.pictures = null; // PictureSubtitles, once a track of pictures shows
     this.playback = null;
     this.hls = null;
     this.timer = null;
@@ -476,8 +484,8 @@ export class Player {
   attach(pb) {
     const video = this.video;
     for (const t of video.querySelectorAll('track[data-overfin]')) t.remove();
-    for (const t of pb.subtitleTracks || []) {
-      if (!t.url) continue;
+    for (const t of [...(pb.subtitleTracks || []), ...(pb.forcedTracks || [])]) {
+      if (!t.url || t.pictures) continue;
       const el = document.createElement('track');
       Object.assign(el, { kind: 'subtitles', src: t.url, srclang: t.language || 'und', label: t.label });
       el.dataset.overfin = t.id;
@@ -496,26 +504,18 @@ export class Player {
       video.src = pb.stream.url;
       if (startAt) video.addEventListener('loadedmetadata', () => { video.currentTime = startAt; }, { once: true });
     }
-    // Text subtitles the server turned on (the profile's language) show,
-    // unless the person chose otherwise since.
-    const picked = (pb.subtitleTracks || []).find((t) => t.id === pb.subtitleTrack && t.url);
-    if (picked && !this.wanted && !this.choice.subtitleTrack && this.textTrack === null && !this.chose) {
-      this.textTrack = picked.id;
-    }
-    // A subtitle asked for in the options: shown if it's text, burned in
-    // (one restart) if it's an image.
-    if (this.wanted) {
-      const id = this.wanted;
-      this.wanted = null;
-      queueMicrotask(() => this.setSubtitleTrack(id));
-    }
-    this.showSubtitles(this.textTrack);
+    this.showSubtitles();
   }
 
-  /** Switches the audio track: the stream restarts at the same place. */
-  setAudioTrack(id) {
+  /**
+   * Switches the audio track: the stream restarts at the same place. The
+   * choice is kept for the title.
+   */
+  async setAudioTrack(id) {
     this.choice.audioTrack = id;
-    return this.restart();
+    const pb = await this.restart();
+    if (pb) this.client.chooseTracks(pb.id, { audioTrack: id }).catch(() => {});
+    return pb;
   }
 
   /**
@@ -532,40 +532,65 @@ export class Player {
   get maxBitrate() { return this.choice.maxBitrateKbps || 0; }
 
   /**
-   * Shows a subtitle track, or none (null). Text tracks switch at once;
-   * image-based ones are burned in, which restarts the stream.
+   * Shows a subtitle track, or none (null), at once: text or pictures,
+   * never burned into the video. The choice is kept for the title.
    */
   setSubtitleTrack(id) {
-    this.chose = true;
-    const tracks = this.playback?.subtitleTracks || [];
-    const isText = (tid) => Boolean(tracks.find((t) => t.id === tid)?.url);
-    const burnedIn = Boolean(this.choice.subtitleTrack);
-    if (id && !isText(id)) {
-      // An image track: the server burns it into the picture.
-      this.choice.subtitleTrack = id;
-      this.textTrack = null;
-      return this.restart();
-    }
-    this.textTrack = id || null;
-    if (burnedIn) {
-      // Leaving a burned-in track needs a clean picture.
-      this.choice.subtitleTrack = undefined;
-      return this.restart();
-    }
-    this.showSubtitles(this.textTrack);
+    this.shown = id || '';
+    this.showSubtitles();
+    const pb = this.playback;
+    if (pb) this.client.chooseTracks(pb.id, { subtitleTrack: id || '' }).catch(() => {});
     return Promise.resolve();
   }
 
-  /** The subtitle track on screen, or null. */
-  get subtitleTrack() { return this.choice.subtitleTrack || this.textTrack; }
+  /** The subtitle track chosen, or null (forced subtitles aside). */
+  get subtitleTrack() { return (this.shown ?? this.playback?.subtitleTrack) || null; }
+
+  /** The forced subtitles on screen (none chosen), or null. */
+  get forcedTrack() { return this.subtitleTrack ? null : this.playback?.forcedTrack || null; }
 
   /** The audio track playing. */
   get audioTrack() { return this.playback?.audioTrack; }
 
-  showSubtitles(id) {
+  // showSubtitles shows the subtitles chosen, else the forced ones in the
+  // audio's language: text through the video's tracks, pictures on a
+  // canvas over the video.
+  showSubtitles() {
+    const pb = this.playback;
+    const id = this.subtitleTrack || this.forcedTrack;
+    const track = [...(pb?.subtitleTracks || []), ...(pb?.forcedTracks || [])].find((t) => t.id === id);
     for (const el of this.video.querySelectorAll('track[data-overfin]')) {
-      el.track.mode = el.dataset.overfin === id ? 'showing' : 'disabled';
+      el.track.mode = track && !track.pictures && el.dataset.overfin === id ? 'showing' : 'disabled';
     }
+    if (track?.pictures && track.url) {
+      if (!this.pictures) this.pictures = new PictureSubtitles(this.video, this.pictureCanvas());
+      if (this.pictures.url !== track.url) {
+        this.pictures.url = track.url;
+        this.pictures.load(track.url).catch(() => {}); // subtitles are a bonus: playback goes on
+      }
+    } else if (this.pictures) {
+      this.pictures.url = '';
+      this.pictures.hide();
+    }
+  }
+
+  // pictureCanvas is where pictures are drawn: the one given in the
+  // options, else one laid over the video, following its box.
+  pictureCanvas() {
+    if (this.options.pictureCanvas) return this.options.pictureCanvas;
+    const video = this.video;
+    const canvas = document.createElement('canvas');
+    canvas.dataset.overfin = 'pictures';
+    canvas.style.position = 'absolute';
+    const follow = () => {
+      Object.assign(canvas.style, { left: `${video.offsetLeft}px`, top: `${video.offsetTop}px`,
+        width: `${video.offsetWidth}px`, height: `${video.offsetHeight}px` });
+    };
+    follow();
+    video.after(canvas);
+    this.resizing = new ResizeObserver(follow);
+    this.resizing.observe(video);
+    return canvas;
   }
 
   /** The segment (intro, credits…) at a time, if any. */
@@ -586,6 +611,9 @@ export class Player {
     const position = this.positionMs;
     this.teardown();
     this.closed = true;
+    this.pictures?.hide();
+    this.resizing?.disconnect();
+    if (!this.options.pictureCanvas) this.video.parentElement?.querySelector('canvas[data-overfin="pictures"]')?.remove();
     this.video.removeAttribute('src');
     this.video.load();
     if (pb) await this.client.stopPlayback(pb.id, position, { keepalive: true }).catch(() => {});
