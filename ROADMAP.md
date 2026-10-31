@@ -894,14 +894,30 @@ nothing beyond what that needs.
 - **Metadata editor** in the panel: the operator changes a title's
   details by hand, and Overfin keeps the changes itself, over what TMDB
   says.
-- **Images resized by Overfin itself** (next). Today Overfin re-encodes
-  every image at the size it gets it: TMDB's ready-made sizes, Jellyfin's
-  own resizing, and uploads (titles' artwork, branding) as large as they
-  came. Overfin resizes them itself, as it re-encodes them, to the sizes
-  it wants: the panel's thumbnails first (its Artwork tab and image
-  picker load backdrops 1280 pixels wide), uploads, then whichever of
-  the site's sizes fit better than TMDB's. Written for Overfin, without
-  a new dependency.
+- **Images resized by Overfin itself** (designed; after Overfin's own
+  identification). Today Overfin re-encodes every image at the size it
+  gets it: TMDB's ready-made sizes, Jellyfin's own resizing, and uploads
+  (titles' artwork, branding) as large as they came; the panel's Artwork
+  tab and image picker load backdrops 1280 pixels wide as thumbnails,
+  and a 4K screen gets the same 1280 pixels.
+  - One original per image: TMDB's original, shrunk on arrival to 3840
+    pixels wide for backdrops, 2000 for posters and logos; one over the
+    4096-pixel safety limit falls back to TMDB's largest ready-made size.
+  - Every size made by Overfin from it, in the re-encode step: an area
+    average, never enlarged, written for Overfin without a new
+    dependency. Uploads too.
+  - Widths: posters 200, 400, 800, 1200, 2000; backdrops 320, 640, 1280,
+    1920, 3840; logos 250, 500, 1000, 2000; episode stills 320, 640,
+    1280, 1920; cast photos 200, 400, 800.
+  - The API takes `?width=N`, rounded up to the next of those; `small`,
+    `medium` and `large` stay, as fixed widths. The site uses `srcset`,
+    so each screen gets its own size; the panel's thumbnails, the
+    smallest.
+  - A library title's sizes are made the first time they're asked for and
+    kept on disk with the original (and go with it); titles no library
+    has, in memory only; a memory cache in front of both.
+  - Order: the resizer and its tests; originals, sizes on disk and
+    `?width=`; the panel's thumbnails; uploads; `srcset` on the site.
 
 ## Companion projects
 
