@@ -33,11 +33,18 @@ export const message = (err: unknown) => (err instanceof Error ? err.message : S
 const featureNames: Record<string, string> = { library: 'Library', playback: 'Playback', watchlist: 'Watchlist', invites: 'Invitations', migration: 'Migration' };
 export const featureName = (n: string) => featureNames[n] || n.charAt(0).toUpperCase() + n.slice(1);
 
-/** languageName is a language tag in words: "fr-CA" is "Canadian French". */
+// Languages' names, Overfin's (as the site and the player name them),
+// given with the session.
+const languageNames = new Map<string, string>();
+export function setLanguageNames(list: { tag: string; name: string }[]) {
+  for (const l of list) languageNames.set(l.tag, l.name);
+}
+
+/**
+ * languageName is a language tag in words, the language named in itself:
+ * "fr-CA" is "Français (Canada)"; a variant Overfin doesn't name, its
+ * language's name; one it doesn't know, the tag.
+ */
 export function languageName(tag: string): string {
-  try {
-    return new Intl.DisplayNames(['en'], { type: 'language' }).of(tag) || tag;
-  } catch {
-    return tag;
-  }
+  return languageNames.get(tag) ?? languageNames.get(tag.split(/[-_]/)[0].toLowerCase()) ?? tag;
 }

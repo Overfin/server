@@ -4,7 +4,7 @@
   import { Shell, Dialogs, Toasts, Loading, Notice } from '@overfin/ui';
   import type { NavGroup } from '@overfin/ui';
   import { api } from './lib/api';
-  import { message } from './lib/format';
+  import { message, setLanguageNames } from './lib/format';
   import { icons } from './lib/icons';
   import { route } from './lib/router.svelte';
   import Server from './pages/Server.svelte';
@@ -51,8 +51,11 @@
   const tab = $derived<Tab>(route.tab in pages ? (route.tab as Tab) : 'server');
   const Page = $derived(pages[tab].page);
 
-  api<{ name?: string }>('GET', '/admin/api/session').then(
-    (s) => (who = s.name ? `Signed in as ${s.name}` : 'Signed in'),
+  api<{ name?: string; languages?: { tag: string; name: string }[] }>('GET', '/admin/api/session').then(
+    (s) => {
+      setLanguageNames(s.languages ?? []);
+      who = s.name ? `Signed in as ${s.name}` : 'Signed in';
+    },
     (err) => (problem = message(err)),
   );
 
