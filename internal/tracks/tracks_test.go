@@ -83,7 +83,7 @@ func TestAudio(t *testing.T) {
 	}
 	want := []struct{ name, language, role string }{
 		{"Français (Canada)", "fr-CA", Main}, {"Français (France)", "fr-FR", Main}, {"English", "en", Main},
-		{"English", "en", Commentary}, {"Français (Canada)", "fr-CA", Description}, {"Español", "es-419", Main},
+		{"English", "en", Commentary}, {"Français (Canada)", "fr-CA", Description}, {"Español (Latinoamérica)", "es-419", Main},
 		{"Español (España)", "es-ES", Main}, {"?", "", Main},
 	}
 	for i, w := range want {

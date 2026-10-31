@@ -453,3 +453,52 @@ test('real PGS tracks', { skip: !process.env.PGS_SAMPLES }, async () => {
     assert.ok(opaque > 0, name);
   }
 });
+
+test('subtitles: forced ones whenever none are chosen; a choice shows at once, never restarts, kept for the title', async () => {
+  const calls = fakeServer({
+    'POST /api/v1/playback': (_, body) => [201, {
+      id: 'pb1', title: { id: body.titleId, name: 'Film' }, method: 'direct', stream: { url: '/x', protocol: 'file' },
+      positionMs: 0, audioTrack: 'a1',
+      subtitleTracks: [{ id: 's3', label: 'English', url: '/vtt3' }, { id: 's4', label: 'Français', pictures: true, url: '/pgs4' }],
+      forcedTracks: [{ id: 's5', label: 'Français', forced: true, url: '/vtt5' }], forcedTrack: 's5',
+    }],
+    'PUT /api/v1/playback/pb1/tracks': () => [204, null],
+    'POST /api/v1/playback/pb1/stop': () => [204, null],
+  });
+  const api = globalThis.fetch;
+  globalThis.fetch = async (url, init) => url === '/pgs4'
+    ? { ok: true, status: 200, arrayBuffer: async () => new Uint8Array(displaySet(0, RUNS)).buffer }
+    : api(url, init);
+  const realDocument = globalThis.document;
+  globalThis.document = { createElement: () => ({ dataset: {}, track: { mode: 'disabled' } }) };
+  globalThis.requestAnimationFrame = () => 0;
+  globalThis.cancelAnimationFrame = () => {};
+  const video = fakeVideo();
+  const els = [];
+  video.append = (el) => els.push(el);
+  video.querySelectorAll = () => els;
+  const mode = () => Object.fromEntries(els.map((el) => [el.dataset.overfin, el.track.mode]));
+  const canvas = { style: {}, width: 0, height: 0, getContext: () => ({ clearRect() {}, putImageData() {} }) };
+  const player = await new Overfin().play(video, 'title_movie_tmdb_1', { startMs: 0, capabilities: {}, pictureCanvas: canvas });
+  // None chosen: the forced ones, in the audio's language.
+  assert.equal(player.subtitleTrack, null);
+  assert.equal(player.forcedTrack, 's5');
+  assert.deepEqual(mode(), { s3: 'disabled', s5: 'showing' });
+  await player.setSubtitleTrack('s3');
+  assert.deepEqual(mode(), { s3: 'showing', s5: 'disabled' });
+  assert.equal(player.forcedTrack, null);
+  // Pictures: drawn on the canvas, the text tracks off.
+  await player.setSubtitleTrack('s4');
+  await settle();
+  assert.deepEqual(mode(), { s3: 'disabled', s5: 'disabled' });
+  assert.equal(player.pictures.cues.length, 1);
+  await player.setSubtitleTrack(null);
+  assert.deepEqual(mode(), { s3: 'disabled', s5: 'showing' });
+  assert.equal(player.pictures.cues.length, 0);
+  await settle();
+  const kept = calls.filter((c) => c.url === '/api/v1/playback/pb1/tracks').map((c) => c.body.subtitleTrack);
+  assert.deepEqual(kept, ['s3', 's4', '']);
+  assert.equal(calls.filter((c) => c.url === '/api/v1/playback').length, 1, 'never restarted');
+  await player.close();
+  globalThis.document = realDocument;
+});

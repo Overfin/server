@@ -1,6 +1,9 @@
 package lang
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // Languages' names: each in itself, the same on the site, in the player,
 // in the control panel and through the API. A variant an operator can
@@ -181,7 +184,41 @@ func Name(s string) string {
 			return c.Name
 		}
 	}
+	if n, ok := variants[t]; ok {
+		return n
+	}
 	return byTwo[Base(t)].name
+}
+
+// variants are the regional variants files tell apart (see the tracks
+// package's markers) that aren't among the Choices.
+var variants = map[string]string{"es-419": "Español (Latinoamérica)"}
+
+// List is every language with its name, for a choice of languages: each
+// language alone, and its variants (Choices and those files tell apart)
+// after it, in the order of their names.
+func List() []Choice {
+	var out []Choice
+	for _, l := range languages {
+		out = append(out, Choice{l.two, l.name})
+		var vs []Choice
+		for _, c := range Choices {
+			if Base(c.Tag) == l.two {
+				vs = append(vs, c)
+			}
+		}
+		for tag, name := range variants {
+			if Base(tag) == l.two {
+				vs = append(vs, Choice{tag, name})
+			}
+		}
+		slices.SortFunc(vs, func(a, b Choice) int { return strings.Compare(a.Name, b.Name) })
+		out = append(out, vs...)
+	}
+	slices.SortStableFunc(out, func(a, b Choice) int {
+		return strings.Compare(byTwo[Base(a.Tag)].name, byTwo[Base(b.Tag)].name)
+	})
+	return out
 }
 
 // unknown are the codes files use for no language in particular.

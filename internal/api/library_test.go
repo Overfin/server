@@ -232,6 +232,7 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					{"Index": 2, "Type": "Audio", "Codec": "aac", "Language": "eng", "DisplayTitle": "English - AAC 2.0", "Channels": 2},
 					{"Index": 3, "Type": "Subtitle", "Codec": "srt", "Language": "eng", "DisplayTitle": "English", "IsTextSubtitleStream": true},
 					{"Index": 4, "Type": "Subtitle", "Codec": "PGSSUB", "DisplayTitle": "Blu-ray"},
+					{"Index": 5, "Type": "Subtitle", "Codec": "srt", "Language": "fre", "IsForced": true, "IsTextSubtitleStream": true},
 				},
 			}},
 		})
@@ -755,9 +756,14 @@ func TestStartPlaybackNeverLeaksUpstream(t *testing.T) {
 		Stream         struct{ URL, Protocol string }
 		DurationMs     int64
 		AudioTracks    []struct{ ID, Label, Language string }
-		SubtitleTracks []struct{ ID, URL string }
-		Segments       []struct{ Kind string }
-		Info           struct {
+		SubtitleTracks []struct {
+			ID, URL  string
+			Pictures bool
+		}
+		ForcedTracks []struct{ ID, Language string }
+		ForcedTrack  string
+		Segments     []struct{ Kind string }
+		Info         struct {
 			Reasons     []string
 			Container   string
 			BitrateKbps int
@@ -783,12 +789,20 @@ func TestStartPlaybackNeverLeaksUpstream(t *testing.T) {
 		!strings.HasPrefix(s.Stream.URL, "/api/v1/stream/") || !strings.HasSuffix(s.Stream.URL, "/master.m3u8") {
 		t.Errorf("session: %+v", s)
 	}
-	if s.DurationMs != 7_200_000 || len(s.AudioTracks) != 2 || s.AudioTracks[0].ID != "a1" || s.AudioTracks[0].Language != "fre" {
+	if s.DurationMs != 7_200_000 || len(s.AudioTracks) != 2 || s.AudioTracks[0].ID != "a1" || s.AudioTracks[0].Language != "fr" ||
+		s.AudioTracks[0].Label != "Français" {
 		t.Errorf("tracks/duration: %+v", s)
 	}
-	// Text subtitles get a WebVTT URL; image subtitles don't (they're burned in).
-	if len(s.SubtitleTracks) != 2 || s.SubtitleTracks[0].URL == "" || s.SubtitleTracks[1].URL != "" {
+	// Text subtitles get a WebVTT URL; pictures, theirs, for the client to
+	// draw.
+	if len(s.SubtitleTracks) != 2 || !strings.HasSuffix(s.SubtitleTracks[0].URL, "/subtitles/s3") ||
+		!strings.HasSuffix(s.SubtitleTracks[1].URL, "/pictures/s4") || !s.SubtitleTracks[1].Pictures {
 		t.Errorf("subtitles: %+v", s.SubtitleTracks)
+	}
+	// The forced subtitles apart; those in the audio's language, French,
+	// to show whenever no others are.
+	if len(s.ForcedTracks) != 1 || s.ForcedTracks[0].Language != "fr" || s.ForcedTrack != "s5" {
+		t.Errorf("forced: %+v %q", s.ForcedTracks, s.ForcedTrack)
 	}
 	if len(s.Segments) != 1 || s.Segments[0].Kind != "intro" {
 		t.Errorf("segments: %+v", s.Segments)

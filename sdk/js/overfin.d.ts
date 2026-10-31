@@ -40,6 +40,10 @@ export interface Profile {
   categories?: string[];
   /** "Contenu pour enfants": its recommendations include children's content (since 0.6). */
   kidsTitles?: boolean;
+  /** The audio it prefers: "original" or a language tag; absent, the site's language. */
+  audioLanguage?: string;
+  /** The subtitles it prefers, a language tag; absent, none. */
+  subtitleLanguage?: string;
   /** The only libraries the profile gets (their IDs); absent, every library. */
   libraries?: string[];
   /** Tags hidden from the profile. */
@@ -185,14 +189,19 @@ export interface Capabilities {
 
 export interface Track {
   id: string;
+  /** The language's name in itself: "Français (Canada)", "日本語"; "?" when unknown. */
   label: string;
+  /** Its tag, with its region when the file says it ("fr-CA"). */
   language?: string;
-  codec?: string;
   channels?: number;
+  /** Audio besides the film's own sound. */
+  role?: 'commentary' | 'description' | string;
   default?: boolean;
   forced?: boolean;
   hearingImpaired?: boolean;
-  /** Text subtitles only: WebVTT the browser shows itself. */
+  /** Subtitles that are pictures (PGS), drawn over the video (PictureSubtitles). */
+  pictures?: boolean;
+  /** Subtitles: WebVTT for text, PGS for pictures. */
   url?: string;
 }
 
@@ -310,6 +319,10 @@ export interface Playback {
   audioTrack?: string;
   subtitleTracks?: Track[];
   subtitleTrack?: string;
+  /** Subtitles for the lines in another language only. */
+  forcedTracks?: Track[];
+  /** Those in the audio's language: shown whenever no other subtitles are. */
+  forcedTrack?: string;
   maxBitrateKbps?: number;
   segments?: Segment[];
   /** Seek-bar previews, when the server has some: sheets of `columns` x `rows` tiles, tile n at n x `intervalMs`. */
@@ -374,6 +387,8 @@ export interface PlayerOptions {
   onEnded?: () => void;
   /** The hls.js constructor; globalThis.Hls by default. */
   Hls?: unknown;
+  /** Where subtitles that are pictures are drawn; by default a canvas laid over the video. */
+  pictureCanvas?: HTMLCanvasElement;
 }
 
 export class Player {
@@ -382,7 +397,10 @@ export class Player {
   readonly playback: Playback | null;
   readonly positionMs: number;
   readonly audioTrack?: string;
+  /** The subtitles chosen, or null. */
   readonly subtitleTrack: string | null;
+  /** The forced subtitles shown (none chosen), or null. */
+  readonly forcedTrack: string | null;
   setAudioTrack(id: string): Promise<unknown>;
   setSubtitleTrack(id: string | null): Promise<unknown>;
   segmentAt(ms?: number): Segment | null;
@@ -471,7 +489,7 @@ export class Overfin {
   createProfile(profile: { name: string; kind?: 'standard' | 'kids'; maxAge?: number; language?: string; libraries?: string[] | null; blockedTags?: string[] | null; categories?: string[] | null }): Promise<Profile>;
   /** `libraries: null` gives every library again; `blockedTags: null` hides no tag. */
   /** Each profile may change its own `theme` (`''` follows the device); the rest is the owner's. */
-  updateProfile(id: string, changes: { name?: string; language?: string; theme?: '' | 'light' | 'dark'; kind?: 'standard' | 'kids'; maxAge?: number; libraries?: string[] | null; blockedTags?: string[] | null; categories?: string[] | null; kidsTitles?: boolean | null; pin?: string }): Promise<Profile>;
+  updateProfile(id: string, changes: { name?: string; language?: string; theme?: '' | 'light' | 'dark'; kind?: 'standard' | 'kids'; maxAge?: number; libraries?: string[] | null; blockedTags?: string[] | null; categories?: string[] | null; kidsTitles?: boolean | null; audioLanguage?: string; subtitleLanguage?: string; pin?: string }): Promise<Profile>;
   deleteProfile(id: string): Promise<null>;
   activateProfile(id: string, pin?: string): Promise<Profile>;
   setPin(id: string, pin: string, ownerPin?: string): Promise<null>;
@@ -540,5 +558,9 @@ export class Overfin {
   stopPlayback(id: string, positionMs: number, options?: { keepalive?: boolean }): Promise<null>;
   play(video: HTMLVideoElement, titleId: string, options?: PlayerOptions): Promise<Player>;
   /** Keeps the language the active profile chose for subtitles ('' for none), for its next playbacks. */
+  /** Every language Overfin names, each in itself (the names tracks have). */
+  languages(): Promise<{ languages: { tag: string; name: string }[] }>;
   setSubtitleLanguage(language: string): Promise<null>;
+  /** Keeps the audio or subtitles chosen while watching, for the title ('' : none). */
+  chooseTracks(playbackId: string, choice: { audioTrack?: string; subtitleTrack?: string }): Promise<null>;
 }

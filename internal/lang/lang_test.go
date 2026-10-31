@@ -33,7 +33,7 @@ func TestNames(t *testing.T) {
 	}
 	for in, want := range map[string]string{
 		"fr-CA": "Français (Canada)", "fra": "Français", "fr-BE": "Français", "es-MX": "Español (México)",
-		"es-419": "Español", "jpn": "日本語", "hi": "हिन्दी", "cn": "粵語", "yue": "粵語", "tl": "Tagalog", "fil": "Tagalog",
+		"es-419": "Español (Latinoamérica)", "es-AR": "Español", "jpn": "日本語", "hi": "हिन्दी", "cn": "粵語", "yue": "粵語", "tl": "Tagalog", "fil": "Tagalog",
 		"xx": "xx", "qya": "qya", "und": "?", "": "?", "zxx": "?", "fr3": "?", "a long name": "?",
 	} {
 		if got := Name(in); got != want {

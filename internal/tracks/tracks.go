@@ -43,9 +43,7 @@ func Read(streams []jellyfin.MediaStream) (audio, subtitles, forced []Track) {
 	for _, s := range streams {
 		switch s.Type {
 		case "Audio":
-			t := track(s)
-			t.Channels, t.Role = s.Channels, role(s)
-			audio = append(audio, t)
+			audio = append(audio, Audio(s))
 		case "Subtitle":
 			if !s.IsTextSubtitleStream && !isPGS(s.Codec) {
 				continue // pictures in a format Overfin can't show (DVD)
@@ -60,6 +58,14 @@ func Read(streams []jellyfin.MediaStream) (audio, subtitles, forced []Track) {
 		}
 	}
 	return bestAudio(audio), bestSubtitles(subtitles), bestSubtitles(forced)
+}
+
+// Audio is one audio stream as Read would list it, before any is merged:
+// its language with its region, its name, its role.
+func Audio(s jellyfin.MediaStream) Track {
+	t := track(s)
+	t.Channels, t.Role = s.Channels, role(s)
+	return t
 }
 
 // track is what audio and subtitles share: the language, its name, whether
