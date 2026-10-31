@@ -841,8 +841,8 @@ nothing beyond what that needs.
   how many are left to share), for "Who's watching?" to tell. Sharing a
   login also costs the owner a stream of theirs.
 
-- **Languages, one way everywhere; subtitles never burned in** (designed,
-  under way). Today languages are named three ways (the site's language
+- **Languages, one way everywhere; subtitles never burned in** (built,
+  not released). Today languages are named three ways (the site's language
   choice in themselves, the player by Jellyfin's free text, the panel by
   the browser in English), a profile's preferences know a language but
   not its region, and choosing a subtitle track that is pictures (PGS)
@@ -866,7 +866,8 @@ nothing beyond what that needs.
   - A profile's audio: as the site, the original version (TMDB's original
     language), or a language; its subtitles: off, or a language; both with
     their region, the same language from elsewhere when a file lacks it.
-    What's chosen while watching stays the title's own, as now.
+    What's chosen while watching is kept for the title (an episode's: its
+    series), on any device, over the profile's preferences.
   - Subtitles that are pictures (PGS): the track Jellyfin extracts as it
     is (`.sup`), checked whole by Overfin (every segment well-formed, each
     picture's run-length data within its declared size, sizes capped) and

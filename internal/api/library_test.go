@@ -1007,6 +1007,12 @@ func TestPlaybackLanguages(t *testing.T) {
 	if a, _ := start(`,"audioLanguage":"en","audioTrack":"a1"`); a != "a1" {
 		t.Errorf("asked track: %q", a)
 	}
+	// Pictures asked for: the client's to draw, never burned in (Jellyfin
+	// asked for no subtitles).
+	if _, s := start(`,"subtitleTrack":"s4"`); s != "s4" || fake.called("PlaybackInfo audio=<nil> subtitles=-1") == 0 ||
+		fake.called("PlaybackInfo audio=<nil> subtitles=4") != 0 {
+		t.Errorf("pictures asked for: %q %v", s, fake.calls)
+	}
 	for _, bad := range []string{`{"language":"klingon"}`, `{"language":"und"}`, `{}x`} {
 		if code, _ := put(t, srv, "PUT", "/api/v1/me/subtitles", bad); code != 400 {
 			t.Errorf("%s: %d", bad, code)

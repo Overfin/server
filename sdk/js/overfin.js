@@ -289,8 +289,10 @@ export class Overfin {
   startPlayback(request) { return this.request('POST', '/playback', request); }
 
   /**
-   * Keeps the language the active profile chose for subtitles ('' for
-   * none): its next playbacks start with them, when the video has them.
+   * Sets the subtitles the active profile prefers, a language ('' for
+   * none), as updateProfile's subtitleLanguage: its next playbacks start
+   * with them when the video has them and nothing else was chosen for the
+   * title.
    */
   setSubtitleLanguage(language) { return this.request('PUT', '/me/subtitles', { language }); }
   /**

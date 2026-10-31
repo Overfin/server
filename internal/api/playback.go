@@ -467,18 +467,15 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 		}
 		pr.AudioStreamIndex = &n
 	}
-	switch req.SubtitleTrack {
-	case "":
-	case "off":
-		off := -1
-		pr.SubtitleStreamIndex = &off
-	default:
-		n, ok := trackIndex(req.SubtitleTrack, 's')
-		if !ok {
+	// Subtitles are the client's to show, text or pictures: Jellyfin is
+	// never asked for any, so it never burns them into the video.
+	off := -1
+	pr.SubtitleStreamIndex = &off
+	if req.SubtitleTrack != "" && req.SubtitleTrack != "off" {
+		if _, ok := trackIndex(req.SubtitleTrack, 's'); !ok {
 			problem.Send(w, problem.InvalidRequest, "")
 			return
 		}
-		pr.SubtitleStreamIndex = &n
 	}
 	kbps := lowest(req.MaxBitrateKbps, req.Capabilities.MaxBitrateKbps, pb.MaxBitrateKbps)
 	if kbps == 0 {
@@ -535,12 +532,6 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		problem.Send(w, problem.NotFound, "")
 		return
-	}
-	// Without a subtitle track asked for, none is burned in: the profile's
-	// language, if any, is chosen below.
-	if req.SubtitleTrack == "" {
-		off := -1
-		pr.SubtitleStreamIndex = &off
 	}
 	audioItem := summary.Kind == "track" || summary.Kind == "audiobook"
 	var info *jellyfin.PlaybackInfo
@@ -612,7 +603,7 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 	// without one, it streamed the default ones (the audio asked for, by
 	// language or from the menu, never played). So it's asked again, for
 	// the version it chose.
-	if pr.MediaSourceID == "" && (pr.AudioStreamIndex != nil || (pr.SubtitleStreamIndex != nil && *pr.SubtitleStreamIndex >= 0)) {
+	if pr.MediaSourceID == "" && pr.AudioStreamIndex != nil {
 		pr.MediaSourceID, again = dec.Source.Id, true
 	}
 	if again && !decide() {
@@ -738,8 +729,8 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case shownSubtitle != "":
 		out.SubtitleTrack = shownSubtitle // shown by the client, from its URL
-	case pr.SubtitleStreamIndex != nil && *pr.SubtitleStreamIndex >= 0:
-		out.SubtitleTrack = "s" + strconv.Itoa(*pr.SubtitleStreamIndex)
+	case req.SubtitleTrack != "" && req.SubtitleTrack != "off":
+		out.SubtitleTrack = req.SubtitleTrack // asked for, shown by the client
 	}
 	// Skip markers are a bonus: playback goes on without them.
 	if segs, err := l.Jellyfin.MediaSegments(ctx, ja, jfItem); err == nil {
