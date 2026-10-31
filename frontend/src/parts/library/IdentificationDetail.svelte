@@ -1,7 +1,7 @@
-<!-- The selected title: its files, the TMDB title it's taken for, why it
-     may be wrong, and TMDB searched for the right one. -->
+<!-- A title's identification: its files, the TMDB title it's taken for,
+     why it may be wrong, and TMDB searched for the right one. -->
 <script lang="ts">
-  import { Badge, Busy, toast } from '@overfin/ui';
+  import { Badge, Busy, ask, toast } from '@overfin/ui';
   import { api } from '../../lib/api';
   import { message } from '../../lib/format';
   import type { Candidate, Identified } from '../../lib/types-library';
@@ -33,6 +33,18 @@
     await reload();
   }
 
+  // Another TMDB title: the texts and artwork changed here stay with the
+  // one it was, and come back if it's that one again.
+  async function retitle(tmdb: string) {
+    if (t.edited && !(await ask('Its texts or artwork were changed here. They stay with the title it is now: this one starts with TMDB\'s, and gets them back if it\'s identified as that title again.', { title: 'Use another title?', yes: 'Use this one' }))) return;
+    await act('PUT', { tmdb }, 'Title fixed.');
+  }
+
+  async function back() {
+    if (t.edited && t.jellyfinTmdb !== t.tmdb && !(await ask('Its texts or artwork were changed here. They stay with the title it is now, and come back if it\'s identified as that title again.', { title: 'Back to Jellyfin\'s title?', yes: 'Go back' }))) return;
+    await act('DELETE', undefined, 'Back to Jellyfin\'s title.');
+  }
+
   async function find(e?: SubmitEvent) {
     e?.preventDefault();
     searching = true;
@@ -48,10 +60,6 @@
   }
 </script>
 
-<div class="detail-head"><div>
-  <h2>{t.tmdbName ? `${t.tmdbName}${t.tmdbYear ? ` (${t.tmdbYear})` : ''}` : 'No TMDB title'}</h2>
-  <div class="hint">{t.kind === 'movie' ? 'Film' : 'Series'}</div>
-</div></div>
 {#if t.overridden}<Badge kind="ok">Fixed here</Badge>{/if}
 <h3>About</h3>
 <dl class="facts">
@@ -65,7 +73,7 @@
 {#if (t.reasons.length && t.tmdb) || t.overridden}
   <div class="actions-row">
     {#if t.reasons.length && t.tmdb}<Busy action={() => act('PUT', { tmdb: t.tmdb }, 'Kept as it is.')}>It's right</Busy>{/if}
-    {#if t.overridden}<Busy action={() => act('DELETE', undefined, 'Back to Jellyfin\'s title.')}>Back to Jellyfin's</Busy>{/if}
+    {#if t.overridden}<Busy action={back}>Back to Jellyfin's</Busy>{/if}
   </div>
 {/if}
 <h3>Find the right one on TMDB</h3>
@@ -87,7 +95,7 @@
           <div class="hint">{[c.originalName && c.originalName !== c.name ? c.originalName : '', c.language, `TMDB ${c.tmdb}`].filter(Boolean).join(' · ')}</div>
           {#if c.overview}<div class="hint clamp">{c.overview}</div>{/if}
         </div>
-        {#if c.tmdb === t.tmdb}<Badge kind="info">Current</Badge>{:else}<Busy small action={() => act('PUT', { tmdb: c.tmdb }, 'Title fixed.')}>Use this</Busy>{/if}
+        {#if c.tmdb === t.tmdb}<Badge kind="info">Current</Badge>{:else}<Busy small action={() => retitle(c.tmdb)}>Use this</Busy>{/if}
       </li>
     {:else}
       <li class="hint">TMDB found nothing.</li>

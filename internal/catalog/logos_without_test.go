@@ -44,7 +44,7 @@ func TestLogosForTitlesWithout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`DROP TABLE title_history; PRAGMA user_version = 67`); err != nil {
+	if _, err := db.Exec(`DROP TABLE title_history; DROP TABLE title_edits; DROP TABLE title_uploads; PRAGMA user_version = 67`); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()

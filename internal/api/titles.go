@@ -129,7 +129,7 @@ func summaryOf(t *store.TitleInfo) library.TitleSummary {
 		s.Ratings = []library.Rating{{Source: "tmdb", Value: math.Round(t.Score*10) / 10, Votes: t.Votes}}
 	}
 	ref := func(typ, path string, aspect *float64) *library.ImageRef {
-		if id := images.ArtworkID(typ, path); id != "" {
+		if id := imageID(typ, path); id != "" {
 			return &library.ImageRef{URL: "/api/v1/images/" + id, AspectRatio: aspect}
 		}
 		return nil

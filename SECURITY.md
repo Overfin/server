@@ -89,7 +89,10 @@ comes from the internet, and media files can be written by anyone.
     treatment, re-encoded as JPEG.
     Branding pictures an admin uploads are kept as they are, 4 MB at most,
     any picture but SVG, and served with their image type under the API's
-    headers (no script in them ever runs).
+    headers (no script in them ever runs). Titles' artwork an admin
+    uploads (the metadata editor), 10 MB at most, is re-encoded on the
+    way in like any image, and served only to profiles that may see a
+    title it's the artwork of.
 11. Subtitles are served only as sanitized WebVTT. Fonts and other files
     attached to media are never served.
 12. From upstream responses, only the headers streaming needs are passed on: a
@@ -255,7 +258,9 @@ comes from the internet, and media files can be written by anyone.
 38. The API's cursors are signed and bound to the query that produced them. A
     modified cursor, or one used with a different query, is refused. The
     apps API's (rule 58) are plain positions in a list the key may read whole.
-39. Today, only admins upload files: branding pictures (rule 10).
+39. Today, only admins upload files: branding pictures and titles'
+    artwork (rule 10); an artwork upload no edit uses is deleted after an
+    hour.
     Profile pictures (planned) will get rule 10's treatment, with stricter
     size limits and a rate limit. Overfin keeps uploads itself, never in
     Jellyfin, whose image endpoints don't check permissions.

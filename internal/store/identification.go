@@ -23,6 +23,8 @@ type LibraryTitle struct {
 	// Jellyfin's; Overridden, an admin chose TMDB.
 	TMDB, JellyfinTMDB string
 	Overridden         bool
+	// Edited: an admin changed its TMDB title's texts or artwork.
+	Edited bool
 	// The TMDB title's name, year and details, when kept.
 	TMDBName string
 	TMDBYear int
@@ -37,7 +39,8 @@ func (s *Store) LibraryTitles(ctx context.Context) ([]LibraryTitle, error) {
 	rows, err := s.read.QueryContext(ctx, `SELECT i.id, i.kind, coalesce(i.library_id, ''), i.name, coalesce(i.year, 0),
 			coalesce(i.folder_name, ''), coalesce(i.file_name, ''), coalesce(i.runtime_ms, 0),
 			coalesce(i.tmdb, ''), coalesce(i.jellyfin_tmdb, ''), o.item_id IS NOT NULL,
-			coalesce(t.name, ''), coalesce(t.year, 0), t.details
+			coalesce(t.name, ''), coalesce(t.year, 0), t.details,
+			EXISTS (SELECT 1 FROM title_edits e WHERE e.kind = i.kind AND e.tmdb = i.tmdb)
 		FROM catalog_items i
 		LEFT JOIN title_overrides o ON o.item_id = i.id
 		LEFT JOIN catalog_titles t ON t.kind = i.kind AND t.tmdb = i.tmdb
@@ -52,7 +55,7 @@ func (s *Store) LibraryTitles(ctx context.Context) ([]LibraryTitle, error) {
 		var t LibraryTitle
 		var details sql.NullString
 		if err := rows.Scan(&t.ItemID, &t.Kind, &t.LibraryID, &t.Name, &t.Year, &t.FolderName, &t.FileName, &t.RuntimeMs,
-			&t.TMDB, &t.JellyfinTMDB, &t.Overridden, &t.TMDBName, &t.TMDBYear, &details); err != nil {
+			&t.TMDB, &t.JellyfinTMDB, &t.Overridden, &t.TMDBName, &t.TMDBYear, &details, &t.Edited); err != nil {
 			rows.Close()
 			return nil, err
 		}

@@ -140,7 +140,10 @@ type Panel struct {
 	SearchTMDB func(ctx context.Context, query string) ([]tmdb.Title, error)
 	Images     *images.Pipeline
 	OnRetitled func()
-	Store      *store.Store
+	// TitleImages, when set, lists the images TMDB has of a film or a
+	// series, for the metadata editor to choose from.
+	TitleImages func(ctx context.Context, kind string, tmdbID int) (map[string][]tmdb.Image, error)
+	Store       *store.Store
 	// Provisioner is the one in effect now: Seerr and the features change
 	// live.
 	Provisioner func() *provision.Provisioner
@@ -321,6 +324,12 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("PUT /admin/api/identification/{id}", p.signedIn(p.identify))
 	mux.HandleFunc("DELETE /admin/api/identification/{id}", p.signedIn(p.unidentify))
 	mux.HandleFunc("GET /admin/api/posters/{id}", p.signedIn(p.poster))
+	mux.HandleFunc("GET /admin/api/metadata/{kind}/{tmdb}", p.signedIn(p.metadata))
+	mux.HandleFunc("GET /admin/api/metadata/{kind}/{tmdb}/images", p.signedIn(p.metadataImages))
+	mux.HandleFunc("PUT /admin/api/metadata/{kind}/{tmdb}", p.signedIn(p.setMetadata))
+	mux.HandleFunc("DELETE /admin/api/metadata/{kind}/{tmdb}/{field}/{language}", p.signedIn(p.unsetMetadata))
+	mux.HandleFunc("POST "+metadataUploads+"{type}", p.signedIn(p.uploadMetadataImage))
+	mux.HandleFunc("GET /admin/api/artwork/{id}", p.signedIn(p.artwork))
 	mux.HandleFunc("GET /admin/api/modules", p.signedIn(p.moduleTabs))
 	if p.People != nil {
 		mux.HandleFunc("GET /admin/api/people", p.signedIn(p.people))
@@ -426,9 +435,9 @@ func sameOrigin(next http.Handler) http.Handler {
 			}
 		}
 		// Requests with a body must be JSON, which HTML forms can't send,
-		// except branding files, which carry an image type (neither can a
-		// form). DELETE has no body, and browsers never send it cross-site
-		// without the server's consent.
+		// except branding files and titles' images, which carry an image
+		// type (neither can a form). DELETE has no body, and browsers never
+		// send it cross-site without the server's consent.
 		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
 			mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 			switch {
@@ -436,6 +445,8 @@ func sameOrigin(next http.Handler) http.Handler {
 				r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 			case strings.HasPrefix(mt, "image/") && r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, brandingFiles):
 				r.Body = http.MaxBytesReader(w, r.Body, maxBrandingFile)
+			case strings.HasPrefix(mt, "image/") && r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, metadataUploads):
+				r.Body = http.MaxBytesReader(w, r.Body, maxTitleUpload)
 			default:
 				http.Error(w, "Requests must be JSON", http.StatusUnsupportedMediaType)
 				return

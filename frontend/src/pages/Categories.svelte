@@ -3,7 +3,7 @@
 <script lang="ts">
   import { PageHead, Card, Setting, Badge, Busy, Empty, Notice, Loading, ask, toast } from '@overfin/ui';
   import { api } from '../lib/api';
-  import { message, plural } from '../lib/format';
+  import { languageName, message, plural } from '../lib/format';
   import CategoryEditor from '../parts/library/CategoryEditor.svelte';
   import type { Categories, Category, CategoryRules } from '../lib/types';
 
@@ -22,7 +22,7 @@
     }
   }
 
-  const langName = (code: string) => { try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code; } catch { return code; } };
+  const langName = languageName;
   const nameOf = (c: Category) => c.names[data!.defaultLanguage] || Object.values(c.names)[0] || 'Unnamed';
 
   function summary(r: CategoryRules): string {

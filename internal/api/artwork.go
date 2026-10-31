@@ -130,3 +130,65 @@ func (l Library) artworkImage(w http.ResponseWriter, r *http.Request, p *store.P
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	_, _ = w.Write(data)
 }
+
+// uploadImage starts the image ID of artwork an admin uploaded for a title
+// (the metadata editor): uploadImage and the upload's ID.
+const uploadImage = "titleup_"
+
+// imageID is the image ID of a title's artwork at path: TMDB's, or an
+// upload; "" when the path is neither.
+func imageID(typ, path string) string {
+	if id, ok := store.UploadID(path); ok {
+		return uploadImage + id
+	}
+	return images.ArtworkID(typ, path)
+}
+
+// uploadedImage serves artwork an admin uploaded, to profiles that may see
+// a title it's the artwork of. It was re-encoded when uploaded, and one
+// size serves all.
+func (l Library) uploadedImage(w http.ResponseWriter, r *http.Request, p *store.Profile, id string) {
+	if _, ok := store.UploadID(store.UploadValue(id)); !ok {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	ctx := r.Context()
+	st := l.Provisioner.Store
+	keys, err := st.UploadTitles(ctx, id)
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	infos, err := st.TitleInfos(ctx, keys, today(), "")
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	titles := make([]*store.TitleInfo, 0, len(infos))
+	for _, t := range infos {
+		titles = append(titles, t)
+	}
+	visible, err := l.visibleTitles(ctx, p, titles)
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	if !slices.Contains(visible, true) {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	u, ok, err := st.TitleUploadOf(ctx, id)
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	if !ok {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	// An upload never changes: a new one has a new ID.
+	w.Header().Set("Cache-Control", "private, max-age=604800, immutable")
+	w.Header().Set("Content-Type", u.ContentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(u.Data)))
+	_, _ = w.Write(u.Data)
+}

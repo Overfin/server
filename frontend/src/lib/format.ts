@@ -32,3 +32,12 @@ export const message = (err: unknown) => (err instanceof Error ? err.message : S
 
 const featureNames: Record<string, string> = { library: 'Library', playback: 'Playback', watchlist: 'Watchlist', invites: 'Invitations', migration: 'Migration' };
 export const featureName = (n: string) => featureNames[n] || n.charAt(0).toUpperCase() + n.slice(1);
+
+/** languageName is a language tag in words: "fr-CA" is "Canadian French". */
+export function languageName(tag: string): string {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'language' }).of(tag) || tag;
+  } catch {
+    return tag;
+  }
+}

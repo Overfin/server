@@ -57,7 +57,7 @@ func TestLogosCheckedAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`DROP TABLE logos_to_check; DROP TABLE collections_to_find; DROP TABLE collections;
-		DROP INDEX catalog_titles_collection; ALTER TABLE catalog_titles DROP COLUMN collection; DROP TABLE title_history; PRAGMA user_version = 65`); err != nil {
+		DROP INDEX catalog_titles_collection; ALTER TABLE catalog_titles DROP COLUMN collection; DROP TABLE title_history; DROP TABLE title_edits; DROP TABLE title_uploads; PRAGMA user_version = 65`); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()

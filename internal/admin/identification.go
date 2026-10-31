@@ -34,6 +34,7 @@ type identifiedJSON struct {
 	TMDB         string            `json:"tmdb,omitempty"`
 	JellyfinTMDB string            `json:"jellyfinTmdb,omitempty"`
 	Overridden   bool              `json:"overridden"`
+	Edited       bool              `json:"edited"`
 	TMDBName     string            `json:"tmdbName,omitempty"`
 	TMDBYear     int               `json:"tmdbYear,omitempty"`
 	OriginalName string            `json:"originalName,omitempty"`
@@ -52,7 +53,7 @@ func (p *Panel) identification(w http.ResponseWriter, r *http.Request, _ *sessio
 	for _, t := range all {
 		j := identifiedJSON{ItemID: t.ItemID, Kind: t.Kind, LibraryID: t.LibraryID, Name: t.Name,
 			FolderName: t.FolderName, FileName: t.FileName, RuntimeMin: int(t.RuntimeMs / 60_000),
-			TMDB: t.TMDB, JellyfinTMDB: t.JellyfinTMDB, Overridden: t.Overridden,
+			TMDB: t.TMDB, JellyfinTMDB: t.JellyfinTMDB, Overridden: t.Overridden, Edited: t.Edited,
 			TMDBName: t.TMDBName, TMDBYear: t.TMDBYear, OriginalName: t.Details.OriginalName, Language: t.Details.Language,
 			Reasons: identify.Reasons(t)}
 		if j.Reasons == nil {
