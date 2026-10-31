@@ -181,3 +181,64 @@ func TestPreviews(t *testing.T) {
 		t.Errorf("a new library's options, previews off: %v", o)
 	}
 }
+
+// Jellyfin's downloaders of metadata and images are emptied for films,
+// series, seasons and episodes, each type's other options kept; set once,
+// nothing differs after. A new library has them empty from the start.
+func TestFetchersOff(t *testing.T) {
+	f, jf := newFake(t)
+	f.lib["TypeOptions"] = []any{
+		map[string]any{"Type": "Movie", "MetadataFetchers": []any{"TheMovieDb", "The Open Movie Database"},
+			"MetadataFetcherOrder": []any{"TheMovieDb"}, "ImageFetchers": []any{}, "ImageFetcherOrder": []any{}, "ImageOptions": []any{"kept"}},
+		map[string]any{"Type": "MusicAlbum", "MetadataFetchers": []any{"MusicBrainz"}},
+	}
+	ctx := context.Background()
+	admin := jellyfin.Auth{Token: "admin"}
+	changes, err := Apply(ctx, jf, admin, Choices{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fetchers := 0
+	for _, c := range changes {
+		if strings.HasPrefix(c.Key, "TypeOptions ") {
+			fetchers++
+		}
+	}
+	// One change for each type: Movie, whose lists weren't empty, and
+	// Series, Season and Episode, which weren't there.
+	if fetchers != 4 {
+		t.Errorf("%d changes to downloaders: %v", fetchers, changes)
+	}
+	f.mu.Lock()
+	types := f.lib["TypeOptions"].([]any)
+	f.mu.Unlock()
+	if len(types) != 5 {
+		t.Fatalf("types: %v", types)
+	}
+	for _, x := range types {
+		m := x.(map[string]any)
+		switch m["Type"] {
+		case "MusicAlbum":
+			if len(m["MetadataFetchers"].([]any)) != 1 {
+				t.Errorf("another type changed: %v", m)
+			}
+		case "Movie":
+			if len(m["ImageOptions"].([]any)) != 1 || len(m["MetadataFetchers"].([]any)) != 0 {
+				t.Errorf("movie: %v", m)
+			}
+		default:
+			for _, list := range fetcherLists {
+				if l, ok := m[list].([]any); !ok || len(l) != 0 {
+					t.Errorf("%v %s: %v", m["Type"], list, m[list])
+				}
+			}
+		}
+	}
+	if again, _ := Plan(ctx, jf, admin, Choices{}); len(again) != 0 {
+		t.Errorf("after: %v", again)
+	}
+	types, _ = LibraryOptions(Choices{})["TypeOptions"].([]any)
+	if len(types) != len(fetcherTypes) {
+		t.Errorf("new library: %v", types)
+	}
+}

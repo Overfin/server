@@ -117,6 +117,10 @@ func TestMatch(t *testing.T) {
 			t.Errorf("searched although the ID was there: %v", src.asked)
 		}
 	}
+	// A file under a minute long says nothing of its length.
+	if got, _ := Match(ctx, src, Files{Kind: "movie", Folder: "Heat (1995) [tmdbid-949]", RuntimeMs: 20_000}); !got.Sure {
+		t.Errorf("20 seconds: %+v", got)
+	}
 	// One TMDB doesn't know is searched for instead.
 	got, _ = Match(ctx, src, Files{Kind: "movie", Folder: "Heat (1995) [tmdbid-424242]"})
 	if got.TMDB != "949" {

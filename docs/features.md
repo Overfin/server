@@ -52,7 +52,7 @@
   account gets, whether each profile keeps a stream of its own, and the
   categories its profiles see), limits, languages,
   libraries, the GPU that converts videos (tested on your own files),
-  seek-bar previews (off by default: they take time and disk space), email, Seerr, fixing titles Jellyfin matched wrong, what each title is
+  seek-bar previews (off by default: they take time and disk space), email, Seerr, each title's metadata (how it's matched, its texts and artwork), what each title is
   worth to your server (Valuation).
 - **Bringing people over** from another Jellyfin, their watch history
   included, with their old username and password, once. Nothing changes on
@@ -127,7 +127,7 @@ watchlist are always on; the rest is switched on in the control panel.
 | Watchlist | Each profile's watchlist | Always on |
 | Invitations | Invitations and invite templates | Always on |
 | Migration | Bringing Jellyfin accounts over | Switch |
-| Catalog | The library's index, matched to TMDB | Always on |
+| Catalog | The library's index, matched to TMDB by Overfin | Always on |
 | Discovery | Trending, popular and upcoming titles, from TMDB | With a TMDB token or Seerr; kids profiles see what their age allows |
 | Requests | Asking for titles no library has, through Seerr | When Seerr is connected |
 
@@ -138,8 +138,15 @@ how to get one), given in the wizard, the control panel (Server, TMDB) or
 `OVERFIN_TMDB_TOKEN`. No token is shipped with Overfin: each server uses
 its own. For now, Overfin can't do without one: titles show with no name
 or picture, Home stays empty, there's no discovery, and kids profiles see
-nothing, since titles' ages come from TMDB's ratings. Running on what
-Jellyfin knows alone is planned.
+nothing, since titles' ages come from TMDB's ratings.
+
+Overfin matches each film and series to TMDB itself: an ID written in its
+folder or file name (`[tmdbid-…]`, `[imdbid-…]`, `[tvdbid-…]`) or in an
+`.nfo` file first, else TMDB searched by its name and year and the closest
+taken, by its length or its seasons and its audio's language too. What it
+isn't sure of waits in the control panel's Metadata, with why and the
+other candidates. Its own Jellyfin fetches no metadata or images from the
+internet: it reads the files, and Overfin does the rest.
 
 Overfin asks TMDB by itself, by title, never saying who's asking; browsers
 never contact TMDB. It keeps TMDB's data as its terms allow (five months at

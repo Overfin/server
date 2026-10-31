@@ -55,7 +55,7 @@ var libraryBase = []Setting{
 	{"ExtractChapterImagesDuringLibraryScan", false, "no app shows chapter images"},
 	{"EnableLUFSScan", false, "no app evens out loudness"},
 	{"EnableRealtimeMonitor", true, "new titles appear as soon as they arrive"},
-	{"EnableInternetProviders", true, "titles are matched to TMDB"},
+	{"EnableInternetProviders", false, "Overfin matches titles to TMDB itself"},
 	{"EnableEmbeddedTitles", false, "titles come from TMDB, not from files"},
 	{"AutomaticallyAddToCollection", false, "Overfin doesn't use Jellyfin's collections"},
 }
@@ -150,6 +150,7 @@ func run(ctx context.Context, jf *jellyfin.Client, admin jellyfin.Auth, apply bo
 			continue // still being made: next time
 		}
 		found := differences(l.Options, librarySettings(c), "library "+l.Name)
+		found = append(found, fetchersOff(l.Options, "library "+l.Name)...)
 		if apply && len(found) > 0 {
 			if err := jf.SetLibraryOptions(ctx, admin, l.ID, l.Options); err != nil {
 				return changes, err
@@ -212,5 +213,53 @@ func normalize(v any) any {
 func LibraryOptions(c Choices) jellyfin.Settings {
 	options := jellyfin.Settings{}
 	differences(options, librarySettings(c), "")
+	fetchersOff(options, "")
 	return options
+}
+
+// fetcherTypes are the kinds of items whose metadata and images Jellyfin
+// would fetch from the internet: films, series, their seasons and
+// episodes.
+var fetcherTypes = []string{"Movie", "Series", "Season", "Episode"}
+
+// fetcherLists are a type's lists of downloaders, all kept empty.
+var fetcherLists = []string{"MetadataFetchers", "MetadataFetcherOrder", "ImageFetchers", "ImageFetcherOrder"}
+
+// fetchersOff empties, in a library's options, every downloader of
+// metadata and images for fetcherTypes (TypeOptions), and lists what it
+// changed: Jellyfin fetches nothing from the internet, which Overfin does
+// itself (synopses, cast and their photos, artwork; the match to TMDB).
+// Jellyfin 12 goes by these lists, not by EnableInternetProviders. Each
+// type's other options are left as they are; IDs in folder names and .nfo
+// files, and episodes' numbers, still come from the files.
+func fetchersOff(s jellyfin.Settings, where string) []Change {
+	types, _ := s["TypeOptions"].([]any)
+	var changes []Change
+	for _, typ := range fetcherTypes {
+		i := slices.IndexFunc(types, func(t any) bool {
+			m, ok := t.(map[string]any)
+			return ok && m["Type"] == typ
+		})
+		if i < 0 {
+			types = append(types, map[string]any{"Type": typ})
+			i = len(types) - 1
+		}
+		entry := types[i].(map[string]any)
+		var had []any // the downloaders listed, all lists together
+		changed := false
+		for _, list := range fetcherLists {
+			have, ok := entry[list].([]any)
+			if ok && len(have) == 0 {
+				continue
+			}
+			had, changed = append(had, have...), true
+			entry[list] = []any{}
+		}
+		if changed {
+			changes = append(changes, Change{Where: where, Key: "TypeOptions " + typ + " downloaders", From: had, To: []any{},
+				Why: "Overfin fetches metadata and images itself"})
+		}
+	}
+	s["TypeOptions"] = types
+	return changes
 }
