@@ -75,6 +75,9 @@ func runtimeDoubt(t store.LibraryTitle) (Reason, bool) {
 		return Reason{}, false
 	}
 	here, there := int(t.RuntimeMs/60_000), t.Details.Runtime
+	if here == 0 {
+		return Reason{}, false // under a minute: not a length to judge by
+	}
 	if abs(here-there) > 15 && (2*here > 3*there || 3*here < 2*there) {
 		return Reason{"runtime", fmt.Sprintf("%d minutes here; TMDB says %d.", here, there)}, true
 	}
