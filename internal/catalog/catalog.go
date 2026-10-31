@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/overfin/server/internal/jellyfin"
+	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/textclean"
 )
@@ -487,26 +488,12 @@ func convert(raw jellyfin.RawItem) (store.CatalogItem, bool) {
 	if r := raw.CommunityRating; r != nil && *r >= 0 && *r <= 10 {
 		it.CommunityRating = r
 	}
-	for _, g := range raw.Genres {
-		if name := textclean.Plain(g, 128); name != "" && len(it.Genres) < 20 {
-			it.Genres = append(it.Genres, name)
-		}
-	}
-	for _, st := range raw.Studios {
-		if name := textclean.Plain(st.Name, 128); name != "" && len(it.Studios) < 20 {
-			it.Studios = append(it.Studios, name)
-		}
-	}
-	// Tags hide titles from profiles (SECURITY.md rule 28): every one is
-	// kept, up to a bound no real title reaches.
-	for _, tag := range raw.Tags {
-		if name := textclean.Plain(tag, 128); name != "" && len(it.Tags) < maxTags {
-			it.Tags = append(it.Tags, name)
-		}
-	}
-	for _, p := range raw.People {
-		if pid, err := jellyfin.NormalizeID(p.Id); err == nil && len(it.People) < 100 && !slices.Contains(it.People, pid) {
-			it.People = append(it.People, pid)
+	// The languages of a film's or an episode's audio, for telling which
+	// title it is (identify.Match): two letters each, once.
+	for _, s := range raw.MediaStreams {
+		if l := lang.Base(s.Language); s.Type == "Audio" && l != "" && !slices.Contains(it.AudioLanguages, l) &&
+			len(it.AudioLanguages) < maxAudioLanguages {
+			it.AudioLanguages = append(it.AudioLanguages, l)
 		}
 	}
 	it.PrimaryTag = matching(imageTag, raw.ImageTags["Primary"])
@@ -545,5 +532,5 @@ func splitPath(p string) (dir, name string) {
 	return p[:max(i, 0)], p[i+1:]
 }
 
-// maxTags is how many tags of a title the index keeps.
-const maxTags = 500
+// maxAudioLanguages is how many audio languages of a file the index keeps.
+const maxAudioLanguages = 12

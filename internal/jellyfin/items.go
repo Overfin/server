@@ -65,6 +65,9 @@ type RawItem struct {
 	AlbumCount        *int
 	Width             *int
 	Height            *int
+	// MediaStreams are a file's streams; only the catalog asks for them,
+	// for its audio's languages.
+	MediaStreams []MediaStream
 }
 
 type NameID struct {

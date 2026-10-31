@@ -114,6 +114,9 @@ type CatalogItem struct {
 	// folder and file, a series' folder); RuntimeMs, a film's length.
 	FolderName, FileName string
 	RuntimeMs            int64
+	// AudioLanguages are a film's or an episode's audio languages, two
+	// letters each.
+	AudioLanguages []string
 }
 
 // PutCatalog adds or updates titles, marking them seen by the full pass
@@ -127,8 +130,8 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 	stmt, err := tx.PrepareContext(ctx, `INSERT INTO catalog_items (id, kind, name, sort_name, year,
 		series_id, season_id, season_number, episode_number, tmdb, imdb, tvdb, rating,
 		primary_tag, backdrop_tag, thumb_tag, seen, library_id, added_at, premiere_date, community_rating,
-		folder_name, file_name, runtime_ms, jellyfin_tmdb)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET kind = excluded.kind, name = excluded.name,
 			sort_name = excluded.sort_name, year = excluded.year, series_id = excluded.series_id,
 			season_id = excluded.season_id, season_number = excluded.season_number,
@@ -138,7 +141,7 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 			library_id = coalesce(excluded.library_id, library_id), added_at = excluded.added_at,
 			premiere_date = excluded.premiere_date, community_rating = excluded.community_rating,
 			folder_name = excluded.folder_name, file_name = excluded.file_name, runtime_ms = excluded.runtime_ms,
-			jellyfin_tmdb = excluded.jellyfin_tmdb`)
+			jellyfin_tmdb = excluded.jellyfin_tmdb, audio_languages = excluded.audio_languages`)
 	if err != nil {
 		return err
 	}
@@ -160,7 +163,8 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 			nullString(tmdb), nullString(it.IMDb), nullString(it.TVDB), it.Rating,
 			nullString(it.PrimaryTag), nullString(it.BackdropTag), nullString(it.ThumbTag), pass,
 			nullString(it.LibraryID), added, nullString(it.PremiereDate), it.CommunityRating,
-			nullString(it.FolderName), nullString(it.FileName), nullInt64(it.RuntimeMs), nullString(it.TMDB)); err != nil {
+			nullString(it.FolderName), nullString(it.FileName), nullInt64(it.RuntimeMs), nullString(it.TMDB),
+			jsonList(it.AudioLanguages)); err != nil {
 			return err
 		}
 		if arrived {

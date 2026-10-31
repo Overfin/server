@@ -346,8 +346,8 @@ comes from the internet, and media files can be written by anyone.
 55. Privacy-sensitive fields are off by default: version names (derived from
     file names) are served only if the operator turns them on
     (`privacy.expose`); photos' capture time, location and camera data, and
-    items' tags, are never served (owners see the list of the libraries'
-    tags, to hide some from a profile).
+    titles' tags (TMDB's keywords), are never served (owners see the list
+    of the libraries' tags, to hide some from a profile).
     Embedded metadata is still stripped from image files (rule 10).
     Security-sensitive data (file paths, server internals, permission flags) is
     never exposed, whatever the configuration. Two exceptions, both in the
