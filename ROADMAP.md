@@ -891,6 +891,9 @@ nothing beyond what that needs.
   running Docker edits one), and a library's folders are the paths after
   the colon. The first one, at `/media`, is in the Compose file too
   (no `MEDIA_DIR` any more, since 0.7).
+- **Metadata editor** in the panel: the operator changes a title's
+  details by hand, and Overfin keeps the changes itself, over what TMDB
+  says.
 
 ## Companion projects
 
