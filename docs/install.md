@@ -1,6 +1,6 @@
 # Installing and running Overfin
 
-You need **Docker** with Compose, and your media on the same machine.
+You need **Docker** with Compose, and your media in a folder this machine can read.
 Overfin needs a **Jellyfin of its own** (Jellyfin 12): the compose file
 runs one, which Overfin sets up by itself on its first start, and manages
 from then on. A Jellyfin you already use stays yours and untouched: see
