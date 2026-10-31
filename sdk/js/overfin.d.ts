@@ -396,6 +396,47 @@ export class Player {
 
 export function capabilities(): Capabilities;
 
+/** A picture of a PGS track, as it comes compressed; pgsPixels() draws it. */
+export interface PGSPicture {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** The part shown, when the track crops it. */
+  crop?: { x: number; y: number; width: number; height: number };
+  /** RGBA, 256 entries. */
+  palette: Uint8ClampedArray;
+  data: Uint8Array;
+}
+
+/** What a PGS track shows from startMs to endMs (Infinity: the last). */
+export interface PGSCue {
+  startMs: number;
+  endMs: number;
+  /** The screen the pictures are placed on. */
+  width: number;
+  height: number;
+  forced: boolean;
+  pictures: PGSPicture[];
+}
+
+/** Reads a PGS track into its cues, in order. Throws on a malformed track. */
+export function decodePGS(bytes: Uint8Array | ArrayBuffer): PGSCue[];
+/** A picture's pixels, RGBA (width × height × 4). Throws when they overflow its size. */
+export function pgsPixels(picture: PGSPicture): Uint8ClampedArray;
+/** The cue showing at a time (ms), or null. */
+export function cueAt(cues: PGSCue[], ms: number): PGSCue | null;
+
+/** Draws a PGS track over a video, on a canvas laid over the video's box. */
+export class PictureSubtitles {
+  constructor(video: HTMLVideoElement, canvas: HTMLCanvasElement);
+  readonly cues: PGSCue[];
+  /** Loads a track by its URL; resolves once its cues are read. */
+  load(url: string): Promise<void>;
+  /** Stops drawing and clears the canvas. */
+  hide(): void;
+}
+
 export class Overfin {
   constructor(options?: { base?: string; onLoginRequired?: (loginUrl: string) => void });
   readonly base: string;

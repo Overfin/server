@@ -371,3 +371,85 @@ test('collections: the list, then one with its films', async () => {
   assert.deepEqual(one.items, []);
   assert.deepEqual(calls.map((c) => c.url), ['/api/v1/collections', '/api/v1/collections/collection_10']);
 });
+
+// ---- Picture subtitles -----------------------------------------------------
+
+// A PGS segment: magic, times (ms, as 90 kHz), type, size, body.
+function segment(type, body, ms = 0) {
+  const pts = ms * 90;
+  return [0x50, 0x47, (pts >>> 24) & 255, (pts >>> 16) & 255, (pts >>> 8) & 255, pts & 255, 0, 0, 0, 0, type, body.length >> 8, body.length & 255, ...body];
+}
+// A display set at ms: 1920×1080, one picture (id 1) at 100,900 when runs
+// are given, else a clearing one.
+function displaySet(ms, runs, { epoch = true, forced = false, fragments = 1 } = {}) {
+  const shown = runs ? [0, 1, 0, forced ? 0x40 : 0, 0, 100, 3, 132] : [];
+  const out = [...segment(0x16, [7, 128, 4, 56, 16, 0, 0, epoch ? 0x80 : 0, 0, 0, runs ? 1 : 0, ...shown], ms)];
+  if (runs) {
+    // Palette 0: entry 1 white, opaque (Y 235, Cr 128, Cb 128).
+    out.push(...segment(0x14, [0, 0, 1, 235, 128, 128, 255], ms));
+    const head = [0, 1, 0, 0, 0, 0, runs.length + 4, 0, 3, 0, 2];
+    if (fragments === 1) {
+      head[3] = 0xc0;
+      out.push(...segment(0x15, [...head, ...runs], ms));
+    } else {
+      head[3] = 0x80;
+      out.push(...segment(0x15, [...head, ...runs.slice(0, 2)], ms));
+      out.push(...segment(0x15, [0, 1, 0, 0x40, ...runs.slice(2)], ms));
+    }
+  }
+  out.push(...segment(0x80, [], ms));
+  return out;
+}
+// 3 by 2: a white pixel, 2 clear, end of line; 3 white, end of line.
+const RUNS = [1, 0, 2, 0, 0, 0, 0x83, 1, 0, 0];
+
+test('a PGS track reads into cues, each ending when the next display set comes', async () => {
+  const { decodePGS, pgsPixels, cueAt } = await import('./overfin.js');
+  const cues = decodePGS(new Uint8Array([...displaySet(1000, RUNS), ...displaySet(3000, null), ...displaySet(5000, RUNS, { forced: true, fragments: 2 })]));
+  assert.equal(cues.length, 2);
+  assert.deepEqual([cues[0].startMs, cues[0].endMs, cues[1].startMs, cues[1].endMs], [1000, 3000, 5000, Infinity]);
+  assert.deepEqual([cues[0].width, cues[0].height, cues[0].forced, cues[1].forced], [1920, 1080, false, true]);
+  const p = cues[0].pictures[0];
+  assert.deepEqual([p.x, p.y, p.width, p.height], [100, 900, 3, 2]);
+  const px = pgsPixels(p);
+  // White and opaque where colour 1 is, clear elsewhere.
+  assert.deepEqual([...px.slice(0, 4)], [255, 255, 255, 255]);
+  assert.deepEqual([...px.slice(4, 12)], [0, 0, 0, 0, 0, 0, 0, 0]);
+  assert.deepEqual([...px.slice(12)].filter((_, i) => i % 4 === 3), [255, 255, 255]);
+  assert.deepEqual([...pgsPixels(cues[1].pictures[0])], [...px], 'fragments join');
+  assert.equal(cueAt(cues, 999), null);
+  assert.equal(cueAt(cues, 1000), cues[0]);
+  assert.equal(cueAt(cues, 2999), cues[0]);
+  assert.equal(cueAt(cues, 4000), null);
+  assert.equal(cueAt(cues, 9e6), cues[1]);
+});
+
+test('a malformed PGS track or picture throws', async () => {
+  const { decodePGS, pgsPixels } = await import('./overfin.js');
+  const good = displaySet(0, RUNS);
+  for (const bad of [good.slice(0, -3), [0x50, 0x58, ...good.slice(2)], [...good, ...segment(0x42, [])]]) {
+    assert.throws(() => decodePGS(new Uint8Array(bad)));
+  }
+  const [cue] = decodePGS(new Uint8Array(displaySet(0, [0, 0x84, 1])));
+  assert.throws(() => pgsPixels(cue.pictures[0]), 'a line too long');
+});
+
+// Real tracks read and draw, when there are some to try (PGS_SAMPLES).
+test('real PGS tracks', { skip: !process.env.PGS_SAMPLES }, async () => {
+  const { decodePGS, pgsPixels } = await import('./overfin.js');
+  const { readdirSync, readFileSync, statSync } = await import('node:fs');
+  const dir = process.env.PGS_SAMPLES;
+  for (const name of readdirSync(dir)) {
+    if (!statSync(`${dir}/${name}`).isFile()) continue;
+    const raw = readFileSync(`${dir}/${name}`);
+    if (raw[0] !== 0x50 || raw[1] !== 0x47) continue;
+    const cues = decodePGS(new Uint8Array(raw));
+    assert.ok(cues.length > 10, `${name}: ${cues.length} cues`);
+    let opaque = 0;
+    for (const cue of cues) for (const p of cue.pictures) {
+      const px = pgsPixels(p);
+      for (let i = 3; i < px.length; i += 4) if (px[i]) opaque++;
+    }
+    assert.ok(opaque > 0, name);
+  }
+});
