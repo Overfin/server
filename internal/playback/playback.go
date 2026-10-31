@@ -138,8 +138,10 @@ func DeviceProfile(c Capabilities, maxBitrate int) jellyfin.DeviceProfile {
 			},
 		})
 	}
-	// Subtitles reach clients only as WebVTT (rule 11); anything else, such
-	// as image-based subtitles, is burned into the video.
+	// Subtitles reach clients as files of their own, checked by Overfin
+	// (rule 11): WebVTT, or PGS pictures the client draws. Jellyfin is never
+	// asked for a subtitle track (SubtitleStreamIndex -1), so none is ever
+	// burned into the video, whatever these say.
 	p.SubtitleProfiles = []jellyfin.SubtitleProfile{
 		{Format: "vtt", Method: "External"},
 		{Format: "srt", Method: "External"},

@@ -4597,8 +4597,9 @@ components:
           examples: [[hdr10, dolbyVision]]
         subtitles:
           type: array
-          description: Subtitle formats the client renders itself; anything
-            else is converted or burned in.
+          description: Subtitle formats the client renders itself. Not
+            used since subtitles are never burned in; text comes as WebVTT,
+            pictures (PGS) as their own file.
           items:
             type: string
           examples: [[vtt, ass, pgs]]
