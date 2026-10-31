@@ -894,6 +894,42 @@ nothing beyond what that needs.
 - **Metadata editor** in the panel: the operator changes a title's
   details by hand, and Overfin keeps the changes itself, over what TMDB
   says.
+- **Overfin identifies titles itself; Jellyfin fetches no metadata**
+  (designed, under way). Jellyfin's matching is thin (an ID in the
+  folder name or an .nfo file, else TMDB's search by name and year,
+  scored on the title and the year only, TMDB's first result when in
+  doubt), and its metadata brings what Overfin doesn't use: synopses,
+  cast with their photos (9.8 GB on one server), OMDb's errors. Overfin
+  already knows more (Identification's doubts); it decides.
+  - IDs in folder names (`[tmdbid-…]`, `[imdbid-…]`, `[tvdbid-…]`) and
+    .nfo files first, used at once, then checked against the files like
+    any match: what contradicts them goes to Metadata's "To check", never
+    swapped by itself.
+  - Otherwise the name is read (year, brackets, release tags, scene
+    names), TMDB searched in the server's language, with the year then
+    without, and its first few candidates scored: title (original and
+    alternative ones too), year, a film's runtime or a series' seasons
+    and episodes, the audio's language against the original one, kind
+    and popularity. The best is taken; when unsure, it's flagged with the
+    other candidates ready to pick.
+  - A title matched is never matched again by itself: only a fix by hand,
+    or its file moving.
+  - Anime numbered across the whole series (`One Piece - 1071`) are
+    placed in TMDB's seasons by counting through them; what doesn't fit
+    is flagged.
+  - Servers keep the matches Jellyfin made; new titles are Overfin's.
+  - Tags become TMDB's keywords (categories, hidden tags, "More like
+    this"), "More like this" uses TMDB's cast, and Jellyfin's community
+    rating goes.
+  - Then Jellyfin goes offline for metadata: each library's metadata and
+    image downloaders emptied for films, series, seasons and episodes
+    (`EnableInternetProviders` alone does nothing in Jellyfin 12: tested).
+    Season and episode numbers, folder IDs and .nfo files still come
+    from the files.
+  - Order: the name reader; the matcher, tested on known misidentified
+    titles; the catalog wired to it, with "To check" and candidates;
+    tags and "More like this"; Jellyfin offline.
+  - Titles TMDB doesn't know: the metadata editor, for now.
 - **Images resized by Overfin itself** (designed; after Overfin's own
   identification). Today Overfin re-encodes every image at the size it
   gets it: TMDB's ready-made sizes, Jellyfin's own resizing, and uploads
