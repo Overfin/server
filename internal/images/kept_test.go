@@ -2,10 +2,12 @@ package images
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -92,5 +94,43 @@ func TestKeep(t *testing.T) {
 	}
 	if err := (&Pipeline{ArtworkDir: filepath.Join(dir, "none")}).ForgetKept(); err != nil {
 		t.Errorf("no folder: %v", err)
+	}
+}
+
+// TMDB serves some sizes as WebP whatever their name says: the next
+// larger one is asked then, once, and nothing that isn't JPEG or PNG is
+// ever served.
+func TestTMDBWebPSize(t *testing.T) {
+	jpg := sampleJPEG(t)
+	webp := []byte("RIFF\x24\x00\x00\x00WEBPVP8 ")
+	var asked []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.Path)
+		switch r.URL.Path {
+		case "/w500/poster1234.jpg", "/w1280/backdrop12.jpg":
+			w.Write(jpg)
+		default:
+			w.Write(webp)
+		}
+	}))
+	defer srv.Close()
+	old := tmdbImageBase
+	tmdbImageBase = srv.URL + "/"
+	defer func() { tmdbImageBase = old }()
+	p := New(nil, 1<<20)
+	ok := func(context.Context) error { return nil }
+	if data, _, err := p.TMDB(context.Background(), TMDBRef{Type: "poster", Path: "/poster1234.jpg"}, "medium", ok); err != nil || len(data) == 0 {
+		t.Errorf("poster: %v", err)
+	}
+	if want := []string{"/w342/poster1234.jpg", "/w500/poster1234.jpg"}; !slices.Equal(asked, want) {
+		t.Errorf("asked %v, want %v", asked, want)
+	}
+	// The largest already: nothing else to ask.
+	asked = nil
+	if _, _, err := p.TMDB(context.Background(), TMDBRef{Type: "logo", Path: "/logo123456.png"}, "large", ok); !errors.Is(err, ErrUnsafe) {
+		t.Errorf("logo: %v", err)
+	}
+	if len(asked) != 1 {
+		t.Errorf("asked %v", asked)
 	}
 }
