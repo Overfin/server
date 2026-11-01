@@ -3795,12 +3795,6 @@ components:
           x-status: planned
           description: Not sent yet (avatars are planned).
           $ref: "#/components/schemas/ImageRef"
-        language:
-          type: string
-          writeOnly: true
-          description: Kept when set, not used yet (metadata comes in the
-            account's language) and not returned.
-          examples: [fr-CA]
         maxAge:
           type: integer
           description: For kids profiles, the age it's held to, films and
@@ -3865,9 +3859,6 @@ components:
           type: string
           enum: [standard, kids]
           default: standard
-        language:
-          type: string
-          pattern: "^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$"
         maxAge:
           type: integer
           minimum: 0
@@ -3930,10 +3921,6 @@ components:
             up") lifts its restrictions, so it needs the PIN like its age.
             Turning a profile into a kids one needs an age.
           enum: [standard, kids]
-        language:
-          type: string
-          description: '"" clears it.'
-          pattern: "^$|^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$"
         maxAge:
           type: integer
           minimum: 0

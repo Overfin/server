@@ -492,12 +492,12 @@ export class Overfin {
 
   profiles(): Promise<Profile[]>;
   profile(id: string): Promise<Profile>;
-  createProfile(profile: { name: string; kind?: 'standard' | 'kids'; maxAge?: number; language?: string; libraries?: string[] | null; blockedTags?: string[] | null; categories?: string[] | null }): Promise<Profile>;
+  createProfile(profile: { name: string; kind?: 'standard' | 'kids'; maxAge?: number; libraries?: string[] | null; blockedTags?: string[] | null; categories?: string[] | null }): Promise<Profile>;
   /**
    * Each profile may change its own `theme` (`''` follows the device); the rest is the owner's.
    * `libraries: null` gives every library again; `blockedTags: null` hides no tag.
    */
-  updateProfile(id: string, changes: { name?: string; language?: string; theme?: '' | 'light' | 'dark'; kind?: 'standard' | 'kids'; maxAge?: number; libraries?: string[] | null; blockedTags?: string[] | null; categories?: string[] | null; kidsTitles?: boolean | null; audioLanguage?: string; subtitleLanguage?: string; pin?: string }): Promise<Profile>;
+  updateProfile(id: string, changes: { name?: string; theme?: '' | 'light' | 'dark'; kind?: 'standard' | 'kids'; maxAge?: number; libraries?: string[] | null; blockedTags?: string[] | null; categories?: string[] | null; kidsTitles?: boolean | null; audioLanguage?: string; subtitleLanguage?: string; pin?: string }): Promise<Profile>;
   deleteProfile(id: string): Promise<null>;
   activateProfile(id: string, pin?: string): Promise<Profile>;
   setPin(id: string, pin: string, ownerPin?: string): Promise<null>;
