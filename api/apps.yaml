@@ -295,8 +295,8 @@ paths:
         `downloading`, `notFound` (with `nextTry`, when the app tries it
         again), `unreleased` (with `releaseDate`, if known) or `waiting` (it
         gave up on it for now). A search, found or not, spends the turn of
-        the account whose wish it was; waiting for a release spends
-        nothing. Needs the `wishes` scope.
+        every account that wished for it (each gets it); waiting for a
+        release spends nothing. Needs the `wishes` scope.
       tags: [apps]
       requestBody:
         required: true

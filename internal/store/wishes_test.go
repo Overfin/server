@@ -173,3 +173,30 @@ func TestGroupedWishes(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+// A title several accounts wished for spends each one's turn when it's
+// fetched: an account once, on its profile whose wish is highest.
+func TestSpendWishTurns(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	ann, a1, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
+	a2, err := s.AddProfile(ctx, ann.ID, NewProfile{Name: "Second", Kind: "standard"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, b1, _ := s.CreateAccount(ctx, "subject-2", owner("2"))
+	_, c1, _ := s.CreateAccount(ctx, "subject-3", owner("3"))
+	s.AddWish(ctx, a1.ID, "movie/tmdb/9")
+	s.AddWish(ctx, a1.ID, "movie/tmdb/1")
+	s.AddWish(ctx, a2.ID, "movie/tmdb/1")
+	s.AddWish(ctx, b1.ID, "movie/tmdb/1")
+	s.AddWish(ctx, c1.ID, "movie/tmdb/2")
+	n, err := s.SpendWishTurns(ctx, "movie/tmdb/1")
+	if err != nil || n != 2 {
+		t.Fatalf("%d accounts, %v", n, err)
+	}
+	turns, _ := s.WishTurns(ctx)
+	if len(turns) != 2 || turns[ann.ID].ProfileID != a2.ID || turns[bob.ID].ProfileID != b1.ID {
+		t.Fatalf("turns: %+v", turns)
+	}
+}

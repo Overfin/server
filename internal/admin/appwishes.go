@@ -14,8 +14,8 @@ import (
 // The wishes, for the app that fetches them (Overswell): the titles people
 // wished for, in the order Overfin's turns give (internal/wishes), never
 // who wished them or how many did (SECURITY.md rule 40). The app says back
-// what became of each title; a search spends the turn of the account whose
-// wish it was.
+// what became of each title; a search spends the turn of every account
+// that wished for it.
 
 // appWishesLimit is how many titles one read gives at most.
 const appWishesLimit = 200
@@ -144,8 +144,8 @@ func (p *Panel) appWishes(w http.ResponseWriter, r *http.Request) {
 // appWishStatus (POST /apps/v1/wishes/status) is the app saying what became
 // of a wished title: downloading, notFound (with nextTry, when it tries
 // again), unreleased (with releaseDate, if known) or waiting (it gave up on
-// it for now). A search, found or not, spends the turn of the account whose
-// wish it was; waiting for a release spends nothing.
+// it for now). A search, found or not, spends the turn of every account
+// that wished for it; waiting for a release spends nothing.
 func (p *Panel) appWishStatus(w http.ResponseWriter, r *http.Request) {
 	if p.appKey(w, r, "wishes") == nil {
 		return
@@ -225,8 +225,9 @@ func (p *Panel) appWishStatus(w http.ResponseWriter, r *http.Request) {
 		notFound(w, "No one wishes for this title")
 		return
 	}
-	// Whose turn went: the first in line for this title, before its state
-	// takes it out of the line.
+	// A search spends a turn only for a title that was due (in line), so a
+	// state told again spends nothing: then every account that wished for
+	// it spends its turn, since each gets it.
 	if spends {
 		order, err := p.wishOrder(r, store.MaxWishes)
 		if err != nil {
@@ -235,8 +236,8 @@ func (p *Panel) appWishStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, next := range order {
 			if next.Title == key {
-				if err := p.Store.SpendWishTurn(ctx, next.AccountID, next.ProfileID); err != nil {
-					p.fail(w, "spending a turn", err)
+				if _, err := p.Store.SpendWishTurns(ctx, key); err != nil {
+					p.fail(w, "spending the turns", err)
 					return
 				}
 				break
