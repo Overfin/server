@@ -163,7 +163,8 @@ export interface TitleQuery {
   /** A category's titles (since 0.6). */
   category?: string;
   kind?: 'movie' | 'series' | ('movie' | 'series')[];
-  genre?: string;
+  /** One genre, or several (any of them). */
+  genre?: string | string[];
   yearFrom?: number;
   yearTo?: number;
   played?: boolean;
@@ -239,7 +240,6 @@ export interface TitleSummary {
   episodeCount?: { inLibrary: number; aired: number };
   images?: Images;
   userState?: UserState;
-  /** The account's latest request covering it. */
   /** Its request, if any: by this account (with an id, to cancel), or by someone else (without). */
   request?: { id?: string; status: RequestStatus };
   /** In a collection's films: one no library has that isn't out yet. It has no page and can't be requested until it's out (since 0.7). */
@@ -406,8 +406,14 @@ export class Player {
   segmentAt(ms?: number): Segment | null;
   continueHere(): Promise<unknown>;
   close(): Promise<void>;
+  /**
+   * Starts at startMs: by default the options' startMs, else where the
+   * profile left off. Resolves with the playback, or null when close() or
+   * a newer start came first.
+   */
+  start(startMs?: number): Promise<Playback | null>;
   /** Limits the bitrate (kbps; 0: automatic). The stream restarts at the same place. */
-  setMaxBitrate(kbps: number | null): Promise<void>;
+  setMaxBitrate(kbps: number | null): Promise<Playback | null>;
   /** The bitrate limit chosen (kbps), or 0 for automatic. */
   readonly maxBitrate: number;
 }
@@ -475,7 +481,6 @@ export class Overfin {
   historyCopy(): Promise<{ available: boolean }>;
   copyHistory(username: string, password: string): Promise<void>;
   logout(): Promise<{ logoutUrl?: string }>;
-  /** Managed sign-in only. */
   /** With Overfin's own sign-in: the email, and whether a forgotten password can be reset by email. */
   signinInfo(): Promise<{ email: string; hasPassword: boolean; reset: boolean }>;
   /** Whose brand to show: Overfin's (without `custom`), or the operator's own, with "Powered by" Overfin. No sign-in needed. */
@@ -487,8 +492,10 @@ export class Overfin {
   profiles(): Promise<Profile[]>;
   profile(id: string): Promise<Profile>;
   createProfile(profile: { name: string; kind?: 'standard' | 'kids'; maxAge?: number; language?: string; libraries?: string[] | null; blockedTags?: string[] | null; categories?: string[] | null }): Promise<Profile>;
-  /** `libraries: null` gives every library again; `blockedTags: null` hides no tag. */
-  /** Each profile may change its own `theme` (`''` follows the device); the rest is the owner's. */
+  /**
+   * Each profile may change its own `theme` (`''` follows the device); the rest is the owner's.
+   * `libraries: null` gives every library again; `blockedTags: null` hides no tag.
+   */
   updateProfile(id: string, changes: { name?: string; language?: string; theme?: '' | 'light' | 'dark'; kind?: 'standard' | 'kids'; maxAge?: number; libraries?: string[] | null; blockedTags?: string[] | null; categories?: string[] | null; kidsTitles?: boolean | null; audioLanguage?: string; subtitleLanguage?: string; pin?: string }): Promise<Profile>;
   deleteProfile(id: string): Promise<null>;
   activateProfile(id: string, pin?: string): Promise<Profile>;
@@ -529,7 +536,8 @@ export class Overfin {
   genres(libraryId?: string, categoryId?: string): Promise<Genre[]>;
   /** The operator's categories (since 0.6); libraries: whether the menu shows the libraries. */
   categories(): Promise<{ items: Category[]; libraries: boolean }>;
-  latest(libraryId: string, limit?: number): Promise<TitleSummary[]>;
+  /** The titles added last, a library's or every library's. */
+  latest(libraryId?: string, limit?: number): Promise<TitleSummary[]>;
   imageUrl(ref: ImageRef | undefined, size?: 'small' | 'medium' | 'large'): string;
 
   discover(list: 'trending' | 'popular' | 'upcoming', mediaKind: 'movie' | 'series',
@@ -557,9 +565,9 @@ export class Overfin {
   reportProgress(id: string, report: { positionMs: number; paused?: boolean; ended?: boolean }): Promise<null>;
   stopPlayback(id: string, positionMs: number, options?: { keepalive?: boolean }): Promise<null>;
   play(video: HTMLVideoElement, titleId: string, options?: PlayerOptions): Promise<Player>;
-  /** Keeps the language the active profile chose for subtitles ('' for none), for its next playbacks. */
   /** Every language Overfin names, each in itself (the names tracks have). */
   languages(): Promise<{ languages: { tag: string; name: string }[] }>;
+  /** Keeps the language the active profile chose for subtitles ('' for none), for its next playbacks. */
   setSubtitleLanguage(language: string): Promise<null>;
   /** Keeps the audio or subtitles chosen while watching, for the title ('' : none). */
   chooseTracks(playbackId: string, choice: { audioTrack?: string; subtitleTrack?: string }): Promise<null>;
