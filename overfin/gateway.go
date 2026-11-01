@@ -398,7 +398,7 @@ func effective(ctx context.Context, cfg *config.Config, db *store.Store, logger 
 		}
 		if cfg.FeaturesInFile {
 			logger.Warn("the configuration file's feature settings are ignored: the control panel holds them; " +
-				"remove [limits], [privacy], [plugins], [accounts] and [modules] from the file")
+				"remove [limits], [plugins], [accounts] and [modules] from the file")
 		}
 	} else {
 		if raw, err = json.Marshal(f); err != nil {

@@ -39,18 +39,13 @@ type Config struct {
 	Plugins  Plugins  `toml:"plugins"`
 	Accounts Accounts `toml:"accounts"`
 	// Modules holds the modules' own settings: module name, then setting.
-	Modules map[string]map[string]string `toml:"modules"`
-	// FormerPrivacy is the former [privacy] section: nothing private can be
-	// exposed any more, so it's read only to be ignored.
-	FormerPrivacy struct {
-		Expose []string `toml:"expose"`
-	} `toml:"privacy"`
-	OIDC      OIDC      `toml:"oidc"`
-	Admin     Admin     `toml:"admin"`
-	Connector Connector `toml:"connector"`
-	Site      Site      `toml:"site"`
-	Mail      Mail      `toml:"mail"`
-	HTTPS     HTTPS     `toml:"https"`
+	Modules   map[string]map[string]string `toml:"modules"`
+	OIDC      OIDC                         `toml:"oidc"`
+	Admin     Admin                        `toml:"admin"`
+	Connector Connector                    `toml:"connector"`
+	Site      Site                         `toml:"site"`
+	Mail      Mail                         `toml:"mail"`
+	HTTPS     HTTPS                        `toml:"https"`
 
 	// FeaturesInFile reports whether the file held feature settings
 	// (limits, plugins, accounts, modules). Those live in the
@@ -522,7 +517,7 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 		return nil, errors.New("config: identity.mode is \"managed\" by default now: add mode = \"forwardauth\" to [identity]")
 	}
 
-	for _, section := range []string{"limits", "privacy", "plugins", "accounts", "modules"} {
+	for _, section := range []string{"limits", "plugins", "accounts", "modules"} {
 		if meta.IsDefined(section) {
 			cfg.FeaturesInFile = true
 		}
