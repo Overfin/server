@@ -160,11 +160,10 @@ only ever sees its own tables and reaches the core's data through its host;
 the core tells them of deleted profiles and accounts (`feature.Forgetter`),
 and existing installs' tables moved there once.
 
-**Connectors to sibling tools**, later: first Overtide (storage
-intelligence for the *arr stack, built from Stewarr, which stays a
-standalone tool), which reads what Overfin knows (title
-values and requests, never who) and decides what the server gets and
-keeps (see "Requests in Overfin" below).
+**Connectors to sibling tools**: Overtide (storage, built from Stewarr,
+which stays a standalone tool) and Overswell (adding), which read what
+Overfin knows (title values and wishes, never who) and decide what the
+server keeps and gets (see "Wishlists, replacing requests" below).
 
 ## Milestone 2: administration (done)
 
@@ -673,26 +672,48 @@ nothing beyond what that needs.
   user if it's gone. Seerr approves and counts requests as it does on its
   own, and is kept private on the network (rule 47). "Ignore quota" is
   never set for people. Problem reports may come later, through Seerr's
-  issues. To be replaced by requests in Overfin (next).
-- **Requests in Overfin, without Seerr.** Seerr does little Overfin
-  doesn't already: TMDB's data is Overfin's own since 0.4, and requests
-  only pass through it. So Overfin keeps them itself:
-  - **Requests, quotas and approval** are Overfin's: per account (how many,
-    how often, approved at once or by an admin), kids limits as today, a
-    list of requests in the panel. They're the account's own data (in its
-    export, gone with it).
-  - **Where approved requests go** is one setting, in the wizard and the
-    panel: nowhere (no request button), **Radarr and Sonarr** (their
-    address and key, the quality profile and root folder to use; Overfin
-    sends each request and reads its download status back), or
-    **Overtide** (its address and key only; Overtide holds the *arr, torrent
-    and storage access). Switching hands the open requests over.
-  - **Status** comes back to people in Overfin's words: approved, queued
-    (and why: "traffic limit reached, expected tomorrow"), downloading,
-    available, refused (and why), and later "leaving soon". "Your request
-    is available" by email, with the email templates.
-  - **Leaving Seerr:** its requests are copied into Overfin once, as the
-    watch history is; then Seerr support goes.
+  issues. To be replaced by wishlists (next).
+- **Wishlists, replacing requests** (designed 2026-11-01). No quotas for
+  people to manage: the server's real limits (disk room, download pace) are
+  shared by taking turns.
+  - **A wishlist per profile**, next to the watchlist, for titles not in
+    the library, ordered by the person. A wished title that arrives leaves
+    the wishlist for the watchlist, with a notice on the site (an email
+    later, with the email templates, as each person chooses).
+  - **Overfin runs the turns**, whatever fetches the titles: per account,
+    then per profile inside it (more profiles don't mean more turns).
+    Later, optionally, templates giving some accounts more turns. A wish
+    keeps its place; an account's turn takes its highest wish that can be
+    tried now, skipping those waiting for their release or their next try.
+    A search spends the turn, found or not; waiting for a release costs
+    nothing.
+  - **What people see**, one state per wish and nothing about others:
+    waiting, not out yet (with the date), not found yet (with the next
+    try), downloading, arrived. A title several people wished for is
+    fetched once and arrives for all of them; nobody sees who else wished
+    for it.
+  - **Kids profiles** wish within their limits, sharing the account's
+    turns, with no approval step; the owner can switch wishing off for any
+    profile (on by default).
+  - **Kept once arrived**, through Overfin's score only: a wish weighs
+    strongly from the moment it's made, and after it arrives until each
+    person who wished for it has watched it, or a set time has passed (60
+    days by default); then it counts like any title. The "requested"
+    criterion becomes "wished".
+  - **Where wishes go** is one setting: nowhere (no wishlist), **Overswell**
+    (Overfin's own fetcher, which keeps its pace, tracker limits and disk
+    room) or **Seerr**, one only. Overfin never connects to Radarr or Sonarr
+    itself: it faces the internet and shouldn't hold their keys, and it
+    would duplicate Overswell. Fetchers get titles in turn order, never
+    names, and report each title's status back. With Overswell, nothing
+    goes to Seerr; with Seerr, Overfin paces itself (wishes a day, 10 by
+    default) through one Seerr user of its own, so the per-account Seerr
+    users, and `accounts.on_delete`, go.
+  - **Wishes are the account's own data**: in its export, gone with it.
+  - **Still open:** how a title is wished for on its page (a button of its
+    own, or not).
+  - **Leaving requests:** Seerr's open requests are copied into the
+    wishlists once.
 - **Title valuation**, computed by Overfin, which knows the titles and the
   people. *Done*: the valuation and the Library → Valuation page, as
   below, Tastes included (web 0.44), the apps endpoint and the favorites
