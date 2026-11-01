@@ -36,7 +36,7 @@ func TestValuationFacts(t *testing.T) {
 		Status: "pending", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.ValuationFacts(ctx, now, []ProfileTitle{{ProfileID: prof.ID, Title: "movie/tmdb/9"}})
+	f, err := s.ValuationFacts(ctx, now, []ProfileTitle{{ProfileID: prof.ID, Title: "movie/tmdb/9"}}, 60)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestValuationTastes(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.SetAccountTastes(ctx, acct.ID, Tastes{Prefer: "movies", Genres: []int{18}}, now)
-	f, err := s.ValuationFacts(ctx, now, nil)
+	f, err := s.ValuationFacts(ctx, now, nil, 60)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestValuationTastes(t *testing.T) {
 		t.Errorf("tastes read while not asked: %v", f.Tastes)
 	}
 	s.SetTastesAsked(ctx, true)
-	if f, _ = s.ValuationFacts(ctx, now, nil); f.Tastes[acct.ID].Prefer != "movies" {
+	if f, _ = s.ValuationFacts(ctx, now, nil, 60); f.Tastes[acct.ID].Prefer != "movies" {
 		t.Errorf("tastes: %v", f.Tastes)
 	}
 	if g, _ := s.TasteGenres(ctx, "fr-CA"); len(g) != 1 || g[0].Name != "Drama" {
@@ -163,7 +163,7 @@ func TestValuationFactsDescribed(t *testing.T) {
 		{Number: 1, AirDate: "2011-04-17", Runtime: 62}, {Number: 2, AirDate: "2011-04-24"}, {Number: 3, AirDate: "2027-01-01"},
 	}}, now)
 
-	f, err := s.ValuationFacts(ctx, now, nil)
+	f, err := s.ValuationFacts(ctx, now, nil, 60)
 	if err != nil {
 		t.Fatal(err)
 	}

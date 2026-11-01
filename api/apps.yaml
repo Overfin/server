@@ -216,6 +216,126 @@ paths:
               schema:
                 $ref: "#/components/schemas/AppError"
 
+  /apps/v1/wishes:
+    get:
+      operationId: appWishes
+      summary: The wished titles to fetch, next first
+      description: |
+        For the app that fetches what people wish for (Overswell), when the
+        operator chose it as where wishes go; otherwise an empty list. The
+        order is Overfin's turns: accounts in turn, then their profiles,
+        each turn the highest wish that can be tried now. Titles downloading,
+        not out yet, or not found and not due again are left out. Never who
+        wished a title, nor how many did. Needs the `wishes` scope; a key
+        without it answers `not-authenticated`.
+      tags: [apps]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 200
+      responses:
+        "200":
+          description: The titles, next first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [titles, generatedAt]
+                properties:
+                  titles:
+                    type: array
+                    items:
+                      type: object
+                      required: [kind, tmdbId]
+                      properties:
+                        kind:
+                          type: string
+                          enum: [movie, series, season]
+                          description: A series means every season out now.
+                        name:
+                          type: string
+                        tmdbId:
+                          type: string
+                        tvdbId:
+                          type: string
+                          description: A series' or a season's, when TMDB
+                            knows it.
+                        season:
+                          type: integer
+                          description: A season's number.
+                  generatedAt:
+                    type: string
+                    format: date-time
+        "401":
+          description: No key, not a valid one, or one without the scope
+            (`not-authenticated`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+
+  /apps/v1/wishes/status:
+    post:
+      operationId: appWishStatus
+      summary: Say what became of a wished title
+      description: |
+        `downloading`, `notFound` (with `nextTry`, when the app tries it
+        again), `unreleased` (with `releaseDate`, if known) or `waiting` (it
+        gave up on it for now). A search, found or not, spends the turn of
+        the account whose wish it was; waiting for a release spends
+        nothing. Needs the `wishes` scope.
+      tags: [apps]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, tmdbId, state]
+              properties:
+                kind:
+                  type: string
+                  enum: [movie, series, season]
+                tmdbId:
+                  type: string
+                season:
+                  type: integer
+                state:
+                  type: string
+                  enum: [downloading, notFound, unreleased, waiting]
+                nextTry:
+                  type: string
+                  format: date-time
+                releaseDate:
+                  type: string
+                  format: date
+      responses:
+        "204":
+          description: Kept.
+        "400":
+          description: Not a wish's status (`invalid-request`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+        "401":
+          description: No key, not a valid one, or one without the scope
+            (`not-authenticated`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+        "404":
+          description: No one wishes for this title (`not-found`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+
   /apps/v1/history:
     get:
       operationId: appHistory
@@ -349,7 +469,7 @@ components:
         `Authorization: Bearer ofapp_…` (at most 100 characters). The
         operator makes one per app in the control panel's Apps section,
         with a name and its scopes among `watch-stats`, `score`, `stats`,
-        `availability` and `history`; the key is shown once, kept only as a hash, and
+        `availability`, `history` and `wishes`; the key is shown once, kept only as a hash, and
         revoked by deleting it there. A key with `watch-stats` also reads
         `stats`, and the reverse.
 

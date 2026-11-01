@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -121,5 +122,44 @@ func TestWishesOff(t *testing.T) {
 	s.SpendWishTurn(ctx, acct.ID, p.ID)
 	if turns, _ := s.WishTurns(ctx); turns[acct.ID].ProfileID != p.ID || time.Since(turns[acct.ID].At) > time.Minute {
 		t.Fatalf("turns: %+v", turns)
+	}
+}
+
+// Wishes weigh like requests: what's on a wishlist, and what arrived less
+// than the kept days ago for a profile that hasn't watched it yet.
+func TestWishesInTheValuation(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	acct, p, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
+	s.AddWish(ctx, p.ID, "movie/tmdb/1")
+	s.AddWish(ctx, p.ID, "movie/tmdb/2")
+	s.AddWish(ctx, p.ID, "movie/tmdb/3")
+	s.ArriveWish(ctx, "movie/tmdb/2")
+	s.ArriveWish(ctx, "movie/tmdb/3")
+	s.RecordPlay(ctx, p.ID, "movie/tmdb/3", strings.Repeat("0", 32), 0, true, time.Now())
+	requested := func(keptDays int) []string {
+		t.Helper()
+		f, err := s.ValuationFacts(ctx, time.Now(), nil, keptDays)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, r := range f.Requests {
+			if r.AccountID != acct.ID {
+				t.Errorf("another account: %+v", r)
+			}
+			out = append(out, r.Title)
+		}
+		slices.Sort(out)
+		return out
+	}
+	// The wish waiting, and the one that arrived unwatched; not the one
+	// watched.
+	if got := requested(60); !slices.Equal(got, []string{"movie/tmdb/1", "movie/tmdb/2"}) {
+		t.Errorf("kept 60 days: %v", got)
+	}
+	// Once the kept days are over, an arrival weighs no more.
+	if got := requested(0); !slices.Equal(got, []string{"movie/tmdb/1"}) {
+		t.Errorf("not kept: %v", got)
 	}
 }

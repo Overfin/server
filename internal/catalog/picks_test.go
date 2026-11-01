@@ -85,7 +85,7 @@ func TestPicks(t *testing.T) {
 	if err := k.Once(ctx); err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.ValuationFacts(ctx, now, nil)
+	f, err := st.ValuationFacts(ctx, now, nil, 60)
 	if err != nil {
 		t.Fatal(err)
 	}

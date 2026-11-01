@@ -49,7 +49,7 @@ func (p *Panel) measuredFacts(ctx context.Context) (*valuation.Measured, *store.
 			return nil, nil, err
 		}
 	}
-	f, err := p.Store.ValuationFacts(ctx, now, interests)
+	f, err := p.Store.ValuationFacts(ctx, now, interests, p.Features.Features().Wishes.KeptDays)
 	if err != nil {
 		return nil, nil, err
 	}

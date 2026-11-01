@@ -240,7 +240,8 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	if sh.source() != nil {
 		disc = &api.Discovery{Library: lib, Store: db}
 	}
-	sessions.Offers = api.Offers{Discovery: disc != nil, Requests: cfg.Plugins.Enabled("library") && sh.seerr != nil}
+	sessions.Offers = api.Offers{Discovery: disc != nil, Requests: cfg.Plugins.Enabled("library") && sh.seerr != nil,
+		Wishes: cfg.Plugins.Enabled("library") && cfg.Wishes.To != ""}
 	pb := api.Playback{Library: lib, Tickets: sh.tickets,
 		MaxBitrateKbps:  cfg.Limits.MaxBitrateKbps,
 		MaxTranscodes:   cfg.Limits.MaxTranscodesTotal,
@@ -310,6 +311,10 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 			rq.Directory = sh.directory
 		}
 		plugins = append(plugins, rq)
+	}
+	// Wishlists, when the operator chose where wishes go.
+	if cfg.Plugins.Enabled("library") && cfg.Wishes.To != "" {
+		plugins = append(plugins, api.Wishes{Library: lib})
 	}
 	// Modules go behind the same guards as the core's own routes.
 	for _, m := range mounts {

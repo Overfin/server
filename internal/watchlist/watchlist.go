@@ -92,6 +92,15 @@ func (Feature) Export(ctx context.Context, h feature.Host, c *feature.Caller) (a
 	return items(ctx, h.DB(), c, true)
 }
 
+// Add puts a title on a profile's watchlist, for the core: a wish that
+// arrived goes there. One already on it, or a full list, changes nothing.
+func Add(ctx context.Context, db *sql.DB, profileID, titleID string) error {
+	_, err := db.ExecContext(ctx, `INSERT INTO watchlist (profile_id, item_id, added_at)
+		SELECT ?, ?, ? WHERE (SELECT count(*) FROM watchlist WHERE profile_id = ?) < ?
+		ON CONFLICT DO NOTHING`, profileID, titleID, time.Now().Unix(), profileID, Max)
+	return err
+}
+
 type handlers struct {
 	db  *sql.DB
 	log *slog.Logger

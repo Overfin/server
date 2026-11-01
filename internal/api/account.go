@@ -49,6 +49,8 @@ type Account struct {
 type Offers struct {
 	Discovery bool `json:"discovery"`
 	Requests  bool `json:"requests"`
+	// Wishes: each profile has a wishlist (/me/wishlist).
+	Wishes bool `json:"wishes"`
 }
 
 func (Account) Name() string { return "account" }

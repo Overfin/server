@@ -38,6 +38,7 @@ type Config struct {
 	Limits   Limits   `toml:"limits"`
 	Plugins  Plugins  `toml:"plugins"`
 	Accounts Accounts `toml:"accounts"`
+	Wishes   Wishes   `toml:"wishes"`
 	// Modules holds the modules' own settings: module name, then setting.
 	Modules   map[string]map[string]string `toml:"modules"`
 	OIDC      OIDC                         `toml:"oidc"`
@@ -119,6 +120,26 @@ type OIDC struct {
 
 // Enabled reports whether an OpenID Connect provider is configured.
 func (o OIDC) Enabled() bool { return o.Issuer != "" }
+
+// Wishes are the wishlists' settings (ROADMAP: "Wishlists, replacing
+// requests").
+type Wishes struct {
+	// To is where wished titles go: "" (nowhere: no wishlist is offered),
+	// "overswell" or "seerr", never both.
+	To string `toml:"to" json:"to"`
+	// KeptDays is how long an arrived wish keeps its weight in the score
+	// while the people who wished it haven't watched it.
+	KeptDays int `toml:"kept_days" json:"keptDays"`
+	// PerDay is how many wishes a day go to Seerr, which has no pace of its
+	// own; Overswell keeps its own.
+	PerDay int `toml:"per_day" json:"perDay"`
+}
+
+// Wishing values.
+const (
+	WishesToOverswell = "overswell"
+	WishesToSeerr     = "seerr"
+)
 
 type Accounts struct {
 	// OnDelete is what happens to a deleted account's Seerr user (its watch
@@ -216,12 +237,13 @@ type Features struct {
 	Limits   Limits                       `json:"limits"`
 	Plugins  Plugins                      `json:"plugins"`
 	Accounts Accounts                     `json:"accounts"`
+	Wishes   Wishes                       `json:"wishes"`
 	Modules  map[string]map[string]string `json:"modules"`
 }
 
 // Features returns the configuration's feature settings.
 func (c *Config) Features() Features {
-	f := Features{Limits: c.Limits, Plugins: c.Plugins, Accounts: c.Accounts, Modules: c.Modules}
+	f := Features{Limits: c.Limits, Plugins: c.Plugins, Accounts: c.Accounts, Wishes: c.Wishes, Modules: c.Modules}
 	f.Plugins.Enable = slices.Clone(f.Plugins.Enable)
 	f.Modules = make(map[string]map[string]string, len(c.Modules))
 	for name, values := range c.Modules {
@@ -241,7 +263,7 @@ func DefaultFeatures() Features {
 // settings, validated together with the rest.
 func (c *Config) WithFeatures(f Features) (*Config, error) {
 	n := *c
-	n.Limits, n.Plugins, n.Accounts, n.Modules = f.Limits, f.Plugins, f.Accounts, f.Modules
+	n.Limits, n.Plugins, n.Accounts, n.Wishes, n.Modules = f.Limits, f.Plugins, f.Accounts, f.Wishes, f.Modules
 	n.Identity.Proxies = nil // filled again by validate
 	if err := n.validate(); err != nil {
 		return nil, err
@@ -464,6 +486,7 @@ func defaults() Config {
 		},
 		OIDC:     OIDC{FreshForMinutes: 5, RecheckMinutes: 10, GroupsClaim: "groups"},
 		Accounts: Accounts{OnDelete: "delete"},
+		Wishes:   Wishes{KeptDays: 60, PerDay: 10},
 		Site:     Site{Serve: "builtin", CSP: DefaultCSP},
 		HTTPS:    HTTPS{Listen: ":8443"},
 	}
@@ -514,7 +537,7 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 		return nil, errors.New("config: identity.mode is \"managed\" by default now: add mode = \"forwardauth\" to [identity]")
 	}
 
-	for _, section := range []string{"limits", "plugins", "accounts", "modules"} {
+	for _, section := range []string{"limits", "plugins", "accounts", "wishes", "modules"} {
 		if meta.IsDefined(section) {
 			cfg.FeaturesInFile = true
 		}
@@ -762,6 +785,15 @@ func (c *Config) validate() error {
 
 	if c.Accounts.OnDelete != "delete" && c.Accounts.OnDelete != "disable" {
 		add("accounts.on_delete must be \"delete\" or \"disable\", got %q", c.Accounts.OnDelete)
+	}
+	if c.Wishes.To != "" && c.Wishes.To != WishesToOverswell && c.Wishes.To != WishesToSeerr {
+		add("wishes.to must be \"\", \"overswell\" or \"seerr\", got %q", c.Wishes.To)
+	}
+	if c.Wishes.KeptDays < 1 || c.Wishes.KeptDays > 365 {
+		add("wishes.kept_days must be between 1 and 365")
+	}
+	if c.Wishes.PerDay < 1 || c.Wishes.PerDay > 100 {
+		add("wishes.per_day must be between 1 and 100")
 	}
 	c.settleModules(add)
 
