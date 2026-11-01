@@ -19,6 +19,7 @@ export interface Problem {
 }
 
 export class OverfinError extends Error {
+  constructor(status: number, problem: Problem);
   readonly status: number;
   /** Stable error name, such as 'pin-incorrect' or 'step-up-required'. */
   readonly type: string;
