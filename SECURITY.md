@@ -200,7 +200,8 @@ comes from the internet, and media files can be written by anyone.
     or PIN, an account that has ended or isn't allowed, a missing invitation,
     a cross-site request.
 25. Account-wide actions are reserved for the owner profile: managing profiles
-    and their PINs, the account's language, its tastes and its sign-in,
+    and other profiles' PINs (a standard profile manages its own, rule 21),
+    the account's language, its tastes and its sign-in,
     deleting the account, exporting the whole account, and ending other
     devices' sessions. Kids profiles can't export themselves; the owner's
     export holds them.
