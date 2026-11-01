@@ -168,7 +168,7 @@ func (p *Provisioner) Create(ctx context.Context, id identity.Identity, hooks *H
 	}
 	if err := hooks.after(ctx, acct, owner); err != nil {
 		// Undone whole: the account and its Jellyfin users go.
-		if _, derr := p.DeleteAccount(ctx, acct.ID, false); derr != nil {
+		if _, _, derr := p.DeleteAccount(ctx, acct.ID, false); derr != nil {
 			p.Logger.Error("undoing an account failed", "account", p.logID(acct.ID), "err", derr)
 		}
 		return nil, nil, err
@@ -341,7 +341,7 @@ func (p *Provisioner) CopyIn(ctx context.Context, id identity.Identity, from *je
 	}
 	if err != nil {
 		// Undone whole: the account and what was copied go.
-		if _, derr := p.DeleteAccount(ctx, acct.ID, false); derr != nil {
+		if _, _, derr := p.DeleteAccount(ctx, acct.ID, false); derr != nil {
 			p.Logger.Error("undoing an account failed", "account", p.logID(acct.ID), "err", derr)
 		}
 		return nil, nil, err
@@ -424,49 +424,52 @@ func (p *Provisioner) Relogin(ctx context.Context, jellyfinUserID, username stri
 	return token, err
 }
 
-// DeleteAccount deletes an account and everything Overfin holds about it.
-// Its Jellyfin users go first, deleted with their history or disabled
-// (keepHistory), and its Seerr user, deleted with its requests, or with
-// keepHistory renamed to an anonymous name and kept with its requests (no
-// one can sign in as it), so a failure deletes nothing here and a retry
-// picks up where it stopped. It returns the account's profiles, as they
-// were.
-func (p *Provisioner) DeleteAccount(ctx context.Context, accountID string, keepHistory bool) ([]*store.Profile, error) {
+// DeleteAccount deletes an account and everything Overfin holds about it,
+// watch history included. Its Seerr user goes first, deleted with its
+// requests, or with keep renamed to an anonymous name and kept with them
+// (no one can sign in as it); so do the Jellyfin users of profiles from
+// before Overfin's one Jellyfin account, deleted or disabled. A failure
+// deletes nothing here, and a retry picks up where it stopped. It returns
+// the account's profiles, as they were, and whether Seerr requests were
+// kept.
+func (p *Provisioner) DeleteAccount(ctx context.Context, accountID string, keep bool) ([]*store.Profile, bool, error) {
 	profiles, err := p.Store.Profiles(ctx, accountID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	for _, pr := range profiles {
 		if pr.JellyfinUserID == "" {
 			continue // none of its own
 		}
-		if keepHistory {
+		if keep {
 			err = p.DisableJellyfinUser(ctx, pr.JellyfinUserID)
 		} else {
 			err = p.DeleteJellyfinUser(ctx, pr.JellyfinUserID)
 		}
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
+	keptRequests := false
 	if id, ok, err := p.Store.SeerrUser(ctx, accountID); err != nil {
-		return nil, err
+		return nil, false, err
 	} else if ok {
 		switch {
-		case !keepHistory && p.DeleteSeerrUser != nil:
+		case !keep && p.DeleteSeerrUser != nil:
 			err = p.DeleteSeerrUser(ctx, id)
-		case keepHistory && p.RenameSeerrUser != nil:
+		case keep && p.RenameSeerrUser != nil:
 			err = p.RenameSeerrUser(ctx, id, AnonymousName())
+			keptRequests = err == nil
 		}
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	if err := p.Store.DeleteAccount(ctx, accountID); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	p.Logger.Info("account deleted", "account", p.logID(accountID))
-	return profiles, nil
+	return profiles, keptRequests, nil
 }
 
 // DisableJellyfinUser disables a profile's Jellyfin user, keeping its

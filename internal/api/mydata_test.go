@@ -65,7 +65,7 @@ func TestDeleteAccount(t *testing.T) {
 	}
 	stepUp(t, srv, idp, subject, time.Now())
 	code, body := put(t, srv, "DELETE", "/api/v1/me", "")
-	if code != 200 || !strings.Contains(body, `"history":"deleted"`) {
+	if code != 200 || !strings.Contains(body, `"requests":"deleted"`) {
 		t.Fatalf("delete: %d %s", code, body)
 	}
 	// Gone: the next visit finds no account.

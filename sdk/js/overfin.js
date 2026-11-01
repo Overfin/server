@@ -133,7 +133,7 @@ export class Overfin {
   copyHistory(username, password) { return this.request('POST', '/me/history/copy', { username, password }); }
   /**
    * Deletes the account and everything Overfin holds about it. Owner only;
-   * needs a fresh login (step-up). Resolves with { history: 'deleted' | 'kept' }.
+   * needs a fresh login (step-up). Resolves with { requests: 'deleted' | 'kept' }: its requests in Seerr.
    */
   deleteAccount() { return this.request('DELETE', '/me'); }
   /**

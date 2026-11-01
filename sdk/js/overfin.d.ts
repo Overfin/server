@@ -487,7 +487,7 @@ export class Overfin {
   /** Whose brand to show: Overfin's (without `custom`), or the operator's own, with "Powered by" Overfin. No sign-in needed. */
   branding(): Promise<Branding>;
   setPassword(password: string): Promise<{ hasPassword: boolean }>;
-  deleteAccount(): Promise<{ history: 'deleted' | 'kept' }>;
+  deleteAccount(): Promise<{ requests: 'deleted' | 'kept' }>;
   exportData(pin?: string): Promise<Record<string, unknown>>;
 
   profiles(): Promise<Profile[]>;

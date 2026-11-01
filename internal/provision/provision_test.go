@@ -393,8 +393,8 @@ func TestCopyHooks(t *testing.T) {
 	}
 }
 
-// A deleted account's Seerr user goes with it, unless its history is kept:
-// then it's kept, with its requests, under an anonymous name.
+// A deleted account's Seerr user goes with it, unless the operator keeps
+// requests: then it's kept, with them, under an anonymous name.
 func TestDeletingAnAccountDeletesItsSeerrUser(t *testing.T) {
 	p := setup(t, &fakeJellyfin{}, "")
 	ctx := context.Background()
@@ -414,9 +414,14 @@ func TestDeletingAnAccountDeletesItsSeerrUser(t *testing.T) {
 			t.Fatal(err)
 		}
 		p.Store.SetSeerrUser(ctx, acct.ID, 40+i, time.Now())
-		if _, err := p.DeleteAccount(ctx, acct.ID, keep); err != nil {
-			t.Fatal(err)
+		if _, kept, err := p.DeleteAccount(ctx, acct.ID, keep); err != nil || kept != keep {
+			t.Fatalf("keep %v: requests kept %v, %v", keep, kept, err)
 		}
+	}
+	// Without a Seerr user, there are no requests to keep.
+	acct, _, _ := p.Ensure(ctx, identity.Identity{Subject: "no-seerr"}, nil)
+	if _, kept, err := p.DeleteAccount(ctx, acct.ID, true); err != nil || kept {
+		t.Errorf("without Seerr: requests kept %v, %v", kept, err)
 	}
 	if len(deleted) != 1 || deleted[0] != 41 {
 		t.Errorf("Seerr users deleted: %v", deleted)

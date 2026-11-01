@@ -31,7 +31,7 @@ func (a Account) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	if !a.Sessions.RequireFresh(w, c) {
 		return
 	}
-	profiles, err := a.Provisioner.DeleteAccount(r.Context(), c.Account.ID, a.KeepOnDelete)
+	profiles, keptRequests, err := a.Provisioner.DeleteAccount(r.Context(), c.Account.ID, a.KeepOnDelete)
 	if err != nil {
 		a.Logger.Error("deleting an account failed", "err", err)
 		problem.Send(w, problem.Internal, "")
@@ -43,9 +43,9 @@ func (a Account) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	clearCookie(w, r)
-	out := map[string]string{"history": "deleted"}
-	if a.KeepOnDelete {
-		out["history"] = "kept"
+	out := map[string]string{"requests": "deleted"}
+	if keptRequests {
+		out["requests"] = "kept"
 	}
 	if in := a.Sessions.SignIn; in != nil {
 		in.Logout(w, r)

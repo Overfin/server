@@ -185,11 +185,11 @@
       </Setting>
     </Card>
     <Card title="Accounts">
-      <Setting label="When an account is deleted" hint="What happens to its watch history.">
+      <Setting label="When an account is deleted" hint="Its watch history and everything else in Overfin always go. This is about its requests in Seerr.">
         {#snippet children(ids)}
           <select bind:value={values['accounts.onDelete']} aria-labelledby={ids.label} aria-describedby={ids.hint}>
-            <option value="delete">Delete it too</option>
-            <option value="disable">Keep it, unusable</option>
+            <option value="delete">Delete them</option>
+            <option value="disable">Keep them, anonymous</option>
           </select>
         {/snippet}
       </Setting>
