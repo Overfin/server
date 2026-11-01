@@ -13,19 +13,16 @@ import (
 // Whatever Jellyfin sends about an item, what comes out has well-formed
 // IDs, image URLs the image endpoint takes, and valid UTF-8 text with no
 // markup.
-func FuzzDetail(f *testing.F) {
+func FuzzSummary(f *testing.F) {
 	f.Add([]byte(hostile))
-	f.Add([]byte(`{"Id":"0123456789abcdef0123456789abcdef","Type":"Movie","Name":"A","People":[{"Name":"B","Id":"22222222222222222222222222222222","Type":"Éditeur"}]}`))
+	f.Add([]byte(`{"Id":"0123456789abcdef0123456789abcdef","Type":"Movie","Name":"A"}`))
 	f.Add([]byte(`{"Id":"0123456789abcdef0123456789abcdef","Type":"Audio","AlbumId":"x","ArtistItems":[{"Id":"1","Name":"n"}]}`))
-	// More chapters than image IDs can number.
-	chapters := strings.Repeat(`{"Name":"c","ImageTag":"`+tag+`"},`, 1001)
-	f.Add([]byte(`{"Id":"` + jfID + `","Type":"Movie","Name":"A","Chapters":[` + strings.TrimSuffix(chapters, ",") + `]}`))
 	f.Fuzz(func(t *testing.T, body []byte) {
 		var raw jellyfin.RawItem
 		if json.Unmarshal(body, &raw) != nil {
 			return
 		}
-		it, ok := Detail(&raw)
+		it, ok := Summary(&raw)
 		if !ok {
 			return
 		}
