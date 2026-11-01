@@ -75,6 +75,11 @@ func TestAppWishes(t *testing.T) {
 	if got := list(); got != first+", "+second+", movie 2" {
 		t.Fatalf("order: %q", got)
 	}
+	// A season goes by its series' name.
+	rec = app.do("GET", "/apps/v1/wishes", "", auth)
+	if !strings.Contains(rec.Body.String(), `"name":"Game of Thrones"`) {
+		t.Errorf("a season's name: %s", rec.Body)
+	}
 	status := func(body string, want int) {
 		t.Helper()
 		if rec := app.do("POST", "/apps/v1/wishes/status", body, auth); rec.Code != want {

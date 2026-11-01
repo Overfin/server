@@ -27,6 +27,9 @@ type appWishJSON struct {
 	TMDB   string `json:"tmdbId"`
 	TVDB   string `json:"tvdbId,omitempty"`
 	Season *int   `json:"season,omitempty"`
+	// Categories are the operator's categories it fits (their IDs), so the
+	// app adds it where the operator wants that kind of title.
+	Categories []string `json:"categories,omitempty"`
 }
 
 // toOverswell reports whether wishes go to an app (Overswell): with Seerr,
@@ -96,21 +99,40 @@ func (p *Panel) appWishes(w http.ResponseWriter, r *http.Request) {
 			p.fail(w, "reading the wished titles", err)
 			return
 		}
+		// Categories by film or series ("movie/N", "series/N").
+		top := func(ref store.TitleRef) string {
+			if ref.Kind == "movie" {
+				return "movie/" + ref.TMDB()
+			}
+			return "series/" + ref.TMDB()
+		}
+		var tops []string
+		for _, key := range keys {
+			if ref, ok := store.ParseTitleKey(key); ok {
+				tops = append(tops, top(ref))
+			}
+		}
+		categories, err := p.Store.TitleCategories(r.Context(), tops)
+		if err != nil {
+			p.fail(w, "reading the wished titles' categories", err)
+			return
+		}
 		for _, key := range keys {
 			ref, ok := store.ParseTitleKey(key)
 			if !ok {
 				continue
 			}
-			j := appWishJSON{Kind: ref.Kind, TMDB: ref.TMDB()}
+			j := appWishJSON{Kind: ref.Kind, TMDB: ref.TMDB(), Categories: categories[top(ref)]}
 			if ref.Kind == "season" {
 				j.Season = &ref.Season
 			}
 			if t := infos[key]; t != nil {
 				j.Name = t.Name
 			}
+			// A season goes by its series: its name and TheTVDB ID.
 			if ref.Kind == "season" {
 				if t := infos[ref.Series().Key()]; t != nil {
-					j.TVDB = t.Details.TVDB
+					j.Name, j.TVDB = t.Name, t.Details.TVDB
 				}
 			}
 			out = append(out, j)
