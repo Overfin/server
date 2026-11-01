@@ -78,7 +78,7 @@
 {/if}
 {#if t.candidates?.length}
   <h3>Candidates Overfin weighed</h3>
-  <ul class="list candidates">
+  <ul class="list top candidates">
     {#each t.candidates as c (c.tmdb)}
       <li>
         <div>
@@ -95,7 +95,7 @@
   <input type="search" bind:value={query} aria-label="Search TMDB" />
   <button type="submit" disabled={searching}>Search</button>
 </form>
-<ul class="list candidates">
+<ul class="list top candidates">
   {#if searching}
     <li class="hint">Searching…</li>
   {:else if failure}
