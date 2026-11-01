@@ -164,9 +164,9 @@ export class Overfin {
 
   async profiles() { return (await this.request('GET', '/profiles')).items; }
   profile(id) { return this.request('GET', `/profiles/${enc(id)}`); }
-  /** @param {{name: string, kind?: 'standard'|'kids', maxAge?: number, language?: string}} profile */
+  /** @param {{name: string, kind?: 'standard'|'kids', maxAge?: number}} profile */
   createProfile(profile) { return this.request('POST', '/profiles', profile); }
-  /** Changes name, language, kind, age, libraries or hidden tags; limits need the owner's `pin` if set. */
+  /** Changes name, kind, age, libraries or hidden tags; limits need the owner's `pin` if set. */
   updateProfile(id, changes) { return this.request('PATCH', `/profiles/${enc(id)}`, changes); }
   /** Deletes a profile and its history. Needs a fresh login (step-up). */
   deleteProfile(id) { return this.request('DELETE', `/profiles/${enc(id)}`); }

@@ -549,8 +549,7 @@ var ErrProfileLimit = errors.New("store: profile limit reached")
 // NewProfile describes an additional profile and its Jellyfin user.
 type NewProfile struct {
 	Name             string
-	Kind             string // "standard" or "kids"
-	Language         string
+	Kind             string   // "standard" or "kids"
 	MaxAge           *int     // a kids profile's
 	Categories       []string // nil: every category's titles
 	Libraries        []string // nil: every library
@@ -583,7 +582,7 @@ func (s *Store) AddProfile(ctx context.Context, accountID string, np NewProfile,
 	p := &Profile{
 		ID: ids.New(ids.Profile), AccountID: accountID, Name: np.Name, Kind: np.Kind,
 		JellyfinUserID: np.JellyfinUserID, JellyfinUsername: np.JellyfinUsername, JellyfinToken: np.JellyfinToken,
-		Language: np.Language, MaxAge: np.MaxAge, Categories: np.Categories,
+		MaxAge: np.MaxAge, Categories: np.Categories,
 		Libraries: np.Libraries, BlockedTags: np.BlockedTags,
 	}
 	if err := insertProfile(ctx, tx, s.box, p, s.now().UTC()); err != nil {
@@ -615,19 +614,6 @@ func (s *Store) RenameProfile(ctx context.Context, accountID, profileID, name st
 		return ErrNotFound
 	}
 	return tx.Commit()
-}
-
-// SetProfileLanguage changes a profile's preferred metadata language.
-func (s *Store) SetProfileLanguage(ctx context.Context, accountID, profileID, language string) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE profiles SET language = ? WHERE id = ? AND account_id = ?`,
-		nullable(language), profileID, accountID)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
 }
 
 // SetProfileTheme sets a profile's look: "light", "dark", or "" to follow

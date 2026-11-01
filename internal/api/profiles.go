@@ -6,7 +6,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"slices"
 	"time"
 
@@ -100,9 +99,8 @@ func (p Profiles) get(w http.ResponseWriter, r *http.Request) {
 }
 
 type profileRequest struct {
-	Name     *string `json:"name"`
-	Kind     *string `json:"kind"`
-	Language *string `json:"language"`
+	Name *string `json:"name"`
+	Kind *string `json:"kind"`
 	// Theme is the profile's look: "light", "dark", or "" to follow the
 	// device. Each profile may change its own.
 	Theme *string `json:"theme"`
@@ -225,8 +223,6 @@ func (p Profiles) accessFrom(ctx context.Context, c *Caller, pr *store.Profile, 
 	return libs, tags, true, nil
 }
 
-var languageTagRe = regexp.MustCompile(`^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$`)
-
 // tidyName tidies the profile name a request gives, if any (see
 // textclean.Name), and reports whether it's then 1 to 32 characters of
 // plain text.
@@ -304,7 +300,6 @@ func (p Profiles) tags(w http.ResponseWriter, r *http.Request) {
 func (p Profiles) create(w http.ResponseWriter, r *http.Request) {
 	var req profileRequest
 	if !decode(r, &req) || req.Name == nil || !tidyName(req.Name) || req.PIN != "" ||
-		(req.Language != nil && !languageTagRe.MatchString(*req.Language)) ||
 		(req.Theme != nil && *req.Theme != "" && *req.Theme != "light" && *req.Theme != "dark") {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
@@ -328,9 +323,6 @@ func (p Profiles) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	np := store.NewProfile{Name: *req.Name, Kind: kind}
-	if req.Language != nil {
-		np.Language = *req.Language
-	}
 	if libs, tags, ok, err := p.accessFrom(r.Context(), c, nil, req); err != nil {
 		p.Logger.Error("listing libraries failed", "err", err)
 		problem.Send(w, problem.Internal, "")
@@ -381,14 +373,13 @@ func (p Profiles) create(w http.ResponseWriter, r *http.Request) {
 func (p Profiles) update(w http.ResponseWriter, r *http.Request) {
 	var req profileRequest
 	if !decode(r, &req) ||
-		(req.Name == nil && req.Language == nil && req.Theme == nil && req.Kind == nil && req.MaxAge == nil &&
+		(req.Name == nil && req.Theme == nil && req.Kind == nil && req.MaxAge == nil &&
 			!req.Libraries.Set && !req.BlockedTags.Set && !req.Categories.Set && !req.KidsTitles.Set &&
 			req.AudioLanguage == nil && req.SubtitleLanguage == nil) || !validAge(req.MaxAge) ||
 		(req.AudioLanguage != nil && *req.AudioLanguage != "" && *req.AudioLanguage != "original" && lang.Tag(*req.AudioLanguage) == "") ||
 		(req.SubtitleLanguage != nil && *req.SubtitleLanguage != "" && lang.Tag(*req.SubtitleLanguage) == "") ||
 		(req.Theme != nil && *req.Theme != "" && *req.Theme != "light" && *req.Theme != "dark") ||
 		!tidyName(req.Name) ||
-		(req.Language != nil && *req.Language != "" && !languageTagRe.MatchString(*req.Language)) ||
 		(req.Kind != nil && *req.Kind != "standard" && *req.Kind != "kids") {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
@@ -406,7 +397,7 @@ func (p Profiles) update(w http.ResponseWriter, r *http.Request) {
 	}
 	// A profile's own look and languages are its own business; the rest
 	// is the owner's.
-	ownLook := (req.Theme != nil || req.KidsTitles.Set || req.AudioLanguage != nil || req.SubtitleLanguage != nil) && req.Name == nil && req.Language == nil && req.Kind == nil &&
+	ownLook := (req.Theme != nil || req.KidsTitles.Set || req.AudioLanguage != nil || req.SubtitleLanguage != nil) && req.Name == nil && req.Kind == nil &&
 		req.MaxAge == nil && !req.Libraries.Set && !req.BlockedTags.Set && !req.Categories.Set &&
 		c.Profile != nil && c.Profile.ID == pr.ID
 	if !c.IsOwner() && !ownLook {
@@ -425,12 +416,6 @@ func (p Profiles) update(w http.ResponseWriter, r *http.Request) {
 			problem.Send(w, problem.NameTaken, "")
 			return
 		} else if err != nil {
-			problem.Send(w, problem.NotFound, "")
-			return
-		}
-	}
-	if req.Language != nil {
-		if err := p.Store.SetProfileLanguage(ctx, c.Account.ID, id, *req.Language); err != nil {
 			problem.Send(w, problem.NotFound, "")
 			return
 		}
