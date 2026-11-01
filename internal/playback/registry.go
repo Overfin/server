@@ -6,12 +6,12 @@ import (
 	"errors"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/overfin/server/internal/ids"
 	"github.com/overfin/server/internal/jellyfin"
+	"github.com/overfin/server/internal/tracks"
 )
 
 // Stream is one active playback, as Overfin keeps it. Playback state is
@@ -89,18 +89,9 @@ func (s *Stream) TextSubtitle(index int) bool {
 // (CheckPGS).
 func (s *Stream) PictureSubtitle(index int) bool {
 	for _, ms := range s.Decision.Source.MediaStreams {
-		if ms.Type == "Subtitle" && ms.Index == index && !ms.IsTextSubtitleStream && isPGSCodec(ms.Codec) {
+		if ms.Type == "Subtitle" && ms.Index == index && !ms.IsTextSubtitleStream && tracks.IsPGS(ms.Codec) {
 			return true
 		}
-	}
-	return false
-}
-
-// isPGSCodec says whether a codec, as Jellyfin names it, is PGS.
-func isPGSCodec(codec string) bool {
-	switch strings.ToLower(codec) {
-	case "pgssub", "hdmv_pgs_subtitle", "pgs":
-		return true
 	}
 	return false
 }

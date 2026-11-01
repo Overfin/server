@@ -211,7 +211,7 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 	}
 	l := s.Playback.Library
 	path := "/Videos/" + st.ItemID + "/" + st.SourceID + "/Subtitles/" + strconv.Itoa(index) + "/Stream.vtt"
-	body, err := l.Jellyfin.ReadSmall(r.Context(), *a, path, nil, maxSubtitles)
+	body, err := l.Jellyfin.ReadSubtitles(r.Context(), *a, path, maxSubtitles)
 	if err != nil {
 		l.upstreamError(w, err)
 		return
@@ -252,7 +252,7 @@ func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
 	}
 	l := s.Playback.Library
 	path := "/Videos/" + st.ItemID + "/" + st.SourceID + "/Subtitles/" + strconv.Itoa(index) + "/Stream.pgssub"
-	body, err := l.Jellyfin.ReadSmall(r.Context(), *a, path, nil, playback.MaxPGS)
+	body, err := l.Jellyfin.ReadSubtitles(r.Context(), *a, path, playback.MaxPGS)
 	if err != nil {
 		l.upstreamError(w, err)
 		return

@@ -486,12 +486,21 @@ export class Player {
   attach(pb) {
     const video = this.video;
     for (const t of video.querySelectorAll('track[data-overfin]')) t.remove();
+    // A track shown holds the video back until it's loaded, and a title's
+    // first subtitles can take long (the server reads the whole file for
+    // them): each track joins the video once it's here, playback never
+    // waits for it.
     for (const t of [...(pb.subtitleTracks || []), ...(pb.forcedTracks || [])]) {
       if (!t.url || t.pictures) continue;
-      const el = document.createElement('track');
-      Object.assign(el, { kind: 'subtitles', src: t.url, srclang: t.language || 'und', label: t.label });
-      el.dataset.overfin = t.id;
-      video.append(el);
+      const add = () => {
+        if (this.playback !== pb || this.video !== video) return; // another title by now
+        const el = document.createElement('track');
+        Object.assign(el, { kind: 'subtitles', src: t.url, srclang: t.language || 'und', label: t.label });
+        el.dataset.overfin = t.id;
+        video.append(el);
+        this.showSubtitles();
+      };
+      fetch(t.url, { credentials: 'same-origin' }).then(add, add);
     }
     const startAt = (pb.positionMs || 0) / 1000;
     const Hls = this.options.Hls || globalThis.Hls;
