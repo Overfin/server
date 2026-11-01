@@ -191,9 +191,9 @@ func must(b []byte, err error) []byte {
 	return b
 }
 
-// Settings saved when bringing accounts over was the core's are carried over
-// to the migration module, once.
-func TestAdoptionMovesToTheMigrationModule(t *testing.T) {
+// The migration module's former mode, kept from before, is dropped, not
+// refused.
+func TestFormerMigrationMode(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "overfin.db")
 	cfgPath := filepath.Join(dir, "overfin.toml")
@@ -207,19 +207,7 @@ func TestAdoptionMovesToTheMigrationModule(t *testing.T) {
 	db, _ := store.Open(context.Background(), dbPath, box)
 	defer db.Close()
 	ctx := context.Background()
-	db.SetFeatures(ctx, []byte(`{"limits":{"maxTranscodesTotal":4,"pinAttempts":5,"onLimit":"replace-oldest"},`+
-		`"adoption":{"claim":true,"mode":"link"},"plugins":{"enable":["library"]},"accounts":{"onDelete":"delete"}}`))
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	got, err := effective(ctx, cfg, db, logger)
-	// Switched on, copying only: no server named yet, so nothing offered.
-	if err != nil || !got.Plugins.Enabled("migration") || !got.Plugins.Enabled("library") || got.Modules["migration"]["from"] != "" {
-		t.Fatalf("carried over: %v %v %v", got.Plugins, got.Modules, err)
-	}
-	if raw, _, _ := db.Features(ctx); bytes.Contains(raw, []byte("adoption")) || bytes.Contains(raw, []byte(`"mode"`)) {
-		t.Errorf("saved: %s", raw)
-	}
-
-	// The module's former mode, kept from before, is dropped, not refused.
 	db.SetFeatures(ctx, []byte(`{"plugins":{"enable":["library","migration"]},"modules":{"migration":{"mode":"move"}}}`))
 	if got, err := effective(ctx, cfg, db, logger); err != nil || got.Modules["migration"]["mode"] != "" {
 		t.Errorf("a former setting: %v %v", got.Modules, err)

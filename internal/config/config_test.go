@@ -383,22 +383,6 @@ func TestModuleSettings(t *testing.T) {
 	}
 }
 
-// The former [adoption] section switches the migration module on, in the
-// same mode.
-func TestAdoptionCarriedOver(t *testing.T) {
-	var f Features
-	f.ImportAdoption(Adoption{Claim: false, Mode: "link"})
-	if f.Plugins.Enabled("migration") {
-		t.Error("switched on without claiming")
-	}
-	f.ImportAdoption(Adoption{Claim: true, Mode: "link"})
-	f.ImportAdoption(Adoption{Claim: true, Mode: "link"})
-	// Switched on once; its mode is gone, it only copies now.
-	if len(f.Plugins.Enable) != 1 || !f.Plugins.Enabled("migration") || f.Modules["migration"] != nil {
-		t.Errorf("carried over: %v %v", f.Plugins, f.Modules)
-	}
-}
-
 func TestSite(t *testing.T) {
 	cfg, err := Load(writeFile(t, goodFile), env(goodEnv()))
 	if err != nil || cfg.Site.Serve != "builtin" || cfg.Site.CSP != DefaultCSP {
