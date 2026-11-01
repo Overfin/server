@@ -21,7 +21,7 @@ import (
 const appWishesLimit = 200
 
 type appWishJSON struct {
-	// Kind is movie, series (every season out now) or season.
+	// Kind is movie or season: a series is wished for season by season.
 	Kind   string `json:"kind"`
 	Name   string `json:"name,omitempty"`
 	TMDB   string `json:"tmdbId"`
@@ -108,12 +108,7 @@ func (p *Panel) appWishes(w http.ResponseWriter, r *http.Request) {
 			if t := infos[key]; t != nil {
 				j.Name = t.Name
 			}
-			switch ref.Kind {
-			case "series":
-				if t := infos[key]; t != nil {
-					j.TVDB = t.Details.TVDB
-				}
-			case "season":
+			if ref.Kind == "season" {
 				if t := infos[ref.Series().Key()]; t != nil {
 					j.TVDB = t.Details.TVDB
 				}
@@ -156,12 +151,10 @@ func (p *Panel) appWishStatus(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case req.Kind == "movie" && req.Season == nil:
 		key = "movie/tmdb/" + req.TMDB
-	case req.Kind == "series" && req.Season == nil:
-		key = "series/tmdb/" + req.TMDB
 	case req.Kind == "season" && req.Season != nil && *req.Season >= 0 && *req.Season <= 9999:
 		key = "series/tmdb/" + req.TMDB + "/s" + strconv.Itoa(*req.Season)
 	default:
-		invalid(w, "kind: movie, series, or season with its number")
+		invalid(w, "kind: movie, or season with its number")
 		return
 	}
 	st := store.WishState{Title: key}

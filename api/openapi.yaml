@@ -622,8 +622,9 @@ paths:
       operationId: getWishlist
       summary: The active profile's wishlist, in its own order
       description: |
-        Films, whole series and seasons no library has yet, first the one
-        wanted most, each with what became of it. Overfin takes turns between
+        Films and seasons no library has whole yet, first the one wanted
+        most, each with what became of it; a series' seasons follow each
+        other. Overfin takes turns between
         accounts, then between an account's profiles, and hands the titles to
         what fetches them (Overswell or Seerr, as the operator chose), never
         who wished them. A title that arrives leaves the wishlist for the
@@ -668,7 +669,8 @@ paths:
                 titles:
                   type: array
                   description: Every title on the wishlist, each once, first
-                    the one wanted most.
+                    the one wanted most; a series' seasons are kept together,
+                    where its first one is, by season number.
                   maxItems: 200
                   items:
                     type: string
@@ -697,8 +699,9 @@ paths:
     put:
       operationId: addToWishlist
       summary: Put a title at the end of the wishlist
-      description: A film, a whole series (every season out now) or a season
-        the profile can see, known to TMDB, that no library has whole; never
+      description: A film or a season the profile can see, known to TMDB, that
+        no library has whole (a season beside its series' others); for a
+        series, each of its seasons out now that no library has whole. Never
         an episode. One already there stays where it was. At most 200 titles.
       tags: [wishlist]
       responses:
@@ -729,7 +732,7 @@ paths:
                 $ref: "#/components/schemas/Problem"
     delete:
       operationId: removeFromWishlist
-      summary: Take a title off the wishlist
+      summary: Take a title off the wishlist (a series, all its seasons)
       tags: [wishlist]
       responses:
         "204":

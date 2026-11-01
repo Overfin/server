@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"time"
 )
 
@@ -20,8 +21,9 @@ var (
 	ErrWishOrder = errors.New("store: not the wishlist's titles")
 )
 
-// Wish is one of a profile's wished titles: a film, a whole series or a
-// season, by its key.
+// Wish is one of a profile's wished titles: a film or a season, by its
+// key. A series is wished for season by season; its seasons stay together
+// on the wishlist (GroupWishes).
 type Wish struct {
 	AccountID string
 	ProfileID string
@@ -109,6 +111,60 @@ func (s *Store) RemoveWish(ctx context.Context, profileID, title string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// wishGroup is what a wish moves with on a wishlist: a season, its
+// series' other seasons; a film, itself alone.
+func wishGroup(title string) string {
+	if r, ok := ParseTitleKey(title); ok && r.Kind == "season" {
+		return r.Series().Key()
+	}
+	return title
+}
+
+// GroupWishes keeps a series' seasons together on a profile's wishlist,
+// where its first one is, by season number; everything else keeps its
+// place.
+func (s *Store) GroupWishes(ctx context.Context, profileID string) error {
+	list, err := s.Wishes(ctx, profileID)
+	if err != nil {
+		return err
+	}
+	titles := make([]string, len(list))
+	for i, w := range list {
+		titles[i] = w.Title
+	}
+	grouped := GroupedWishes(titles)
+	if slices.Equal(grouped, titles) {
+		return nil
+	}
+	return s.OrderWishes(ctx, profileID, grouped)
+}
+
+// GroupedWishes orders titles so that a series' seasons follow each other,
+// where its first one is, by season number: a series moves as a whole,
+// its seasons never on their own.
+func GroupedWishes(titles []string) []string {
+	var groups []string
+	members := map[string][]string{}
+	for _, t := range titles {
+		g := wishGroup(t)
+		if _, seen := members[g]; !seen {
+			groups = append(groups, g)
+		}
+		members[g] = append(members[g], t)
+	}
+	out := make([]string, 0, len(titles))
+	for _, g := range groups {
+		seasons := members[g]
+		slices.SortStableFunc(seasons, func(a, b string) int {
+			ra, _ := ParseTitleKey(a)
+			rb, _ := ParseTitleKey(b)
+			return ra.Season - rb.Season
+		})
+		out = append(out, seasons...)
+	}
+	return out
 }
 
 // OrderWishes sets a profile's order: titles must be its wishlist's, each
