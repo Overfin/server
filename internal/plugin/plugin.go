@@ -61,7 +61,7 @@ func (r *Registrar) Load(plugins ...Plugin) error {
 }
 
 // Handle adds one protected route. The pattern must be "METHOD /api/v1/...",
-// using Go's ServeMux syntax, for example "GET /api/v1/items/{id}".
+// using Go's ServeMux syntax, for example "GET /api/v1/titles/{titleId}".
 func (r *Registrar) Handle(pattern string, h http.Handler) error {
 	return r.add(pattern, r.protect(h), false)
 }

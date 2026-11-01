@@ -101,12 +101,20 @@ func TestSpecMatchesRoutes(t *testing.T) {
 	if len(ops) < 50 {
 		t.Fatalf("read only %d operations from the specification", len(ops))
 	}
+	inSpec := map[string]bool{}
 	for _, op := range ops {
+		inSpec[op] = true
 		switch {
 		case planned[op] && served[op]:
 			t.Errorf("%s is served: drop its x-status: planned", op)
 		case !planned[op] && !served[op]:
 			t.Errorf("%s isn't served: mark it x-status: planned, or serve it", op)
+		}
+	}
+	// And the other way: every route served is in the specification.
+	for op := range served {
+		if !inSpec[op] {
+			t.Errorf("%s is served but not in api/openapi.yaml", op)
 		}
 	}
 }
