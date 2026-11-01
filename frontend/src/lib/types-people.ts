@@ -69,5 +69,4 @@ export type FeatureSettings = Record<string, any>;
 export interface FeaturesState {
   features: FeatureSettings;
   plugins: Plugin[];
-  exposableFields: string[];
 }

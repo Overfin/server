@@ -352,8 +352,7 @@ func isEncode(v string) bool { return strings.EqualFold(v, "encode") }
 
 // Describe gives a version a neutral name from its streams, such as
 // "2160p HDR · HEVC". Jellyfin's own version names come from file names,
-// which may reveal how files were named; those are shown only when the
-// operator exposes them (rule 55).
+// which may reveal how files were named; they're never shown (rule 55).
 func Describe(src jellyfin.MediaSource) string {
 	var parts []string
 	for _, ms := range src.MediaStreams {

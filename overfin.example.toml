@@ -237,8 +237,3 @@ on_delete = "delete"
 #   migration  people bring their history from another Jellyfin server
 enable = []
 
-[privacy]
-# Privacy-sensitive fields stay hidden unless listed here:
-#   version.names   names of media versions, derived from file names (otherwise
-#                   a neutral description such as "2160p HDR · HEVC" is shown)
-expose = []

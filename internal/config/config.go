@@ -36,14 +36,18 @@ type Config struct {
 	Identity Identity `toml:"identity"`
 	Storage  Storage  `toml:"storage"`
 	Limits   Limits   `toml:"limits"`
-	Privacy  Privacy  `toml:"privacy"`
 	Plugins  Plugins  `toml:"plugins"`
 	Accounts Accounts `toml:"accounts"`
 	// Modules holds the modules' own settings: module name, then setting.
 	Modules map[string]map[string]string `toml:"modules"`
 	// Adoption is the former [adoption] section, only read to carry it
 	// over to the migration module.
-	Adoption  Adoption  `toml:"adoption"`
+	Adoption Adoption `toml:"adoption"`
+	// FormerPrivacy is the former [privacy] section: nothing private can be
+	// exposed any more, so it's read only to be ignored.
+	FormerPrivacy struct {
+		Expose []string `toml:"expose"`
+	} `toml:"privacy"`
 	OIDC      OIDC      `toml:"oidc"`
 	Admin     Admin     `toml:"admin"`
 	Connector Connector `toml:"connector"`
@@ -52,7 +56,7 @@ type Config struct {
 	HTTPS     HTTPS     `toml:"https"`
 
 	// FeaturesInFile reports whether the file held feature settings
-	// (limits, privacy, plugins, accounts, modules). Those live in the
+	// (limits, plugins, accounts, modules). Those live in the
 	// database now; the file's are only read to fill an empty one.
 	FeaturesInFile bool `toml:"-"`
 
@@ -116,20 +120,6 @@ func (f *Features) ImportAdoption(a Adoption) {
 // retiredSettings are module settings that existed once: kept values are
 // dropped, not refused.
 var retiredSettings = map[string][]string{"migration": {"mode"}}
-
-// Privacy lists the privacy-sensitive fields the operator chooses to
-// expose (SECURITY.md rule 55). Everything not listed stays hidden.
-type Privacy struct {
-	Expose []string `toml:"expose" json:"expose"`
-}
-
-// ExposableFields are the privacy-sensitive fields an operator may turn on.
-var ExposableFields = []string{"version.names", "photo.takenAt", "photo.location", "photo.camera", "item.tags"}
-
-// Exposes reports whether the operator turned on a privacy-sensitive field.
-func (p Privacy) Exposes(field string) bool {
-	return slices.Contains(p.Expose, field)
-}
 
 // OIDC is Overfin's client registration at the identity provider. It logs
 // users in (identity mode "oidc") and confirms fresh logins before
@@ -252,7 +242,6 @@ func (p Plugins) Enabled(name string) bool {
 // live in the database and apply at once.
 type Features struct {
 	Limits   Limits                       `json:"limits"`
-	Privacy  Privacy                      `json:"privacy"`
 	Plugins  Plugins                      `json:"plugins"`
 	Accounts Accounts                     `json:"accounts"`
 	Modules  map[string]map[string]string `json:"modules"`
@@ -260,7 +249,7 @@ type Features struct {
 
 // Features returns the configuration's feature settings.
 func (c *Config) Features() Features {
-	f := Features{Limits: c.Limits, Privacy: c.Privacy, Plugins: c.Plugins, Accounts: c.Accounts, Modules: c.Modules}
+	f := Features{Limits: c.Limits, Plugins: c.Plugins, Accounts: c.Accounts, Modules: c.Modules}
 	f.Plugins.Enable = slices.Clone(f.Plugins.Enable)
 	f.Modules = make(map[string]map[string]string, len(c.Modules))
 	for name, values := range c.Modules {
@@ -281,7 +270,7 @@ func DefaultFeatures() Features {
 // settings, validated together with the rest.
 func (c *Config) WithFeatures(f Features) (*Config, error) {
 	n := *c
-	n.Limits, n.Privacy, n.Plugins, n.Accounts, n.Modules = f.Limits, f.Privacy, f.Plugins, f.Accounts, f.Modules
+	n.Limits, n.Plugins, n.Accounts, n.Modules = f.Limits, f.Plugins, f.Accounts, f.Modules
 	n.Adoption = Adoption{}  // carried over into f already
 	n.Identity.Proxies = nil // filled again by validate
 	if err := n.validate(); err != nil {
@@ -756,12 +745,6 @@ func (c *Config) validate() error {
 			continue
 		}
 		c.Identity.Proxies = append(c.Identity.Proxies, prefix)
-	}
-
-	for _, f := range c.Privacy.Expose {
-		if !slices.Contains(ExposableFields, f) {
-			add("privacy.expose: unknown field %q (known: %s)", f, strings.Join(ExposableFields, ", "))
-		}
 	}
 
 	known := slices.Sorted(maps.Keys(KnownPlugins))

@@ -10,14 +10,8 @@
 
   const DRAFT = 'overfin-panel-draft';
 
-  const privacyNames: Record<string, string> = {
-    'version.names': 'Version names (from file names)', 'photo.takenAt': 'When photos were taken', 'photo.location': 'Where photos were taken',
-    'photo.camera': 'Which camera took photos', 'item.tags': 'Tags',
-  };
-  const privacyName = (n: string) => privacyNames[n] || n;
-
   // A field of the form: where its value goes in the settings, and how.
-  // A "list" field ticks one value in a list (plugins.enable, privacy.expose).
+  // A "list" field ticks one value in a list (plugins.enable).
   type Kind = 'number' | 'choice' | 'list' | 'text' | 'onOff';
   interface Field {
     path: string;
@@ -93,7 +87,6 @@
         { path: 'accounts.onDelete', kind: 'choice', label: 'When an account is deleted' },
         { path: 'limits.pinAttempts', kind: 'number', label: 'Wrong PINs before a lock' },
       );
-      for (const name of s.exposableFields) f.push({ path: 'privacy.expose', kind: 'list', value: name, label: privacyName(name) });
       fields = f;
       data = s;
       // A draft fills in over the current settings: one kept from an older
@@ -205,14 +198,6 @@
       </Setting>
     </Card>
   </div>
-
-  <Card title="Privacy" description="Details hidden from everyone unless switched on here.">
-    {#each data.exposableFields as name (name)}
-      <Setting label={privacyName(name)}>
-        {#snippet children(ids)}<input type="checkbox" bind:checked={values[listKey('privacy.expose', name)]} aria-labelledby={ids.label} />{/snippet}
-      </Setting>
-    {/each}
-  </Card>
 
   {#if dirty}
     <div class="savebar">
