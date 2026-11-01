@@ -46,7 +46,7 @@
 <p class="hint">The pictures the site shows.{single ? '' : ' One chosen for all languages goes wherever a language has none of its own; a language\'s own comes first.'}</p>
 {#each types as { type, label } (type)}
   <h3>{label}</h3>
-  <ul class="list artwork-rows">
+  <ul class="list wrap">
     {#each rows as a (a.language)}
       <li>
         {#if a.images[type].url}
