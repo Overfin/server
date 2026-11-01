@@ -1139,8 +1139,8 @@ paths:
       summary: How the person signed in signs in
       description: With managed sign-in only, for the account owner's
         profile (`owner-only` otherwise). Their email, whether they have a
-        password, and whether a forgotten one can be reset by email
-        (`reset`).
+        password, whether a forgotten one can be reset by email (`reset`),
+        and the rules a new password follows (the operator's).
       tags: [account]
       responses:
         "200":
@@ -1149,7 +1149,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [email, hasPassword, reset]
+                required: [email, hasPassword, reset, rules]
                 properties:
                   email:
                     type: string
@@ -1157,6 +1157,20 @@ paths:
                     type: boolean
                   reset:
                     type: boolean
+                  rules:
+                    type: object
+                    required: [minLength, digit, special]
+                    properties:
+                      minLength:
+                        type: integer
+                        minimum: 10
+                        maximum: 64
+                      digit:
+                        type: boolean
+                        description: It needs a digit.
+                      special:
+                        type: boolean
+                        description: It needs a special character.
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":

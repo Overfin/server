@@ -483,7 +483,7 @@ export class Overfin {
   copyHistory(username: string, password: string): Promise<void>;
   logout(): Promise<{ logoutUrl?: string }>;
   /** With Overfin's own sign-in: the email, and whether a forgotten password can be reset by email. */
-  signinInfo(): Promise<{ email: string; hasPassword: boolean; reset: boolean }>;
+  signinInfo(): Promise<{ email: string; hasPassword: boolean; reset: boolean; rules: { minLength: number; digit: boolean; special: boolean } }>;
   /** Whose brand to show: Overfin's (without `custom`), or the operator's own, with "Powered by" Overfin. No sign-in needed. */
   branding(): Promise<Branding>;
   setPassword(password: string): Promise<{ hasPassword: boolean }>;
