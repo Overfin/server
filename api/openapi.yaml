@@ -327,8 +327,9 @@ paths:
     delete:
       operationId: deleteAccount
       summary: Delete the account and everything Overfin holds about it
-      description: Owner profile only, and needs a fresh login. Whether the
-        watch history is deleted too or kept on the server (unusable) is the
+      description: Owner profile only, and needs a fresh login. Everything
+        Overfin holds about the account goes, watch history included. Whether
+        its requests in Seerr go too or stay under an anonymous name is the
         operator's choice; the answer says which.
       tags: [account]
       responses:
@@ -339,11 +340,12 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [history]
+                required: [requests]
                 properties:
-                  history:
+                  requests:
                     type: string
                     enum: [deleted, kept]
+                    description: Its requests in Seerr, if it had any.
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":

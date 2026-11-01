@@ -236,26 +236,27 @@ func (p *Panel) changeAccount(w http.ResponseWriter, r *http.Request, s *session
 	writeJSON(w, http.StatusOK, aj)
 }
 
-// deleteAccount deletes an account like its owner would: its Jellyfin users
-// deleted with their history, or kept disabled, as the instance is set.
+// deleteAccount deletes an account like its owner would: its Seerr user
+// deleted with its requests, or kept anonymous, as the instance is set.
 func (p *Panel) deleteAccount(w http.ResponseWriter, r *http.Request, s *session) {
 	if a, err := p.Store.AccountByID(r.Context(), r.PathValue("id")); err == nil && p.own(r.Context(), a, s) {
 		invalid(w, "You can't delete your own account here: you'd lose the control panel. Another admin can, or you can from the site.")
 		return
 	}
 	keep := p.Features.Features().Accounts.OnDelete == "disable"
-	if _, err := p.Provisioner().DeleteAccount(r.Context(), r.PathValue("id"), keep); errors.Is(err, store.ErrNotFound) {
+	_, keptRequests, err := p.Provisioner().DeleteAccount(r.Context(), r.PathValue("id"), keep)
+	if errors.Is(err, store.ErrNotFound) {
 		notFound(w, "No such account")
 		return
 	} else if err != nil {
 		p.fail(w, "deleting an account", err)
 		return
 	}
-	history := "deleted"
-	if keep {
-		history = "kept"
+	requests := "deleted"
+	if keptRequests {
+		requests = "kept"
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"history": history})
+	writeJSON(w, http.StatusOK, map[string]string{"requests": requests})
 }
 
 func (p *Panel) unlockPIN(w http.ResponseWriter, r *http.Request, _ *session) {

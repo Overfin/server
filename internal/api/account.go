@@ -27,8 +27,8 @@ type Account struct {
 	Sessions    *Sessions
 	Provisioner *provision.Provisioner
 	Logger      *slog.Logger
-	// KeepOnDelete disables a deleted account's Jellyfin users, keeping
-	// their history, instead of deleting them (accounts.on_delete).
+	// KeepOnDelete keeps a deleted account's Seerr user, with its requests,
+	// under an anonymous name, instead of deleting it (accounts.on_delete).
 	KeepOnDelete bool
 	// Images, when set, forgets a deleted account's image access.
 	Images *images.Pipeline
