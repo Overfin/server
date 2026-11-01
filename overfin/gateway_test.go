@@ -191,29 +191,6 @@ func must(b []byte, err error) []byte {
 	return b
 }
 
-// The migration module's former mode, kept from before, is dropped, not
-// refused.
-func TestFormerMigrationMode(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "overfin.db")
-	cfgPath := filepath.Join(dir, "overfin.toml")
-	os.WriteFile(cfgPath, []byte(strings.ReplaceAll(baseConfig, "%DB%", dbPath)), 0o600)
-	cfg, err := config.Load(cfgPath, env("a"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	k, _ := keys.Derive(cfg.Secrets.Key)
-	box, _ := seal.New(k.TokenEncryption)
-	db, _ := store.Open(context.Background(), dbPath, box)
-	defer db.Close()
-	ctx := context.Background()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	db.SetFeatures(ctx, []byte(`{"plugins":{"enable":["library","migration"]},"modules":{"migration":{"mode":"move"}}}`))
-	if got, err := effective(ctx, cfg, db, logger); err != nil || got.Modules["migration"]["mode"] != "" {
-		t.Errorf("a former setting: %v %v", got.Modules, err)
-	}
-}
-
 func TestFirstKey(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	setup := func(t *testing.T, dbExists bool) *config.Config {

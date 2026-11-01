@@ -92,10 +92,6 @@ type Identity struct {
 	Proxies []netip.Prefix `toml:"-"`
 }
 
-// retiredSettings are module settings that existed once: kept values are
-// dropped, not refused.
-var retiredSettings = map[string][]string{"migration": {"mode"}}
-
 // OIDC is Overfin's client registration at the identity provider. It logs
 // users in (identity mode "oidc") and confirms fresh logins before
 // destructive actions (step-up, in any mode). Off unless Issuer is set.
@@ -952,7 +948,7 @@ func (c *Config) settleModules(add func(string, ...any)) {
 		settings := PluginSettings[name]
 		values := c.Modules[name]
 		for _, key := range slices.Sorted(maps.Keys(values)) {
-			if !slices.ContainsFunc(settings, func(s Setting) bool { return s.Key == key }) && !slices.Contains(retiredSettings[name], key) {
+			if !slices.ContainsFunc(settings, func(s Setting) bool { return s.Key == key }) {
 				add("modules.%s: unknown setting %q", name, key)
 			}
 		}
