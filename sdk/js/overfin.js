@@ -199,8 +199,9 @@ export class Overfin {
   person(id) { return this.request('GET', `/people/${enc(id)}`); }
 
   /**
-   * One page of a library's titles. query: library, kind ('movie',
-   * 'series', or both), genre, yearFrom, yearTo, played, favorite,
+   * One page of a library's titles. query: library or category, kind
+   * ('movie', 'series', or both; required), genre (one or several),
+   * yearFrom, yearTo, played, favorite,
    * inProgress, sort (name, addedAt, premiereDate, communityRating,
    * lastPlayed, random), order (asc, desc), seed, limit, cursor. Resolves
    * with { items, nextCursor?, totalCount?, seed? }.
@@ -388,6 +389,8 @@ function browserFamily() {
  *   left off.
  * @property {string} [audioTrack]
  * @property {string} [subtitleTrack]
+ * @property {string} [audioLanguage] The language to start in (the app's),
+ *   when the video has it and no audioTrack is given.
  * @property {object} [capabilities] What the browser can play; detected by default.
  * @property {(playback: object) => void} [onStart] Called on every (re)start,
  *   with the playback: tracks, segments, method.
@@ -397,6 +400,8 @@ function browserFamily() {
  * @property {() => void} [onEnded] Played to the end.
  * @property {object} [Hls] The hls.js constructor, for browsers without
  *   native HLS; globalThis.Hls by default.
+ * @property {HTMLCanvasElement} [pictureCanvas] Where subtitles that are
+ *   pictures are drawn; by default a canvas laid over the video.
  */
 
 const PROGRESS_EVERY = 10_000;   // ms between progress reports while playing

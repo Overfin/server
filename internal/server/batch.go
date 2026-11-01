@@ -26,8 +26,9 @@ const maxBatch = 20
 const batchParallel = 6
 
 // notBatched are the GET routes a batch refuses: they answer with media or
-// redirects, not JSON.
-var notBatched = []string{"/api/v1/images/", "/api/v1/stream/", "/api/v1/auth/"}
+// redirects, not JSON, or start a login (a cookie a batch would pass on).
+var notBatched = []string{"/api/v1/images/", "/api/v1/stream/", "/api/v1/auth/",
+	"/api/v1/login", "/api/v1/step-up", "/api/v1/gate"}
 
 type batchAnswer struct {
 	Status int             `json:"status"`

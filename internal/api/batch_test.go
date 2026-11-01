@@ -26,6 +26,9 @@ func TestBatch(t *testing.T) {
 	for _, bad := range []string{
 		`{"requests":[]}`,
 		`{"requests":["/api/v1/images/x"]}`,
+		`{"requests":["/api/v1/login"]}`,
+		`{"requests":["/api/v1/step-up"]}`,
+		`{"requests":["/api/v1/gate"]}`,
 		`{"requests":["/api/v1/batch"]}`,
 		`{"requests":["/api/v1/../admin"]}`,
 		`{"requests":["https://evil.example/api/v1/me"]}`,
