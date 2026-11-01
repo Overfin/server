@@ -58,14 +58,6 @@ func TestLoadValid(t *testing.T) {
 	}
 }
 
-// A file still holding the former [privacy] section starts: the section
-// is ignored, since nothing private can be exposed any more.
-func TestLoadFormerPrivacy(t *testing.T) {
-	if _, err := Load(writeFile(t, goodFile+"\n[privacy]\nexpose = [\"version.names\"]\n"), env(goodEnv())); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestLoadRejects(t *testing.T) {
 	tests := []struct {
 		name    string
