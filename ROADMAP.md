@@ -673,9 +673,9 @@ nothing beyond what that needs.
   own, and is kept private on the network (rule 47). "Ignore quota" is
   never set for people. Problem reports may come later, through Seerr's
   issues. To be replaced by wishlists (next).
-- **Wishlists, replacing requests** (designed 2026-11-01; steps 1 to 4 of 6
+- **Wishlists, replacing requests** (designed 2026-11-01; steps 1 to 5 of 6
   built: the store, the turns, the site's and the fetcher's API, arrivals
-  onto the watchlists, the score; the site; Overswell; the panel; next, Seerr). No quotas for
+  onto the watchlists, the score; the site; Overswell; the panel; Seerr; next, leaving requests). No quotas for
   people to manage: the server's real limits (disk room, download pace) are
   shared by taking turns.
   - **A wishlist per profile**, next to the watchlist, for titles not in
