@@ -9,8 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/textclean"
@@ -18,9 +16,8 @@ import (
 
 // Text limits, in bytes.
 const (
-	maxName     = 300
-	maxOverview = 4000
-	maxShort    = 200
+	maxName  = 300
+	maxShort = 200
 )
 
 // ---- IDs --------------------------------------------------------------------
@@ -153,18 +150,6 @@ type ItemSummary struct {
 	LiveChannel *LiveChannelPart `json:"liveChannel,omitempty"`
 }
 
-type Item struct {
-	ItemSummary
-	Overview        string            `json:"overview,omitempty"`
-	Genres          []string          `json:"genres,omitempty"`
-	Studios         []string          `json:"studios,omitempty"`
-	CommunityRating *float64          `json:"communityRating,omitempty"`
-	CriticRating    *float64          `json:"criticRating,omitempty"`
-	Credits         []Credit          `json:"credits,omitempty"`
-	Chapters        []Chapter         `json:"chapters,omitempty"`
-	ExternalIDs     map[string]string `json:"externalIds,omitempty"`
-}
-
 type MoviePart struct {
 	OriginalTitle string `json:"originalTitle,omitempty"`
 	Tagline       string `json:"tagline,omitempty"`
@@ -232,18 +217,6 @@ type LiveChannelPart struct {
 	Number string `json:"number,omitempty"`
 }
 
-type Credit struct {
-	Person    CreditPerson `json:"person"`
-	Role      string       `json:"role"`
-	Character string       `json:"character,omitempty"`
-}
-
-type CreditPerson struct {
-	ID    string    `json:"id"`
-	Name  string    `json:"name"`
-	Image *ImageRef `json:"image,omitempty"`
-}
-
 // Person is a person's page: who they are, not their work, which is listed
 // with GET /items?person=….
 type Person struct {
@@ -254,12 +227,6 @@ type Person struct {
 	BirthDate   string            `json:"birthDate,omitempty"`
 	DeathDate   string            `json:"deathDate,omitempty"`
 	ExternalIDs map[string]string `json:"externalIds,omitempty"`
-}
-
-type Chapter struct {
-	Name    string    `json:"name,omitempty"`
-	StartMs int64     `json:"startMs"`
-	Image   *ImageRef `json:"image,omitempty"`
 }
 
 type Library struct {
@@ -292,39 +259,6 @@ func Summary(r *jellyfin.RawItem) (ItemSummary, bool) {
 	}
 	addPart(&s, r)
 	return s, true
-}
-
-// Detail translates a Jellyfin item for its detail page.
-func Detail(r *jellyfin.RawItem) (Item, bool) {
-	s, ok := Summary(r)
-	if !ok {
-		return Item{}, false
-	}
-	it := Item{
-		ItemSummary:     s,
-		Overview:        textclean.Plain(r.Overview, maxOverview),
-		Genres:          cleanList(r.Genres),
-		CommunityRating: r.CommunityRating,
-		CriticRating:    r.CriticRating,
-		ExternalIDs:     externalIDs(r.ProviderIds),
-	}
-	for _, st := range r.Studios {
-		if n := textclean.Plain(st.Name, maxShort); n != "" {
-			it.Studios = append(it.Studios, n)
-		}
-	}
-	for _, p := range r.People {
-		if c, ok := credit(p); ok {
-			it.Credits = append(it.Credits, c)
-		}
-	}
-	jfID, _ := jellyfin.NormalizeID(r.Id)
-	for i, ch := range r.Chapters {
-		c := Chapter{Name: textclean.Plain(ch.Name, maxShort), StartMs: ticksToMs(ch.StartPositionTicks)}
-		c.Image = imageRef(jfID, "chapter", i, ch.ImageTag, nil, "")
-		it.Chapters = append(it.Chapters, c)
-	}
-	return it, true
 }
 
 // LibraryOf translates one of Jellyfin's user views into a library.
@@ -423,52 +357,11 @@ func refs(in []jellyfin.NameID) []ItemRef {
 	return out
 }
 
-func credit(p jellyfin.Person) (Credit, bool) {
-	id := wrap(PersonPrefix, p.Id)
-	name := textclean.Plain(p.Name, maxShort)
-	if id == "" || name == "" {
-		return Credit{}, false
-	}
-	c := Credit{Person: CreditPerson{ID: id, Name: name}, Role: role(p.Type)}
-	jfID, _ := jellyfin.NormalizeID(p.Id)
-	c.Person.Image = imageRef(jfID, "primary", 0, p.PrimaryImageTag, nil, "")
-	if c.Role == "actor" || c.Role == "guestStar" {
-		c.Character = textclean.Plain(p.Role, maxShort)
-	}
-	return c, true
-}
-
-// role turns Jellyfin's person type into the spec's role: "GuestStar"
-// becomes "guestStar".
-func role(t string) string {
-	t = textclean.Plain(t, 32)
-	if t == "" {
-		return "other"
-	}
-	// The first character, not the first byte: half a character would
-	// come out as garbage.
-	r, n := utf8.DecodeRuneInString(t)
-	return string(unicode.ToLower(r)) + t[n:]
-}
-
-func cleanList(in []string) []string {
-	var out []string
-	for _, s := range in {
-		if c := textclean.Plain(s, maxShort); c != "" {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
-// externalIDs keeps the public database IDs the spec names, with values
-// limited to plain identifier characters.
 var externalValue = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
 
-// ExternalIDs is externalIDs for other packages.
-func ExternalIDs(in map[string]string) map[string]string { return externalIDs(in) }
-
-func externalIDs(in map[string]string) map[string]string {
+// ExternalIDs keeps the public database IDs the spec names, with values
+// limited to plain identifier characters.
+func ExternalIDs(in map[string]string) map[string]string {
 	keys := map[string]string{
 		"Tmdb": "tmdb", "Imdb": "imdb", "Tvdb": "tvdb",
 		"MusicBrainzAlbum": "musicBrainz", "MusicBrainzArtist": "musicBrainz", "MusicBrainzTrack": "musicBrainz",

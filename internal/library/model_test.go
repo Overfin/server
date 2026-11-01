@@ -36,12 +36,12 @@ const hostile = `{
 	"UserData": {"PlaybackPositionTicks": 12040000000, "Played": false, "IsFavorite": true, "LastPlayedDate": "2026-10-18T21:04:00.123Z"}
 }`
 
-func TestDetailKeepsOnlyTheModel(t *testing.T) {
+func TestSummaryKeepsOnlyTheModel(t *testing.T) {
 	var raw jellyfin.RawItem
 	if err := json.Unmarshal([]byte(hostile), &raw); err != nil {
 		t.Fatal(err)
 	}
-	it, ok := Detail(&raw)
+	it, ok := Summary(&raw)
 	if !ok {
 		t.Fatal("item skipped")
 	}
@@ -54,10 +54,7 @@ func TestDetailKeepsOnlyTheModel(t *testing.T) {
 		}
 	}
 	if it.ID != ItemPrefix+jfID || it.Kind != "episode" || it.DurationMs != 2853000 || it.PremiereDate != "2013-09-15" {
-		t.Errorf("core fields: %+v", it.ItemSummary)
-	}
-	if it.Overview != "Walt and Hank face off." {
-		t.Errorf("overview = %q", it.Overview)
+		t.Errorf("core fields: %+v", it)
 	}
 	if it.Episode == nil || *it.Episode.SeasonNumber != 5 || *it.Episode.Number != 14 || it.Episode.SeriesID != "item_11111111111111111111111111111111" {
 		t.Errorf("episode part: %+v", it.Episode)
@@ -67,15 +64,6 @@ func TestDetailKeepsOnlyTheModel(t *testing.T) {
 	}
 	if want := "/api/v1/images/img_" + jfID + "_primary_0_" + tag; it.Images.Primary.URL != want {
 		t.Errorf("image URL = %q", it.Images.Primary.URL)
-	}
-	if len(it.Credits) != 1 || it.Credits[0].Character != "Walter White" || it.Credits[0].Role != "actor" {
-		t.Errorf("credits: %+v (the bad ID must be dropped)", it.Credits)
-	}
-	if len(it.Chapters) != 1 || it.Chapters[0].StartMs != 60000 || it.Chapters[0].Image == nil {
-		t.Errorf("chapters: %+v", it.Chapters)
-	}
-	if it.ExternalIDs["tvdb"] != "4999232" || it.ExternalIDs["imdb"] != "tt2301451" || len(it.ExternalIDs) != 2 {
-		t.Errorf("external IDs: %v", it.ExternalIDs)
 	}
 	if it.UserState == nil || it.UserState.PositionMs != 1204000 || !it.UserState.Favorite || it.UserState.LastPlayedAt != "2026-10-18T21:04:00Z" {
 		t.Errorf("user state: %+v", it.UserState)
