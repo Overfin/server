@@ -44,7 +44,7 @@ func TestLogosForTitlesWithout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`DROP TABLE title_history; DROP TABLE title_edits; DROP TABLE title_uploads; DROP TABLE title_matches; DROP TABLE catalog_title_keywords; ALTER TABLE catalog_items DROP COLUMN audio_languages; ALTER TABLE profiles DROP COLUMN audio_language; DROP TABLE title_tracks; CREATE TABLE catalog_genres (item_id TEXT); CREATE TABLE catalog_studios (item_id TEXT); CREATE TABLE catalog_tags (item_id TEXT); CREATE TABLE catalog_people (item_id TEXT); PRAGMA user_version = 67`); err != nil {
+	if _, err := db.Exec(`DROP TABLE title_history; DROP TABLE title_edits; DROP TABLE title_uploads; DROP TABLE title_matches; DROP TABLE catalog_title_keywords; ALTER TABLE catalog_items DROP COLUMN audio_languages; ALTER TABLE profiles DROP COLUMN audio_language; DROP TABLE title_tracks; CREATE TABLE catalog_genres (item_id TEXT); CREATE TABLE catalog_studios (item_id TEXT); CREATE TABLE catalog_tags (item_id TEXT); CREATE TABLE catalog_people (item_id TEXT); DROP TABLE wishes; DROP TABLE wish_states; DROP TABLE wish_turns; DROP TABLE wish_arrivals; DROP TABLE wish_off; PRAGMA user_version = 67`); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
