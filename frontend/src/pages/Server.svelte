@@ -1,4 +1,5 @@
-<!-- Server: what Overfin connects to, each part tested before it's saved.
+<!-- Server: what Overfin connects to, and how; connections tested before
+     they're saved.
      A part that changes the others reloads the whole page. -->
 <script lang="ts">
   import { PageHead, Loading } from '@overfin/ui';
@@ -57,7 +58,7 @@
   load();
 </script>
 
-<PageHead title="Server" description="What Overfin connects to. Every change is tested before it's saved, and applies at once." />
+<PageHead title="Server" description="What Overfin connects to, and how. Connections are tested before they're saved; every change applies at once." />
 
 {#if !data}
   <Loading />
