@@ -152,7 +152,7 @@ var Members = []string{"type", "title", "status", "detail", "takenOverBy", "retr
 
 // New returns the problem for t, with an optional human-readable detail.
 // The detail must never contain upstream error text or internal details
-// (SECURITY.md rule 31).
+// (SECURITY.md rule 35).
 func New(t Type, detail string) Problem {
 	i, ok := registry[t]
 	if !ok {

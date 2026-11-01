@@ -55,7 +55,7 @@ type Event struct {
 }
 
 // WebhookClient is the webhook's HTTP client: ten seconds at most, and no
-// redirects followed (rule 6, for any address Overfin posts to).
+// redirects followed (rule 46).
 func WebhookClient() *http.Client {
 	return &http.Client{Timeout: 10 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}

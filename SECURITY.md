@@ -10,7 +10,7 @@ Overfin must be easy to run, for anyone from a first-time operator to a
 network security expert. So the rules come in two kinds:
 
 - **Hard rules** hold on every server, whatever its settings. No setting
-  loosens them. Above all, between servers (rules 65 and after): one badly
+  loosens them. Above all, between servers (rule 65): one badly
   run server must never be a way into another.
 - **Secure defaults** are where an operator's choice of setup decides, and
   each says what it can be relaxed to. The default is always the strict
@@ -151,7 +151,9 @@ comes from the internet, and media files can be written by anyone.
     exceptions are top-level GET navigations to the pages people arrive at
     from elsewhere (sign-in, an invitation, a forgotten password, an
     identity provider's return), which act on nothing but their own code
-    and query, and the gate a reverse proxy asks (rule 13). A request
+    and query, the gate a reverse proxy asks (rule 13), and the site's own
+    pages and files (any GET or HEAD outside `/api/`, which change nothing;
+    rule 64). A request
     without `Sec-Fetch-Site` (older browsers, some TVs' and apps' web views,
     apps) is let through this check; for those, the JSON rule is what rules
     out cross-site writes. State-changing requests must be JSON, except

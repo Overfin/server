@@ -24,7 +24,7 @@ func (Feature) Info() feature.Info {
 		Settings: []feature.Setting{{
 			Key:   "from",
 			Label: "The other server's address",
-			Hint:  "As Overfin reaches it, such as http://192.168.1.10:8096. Nothing is offered without it.",
+			Hint:  "As Overfin reaches it, such as http://192.0.2.10:8096. Nothing is offered without it.",
 			Text:  true,
 		}},
 	}

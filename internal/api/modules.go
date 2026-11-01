@@ -232,8 +232,8 @@ func CallerFor(l Library, c *Caller) *feature.Caller {
 	}
 }
 
-// profileBackend is the media backend as one profile, with that profile's
-// own token: its limits apply to everything it returns.
+// profileBackend is the media backend as one profile sees it: Overfin
+// applies the profile's limits to everything it returns.
 type profileBackend struct {
 	l Library
 	p *store.Profile
@@ -349,29 +349,6 @@ func creationHooks(r *http.Request, mounts []Mount, prov *provision.Provisioner)
 			return nil
 		},
 	}
-}
-
-// Invited reports whether the visitor making r brings an invitation, as the
-// switched-on modules see it: one of them would shape a new account for it.
-// Nothing is used up.
-func Invited(r *http.Request, mounts []Mount) (bool, error) {
-	for _, m := range mounts {
-		g, ok := m.Module.(feature.AccountGate)
-		if !ok {
-			continue
-		}
-		plan, err := g.NewAccount(r.Context(), &host{mount: m}, r)
-		var refusal *feature.Refusal
-		switch {
-		case errors.As(err, &refusal):
-			return false, nil
-		case err != nil:
-			return false, err
-		case plan != nil:
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // applyPlan shapes a new account: its template, when its access ends, and
