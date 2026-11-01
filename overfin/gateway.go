@@ -1041,6 +1041,14 @@ func (g *gateway) SetTMDBToken(ctx context.Context, token string) (string, error
 }
 
 // Features returns the feature settings in effect.
+// wishSetup says where wishes go, how many a day go to Seerr, and the
+// Seerr connected, as things are now.
+func (g *gateway) wishSetup() (string, int, *seerr.Client) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.cfg.Wishes.To, g.cfg.Wishes.PerDay, g.sh.seerr
+}
+
 func (g *gateway) Features() config.Features {
 	g.mu.Lock()
 	defer g.mu.Unlock()

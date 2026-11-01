@@ -88,6 +88,7 @@
         { path: 'limits.pinAttempts', kind: 'number', label: 'Wrong PINs before a lock' },
         { path: 'wishes.to', kind: 'choice', label: 'Wishes go to' },
         { path: 'wishes.keptDays', kind: 'number', label: 'Kept after arriving (days)' },
+        { path: 'wishes.perDay', kind: 'number', label: 'Wishes a day' },
       );
       fields = f;
       data = s;
@@ -202,14 +203,20 @@
     <!-- Wishlists: each profile's titles to get, taken in turns, account
          by account; what fetches them. -->
     <Card title="Wishes" description="Each profile lists the films and seasons it would like here; Overfin takes turns, account by account.">
-      <Setting label="Wishes go to" hint="Nowhere: no wishlist is offered. Overswell: it fetches them in Overfin's turns, and says back what became of each; its key needs Wishes to fetch (Apps).">
+      <Setting label="Wishes go to" hint="Nowhere: no wishlist is offered. Overswell: it fetches them in Overfin's turns, and says back what became of each; its key needs Wishes to fetch (Apps). Seerr: Overfin requests them there itself, as a user named Overfin it makes (give it the Request permission, and auto-approval if you like).">
         {#snippet children(ids)}
           <select bind:value={values['wishes.to']} aria-labelledby={ids.label} aria-describedby={ids.hint}>
             <option value="">Nowhere</option>
             <option value="overswell">Overswell</option>
+            <option value="seerr">Seerr</option>
           </select>
         {/snippet}
       </Setting>
+      {#if values['wishes.to'] === 'seerr'}
+        <Setting label="Wishes a day" hint="How many wishes Overfin requests in Seerr in 24 hours, in its turns: Seerr has no pace of its own. From 1 to 100." sub>
+          {#snippet children(ids)}<input type="number" min="1" max="100" bind:value={values['wishes.perDay']} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+        </Setting>
+      {/if}
       <Setting label="Kept after arriving (days)" hint="A wished title weighs in the values this long after it arrives, until those who wished for it watched it. From 1 to 365." sub off={!values['wishes.to']}>
         {#snippet children(ids)}<input type="number" min="1" max="365" bind:value={values['wishes.keptDays']} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
       </Setting>

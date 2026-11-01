@@ -346,7 +346,10 @@ comes from the internet, and media files can be written by anyone.
     for what; never an email, nor any name with an @ (the next one along
     is taken instead; their address is a placeholder on `.invalid`), and
     no one can sign in to Seerr as them. Seerr therefore holds names: keep
-    it private, reachable by Overfin and the operator only.
+    it private, reachable by Overfin and the operator only. Wishes handed
+    to Seerr (wishes.to = "seerr") go as one user of Overfin's own, named
+    "Overfin", the same way: Seerr learns what was wished for, never who
+    wished it.
 48. Search terms and other personal input travel in request bodies, never in
     URLs, so they stay out of access logs and browser history.
 49. Users never learn who else requested a title, only that it was requested.

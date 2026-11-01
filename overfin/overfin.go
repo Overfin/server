@@ -497,6 +497,8 @@ func run(logger *slog.Logger) error {
 		}}
 	go cat.Run(ctx)
 	go cat.Watch(ctx)
+	// Wishes, handed to Seerr when that's where they go.
+	go (&api.WishesToSeerr{Store: db, Setup: gw.wishSetup, Logger: logger}).Run(ctx)
 	// Discovery's lists, from TMDB: 10 pages (200 titles) per list, every
 	// hour.
 	sh.lists = catalog.NewLists(gw.tmdbSource, db, logger, time.Hour, 10)

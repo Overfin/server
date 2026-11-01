@@ -18,10 +18,10 @@ export interface Problem {
   language?: string;
 }
 
-/** A wished title, and what became of it: waiting its turn, not out yet (releaseDate, when known), not found yet (tried again at nextTry), or downloading. */
+/** A wished title, and what became of it: waiting its turn, requested (handed to Seerr, not started yet), not out yet (releaseDate, when known), not found yet (tried again at nextTry), or downloading. */
 export interface Wish {
   title: TitleSummary;
-  state: 'waiting' | 'unreleased' | 'notFound' | 'downloading';
+  state: 'waiting' | 'requested' | 'unreleased' | 'notFound' | 'downloading';
   releaseDate?: string;
   nextTry?: string;
 }

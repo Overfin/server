@@ -4318,8 +4318,9 @@ components:
           $ref: "#/components/schemas/TitleSummary"
         state:
           type: string
-          enum: [waiting, unreleased, notFound, downloading]
-          description: Waiting its turn; not out yet (with `releaseDate`, when
+          enum: [waiting, requested, unreleased, notFound, downloading]
+          description: Waiting its turn; requested (handed to Seerr, which
+            hasn't started it yet); not out yet (with `releaseDate`, when
             known); not found yet, tried again at `nextTry`; or downloading.
         releaseDate:
           type: string
