@@ -18,6 +18,21 @@ export interface Problem {
   language?: string;
 }
 
+/** A wished title, and what became of it: waiting its turn, not out yet (releaseDate, when known), not found yet (tried again at nextTry), or downloading. */
+export interface Wish {
+  title: TitleSummary;
+  state: 'waiting' | 'unreleased' | 'notFound' | 'downloading';
+  releaseDate?: string;
+  nextTry?: string;
+}
+
+/** The profile's wishlist. on is false when its owner switched its wishing off (its wishes wait); arrived, what came since it was last told (on its watchlist now). */
+export interface Wishlist {
+  on: boolean;
+  items: Wish[];
+  arrived: TitleSummary[];
+}
+
 export class OverfinError extends Error {
   constructor(status: number, problem: Problem);
   readonly status: number;
@@ -80,8 +95,8 @@ export interface Me {
    * one answered (or chose to say nothing). */
   tastes: { asked: boolean; answered: boolean };
   /** What the server offers that depends on its setup: discovery (TMDB or
-   * Seerr), requests (Seerr). Absent before 0.5. */
-  offers?: { discovery: boolean; requests: boolean };
+   * Seerr), requests (Seerr), wishlists (since 0.8). Absent before 0.5. */
+  offers?: { discovery: boolean; requests: boolean; wishes?: boolean };
   /** The control panel's path on the site ("/admin/"), only for an admin
    * who can open it there; absent otherwise. Since 0.6. */
   panel?: string;
@@ -560,6 +575,14 @@ export class Overfin {
   onWatchlist(id: string): Promise<boolean>;
   addToWatchlist(id: string): Promise<null>;
   removeFromWatchlist(id: string): Promise<null>;
+
+  wishlist(): Promise<Wishlist>;
+  addToWishlist(id: string): Promise<null>;
+  removeFromWishlist(id: string): Promise<null>;
+  orderWishlist(ids: string[]): Promise<null>;
+  wishesSeen(): Promise<null>;
+  profileWishing(profileId: string): Promise<{ on: boolean }>;
+  setProfileWishing(profileId: string, on: boolean): Promise<{ on: boolean }>;
 
   startPlayback(request: PlaybackRequest): Promise<Playback>;
   playback(id: string): Promise<Playback>;
