@@ -265,9 +265,11 @@ comes from the internet, and media files can be written by anyone.
 37. Public endpoints (`/api/v1/health`, the sign-in, invitation and
     forgotten-password pages with their script, style, logo and check
     against scripts, the sign-in, registration and forgotten-password calls,
-    the identity provider's return, the gate, `theme.css`, and the
-    operator's branding) never reveal
-    software versions, upstream servers or anything about users.
+    the login's start, the identity provider's return and the login's
+    finish, the gate, logout, `theme.css`, and the operator's branding)
+    never reveal software versions, upstream servers or anything about
+    users. This list is the whole set: a test fails on any other route
+    that needs no session.
 38. The API's cursors are signed and bound to the query that produced them. A
     modified cursor, or one used with a different query, is refused. The
     apps API's (rule 58) are plain positions in a list the key may read whole.
