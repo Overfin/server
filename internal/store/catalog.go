@@ -99,17 +99,11 @@ type CatalogItem struct {
 	BackdropTag   string
 	ThumbTag      string
 	// For listings: the library it's in (empty: unchanged), when it was
-	// added, its release date (YYYY-MM-DD), its rating score, its genres
-	// and studios.
+	// added, its release date (YYYY-MM-DD) and its rating score.
 	LibraryID       string
 	AddedAt         time.Time
 	PremiereDate    string
 	CommunityRating *float64
-	Genres          []string
-	Studios         []string
-	// Tags are Jellyfin's tags; People, the Jellyfin IDs of who's in it.
-	Tags   []string
-	People []string
 	// FolderName and FileName are the last names of where it is (a film's
 	// folder and file, a series' folder); RuntimeMs, a film's length.
 	FolderName, FileName string
@@ -174,20 +168,6 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 			}
 			if err := recordHistory(ctx, tx, "arrived", it.Kind, it.ID, it.SeriesID, it.SeasonNumber, tmdb, it.TVDB, at); err != nil {
 				return err
-			}
-		}
-		// Genres, studios, tags and people, replaced as a whole.
-		for table, names := range map[string][]string{"catalog_genres": it.Genres, "catalog_studios": it.Studios,
-			"catalog_tags": it.Tags, "catalog_people": it.People} {
-			column := map[string]string{"catalog_genres": "genre", "catalog_studios": "studio",
-				"catalog_tags": "tag", "catalog_people": "person_id"}[table]
-			if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE item_id = ?`, it.ID); err != nil {
-				return err
-			}
-			for _, n := range names {
-				if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO `+table+` (item_id, `+column+`) VALUES (?, ?)`, it.ID, n); err != nil {
-					return err
-				}
 			}
 		}
 	}

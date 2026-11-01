@@ -72,7 +72,7 @@ func TestCatalogGenres(t *testing.T) {
 	ctx := context.Background()
 	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
 	s.PutCatalog(ctx, []CatalogItem{
-		{ID: id(0), Kind: "movie", Name: "A", SortName: "a", LibraryID: "films", TMDB: "1", Genres: []string{"Jellyfin's"}},
+		{ID: id(0), Kind: "movie", Name: "A", SortName: "a", LibraryID: "films", TMDB: "1"},
 		{ID: id(1), Kind: "movie", Name: "B", SortName: "b", LibraryID: "films", TMDB: "2"},
 		{ID: id(2), Kind: "series", Name: "C", SortName: "c", LibraryID: "tv", TMDB: "3"},
 	}, 1)
