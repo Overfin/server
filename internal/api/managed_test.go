@@ -595,6 +595,28 @@ func TestManagedPasswordOwnerOnly(t *testing.T) {
 	if c, out := signinPost(t, b, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "ann@example.org", "password": "a long password 1"})); c != 200 {
 		t.Fatalf("signing in: %d %v", c, out)
 	}
+	// The owner is told the rules a new password follows.
+	if res, body := visit(t, b, srv, "/api/v1/me/signin", nil); res.StatusCode != 200 || !strings.Contains(body, `"rules":{"minLength":10,"digit":true,"special":true}`) {
+		t.Errorf("the owner's sign-in: %d %s", res.StatusCode, body)
+	}
+	// A refused password is said in the account's language, as the site
+	// is, whatever the browser asks for.
+	st.SetLanguages(ctx, []string{"en-US", "fr-CA"}, "en-US")
+	if err := st.SetAccountLanguage(ctx, acct.ID, "fr-CA"); err != nil {
+		t.Fatal(err)
+	}
+	weak, _ := http.NewRequest("PUT", srv.URL+"/api/v1/me/password", strings.NewReader(`{"password":"abcdefghijklmn"}`))
+	weak.Header.Set("Content-Type", "application/json")
+	weak.Header.Set("Accept-Language", "en-US")
+	if res, err := b.Do(weak); err != nil {
+		t.Fatal(err)
+	} else {
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != 400 || !strings.Contains(string(body), "chiffre") {
+			t.Errorf("a refused password: %d %s", res.StatusCode, body)
+		}
+	}
 	put := func() int {
 		req, _ := http.NewRequest("PUT", srv.URL+"/api/v1/me/password", strings.NewReader(`{"password":"the kid's choice, 2026"}`))
 		req.Header.Set("Content-Type", "application/json")

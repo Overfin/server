@@ -670,7 +670,7 @@ func (m *Managed) signinInfo(w http.ResponseWriter, r *http.Request) {
 	if !m.ownerHere(w, r) {
 		return
 	}
-	writeOK(w, map[string]any{"email": u.Email, "hasPassword": u.PasswordHash != "", "reset": m.canMail()})
+	writeOK(w, map[string]any{"email": u.Email, "hasPassword": u.PasswordHash != "", "reset": m.canMail(), "rules": m.rules(r.Context())})
 }
 
 // setPassword changes the password, after a fresh login; other browsers
@@ -857,11 +857,25 @@ func (m *Managed) followsRules(w http.ResponseWriter, r *http.Request, pw string
 	rules := m.rules(r.Context())
 	if lacks := rules.Lacks(pw); lacks != "" {
 		key := map[string]string{"length": "lacksLength", "digit": "lacksDigit", "special": "lacksSpecial"}[lacks]
-		detail := strings.ReplaceAll(signinTexts[pageLang(r, m.Store)][key], "{n}", strconv.Itoa(rules.MinLength))
+		detail := strings.ReplaceAll(signinTexts[m.textLang(r)][key], "{n}", strconv.Itoa(rules.MinLength))
 		problem.Send(w, problem.InvalidRequest, detail)
 		return false
 	}
 	return true
+}
+
+// textLang is the language of an answer: the account's, for someone
+// signed in who has one (what the site shows), else the page's.
+func (m *Managed) textLang(r *http.Request) string {
+	if _, u := m.current(r); u != nil {
+		if a, err := m.Store.AccountBySubject(r.Context(), u.Subject); err == nil {
+			code, _, _ := strings.Cut(strings.ToLower(a.Language), "-")
+			if _, ok := signinTexts[code]; ok {
+				return code
+			}
+		}
+	}
+	return pageLang(r, m.Store)
 }
 
 // hashPassword hashes a new password, a few at a time (it's slow on
@@ -976,7 +990,7 @@ func (m *Managed) CanMail() bool { return m.canMail() }
 func (m *Managed) refuse(w http.ResponseWriter, r *http.Request, t problem.Type, key string) {
 	detail := ""
 	if key != "" {
-		detail = signinTexts[pageLang(r, m.Store)][key]
+		detail = signinTexts[m.textLang(r)][key]
 	}
 	problem.Send(w, t, detail)
 }
