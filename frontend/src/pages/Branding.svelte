@@ -94,7 +94,7 @@
       {/snippet}
     </Card>
 
-    <Card title="Files" description={'Kept as you upload them: PNG works everywhere, emails included (JPEG too; not SVG, which emails can\'t show). 4 MB at most each.'}>
+    <Card title="Files" description={'PNG or JPEG (not SVG, which emails can\'t show), 4 MB at most each. Overfin keeps them as PNG, no wider than they\'re shown: the logo 512 pixels, banners 1200.'}>
       {#each kinds as [kind, label, hint] (kind)}
         <BrandingFile {kind} {label} {hint} branding={b} changed={settle} />
       {/each}

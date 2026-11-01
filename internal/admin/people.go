@@ -221,7 +221,7 @@ func (p *Panel) removePerson(w http.ResponseWriter, r *http.Request, s *session)
 		return
 	}
 	if _, err := p.Store.AccountBySubject(r.Context(), u.Subject); err == nil {
-		invalid(w, "They have an account: delete it in Users, which removes them too.")
+		invalid(w, "They have an account: delete it in People, which removes them too.")
 		return
 	} else if !errors.Is(err, store.ErrNotFound) {
 		p.fail(w, "removing someone", err)
