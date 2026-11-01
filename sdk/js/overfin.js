@@ -133,7 +133,8 @@ export class Overfin {
   copyHistory(username, password) { return this.request('POST', '/me/history/copy', { username, password }); }
   /**
    * Deletes the account and everything Overfin holds about it. Owner only;
-   * needs a fresh login (step-up). Resolves with { requests: 'deleted' | 'kept' }: its requests in Seerr.
+   * needs a fresh login (step-up). Resolves with null (before 0.8, with
+   * what became of its requests in Seerr).
    */
   deleteAccount() { return this.request('DELETE', '/me'); }
   /**
@@ -275,15 +276,6 @@ export class Overfin {
   /** Whether a profile may wish (owner profile only): { on }. */
   profileWishing(profileId) { return this.request('GET', `/profiles/${enc(profileId)}/wishing`); }
   setProfileWishing(profileId, on) { return this.request('PUT', `/profiles/${enc(profileId)}/wishing`, { on }); }
-
-  // ---- Requests (when the server has Seerr connected) -----------------------
-
-  /** The profile's requests (the owner's: its kids profiles' too), newest first. Rejects with 404 when the server offers none. */
-  async requests() { return (await this.request('GET', '/requests')).items; }
-  /** Requests a title no library has (a season or an episode: its season; a series: seasons, or all). */
-  requestTitle(titleId, seasons) { return this.request('POST', '/requests', seasons ? { titleId, seasons } : { titleId }); }
-  /** Cancels a request while it's pending. */
-  cancelRequest(id) { return this.request('DELETE', `/requests/${enc(id)}`); }
 
   // ---- Discovery (when the server has Seerr connected) ----------------------
 

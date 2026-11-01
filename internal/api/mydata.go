@@ -16,9 +16,8 @@ import (
 // ---- Deleting an account ----------------------------------------------------
 
 // deleteAccount deletes the account and everything Overfin holds about it
-// (rule 45). Its Jellyfin users are deleted with their history, or disabled
-// and kept, as the operator chose; the answer says which. Owner only, after a
-// fresh login.
+// (rule 45), with the Jellyfin users of its profiles from before Overfin's
+// one Jellyfin account. Owner only, after a fresh login.
 func (a Account) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	c := a.Sessions.Current(w, r)
 	if c == nil {
@@ -31,7 +30,7 @@ func (a Account) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	if !a.Sessions.RequireFresh(w, c) {
 		return
 	}
-	profiles, keptRequests, err := a.Provisioner.DeleteAccount(r.Context(), c.Account.ID, a.KeepOnDelete)
+	profiles, err := a.Provisioner.DeleteAccount(r.Context(), c.Account.ID)
 	if err != nil {
 		a.Logger.Error("deleting an account failed", "err", err)
 		problem.Send(w, problem.Internal, "")
@@ -43,14 +42,10 @@ func (a Account) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	clearCookie(w, r)
-	out := map[string]string{"requests": "deleted"}
-	if keptRequests {
-		out["requests"] = "kept"
-	}
 	if in := a.Sessions.SignIn; in != nil {
 		in.Logout(w, r)
 	}
-	writeOK(w, out)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---- Downloading your data --------------------------------------------------
@@ -123,9 +118,6 @@ type exportProfileJSON struct {
 	// title: where it stopped, whether it watched it, how many times and
 	// when last, its favorites.
 	Titles []exportTitleJSON `json:"titles"`
-	// Requests are the titles the profile requested, and where each
-	// stood when last read from Seerr.
-	Requests []exportRequestJSON `json:"requests"`
 	// Modules holds what each switched-on module keeps about the profile,
 	// by module name (the watchlist, say).
 	Modules map[string]any `json:"modules,omitempty"`
@@ -134,14 +126,6 @@ type exportProfileJSON struct {
 type exportTracksJSON struct {
 	Audio     string  `json:"audio,omitempty"`
 	Subtitles *string `json:"subtitles,omitempty"`
-}
-
-type exportRequestJSON struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Seasons     []int  `json:"seasons,omitempty"`
-	Status      string `json:"status"`
-	RequestedAt string `json:"requestedAt"`
 }
 
 type exportTitleJSON struct {
@@ -261,17 +245,6 @@ func (a Account) export(w http.ResponseWriter, r *http.Request) {
 			}
 			titles = append(titles, t)
 		}
-		asked, err := a.Sessions.Store.ProfileRequests(ctx, c.Account.ID, []string{p.ID})
-		if err != nil {
-			a.Logger.Error("reading a profile's requests for an export failed", "err", err)
-			problem.Send(w, problem.Internal, "")
-			return
-		}
-		requests := make([]exportRequestJSON, 0, len(asked))
-		for _, x := range asked {
-			requests = append(requests, exportRequestJSON{ID: x.ID, Title: x.Title, Seasons: x.Seasons, Status: x.Status,
-				RequestedAt: x.CreatedAt.UTC().Format(time.RFC3339)})
-		}
 		mods := map[string]any{}
 		as := &Caller{Account: c.Account, Session: c.Session, Profile: p, Owner: c.Owner}
 		for _, m := range a.Mounts {
@@ -326,7 +299,7 @@ func (a Account) export(w http.ResponseWriter, r *http.Request) {
 			AudioLanguage: p.AudioLanguage, SubtitleLanguage: p.SubtitleLanguage, Tracks: trackChoices,
 			MaxAge: p.MaxAge, Categories: p.Categories, Libraries: p.Libraries, BlockedTags: p.BlockedTags,
 			KidsTitles: p.KidsTitles, Theme: p.Theme, HasPIN: p.HasPIN, CreatedAt: p.Created.Format(time.RFC3339),
-			WatchHistory: history, Titles: titles, Requests: requests, Modules: mods, OutOfContinue: hidden,
+			WatchHistory: history, Titles: titles, Modules: mods, OutOfContinue: hidden,
 			Wishlist: wishlist, WishesOff: wishesOff,
 		})
 	}

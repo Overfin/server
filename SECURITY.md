@@ -59,7 +59,7 @@ Every rule not named here is a hard rule.
    only by setup, provisioning code and the control panel (rule 58), never
    by the public API's user routes. Seerr has no per-user tokens, so Seerr
    calls use its API key with the acting user named in the request; that user
-   is always the account's own Seerr user, derived from the session.
+   is always Overfin's own (rule 47), never one a client names.
 4. Upstream tokens never reach the browser, including inside stream URLs and
    HLS playlists.
 
@@ -190,7 +190,7 @@ comes from the internet, and media files can be written by anyone.
 
 ### Authorization
 23. Every resource ID Overfin issues (profiles, sessions, playbacks, stream
-    tickets, requests, invitations, app keys, and the planned transfer codes)
+    tickets, invitations, app keys, and the planned transfer codes)
     is random, at least 128 bits, and every lookup checks that it belongs to
     the current account (for playbacks and tickets, its profile; for
     invitations and app keys, that an admin asks). Catalog IDs (titles,
@@ -206,13 +206,13 @@ comes from the internet, and media files can be written by anyone.
     devices' sessions. Kids profiles can't export themselves; the owner's
     export holds them.
 26. The client never chooses who acts for it upstream: Jellyfin calls run
-    as Overfin's one account (rule 3), and Seerr's as the account's own
-    Seerr user, which Overfin derives from the session.
+    as Overfin's one account (rule 3), and Seerr's as Overfin's own Seerr
+    user (rule 47).
 27. An image is served only after checking that the active profile may see
     what it belongs to (a library item or a catalog title), also when it
     comes from Overfin's cache. A person's own photo goes to any profile:
     people carry no rating, library or tag.
-28. Kids profiles see and request only titles for their age (one for films
+28. Kids profiles see and wish for only titles for their age (one for films
     and series alike), chosen by the account's owner. A title's age is
     Overfin's own, from TMDB's ratings, never the media server's: its rating
     in the operator's ratings country when it has one, else the middle of
@@ -225,7 +225,7 @@ comes from the internet, and media files can be written by anyone.
     account template's) and the tags hidden from it, for any profile:
     Overfin applies them, not Jellyfin, and what it can't place in a
     library or a category, like every title no library has, is hidden from
-    a profile limited to some (so it can't request them either). A category
+    a profile limited to some (so it can't wish for them either). A category
     deleted counts for nothing: a profile limited to it alone sees nothing.
 29. Play queues aren't accepted yet; when they are, every entry is checked
     against the active profile, when the queue is set and again when it
@@ -241,8 +241,8 @@ comes from the internet, and media files can be written by anyone.
 31. Streams are limited per account (its account template), and playbacks
     that re-encode the video in total (`limits.max_transcodes_total`).
     Images come in a fixed set of sizes. Sign-in, registration, forgotten
-    passwords, PINs, search, requests to Seerr, copying history and new
-    accounts are rate-limited.
+    passwords, PINs, search, copying history and new accounts are
+    rate-limited; wishes go to Seerr at most wishes.per_day a day.
 32. When an account reaches its stream limit, its oldest stream stops and the
     stopped device is told why (operators can choose to refuse the new stream
     instead). With a stream reserved for each profile (a template's setting),
@@ -282,8 +282,7 @@ comes from the internet, and media files can be written by anyone.
 
 ### Privacy
 40. Overfin stores only what it needs to run: encrypted upstream tokens
-    and keys, sessions, profiles, which profile made each request, and
-    short-lived playback state; with the admin side, also invites, account
+    and keys, sessions, profiles, and short-lived playback state; with the admin side, also invites, account
     expiry and limits, and labels the operator sets; with the watchlist,
     each profile's list of titles (private to it, deleted with it); with
     wishlists, each profile's wished titles in its order, and what arrived
@@ -307,8 +306,8 @@ comes from the internet, and media files can be written by anyone.
     stores it: at most it keeps it in memory, never on
     disk, for a few minutes and within a size limit, so a restart forgets
     it. Names and emails from the identity provider are shown live through
-    its connector, the same way, never stored; only the name is handed on,
-    to the account's Seerr user (rule 47). The one exception to "never the
+    its connector, the same way, never stored, nor handed on. The one
+    exception to "never the
     admins": apps the operator gives a key to (rule 58) read totals per
     film and series (plays to the end, viewers counted by account,
     favorites counted by profile, the day it was last played), never
@@ -322,12 +321,11 @@ comes from the internet, and media files can be written by anyone.
     served by the gateway.
 44. A public API response never reveals other users' data or activity. Only
     the admin API (rule 58) shows users, to the operator's admins.
-45. Deleting an account deletes everything Overfin holds about it. Its
-    Seerr user, and the Jellyfin users of profiles from before Overfin's
-    one Jellyfin account (rule 3), are deleted or disabled, as the operator
-    configures (`accounts.on_delete`), and the site tells the user which.
-    A disabled Seerr user keeps its requests but not the person's name: it
-    is renamed `overfin-…`, a name that points at no one.
+45. Deleting an account deletes everything Overfin holds about it, and the
+    Jellyfin users of its profiles from before Overfin's one Jellyfin
+    account (rule 3). The Seerr users accounts had before wishlists stay in
+    Seerr, untouched, for the operator to delete there; Overfin no longer
+    uses them.
 46. Overfin offers no hooks for extra data collection. Operators who want more
     collect it with their own tools. Notices (off by default) carry account
     events only, never what anyone watches: an account made, its access
@@ -340,19 +338,16 @@ comes from the internet, and media files can be written by anyone.
     backend, logging users in with the same identity provider.
 47. Overfin's users on Jellyfin get opaque names (its one account,
     `overfin-service-…`, and those of profiles from before it, `of-…`),
-    never real names or emails. Seerr users get the account's name as the
-    control panel shows it (the identity provider's, else the operator's
-    label, else the owner profile's), so Seerr's own pages say who asked
-    for what; never an email, nor any name with an @ (the next one along
-    is taken instead; their address is a placeholder on `.invalid`), and
-    no one can sign in to Seerr as them. Seerr therefore holds names: keep
-    it private, reachable by Overfin and the operator only. Wishes handed
-    to Seerr (wishes.to = "seerr") go as one user of Overfin's own, named
-    "Overfin", the same way: Seerr learns what was wished for, never who
-    wished it.
+    never real names or emails. Wishes handed to Seerr (wishes.to =
+    "seerr") go as one user of Overfin's own, named "Overfin", with a
+    placeholder address on `.invalid`, that no one can sign in to Seerr as:
+    Seerr learns what was wished for, never who wished it. The Seerr users
+    accounts had before wishlists hold names (the accounts' as the panel
+    showed them): keep Seerr private, reachable by Overfin and the operator
+    only, until they're deleted there.
 48. Search terms and other personal input travel in request bodies, never in
     URLs, so they stay out of access logs and browser history.
-49. Users never learn who else requested a title, only that it was requested.
+49. Users never learn who else wished for a title, nor that anyone did.
 50. Profiles are private from each other; kids profiles are visible to their
     account owner.
 51. The owner profile can list and end all of the account's sessions; other

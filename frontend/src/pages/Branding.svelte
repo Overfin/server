@@ -85,7 +85,7 @@
     </Card>
 
     <Card title="Home page" description="What your site's home page shows besides the libraries.">
-      <Setting label="Titles no library has" hint="Also show them among what's trending and in the slideshow, to be requested (which ones: Server, TMDB, Titles shown). Off: the home page shows the libraries only.">
+      <Setting label="Titles no library has" hint="Also show them among what's trending and in the slideshow, to be wished for (which ones: Server, TMDB, Titles shown). Off: the home page shows the libraries only.">
         {#snippet children(ids)}<input type="checkbox" bind:checked={missing} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
       </Setting>
       {#snippet foot()}

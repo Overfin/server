@@ -10,13 +10,13 @@ import (
 )
 
 // What the valuation reads: who counts, what they watched, marked and
-// asked for, and the films and seasons the libraries have, with their
+// wished for, and the films and seasons the libraries have, with their
 // lengths; a disabled account doesn't count.
 func TestValuationFacts(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
 	now := time.Now()
-	acct, prof, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
+	_, prof, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
 	gone, goneProf, _ := s.CreateAccount(ctx, "subject-2", owner("2"))
 	if err := s.SetAccountDisabled(ctx, gone.ID, true); err != nil {
 		t.Fatal(err)
@@ -32,8 +32,7 @@ func TestValuationFacts(t *testing.T) {
 	s.RecordPlay(ctx, prof.ID, "movie/tmdb/7", id(0), 3_000_000, false, now)
 	s.RecordPlay(ctx, goneProf.ID, "series/tmdb/8/s1/e1", id(2), 0, true, now)
 	s.SetFavorite(ctx, prof.ID, "series/tmdb/8", id(1), true, now)
-	if err := s.AddRequest(ctx, &Request{AccountID: acct.ID, ProfileID: prof.ID, Title: "series/tmdb/8", Seasons: []int{2},
-		Status: "pending", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := s.AddWish(ctx, prof.ID, "series/tmdb/8/s2"); err != nil {
 		t.Fatal(err)
 	}
 	f, err := s.ValuationFacts(ctx, now, []ProfileTitle{{ProfileID: prof.ID, Title: "movie/tmdb/9"}}, 60)
@@ -54,7 +53,7 @@ func TestValuationFacts(t *testing.T) {
 		t.Errorf("arrival: the film %v, season 1 %v", film.Added, s1.Added)
 	}
 	if s2 == nil || s2.InLibrary {
-		t.Errorf("season 2, asked for: %+v", s2)
+		t.Errorf("season 2, wished for: %+v", s2)
 	}
 	if wanted == nil || wanted.InLibrary {
 		t.Errorf("a film on a watchlist: %+v", wanted)

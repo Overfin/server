@@ -21,8 +21,8 @@ type ValuationFacts struct {
 	Viewings []Viewing
 	// Favorites are the titles profiles marked: films and series.
 	Favorites []ProfileTitle
-	// Requests are what accounts asked for: films, seasons, and series
-	// (every season).
+	// Requests are what accounts wished for: films and seasons on
+	// wishlists, and those that arrived lately, unwatched (wishFacts).
 	Requests []AccountTitle
 	// Interests are what profiles keep for later (the watchlist): films,
 	// series, seasons, episodes.
@@ -173,39 +173,6 @@ func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []P
 		return nil, err
 	}
 
-	rows, err = s.read.QueryContext(ctx, `SELECT account_id, title, coalesce(seasons, '') FROM requests
-		WHERE status NOT IN ('declined', 'failed')`)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var account, title, seasons string
-		if err := rows.Scan(&account, &title, &seasons); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		var list []int
-		if seasons != "" {
-			_ = json.Unmarshal([]byte(seasons), &list)
-		}
-		r, ok := ParseTitleKey(title)
-		switch {
-		case !ok:
-		case r.Kind == "movie":
-			f.Requests = append(f.Requests, AccountTitle{account, title})
-		case r.Kind == "series" && len(list) == 0:
-			// Every season: those the valuation knows of, below.
-			f.Requests = append(f.Requests, AccountTitle{account, title})
-		case r.Kind == "series":
-			for _, n := range list {
-				f.Requests = append(f.Requests, AccountTitle{account, TitleRef{Kind: "season", Source: r.Source, ID: r.ID, Season: n}.Key()})
-			}
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
 	if err := s.wishFacts(ctx, f, now, keptDays); err != nil {
 		return nil, err
 	}

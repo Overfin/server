@@ -37,7 +37,6 @@ type Config struct {
 	Storage  Storage  `toml:"storage"`
 	Limits   Limits   `toml:"limits"`
 	Plugins  Plugins  `toml:"plugins"`
-	Accounts Accounts `toml:"accounts"`
 	Wishes   Wishes   `toml:"wishes"`
 	// Modules holds the modules' own settings: module name, then setting.
 	Modules   map[string]map[string]string `toml:"modules"`
@@ -49,7 +48,7 @@ type Config struct {
 	HTTPS     HTTPS                        `toml:"https"`
 
 	// FeaturesInFile reports whether the file held feature settings
-	// (limits, plugins, accounts, modules). Those live in the
+	// (limits, plugins, wishes, modules). Those live in the
 	// database now; the file's are only read to fill an empty one.
 	FeaturesInFile bool `toml:"-"`
 
@@ -141,15 +140,6 @@ const (
 	WishesToSeerr     = "seerr"
 )
 
-type Accounts struct {
-	// OnDelete is what happens to a deleted account's Seerr user (its watch
-	// history always goes): "delete" (the default: with its requests) or
-	// "disable" (kept, with its requests, under an anonymous name). The
-	// Jellyfin users of profiles from before Overfin's one Jellyfin account
-	// are deleted or disabled the same way.
-	OnDelete string `toml:"on_delete" json:"onDelete"`
-}
-
 type Plugins struct {
 	// Enable lists the features switched on besides those always on.
 	Enable []string `toml:"enable" json:"enable"`
@@ -234,16 +224,15 @@ func (p Plugins) Enabled(name string) bool {
 // Features are the settings the control panel switches on and off. They
 // live in the database and apply at once.
 type Features struct {
-	Limits   Limits                       `json:"limits"`
-	Plugins  Plugins                      `json:"plugins"`
-	Accounts Accounts                     `json:"accounts"`
-	Wishes   Wishes                       `json:"wishes"`
-	Modules  map[string]map[string]string `json:"modules"`
+	Limits  Limits                       `json:"limits"`
+	Plugins Plugins                      `json:"plugins"`
+	Wishes  Wishes                       `json:"wishes"`
+	Modules map[string]map[string]string `json:"modules"`
 }
 
 // Features returns the configuration's feature settings.
 func (c *Config) Features() Features {
-	f := Features{Limits: c.Limits, Plugins: c.Plugins, Accounts: c.Accounts, Wishes: c.Wishes, Modules: c.Modules}
+	f := Features{Limits: c.Limits, Plugins: c.Plugins, Wishes: c.Wishes, Modules: c.Modules}
 	f.Plugins.Enable = slices.Clone(f.Plugins.Enable)
 	f.Modules = make(map[string]map[string]string, len(c.Modules))
 	for name, values := range c.Modules {
@@ -263,7 +252,7 @@ func DefaultFeatures() Features {
 // settings, validated together with the rest.
 func (c *Config) WithFeatures(f Features) (*Config, error) {
 	n := *c
-	n.Limits, n.Plugins, n.Accounts, n.Wishes, n.Modules = f.Limits, f.Plugins, f.Accounts, f.Wishes, f.Modules
+	n.Limits, n.Plugins, n.Wishes, n.Modules = f.Limits, f.Plugins, f.Wishes, f.Modules
 	n.Identity.Proxies = nil // filled again by validate
 	if err := n.validate(); err != nil {
 		return nil, err
@@ -484,11 +473,10 @@ func defaults() Config {
 			PINAttempts:        5,
 			OnLimit:            "replace-oldest",
 		},
-		OIDC:     OIDC{FreshForMinutes: 5, RecheckMinutes: 10, GroupsClaim: "groups"},
-		Accounts: Accounts{OnDelete: "delete"},
-		Wishes:   Wishes{KeptDays: 60, PerDay: 10},
-		Site:     Site{Serve: "builtin", CSP: DefaultCSP},
-		HTTPS:    HTTPS{Listen: ":8443"},
+		OIDC:   OIDC{FreshForMinutes: 5, RecheckMinutes: 10, GroupsClaim: "groups"},
+		Wishes: Wishes{KeptDays: 60, PerDay: 10},
+		Site:   Site{Serve: "builtin", CSP: DefaultCSP},
+		HTTPS:  HTTPS{Listen: ":8443"},
 	}
 }
 
@@ -537,7 +525,7 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 		return nil, errors.New("config: identity.mode is \"managed\" by default now: add mode = \"forwardauth\" to [identity]")
 	}
 
-	for _, section := range []string{"limits", "plugins", "accounts", "wishes", "modules"} {
+	for _, section := range []string{"limits", "plugins", "wishes", "modules"} {
 		if meta.IsDefined(section) {
 			cfg.FeaturesInFile = true
 		}
@@ -783,9 +771,6 @@ func (c *Config) validate() error {
 		}
 	}
 
-	if c.Accounts.OnDelete != "delete" && c.Accounts.OnDelete != "disable" {
-		add("accounts.on_delete must be \"delete\" or \"disable\", got %q", c.Accounts.OnDelete)
-	}
 	if c.Wishes.To != "" && c.Wishes.To != WishesToOverswell && c.Wishes.To != WishesToSeerr {
 		add("wishes.to must be \"\", \"overswell\" or \"seerr\", got %q", c.Wishes.To)
 	}

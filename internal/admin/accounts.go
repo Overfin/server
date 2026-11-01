@@ -236,15 +236,13 @@ func (p *Panel) changeAccount(w http.ResponseWriter, r *http.Request, s *session
 	writeJSON(w, http.StatusOK, aj)
 }
 
-// deleteAccount deletes an account like its owner would: its Seerr user
-// deleted with its requests, or kept anonymous, as the instance is set.
+// deleteAccount deletes an account like its owner would.
 func (p *Panel) deleteAccount(w http.ResponseWriter, r *http.Request, s *session) {
 	if a, err := p.Store.AccountByID(r.Context(), r.PathValue("id")); err == nil && p.own(r.Context(), a, s) {
 		invalid(w, "You can't delete your own account here: you'd lose the control panel. Another admin can, or you can from the site.")
 		return
 	}
-	keep := p.Features.Features().Accounts.OnDelete == "disable"
-	_, keptRequests, err := p.Provisioner().DeleteAccount(r.Context(), r.PathValue("id"), keep)
+	_, err := p.Provisioner().DeleteAccount(r.Context(), r.PathValue("id"))
 	if errors.Is(err, store.ErrNotFound) {
 		notFound(w, "No such account")
 		return
@@ -252,11 +250,7 @@ func (p *Panel) deleteAccount(w http.ResponseWriter, r *http.Request, s *session
 		p.fail(w, "deleting an account", err)
 		return
 	}
-	requests := "deleted"
-	if keptRequests {
-		requests = "kept"
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"requests": requests})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (p *Panel) unlockPIN(w http.ResponseWriter, r *http.Request, _ *session) {

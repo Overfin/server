@@ -52,8 +52,6 @@ type Library struct {
 	Texts *catalog.Texts
 	// Searches, when set, limits how often each account searches.
 	Searches *AccountLimiter
-	// Requested, when set, is what Seerr says anyone requested.
-	Requested *SeerrRequested
 }
 
 func (Library) Name() string { return "library" }

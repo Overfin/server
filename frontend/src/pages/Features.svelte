@@ -84,7 +84,6 @@
         { path: 'limits.onLimit', kind: 'choice', label: 'One stream too many' },
         { path: 'limits.maxTranscodesTotal', kind: 'number', label: 'Transcodes on the server', zero: '0: no limit' },
         { path: 'limits.maxBitrateKbps', kind: 'number', label: 'Bitrate cap (kbps)', zero: '0: no cap' },
-        { path: 'accounts.onDelete', kind: 'choice', label: 'When an account is deleted' },
         { path: 'limits.pinAttempts', kind: 'number', label: 'Wrong PINs before a lock' },
         { path: 'wishes.to', kind: 'choice', label: 'Wishes go to' },
         { path: 'wishes.keptDays', kind: 'number', label: 'Kept after arriving (days)' },
@@ -188,14 +187,6 @@
       </Setting>
     </Card>
     <Card title="Accounts">
-      <Setting label="When an account is deleted" hint="Its watch history and everything else in Overfin always go. This is about its requests in Seerr.">
-        {#snippet children(ids)}
-          <select bind:value={values['accounts.onDelete']} aria-labelledby={ids.label} aria-describedby={ids.hint}>
-            <option value="delete">Delete them</option>
-            <option value="disable">Keep them, anonymous</option>
-          </select>
-        {/snippet}
-      </Setting>
       <Setting label="Wrong PINs before a lock" hint="From 3 to 10.">
         {#snippet children(ids)}<input type="number" min="3" max="10" bind:value={values['limits.pinAttempts']} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
       </Setting>

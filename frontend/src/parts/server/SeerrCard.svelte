@@ -1,4 +1,5 @@
-<!-- Seerr: optional, where requests go; tested before it's saved. -->
+<!-- Seerr: optional, a second source for discovery, and where wishes can
+     go; tested before it's saved. -->
 <script lang="ts">
   import { Card, Badge, Field, Status, Busy, ask, toast } from '@overfin/ui';
   import { api } from '../../lib/api';
@@ -11,7 +12,7 @@
   let url = $state(sr.url);
   let key = $state('');
   // svelte-ignore state_referenced_locally
-  let st = $state<Line>({ text: sr.url ? 'Requests go to Seerr.' : 'Without Seerr, nobody can request titles.', kind: '' });
+  let st = $state<Line>({ text: sr.url ? 'Seerr is connected.' : 'Not connected.', kind: '' });
   const fail = (err: Error) => (st = { text: message(err), kind: 'error' });
 
   async function send(body: { url: string; key: string }) {
@@ -27,11 +28,11 @@
   }
 
   async function off() {
-    if (await ask('Disconnect Seerr? Requests stop until it\'s connected again.', { yes: 'Disconnect', danger: true })) await send({ url: '', key: '' });
+    if (await ask('Disconnect Seerr? Wishes going to Seerr wait until it\'s connected again.', { yes: 'Disconnect', danger: true })) await send({ url: '', key: '' });
   }
 </script>
 
-<Card title="Seerr" description="Optional: where requests go. Keep it off the internet; only Overfin needs to reach it.">
+<Card title="Seerr" description="Optional: a second source for discovery, and where wishes can go (Features, Wishes). Keep it off the internet; only Overfin needs to reach it.">
   {#snippet badge()}{#if sr.url}<Badge kind="ok">Connected</Badge>{:else}<Badge>Not connected</Badge>{/if}{/snippet}
   <div class="fields">
     <Field label="Address" hint="As Overfin reaches it." wide><input bind:value={url} autocomplete="off" spellcheck="false" placeholder="http://192.0.2.10:5055" /></Field>

@@ -313,12 +313,12 @@ func TestMeOffers(t *testing.T) {
 		} `json:"offers"`
 	}
 	srv, _ := newServerWith(t, options{})
-	if code := get(t, srv, "/api/v1/me", &me); code != 200 || me.Offers.Discovery || me.Offers.Requests {
+	if code := get(t, srv, "/api/v1/me", &me); code != 200 || me.Offers.Discovery {
 		t.Errorf("without Seerr: %d %+v", code, me)
 	}
 	var st *store.Store
 	srv, _ = newServerWith(t, options{seerr: fakeSeerr(t), store: &st})
-	if code := get(t, srv, "/api/v1/me", &me); code != 200 || !me.Offers.Discovery || !me.Offers.Requests {
+	if code := get(t, srv, "/api/v1/me", &me); code != 200 || !me.Offers.Discovery {
 		t.Errorf("with Seerr: %d %+v", code, me)
 	}
 }
