@@ -710,8 +710,9 @@ nothing beyond what that needs.
     default) through one Seerr user of its own, so the per-account Seerr
     users, and `accounts.on_delete`, go.
   - **Wishes are the account's own data**: in its export, gone with it.
-  - **Still open:** how a title is wished for on its page (a button of its
-    own, or not).
+  - **Its own button**, "Add to wishlist", for now where the request
+    button is (requests leave the clients); its final place is still
+    open.
   - **Leaving requests:** Seerr's open requests are copied into the
     wishlists once.
 - **Title valuation**, computed by Overfin, which knows the titles and the
