@@ -664,7 +664,7 @@ nothing beyond what that needs.
   so a title is shown to a kids profile only once its rating, in the
   operator's country, is read from its details and kept; without one it
   stays hidden (rule 28).
-- ~~**Requests**, through Seerr~~ Done (`/requests`). Each Overfin **account** (not profile) has
+- ~~**Requests**, through Seerr~~ Done (`/requests`), then replaced by wishlists (2026-11-01). Each Overfin **account** (not profile) has
   its own Seerr user, under the name the panel shows for the account (kept
   up to date), with a unique placeholder address on `.invalid` and a
   random password thrown away (so Seerr never emails one, and nobody signs
@@ -673,9 +673,9 @@ nothing beyond what that needs.
   own, and is kept private on the network (rule 47). "Ignore quota" is
   never set for people. Problem reports may come later, through Seerr's
   issues. To be replaced by wishlists (next).
-- **Wishlists, replacing requests** (designed 2026-11-01; steps 1 to 5 of 6
+- **Wishlists, replacing requests** (designed and built 2026-11-01, all 6 steps
   built: the store, the turns, the site's and the fetcher's API, arrivals
-  onto the watchlists, the score; the site; Overswell; the panel; Seerr; next, leaving requests). No quotas for
+  onto the watchlists, the score; the site; Overswell; the panel; Seerr; requests gone, the open ones copied). No quotas for
   people to manage: the server's real limits (disk room, download pace) are
   shared by taking turns.
   - **A wishlist per profile**, next to the watchlist, for titles not in
