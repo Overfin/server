@@ -34,7 +34,7 @@
 <Card title="Seerr" description="Optional: where requests go. Keep it off the internet; only Overfin needs to reach it.">
   {#snippet badge()}{#if sr.url}<Badge kind="ok">Connected</Badge>{:else}<Badge>Not connected</Badge>{/if}{/snippet}
   <div class="fields">
-    <Field label="Address" hint="As Overfin reaches it." wide><input bind:value={url} autocomplete="off" spellcheck="false" placeholder="http://192.168.1.10:5055" /></Field>
+    <Field label="Address" hint="As Overfin reaches it." wide><input bind:value={url} autocomplete="off" spellcheck="false" placeholder="http://192.0.2.10:5055" /></Field>
     <Field label="API key" hint="In Seerr's settings, under General." wide><input type="password" bind:value={key} autocomplete="off" placeholder={sr.url ? 'Unchanged' : ''} /></Field>
   </div>
   {#snippet foot()}
