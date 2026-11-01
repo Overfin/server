@@ -15,8 +15,10 @@ import (
 )
 
 // Wishes is each profile's wishlist (ROADMAP: "Wishlists, replacing
-// requests"): films, whole series and seasons no library has yet, in the
-// person's own order. Overfin takes turns between accounts and hands the
+// requests"): films and seasons no library has whole yet, in the person's
+// own order. A series is wished for season by season (wishing for it adds
+// each of its seasons out now and not complete here); on the list it moves
+// as a whole, its seasons by number. Overfin takes turns between accounts and hands the
 // titles to a fetcher (internal/wishes); a title that arrives leaves the
 // wishlist for the watchlist, and the person is told once. Offered when
 // the operator chose where wishes go.
@@ -43,7 +45,8 @@ func (wl Wishes) Register(r *plugin.Registrar) error {
 	return nil
 }
 
-// wishable are the kinds of titles one wishes for: never an episode.
+// wishable are the kinds of titles one wishes for: never an episode (a
+// series stands for its seasons).
 var wishable = map[string]bool{"movie": true, "series": true, "season": true}
 
 type wishJSON struct {
@@ -145,9 +148,10 @@ func keyOfTitleID(id string) (string, bool) {
 	return ref.Key(), true
 }
 
-// add puts a title at the end of the profile's wishlist: a film, a whole
-// series or a season it may see, known to TMDB, that no library has
-// whole.
+// add puts a film or a season at the end of the profile's wishlist (a
+// season beside its series' others), or for a series, each of its seasons
+// out now that no library has whole; only titles the profile may see,
+// known to TMDB.
 func (wl Wishes) add(w http.ResponseWriter, r *http.Request) {
 	l := wl.Library
 	c := l.Sessions.Current(w, r)
@@ -181,36 +185,103 @@ func (wl Wishes) add(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.AlreadyRequested, "")
 		return
 	}
-	switch err := st.AddWish(ctx, c.Profile.ID, ref.Key()); {
-	case errors.Is(err, store.ErrWishlistFull):
-		problem.Send(w, problem.WishlistFull, "")
-	case err != nil:
-		l.storeError(w, err)
-	default:
-		w.WriteHeader(http.StatusNoContent)
+	keys := []string{ref.Key()}
+	if ref.Kind == "series" {
+		var err error
+		if keys, err = wl.missingSeasons(ctx, ref, t); err != nil {
+			l.storeError(w, err)
+			return
+		}
+		if len(keys) == 0 {
+			problem.Send(w, problem.AlreadyRequested, "")
+			return
+		}
 	}
-}
-
-func (wl Wishes) remove(w http.ResponseWriter, r *http.Request) {
-	l := wl.Library
-	c := l.Sessions.Current(w, r)
-	if c == nil {
-		return
+	for _, key := range keys {
+		switch err := st.AddWish(ctx, c.Profile.ID, key); {
+		case errors.Is(err, store.ErrWishlistFull):
+			problem.Send(w, problem.WishlistFull, "")
+			return
+		case err != nil:
+			l.storeError(w, err)
+			return
+		}
 	}
-	key, ok := keyOfTitleID(r.PathValue("id"))
-	if !ok {
-		problem.Send(w, problem.NotFound, "")
-		return
-	}
-	if err := l.Provisioner.Store.RemoveWish(r.Context(), c.Profile.ID, key); err != nil {
+	if err := st.GroupWishes(ctx, c.Profile.ID); err != nil {
 		l.storeError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// missingSeasons are a series' seasons out now (specials aside) that no
+// library has whole, in order: their pages are read first, so their
+// episodes are counted.
+func (wl Wishes) missingSeasons(ctx context.Context, series store.TitleRef, t *store.TitleInfo) ([]string, error) {
+	l := wl.Library
+	now := today()
+	var keys []string
+	for _, se := range t.Details.Seasons {
+		if se.Number < 1 || se.AirDate == "" || se.AirDate > now {
+			continue
+		}
+		season := store.TitleRef{Kind: "season", Source: series.Source, ID: series.ID, Season: se.Number}
+		l.describe(ctx, season)
+		keys = append(keys, season.Key())
+	}
+	infos, err := l.Provisioner.Store.TitleInfos(ctx, keys, now, "")
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, k := range keys {
+		if info := infos[k]; info == nil || availability(info) != "available" {
+			out = append(out, k)
+		}
+	}
+	return out, nil
+}
+
+// remove takes a film or a season off the wishlist, or a series' seasons.
+func (wl Wishes) remove(w http.ResponseWriter, r *http.Request) {
+	l := wl.Library
+	c := l.Sessions.Current(w, r)
+	if c == nil {
+		return
+	}
+	ctx := r.Context()
+	ref, ok := titleRef(r.PathValue("id"))
+	if !ok {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	st := l.Provisioner.Store
+	keys := []string{ref.Key()}
+	if ref.Kind == "series" {
+		// Its seasons, and the series itself, should a wish for it be
+		// kept from before seasons were the unit.
+		list, err := st.Wishes(ctx, c.Profile.ID)
+		if err != nil {
+			l.storeError(w, err)
+			return
+		}
+		for _, wi := range list {
+			if r, ok := store.ParseTitleKey(wi.Title); ok && r.Kind == "season" && r.Series().Key() == ref.Key() {
+				keys = append(keys, wi.Title)
+			}
+		}
+	}
+	for _, key := range keys {
+		if err := st.RemoveWish(ctx, c.Profile.ID, key); err != nil {
+			l.storeError(w, err)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // order sets the wishlist's order: every title on it, each once, first
-// the one wanted most.
+// the one wanted most; a series' seasons are kept together, by number.
 func (wl Wishes) order(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Titles []string `json:"titles"`
@@ -233,7 +304,8 @@ func (wl Wishes) order(w http.ResponseWriter, r *http.Request) {
 		}
 		keys[i] = key
 	}
-	switch err := l.Provisioner.Store.OrderWishes(r.Context(), c.Profile.ID, keys); {
+	// A series' seasons stay together, where its first one is.
+	switch err := l.Provisioner.Store.OrderWishes(r.Context(), c.Profile.ID, store.GroupedWishes(keys)); {
 	case errors.Is(err, store.ErrWishOrder):
 		problem.Send(w, problem.InvalidRequest, "every title on the wishlist, each once")
 	case err != nil:

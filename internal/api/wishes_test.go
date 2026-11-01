@@ -39,7 +39,7 @@ func TestWishlist(t *testing.T) {
 	var st *store.Store
 	srv, _ := newServerWith(t, options{store: &st, wishes: true})
 	ctx := context.Background()
-	det, _ := json.Marshal(store.TitleDetails{Seasons: []store.SeasonInfo{{Number: 1, EpisodeCount: 1}, {Number: 2, EpisodeCount: 1}}})
+	det, _ := json.Marshal(store.TitleDetails{Seasons: []store.SeasonInfo{{Number: 1, EpisodeCount: 1, AirDate: "2011-04-17"}, {Number: 2, EpisodeCount: 1, AirDate: "2012-04-01"}}})
 	st.SetTitleDetails(ctx, store.Title{Kind: "series", TMDB: "1399", Name: "Le Trône de fer"}, det, time.Now())
 	st.SetSeason(ctx, "1399", store.Season{Number: 1, Name: "Saison 1", AirDate: "2011-04-17", Episodes: []store.Episode{{Number: 1, AirDate: "2011-04-17"}}}, time.Now())
 	st.SetSeason(ctx, "1399", store.Season{Number: 2, Name: "Saison 2", AirDate: "2012-04-01", Episodes: []store.Episode{{Number: 1, AirDate: "2012-04-01"}}}, time.Now())
@@ -53,13 +53,17 @@ func TestWishlist(t *testing.T) {
 	if !me.Offers.Wishes {
 		t.Fatal("wishes not offered")
 	}
-	for id, want := range map[string]int{
-		"title_movie_tmdb_100": 204, "title_series_tmdb_1399": 204, "title_series_tmdb_1399_s2": 204,
-		"title_series_tmdb_1399_s1_e1": 400, // never an episode
-		"title_movie_tmdb_555":         404, // unknown
+	// A film; a series, as each of its seasons out now (both); never an
+	// episode; not an unknown title.
+	for _, c := range []struct {
+		id   string
+		want int
+	}{
+		{"title_movie_tmdb_100", 204}, {"title_series_tmdb_1399", 204},
+		{"title_series_tmdb_1399_s1_e1", 400}, {"title_movie_tmdb_555", 404},
 	} {
-		if code, body := put(t, srv, "PUT", "/api/v1/me/wishlist/"+id, ""); code != want {
-			t.Errorf("wish %s: %d %s", id, code, body)
+		if code, body := put(t, srv, "PUT", "/api/v1/me/wishlist/"+c.id, ""); code != c.want {
+			t.Errorf("wish %s: %d %s", c.id, code, body)
 		}
 	}
 	list := func() wishlistOut {
@@ -70,30 +74,35 @@ func TestWishlist(t *testing.T) {
 		}
 		return out
 	}
-	// Added in the order they came, waiting. The map above isn't ordered:
-	// put them in a known order first.
-	order := `{"titles":["title_series_tmdb_1399_s2","title_movie_tmdb_100","title_series_tmdb_1399"]}`
+	if got := list(); !got.On || strings.Join(got.ids(), " ") != "title_movie_tmdb_100 title_series_tmdb_1399_s1 title_series_tmdb_1399_s2" ||
+		got.Items[0].State != "waiting" {
+		t.Fatalf("added: %+v", got)
+	}
+	// A series moves as a whole, its seasons by number, wherever they're
+	// put.
+	order := `{"titles":["title_series_tmdb_1399_s2","title_movie_tmdb_100","title_series_tmdb_1399_s1"]}`
 	if code, body := put(t, srv, "PUT", "/api/v1/me/wishlist", order); code != 204 {
 		t.Fatalf("order: %d %s", code, body)
 	}
-	if got := list(); !got.On || strings.Join(got.ids(), " ") != "title_series_tmdb_1399_s2 title_movie_tmdb_100 title_series_tmdb_1399" ||
-		got.Items[0].State != "waiting" {
-		t.Fatalf("ordered: %+v", got)
+	if got := list(); strings.Join(got.ids(), " ") != "title_series_tmdb_1399_s1 title_series_tmdb_1399_s2 title_movie_tmdb_100" {
+		t.Fatalf("grouped: %+v", got.ids())
 	}
 	if code, _ := put(t, srv, "PUT", "/api/v1/me/wishlist", `{"titles":["title_movie_tmdb_100"]}`); code != 400 {
 		t.Errorf("an order missing titles: %d", code)
 	}
 	// What the fetcher said shows.
 	st.SetWishState(ctx, store.WishState{Title: "movie/tmdb/100", State: store.WishUnreleased, ReleaseOn: "2027-01-01"})
-	if got := list(); got.Items[1].State != "unreleased" || got.Items[1].ReleaseDate != "2027-01-01" {
-		t.Errorf("a state: %+v", got.Items[1])
+	if got := list(); got.Items[2].State != "unreleased" || got.Items[2].ReleaseDate != "2027-01-01" {
+		t.Errorf("a state: %+v", got.Items[2])
 	}
+	// Removing the series removes its seasons.
 	if code, _ := put(t, srv, "DELETE", "/api/v1/me/wishlist/title_series_tmdb_1399", ""); code != 204 {
 		t.Errorf("remove: %d", code)
 	}
-	if got := list(); len(got.Items) != 2 {
-		t.Fatalf("after a removal: %+v", got)
+	if got := list(); strings.Join(got.ids(), " ") != "title_movie_tmdb_100" {
+		t.Fatalf("after removing the series: %+v", got.ids())
 	}
+	put(t, srv, "PUT", "/api/v1/me/wishlist/title_series_tmdb_1399_s2", "")
 
 	// The owner switches another profile's wishing off: it can't wish, and
 	// says so; its switch is the owner's alone.
@@ -160,5 +169,26 @@ func TestWishlist(t *testing.T) {
 	// It's here now: it can't be wished for again.
 	if code, body := put(t, srv, "PUT", "/api/v1/me/wishlist/title_movie_tmdb_100", ""); code != 409 || !strings.Contains(body, "already-requested") {
 		t.Errorf("wishing for what's here: %d %s", code, body)
+	}
+
+	// Season 1 is here whole (its one episode): it can't be wished for, and
+	// wishing for the series leaves it out.
+	n := func(i int) *int { return &i }
+	series, season := fmt.Sprintf("%032x", 2), fmt.Sprintf("%032x", 3)
+	st.PutCatalog(ctx, []store.CatalogItem{
+		{ID: series, Kind: "series", Name: "Le Trône de fer", SortName: "t", TMDB: "1399"},
+		{ID: season, Kind: "season", Name: "Saison 1", SortName: "s", SeriesID: series, SeasonNumber: n(1)},
+		{ID: fmt.Sprintf("%032x", 4), Kind: "episode", Name: "E1", SortName: "e", SeriesID: series, SeasonID: season, SeasonNumber: n(1), EpisodeNumber: n(1)},
+	}, 2)
+	st.RefreshTitleKeys(ctx)
+	if code, body := put(t, srv, "PUT", "/api/v1/me/wishlist/title_series_tmdb_1399_s1", ""); code != 409 {
+		t.Errorf("a season here whole: %d %s", code, body)
+	}
+	put(t, srv, "DELETE", "/api/v1/me/wishlist/title_series_tmdb_1399", "")
+	if code, body := put(t, srv, "PUT", "/api/v1/me/wishlist/title_series_tmdb_1399", ""); code != 204 {
+		t.Fatalf("the series again: %d %s", code, body)
+	}
+	if got := list(); strings.Join(got.ids(), " ") != "title_series_tmdb_1399_s2" {
+		t.Errorf("the series without its season here: %v", got.ids())
 	}
 }

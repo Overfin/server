@@ -264,10 +264,11 @@ export class Overfin {
 
   /** The profile's wishlist, in its order, with each wish's state, and what arrived since it was last told: { on, items, arrived }. */
   wishlist() { return this.request('GET', '/me/wishlist'); }
-  /** Puts a film, a whole series or a season at the end of the wishlist. */
+  /** Puts a film or a season at the end of the wishlist; for a series, each of its seasons out now not here whole. */
   addToWishlist(id) { return this.request('PUT', `/me/wishlist/${enc(id)}`); }
+  /** Takes a film or a season off the wishlist; for a series, all its seasons. */
   removeFromWishlist(id) { return this.request('DELETE', `/me/wishlist/${enc(id)}`); }
-  /** Sets the wishlist's order: every title on it, each once, first the one wanted most. */
+  /** Sets the wishlist's order: every title on it, each once, first the one wanted most (a series' seasons stay together, by number). */
   orderWishlist(ids) { return this.request('PUT', '/me/wishlist', { titles: ids }); }
   /** Marks what arrived as told. */
   wishesSeen() { return this.request('POST', '/me/wishlist/seen'); }

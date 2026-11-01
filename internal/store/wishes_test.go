@@ -163,3 +163,13 @@ func TestWishesInTheValuation(t *testing.T) {
 		t.Errorf("not kept: %v", got)
 	}
 }
+
+// A series' seasons follow each other, where its first one is, by season
+// number; films keep their place.
+func TestGroupedWishes(t *testing.T) {
+	got := GroupedWishes([]string{"series/tmdb/1/s2", "movie/tmdb/9", "series/tmdb/5/s3", "series/tmdb/1/s1", "series/tmdb/5/s1"})
+	want := []string{"series/tmdb/1/s1", "series/tmdb/1/s2", "movie/tmdb/9", "series/tmdb/5/s1", "series/tmdb/5/s3"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("%v", got)
+	}
+}
