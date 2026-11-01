@@ -259,15 +259,23 @@ paths:
                             season.
                         name:
                           type: string
+                          description: A film's, or a season's series'.
                         tmdbId:
                           type: string
+                          description: A film's, or a season's series'.
                         tvdbId:
                           type: string
-                          description: A season's (its series'), when TMDB
-                            knows it.
+                          description: A season's series', when TMDB knows
+                            it.
                         season:
                           type: integer
                           description: A season's number.
+                        categories:
+                          type: array
+                          items:
+                            type: string
+                          description: The operator's categories it fits
+                            (their IDs), as for `list=suggestions`.
                   generatedAt:
                     type: string
                     format: date-time
