@@ -56,3 +56,9 @@ limits); apps, official or not, use only its public API. MIT, public.
   `internal/admin/dist`
 - `internal/server`: HTTP handler, middleware
 - `internal/plugin`: plugin interface and the route registrar
+- `api/`: the specifications: `openapi.yaml` (the API, checked against the
+  routes by `internal/sourcecheck`) and `apps.yaml` (the apps API)
+- `sdk/js`: the JavaScript SDK (overfin-web carries a copy)
+- `deploy/`: the Compose bundle for operators
+- `docs/`: the operators' and developers' guides (install, features,
+  operations, sign-in, the apps API…)

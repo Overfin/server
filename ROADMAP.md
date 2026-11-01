@@ -131,8 +131,8 @@ features, so every app can count on them.
 2. ~~The watchlist on it, as the pilot~~; then migration and invites.
    Library and playback stay in the core.
 3. ~~Everything built in~~ Done: no custom builds and no public module
-   contract anymore. Library, playback and the watchlist are always on;
-   invites and migration are switched in the control panel.
+   contract anymore. Library, playback, the watchlist and invites are
+   always on; migration is switched in the control panel.
 
 **Media backends behind an interface.** The backend becomes an interface written in
 terms of what Overfin needs, with each backend declaring what it can do;
@@ -202,8 +202,8 @@ Everything is off by default.
    owner profile alone, never a kids one, and its owner creates the rest.
 2d. ~~Migration as a feature of its own~~ Done (`migration`): bringing old accounts and
    their history over, the same on every backend. Claiming an old account
-   with its username and password (move or link), and moving linked
-   accounts from its own panel tab. How an existing user is checked and
+   with its username and password (since then, migration only copies: no
+   move or link modes any more). How an existing user is checked and
    adopted is the backend's capability (Jellyfin has it); a backend without
    it makes migration say so instead of offering it. A new server, or one
    done migrating, simply doesn't use it. An old account is one person and
@@ -628,9 +628,9 @@ nothing beyond what that needs.
 - **Personal lists**, per profile (`/me/lists`): create, rename and delete
   lists, add, remove and reorder titles, kept like the watchlist.
   Distinct from the operator's curated `/lists`.
-- **Titles not in the library yet** on the watchlist: they have no Jellyfin
-  item, so they come with the TMDB catalog and Seerr requests plugins (Seerr
-  keeps watchlists of its own).
+- ~~**Titles not in the library yet** on the watchlist~~ Done: a film,
+  series, season, episode or video the profile can see, in a library or
+  not.
 - From Jellyfin's most voted feature requests, simple once Overfin keeps
   personal data (milestone 4): ~~**removing a title from "Continue
   Watching"**~~ (one of the most voted of all; done:
@@ -882,15 +882,18 @@ nothing beyond what that needs.
 
 ## Planned, not designed yet
 
-- **Playback extras:** changing tracks or quality mid-playback (`PATCH`),
-  queues and "advance".
+- **Playback extras:** changing quality or version mid-playback (`PATCH`),
+  queues and "advance". (Changing tracks is done: `PUT
+  /playback/{id}/tracks`.)
 - **Playback info in the player:** `GET /playback/{id}/status`, read from
   the profile's session in the media server and given in Overfin's own
   words: how the playback is served (direct, repackaged, transcoded), why
   in plain sentences, the target codec, bitrate, encoding speed and
   whether the GPU does it, and how far ahead the server has prepared the
   video, shown as the ready part of the seek bar. A "Playback info" panel
-  in overfin-web.
+  in overfin-web. (Partly done: a playback's `info` gives the method, the
+  reasons, codecs and bitrate, and overfin-web shows them; the live status,
+  speed and how far ahead are still to come.)
 - **Native-app login.** Today's login works in browsers (and webview apps).
   Native apps, including third-party ones, need:
   - signing in through the system browser (OAuth with PKCE), and on TVs a
@@ -925,16 +928,18 @@ nothing beyond what that needs.
 - **A home page of one's own.** Each profile's home follows its tastes and
   habits. First step: the slideshow shows the titles that fit that profile
   (from Tastes and what it watches), instead of the same ones for everyone.
-- ~~**Media in several places.**~~ Done (0.5), in the README: one line
+- ~~**Media in several places.**~~ Done (0.5), in `docs/install.md`: one line
   per folder under Jellyfin's `volumes` in the Compose file (anyone
   running Docker edits one), and a library's folders are the paths after
   the colon. The first one, at `/media`, is in the Compose file too
   (no `MEDIA_DIR` any more, since 0.7).
-- **Metadata editor** in the panel: the operator changes a title's
-  details by hand, and Overfin keeps the changes itself, over what TMDB
-  says.
-- **Overfin identifies titles itself; Jellyfin fetches no metadata**
-  (designed, under way). Jellyfin's matching is thin (an ID in the
+- ~~**Metadata editor**~~ Done (2026-10-31) in the panel: the operator
+  changes a title's details by hand, and Overfin keeps the changes itself,
+  over what TMDB says.
+- ~~**Overfin identifies titles itself; Jellyfin fetches no metadata**~~
+  Done (2026-10-31), except anime numbered across the whole series: their
+  numbers are read and the placing is written (`identify.readEpisode`,
+  `PlaceAbsolute`), but nothing calls them yet. Jellyfin's matching is thin (an ID in the
   folder name or an .nfo file, else TMDB's search by name and year,
   scored on the title and the year only, TMDB's first result when in
   doubt), and its metadata brings what Overfin doesn't use: synopses,
@@ -969,8 +974,8 @@ nothing beyond what that needs.
     titles; the catalog wired to it, with "To check" and candidates;
     tags and "More like this"; Jellyfin offline.
   - Titles TMDB doesn't know: the metadata editor, for now.
-- **Images resized by Overfin itself** (designed; after Overfin's own
-  identification). Today Overfin re-encodes every image at the size it
+- ~~**Images resized by Overfin itself**~~ Done (2026-10-31; overfin-web
+  0.82). Today Overfin re-encodes every image at the size it
   gets it: TMDB's ready-made sizes, Jellyfin's own resizing, and uploads
   (titles' artwork, branding) as large as they came; the panel's Artwork
   tab and image picker load backdrops 1280 pixels wide as thumbnails,
