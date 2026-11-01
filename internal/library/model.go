@@ -222,7 +222,7 @@ type TrackPart struct {
 }
 
 // PhotoPart carries no capture time, location or camera data: those are
-// privacy-sensitive and off unless the operator enables them (rule 55).
+// never served (rule 55).
 type PhotoPart struct {
 	Width  *int `json:"width,omitempty"`
 	Height *int `json:"height,omitempty"`

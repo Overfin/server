@@ -58,6 +58,14 @@ func TestLoadValid(t *testing.T) {
 	}
 }
 
+// A file still holding the former [privacy] section starts: the section
+// is ignored, since nothing private can be exposed any more.
+func TestLoadFormerPrivacy(t *testing.T) {
+	if _, err := Load(writeFile(t, goodFile+"\n[privacy]\nexpose = [\"version.names\"]\n"), env(goodEnv())); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLoadRejects(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -69,11 +77,6 @@ func TestLoadRejects(t *testing.T) {
 			name:    "misspelled key",
 			file:    goodFile + "\n[limits]\nmax_stream_per_account = 3\n",
 			wantErr: "unknown keys: limits.max_stream_per_account",
-		},
-		{
-			name:    "unknown privacy field",
-			file:    goodFile + "\n[privacy]\nexpose = [\"user.passwords\"]\n",
-			wantErr: "privacy.expose: unknown field",
 		},
 		{
 			name:    "URL with credentials",

@@ -242,7 +242,7 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	}
 	sessions.Offers = api.Offers{Discovery: disc != nil, Requests: cfg.Plugins.Enabled("library") && sh.seerr != nil}
 	pb := api.Playback{Library: lib, Tickets: sh.tickets,
-		MaxBitrateKbps: cfg.Limits.MaxBitrateKbps, VersionNames: cfg.Privacy.Exposes("version.names"),
+		MaxBitrateKbps:  cfg.Limits.MaxBitrateKbps,
 		MaxTranscodes:   cfg.Limits.MaxTranscodesTotal,
 		RefuseOverLimit: cfg.Limits.OnLimit == "refuse", Logger: logger}
 	// The modules the operator switched on, with their control panel routes

@@ -33,10 +33,7 @@ type Playback struct {
 	// RefuseOverLimit refuses a stream over the account's limit instead of
 	// replacing its oldest.
 	RefuseOverLimit bool
-	// VersionNames shows Jellyfin's version names, derived from file names,
-	// instead of neutral descriptions (privacy.expose "version.names").
-	VersionNames bool
-	Logger       *slog.Logger
+	Logger          *slog.Logger
 }
 
 func (Playback) Name() string { return "playback" }
@@ -684,11 +681,7 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, src := range info.MediaSources {
 		if id, err := jellyfin.NormalizeID(src.Id); err == nil {
-			name := playback.Describe(src)
-			if pb.VersionNames {
-				name = textclean.Plain(src.Name, 200)
-			}
-			out.Versions = append(out.Versions, versionJSON{ID: "ver_" + id, Name: name})
+			out.Versions = append(out.Versions, versionJSON{ID: "ver_" + id, Name: playback.Describe(src)})
 		}
 	}
 	// The tracks as the player lists them (tracks.Read), read again from

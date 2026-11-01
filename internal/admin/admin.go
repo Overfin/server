@@ -733,10 +733,9 @@ func (p *Panel) features(w http.ResponseWriter, r *http.Request, s *session) {
 	}
 	slices.SortFunc(plugins, func(a, b pluginInfo) int { return strings.Compare(a.Name, b.Name) })
 	writeJSON(w, http.StatusOK, map[string]any{
-		"features":        p.Features.Features(),
-		"defaults":        config.DefaultFeatures(),
-		"plugins":         plugins,
-		"exposableFields": config.ExposableFields,
+		"features": p.Features.Features(),
+		"defaults": config.DefaultFeatures(),
+		"plugins":  plugins,
 	})
 }
 
@@ -750,7 +749,6 @@ var settingLabels = strings.NewReplacer(
 	"limits.on_limit", "One stream too many",
 	"accounts.on_delete", "When an account is deleted",
 	"plugins.enable:", "Features:",
-	"privacy.expose:", "Privacy:",
 )
 
 // inWords says a configuration error to an admin in the panel's words:

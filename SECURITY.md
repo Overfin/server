@@ -29,7 +29,7 @@ network security expert. So the rules come in two kinds:
     have passwords nobody knows. An admin can open it from the control
     panel, and close it again.
   - **What the operator may choose to share or allow**, each off or at
-    its strictest by default: privacy-sensitive fields (rule 55), copying
+    its strictest by default: copying
     history from another server (rule 60), apps reading totals (rule 40),
     and how many wrong PINs lock a profile (rule 22, within 3 to 10).
 
@@ -356,11 +356,11 @@ comes from the internet, and media files can be written by anyone.
     scripts, icons); overfin-web does exactly that.
 54. Logs identify users only by a keyed hash (HMAC) of their ID and never
     contain query strings.
-55. Privacy-sensitive fields are off by default: version names (derived from
-    file names) are served only if the operator turns them on
-    (`privacy.expose`); photos' capture time, location and camera data, and
-    titles' tags (TMDB's keywords), are never served (owners see the list
-    of the libraries' tags, to hide some from a profile).
+55. Privacy-sensitive fields are never served, and no setting changes that:
+    versions get neutral names (such as "2160p HDR · HEVC"), never Jellyfin's,
+    which come from file names; photos' capture time, location and camera
+    data, and titles' tags (TMDB's keywords), aren't served either (owners see the list of the libraries' tags, to hide some from a
+    profile).
     Embedded metadata is still stripped from image files (rule 10).
     Security-sensitive data (file paths, server internals, permission flags) is
     never exposed, whatever the configuration. Two exceptions, both in the

@@ -83,8 +83,7 @@ servers. The apps hold the experience, and nothing else.
   rewritten so no Jellyfin URL or token reaches the client, segments
   mapped back server-side, subtitles rebuilt as plain WebVTT; tickets work
   only for the profile that started the playback.
-- Version names replaced by neutral descriptions unless the operator
-  exposes them (`[privacy] expose`).
+- Version names replaced by neutral descriptions (rule 55).
 - Playback lifecycle: progress reported to Jellyfin, stop that ends the
   transcode, idle playbacks ended after two minutes by a janitor, stream
   limits that replace the account's oldest playback (or refuse), a total
@@ -183,7 +182,7 @@ stay signed in while active (30 idle minutes end it).
 Overfin needs to start (listen addresses, Jellyfin, the database, the
 identity provider, the admin listener; secrets stay in the environment).
 Every feature (plugins and their settings, limits, account deletion,
-privacy fields, PIN attempts, and later invites, catalog, requests) lives in
+PIN attempts, and later invites, catalog, requests) lives in
 the database, is switched on and off from the panel, and applies at once.
 Everything is off by default.
 
