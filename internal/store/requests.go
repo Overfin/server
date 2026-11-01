@@ -146,3 +146,43 @@ func (s *Store) DeleteRequest(ctx context.Context, accountID, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM requests WHERE account_id = ? AND id = ?`, accountID, id)
 	return err
 }
+
+// OpenRequests lists the requests not declined, failed or available, for
+// copying them onto wishlists once (CopyRequests), the oldest first.
+func (s *Store) OpenRequests(ctx context.Context) ([]Request, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT `+requestColumns+` FROM requests
+		WHERE status NOT IN ('declined', 'failed', 'available') ORDER BY created_at, id`)
+	if err != nil {
+		return nil, err
+	}
+	return scanRequests(rows)
+}
+
+// RequestsCopied reports whether the requests were copied onto wishlists
+// already.
+func (s *Store) RequestsCopied(ctx context.Context) (bool, error) {
+	var v []byte
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'requests-copied'`).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// ForgetRequests deletes every request and the links to the accounts'
+// Seerr users, once the requests were copied onto wishlists: the users
+// stay in Seerr, untouched, for the operator to delete there.
+func (s *Store) ForgetRequests(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, q := range []string{`DELETE FROM requests`, `DELETE FROM seerr_users`,
+		`INSERT INTO meta (name, value) VALUES ('requests-copied', X'31') ON CONFLICT (name) DO NOTHING`} {
+		if _, err := tx.ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}

@@ -430,3 +430,69 @@ func (a *WishArrivals) Settle(ctx context.Context) error {
 	}
 	return nil
 }
+
+// CopyRequests puts the requests made before wishlists onto their
+// profiles' wishlists, once, in the order they were made: a film, the
+// seasons asked for, or for a whole series its seasons out now; what a
+// library has whole stays out. Then the requests and the links to the
+// accounts' Seerr users are forgotten: those users stay in Seerr,
+// untouched, for the operator to delete there.
+func CopyRequests(ctx context.Context, st *store.Store) error {
+	if done, err := st.RequestsCopied(ctx); err != nil || done {
+		return err
+	}
+	open, err := st.OpenRequests(ctx)
+	if err != nil {
+		return err
+	}
+	now := today()
+	profiles := map[string]bool{}
+	for _, r := range open {
+		ref, ok := store.ParseTitleKey(r.Title)
+		if !ok || ref.TMDB() == "" {
+			continue
+		}
+		var keys []string
+		switch {
+		case ref.Kind == "movie":
+			keys = []string{ref.Key()}
+		case ref.Kind == "series" && len(r.Seasons) > 0:
+			for _, n := range r.Seasons {
+				if n > 0 {
+					keys = append(keys, store.TitleRef{Kind: "season", Source: ref.Source, ID: ref.ID, Season: n}.Key())
+				}
+			}
+		case ref.Kind == "series":
+			infos, err := st.TitleInfos(ctx, []string{ref.Key()}, now, "")
+			if err != nil {
+				return err
+			}
+			if t := infos[ref.Key()]; t != nil {
+				for _, se := range t.Details.Seasons {
+					if se.Number > 0 && se.AirDate != "" && se.AirDate <= now {
+						keys = append(keys, store.TitleRef{Kind: "season", Source: ref.Source, ID: ref.ID, Season: se.Number}.Key())
+					}
+				}
+			}
+		}
+		infos, err := st.TitleInfos(ctx, keys, now, "")
+		if err != nil {
+			return err
+		}
+		for _, k := range keys {
+			if t := infos[k]; t != nil && availability(t) == "available" {
+				continue
+			}
+			if err := st.AddWish(ctx, r.ProfileID, k); err != nil && !errors.Is(err, store.ErrWishlistFull) {
+				return err
+			}
+			profiles[r.ProfileID] = true
+		}
+	}
+	for p := range profiles {
+		if err := st.GroupWishes(ctx, p); err != nil {
+			return err
+		}
+	}
+	return st.ForgetRequests(ctx)
+}

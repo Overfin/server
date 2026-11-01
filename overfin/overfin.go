@@ -145,6 +145,10 @@ func run(logger *slog.Logger) error {
 	}
 	defer db.Close()
 	logger.Info("database ready", "path", cfg.Storage.Path)
+	// Requests are gone: those still open become wishes, once.
+	if err := api.CopyRequests(context.Background(), db); err != nil {
+		return fmt.Errorf("copying requests onto wishlists: %w", err)
+	}
 	if wide := cfg.Identity.WideProxies(); cfg.Identity.Mode == "forwardauth" && len(wide) > 0 {
 		logger.Warn("identity.trusted_proxies is very wide: anyone in it may say who they are; give your reverse proxy's own address",
 			"ranges", strings.Join(wide, ", "))
