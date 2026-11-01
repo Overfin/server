@@ -396,28 +396,9 @@ func effective(ctx context.Context, cfg *config.Config, db *store.Store, logger 
 		if err := json.Unmarshal(raw, &f); err != nil {
 			return nil, fmt.Errorf("feature settings in the database: %w", err)
 		}
-		// Settings saved before bringing accounts over became the
-		// migration module's are carried over to it, once.
-		var former struct {
-			Adoption *config.Adoption `json:"adoption"`
-		}
-		if err := json.Unmarshal(raw, &former); err == nil && former.Adoption != nil {
-			f.ImportAdoption(*former.Adoption)
-			n, err := cfg.WithFeatures(f)
-			if err != nil {
-				return nil, err
-			}
-			if raw, err = json.Marshal(n.Features()); err != nil {
-				return nil, err
-			}
-			if err := db.SetFeatures(ctx, raw); err != nil {
-				return nil, err
-			}
-			logger.Info("bringing existing accounts over is the migration module's now; its settings were carried over")
-		}
 		if cfg.FeaturesInFile {
 			logger.Warn("the configuration file's feature settings are ignored: the control panel holds them; " +
-				"remove [limits], [adoption], [privacy], [plugins], [accounts] and [modules] from the file")
+				"remove [limits], [privacy], [plugins], [accounts] and [modules] from the file")
 		}
 	} else {
 		if raw, err = json.Marshal(f); err != nil {

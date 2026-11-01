@@ -40,9 +40,6 @@ type Config struct {
 	Accounts Accounts `toml:"accounts"`
 	// Modules holds the modules' own settings: module name, then setting.
 	Modules map[string]map[string]string `toml:"modules"`
-	// Adoption is the former [adoption] section, only read to carry it
-	// over to the migration module.
-	Adoption Adoption `toml:"adoption"`
 	// FormerPrivacy is the former [privacy] section: nothing private can be
 	// exposed any more, so it's read only to be ignored.
 	FormerPrivacy struct {
@@ -98,23 +95,6 @@ type Identity struct {
 
 	// Parsed form of TrustedProxies, filled in by Load.
 	Proxies []netip.Prefix `toml:"-"`
-}
-
-// Adoption is the former [adoption] section: bringing existing accounts
-// over is the migration module's now, and ImportAdoption carries these
-// settings over to it.
-type Adoption struct {
-	Claim bool   `toml:"claim" json:"claim"`
-	Mode  string `toml:"mode" json:"mode"`
-}
-
-// ImportAdoption carries the former [adoption] settings over to the
-// migration module: switched on. Its mode is gone: it only copies now, from
-// the server the operator names.
-func (f *Features) ImportAdoption(a Adoption) {
-	if a.Claim && !f.Plugins.Enabled("migration") {
-		f.Plugins.Enable = append(f.Plugins.Enable, "migration")
-	}
 }
 
 // retiredSettings are module settings that existed once: kept values are
@@ -255,7 +235,6 @@ func (c *Config) Features() Features {
 	for name, values := range c.Modules {
 		f.Modules[name] = maps.Clone(values)
 	}
-	f.ImportAdoption(c.Adoption)
 	return f
 }
 
@@ -271,7 +250,6 @@ func DefaultFeatures() Features {
 func (c *Config) WithFeatures(f Features) (*Config, error) {
 	n := *c
 	n.Limits, n.Plugins, n.Accounts, n.Modules = f.Limits, f.Plugins, f.Accounts, f.Modules
-	n.Adoption = Adoption{}  // carried over into f already
 	n.Identity.Proxies = nil // filled again by validate
 	if err := n.validate(); err != nil {
 		return nil, err
@@ -544,7 +522,7 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 		return nil, errors.New("config: identity.mode is \"managed\" by default now: add mode = \"forwardauth\" to [identity]")
 	}
 
-	for _, section := range []string{"limits", "adoption", "privacy", "plugins", "accounts", "modules"} {
+	for _, section := range []string{"limits", "privacy", "plugins", "accounts", "modules"} {
 		if meta.IsDefined(section) {
 			cfg.FeaturesInFile = true
 		}
