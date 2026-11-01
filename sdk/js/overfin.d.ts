@@ -162,6 +162,7 @@ export interface TitleQuery {
   library?: string;
   /** A category's titles (since 0.6). */
   category?: string;
+  /** Required by titles() and pages(): the server refuses a listing without it. */
   kind?: 'movie' | 'series' | ('movie' | 'series')[];
   /** One genre, or several (any of them). */
   genre?: string | string[];
