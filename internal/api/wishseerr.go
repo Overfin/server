@@ -20,8 +20,8 @@ import (
 // they go: Overfin is then their fetcher. Seerr has no pace of its own, so
 // Overfin sends at most so many a day (wishes.per_day), in its turns,
 // through one Seerr user of its own: Seerr never learns who wished what.
-// Each send spends the turn of the account whose wish it was. What Seerr
-// does with each request is read back as the wish's state.
+// Each send spends the turn of every account that wished for the title.
+// What Seerr does with each request is read back as the wish's state.
 type WishesToSeerr struct {
 	Store *store.Store
 	// Setup says, as things are now, where wishes go, how many a day, and
@@ -126,9 +126,9 @@ func (s *WishesToSeerr) Pass(ctx context.Context) error {
 			st.SeerrRequest = made.ID
 			st.State = wishStateOf(made)
 		}
-		// A request, made or found, spends the turn of the account whose
-		// wish it was.
-		if err := s.Store.SpendWishTurn(ctx, next.AccountID, next.ProfileID); err != nil {
+		// A request, made or found, spends the turn of every account that
+		// wished for it: each gets it.
+		if _, err := s.Store.SpendWishTurns(ctx, next.Title); err != nil {
 			return err
 		}
 		if err := s.Store.RecordWishSend(ctx, next.Title); err != nil {

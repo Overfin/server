@@ -328,6 +328,39 @@ func (s *Store) SpendWishTurn(ctx context.Context, accountID, profileID string) 
 	return err
 }
 
+// SpendWishTurns spends the turn of every account that wished for a title,
+// when it's fetched: each got it, so the others go next. An account whose
+// profiles wished it spends one turn, on the profile whose wish is highest.
+// It reports how many accounts did.
+func (s *Store) SpendWishTurns(ctx context.Context, title string) (int, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT p.account_id, w.profile_id FROM wishes w JOIN profiles p ON p.id = w.profile_id
+		WHERE w.title = ? ORDER BY p.account_id, w.position, w.profile_id`, title)
+	if err != nil {
+		return 0, err
+	}
+	var accounts, profiles []string
+	for rows.Next() {
+		var account, profile string
+		if err := rows.Scan(&account, &profile); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if len(accounts) == 0 || accounts[len(accounts)-1] != account {
+			accounts, profiles = append(accounts, account), append(profiles, profile)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for i := range accounts {
+		if err := s.SpendWishTurn(ctx, accounts[i], profiles[i]); err != nil {
+			return i, err
+		}
+	}
+	return len(accounts), nil
+}
+
 // ArriveWish settles a title that arrived: it leaves every wishlist it
 // was on, into each profile's arrivals, and its state goes. It returns
 // those profiles.

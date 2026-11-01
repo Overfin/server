@@ -687,8 +687,9 @@ nothing beyond what that needs.
     Later, optionally, templates giving some accounts more turns. A wish
     keeps its place; an account's turn takes its highest wish that can be
     tried now, skipping those waiting for their release or their next try.
-    A search spends the turn, found or not; waiting for a release costs
-    nothing.
+    A search spends the turn, found or not, of every account that wished
+    for the title (each gets it, so the others go next); waiting for a
+    release costs nothing.
   - **What people see**, one state per wish and nothing about others:
     waiting, not out yet (with the date), not found yet (with the next
     try), downloading, arrived. A title several people wished for is

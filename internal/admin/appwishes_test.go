@@ -102,6 +102,17 @@ func TestAppWishes(t *testing.T) {
 	if after, _ := db.WishTurns(ctx); len(after) != len(turns) {
 		t.Errorf("a release waited for spent a turn: %v → %v", turns, after)
 	}
+	// Film 2, wished by both, due again and found: both accounts spend
+	// their turn.
+	status(`{"kind":"movie","tmdbId":"2","state":"waiting"}`, 204)
+	before, _ := db.WishTurns(ctx)
+	status(`{"kind":"movie","tmdbId":"2","state":"downloading"}`, 204)
+	after, _ := db.WishTurns(ctx)
+	for _, acct := range []string{ann.AccountID, bob.AccountID} {
+		if !after[acct].At.After(before[acct].At) {
+			t.Errorf("account %s didn't spend its turn: %v → %v", acct, before[acct], after[acct])
+		}
+	}
 	for _, bad := range []string{
 		`{"kind":"movie","tmdbId":"3","state":"downloading"}`,                 // no one wishes it
 		`{"kind":"movie","tmdbId":"1","state":"lost"}`,                        // not a state
