@@ -10,11 +10,9 @@ import (
 )
 
 // Library listings answered from the catalog's index, which is faster than
-// asking Jellyfin to list and count each time. Jellyfin still has the last
-// word on what the profile sees: each page is read from it, with the
-// profile's own token, by the items' IDs, so anything the profile may not
-// see is left out (which also brings each item's progress), and the total
-// is Jellyfin's own count for the profile (rule 56).
+// asking Jellyfin to list and count each time. What the profile may see is
+// Overfin's own rule (its access; Jellyfin sees one account, rule 3): the
+// index keeps only that, and the total counts only that (rule 56).
 //
 // What the index can't answer goes to Jellyfin as before: personal
 // filters and last played before the profile's data is Overfin's, and item

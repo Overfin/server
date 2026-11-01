@@ -112,8 +112,10 @@ subtitles and attachments) from anywhere.
 - **Redirecting the browser:** playlists are parsed and filtered [8], and only
   a few upstream headers are passed on [12].
 - **Script or markup in metadata:** plain text only [9].
-- **Malicious images and subtitles:** images are re-encoded [10], subtitles are
-  sanitized WebVTT [11].
+- **Malicious images and subtitles:** images are re-encoded [10], subtitles
+  Overfin serves are sanitized WebVTT or picture tracks checked whole [11].
+  Remuxed and transcoded streams carry only video and audio; a file played as
+  it is is the known limitation below.
 - **Oversized or malformed data:** size limits and timeouts, upstream IDs
   validated like client input, and image dimensions checked before decoding,
   so a small file claiming to be enormous can't exhaust memory [6, 7, 10].
@@ -148,6 +150,10 @@ subtitles and attachments) from anywhere.
 
 ## Known limitations
 
+- **Direct play sends a file whole.** When the device can play a file as it
+  is, the subtitles, attached files (fonts, pictures) and tags inside it reach
+  the device unchecked, as with any media server; the device's own player
+  reads them [11].
 - **Stream tickets appear in the reverse proxy's access logs,** because media
   players request them by URL. They work only in the session and for the
   profile that started them, and end with the playback (24 hours at most),
@@ -173,7 +179,8 @@ subtitles and attachments) from anywhere.
 
 - **A compromised Jellyfin, Seerr or TMDB.** Overfin can't protect those
   services themselves, but rules 5–12 keep a compromised upstream from automatically
-  compromising Overfin and its users.
+  compromising Overfin and its users (a file played as it is aside, see Known
+  limitations).
 - **A compromised user device.** No web application can help there.
 - **The operator.** They run the server and can see everything on it. Overfin's
   privacy rules protect users from strangers and from each other, not from the

@@ -185,8 +185,9 @@ func (p *Pipeline) ForgetAll() {
 	p.access.forget("")
 }
 
-// checkAccess asks Jellyfin, with the profile's own token, whether it may
-// see the item, and returns the item's current image tags by "type/index".
+// checkAccess reads the item from Jellyfin, as Overfin's one account, and
+// asks Overfin's access rules (v.May) whether the profile may see it; it
+// returns the item's current image tags by "type/index".
 func (p *Pipeline) checkAccess(ctx context.Context, v Viewer, itemID string) (map[string]string, error) {
 	key := v.ProfileID + "/" + itemID
 	if tags, ok := p.access.allowed(key, time.Now()); ok {
