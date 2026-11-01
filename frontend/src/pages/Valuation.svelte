@@ -15,7 +15,7 @@
     followed: ['Followed', 'For series: the season people are on and those after it, while they keep watching.'],
     favorites: ['Favorites', 'How many accounts marked it a favorite.'],
     watchlist: ['Watchlist', 'How many accounts keep it to watch later.'],
-    requested: ['Requested', 'How many accounts asked for it.'],
+    requested: ['Wished', 'How many accounts wished for it (or asked for it in Seerr); kept a while once it arrives, until they watched it.'],
     tastes: ['Tastes', 'How well it fits what people here like: what they watch (genres, series or films), and what they said when asked. What someone watches counts more and more over what they said.'],
     rating: ['Rating', 'TMDB\'s rating. One from a few votes counts for little.'],
     newRelease: ['New release', 'How recent the film or the season is: its release, or its first air date.'],
