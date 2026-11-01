@@ -43,7 +43,7 @@
     <Field label="Streams at once"><input type="number" min="1" max="100" bind:value={streams} /></Field>
     <Field label="Profiles" hint="The owner's included."><input type="number" min="1" max="20" bind:value={profiles} /></Field>
   </div>
-  <Setting label="A stream for each profile" hint="Each profile keeps one of the streams for itself; the rest are shared. Nobody is cut off to make room. No more profiles than streams.">
+  <Setting label="A stream for each profile" hint="Each profile keeps one of the streams for itself; the rest are shared. No other profile's stream is cut off to make room. No more profiles than streams.">
     {#snippet children(ids)}<input type="checkbox" bind:checked={reserve} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
   </Setting>
   {#if cats.items.length}
