@@ -260,6 +260,21 @@ export class Overfin {
   addToWatchlist(id) { return this.request('PUT', `/me/watchlist/${enc(id)}`); }
   removeFromWatchlist(id) { return this.request('DELETE', `/me/watchlist/${enc(id)}`); }
 
+  // ---- Wishlist (when the server offers it: offers.wishes) -------------------
+
+  /** The profile's wishlist, in its order, with each wish's state, and what arrived since it was last told: { on, items, arrived }. */
+  wishlist() { return this.request('GET', '/me/wishlist'); }
+  /** Puts a film, a whole series or a season at the end of the wishlist. */
+  addToWishlist(id) { return this.request('PUT', `/me/wishlist/${enc(id)}`); }
+  removeFromWishlist(id) { return this.request('DELETE', `/me/wishlist/${enc(id)}`); }
+  /** Sets the wishlist's order: every title on it, each once, first the one wanted most. */
+  orderWishlist(ids) { return this.request('PUT', '/me/wishlist', { titles: ids }); }
+  /** Marks what arrived as told. */
+  wishesSeen() { return this.request('POST', '/me/wishlist/seen'); }
+  /** Whether a profile may wish (owner profile only): { on }. */
+  profileWishing(profileId) { return this.request('GET', `/profiles/${enc(profileId)}/wishing`); }
+  setProfileWishing(profileId, on) { return this.request('PUT', `/profiles/${enc(profileId)}/wishing`, { on }); }
+
   // ---- Requests (when the server has Seerr connected) -----------------------
 
   /** The profile's requests (the owner's: its kids profiles' too), newest first. Rejects with 404 when the server offers none. */
