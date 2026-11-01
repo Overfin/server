@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
+	"strconv"
 	"time"
 )
 
@@ -226,6 +227,9 @@ const (
 	WishUnreleased  = "unreleased"
 	WishNotFound    = "notfound"
 	WishDownloading = "downloading"
+	// WishRequested: handed to Seerr, which hasn't started it yet (its
+	// approval, say).
+	WishRequested = "requested"
 )
 
 // WishState is what the fetcher last said of a wished title. A title
@@ -237,12 +241,14 @@ type WishState struct {
 	// known; NextTry, when one not found is tried again.
 	ReleaseOn string
 	NextTry   time.Time
-	Updated   time.Time
+	// SeerrRequest is its request in Seerr, when Overfin handed it there.
+	SeerrRequest int
+	Updated      time.Time
 }
 
 // WishStates returns every wished title's state, by title.
 func (s *Store) WishStates(ctx context.Context) (map[string]WishState, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT title, state, coalesce(release_on, ''), coalesce(next_try, 0), updated_at FROM wish_states`)
+	rows, err := s.read.QueryContext(ctx, `SELECT title, state, coalesce(release_on, ''), coalesce(next_try, 0), coalesce(seerr_request, 0), updated_at FROM wish_states`)
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +257,7 @@ func (s *Store) WishStates(ctx context.Context) (map[string]WishState, error) {
 	for rows.Next() {
 		var st WishState
 		var next, updated int64
-		if err := rows.Scan(&st.Title, &st.State, &st.ReleaseOn, &next, &updated); err != nil {
+		if err := rows.Scan(&st.Title, &st.State, &st.ReleaseOn, &next, &st.SeerrRequest, &updated); err != nil {
 			return nil, err
 		}
 		if next > 0 {
@@ -270,17 +276,20 @@ func (s *Store) SetWishState(ctx context.Context, st WishState) error {
 		_, err := s.db.ExecContext(ctx, `DELETE FROM wish_states WHERE title = ?`, st.Title)
 		return err
 	}
-	var release, next any
+	var release, next, request any
 	if st.ReleaseOn != "" {
 		release = st.ReleaseOn
 	}
 	if !st.NextTry.IsZero() {
 		next = st.NextTry.Unix()
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO wish_states (title, state, release_on, next_try, updated_at) VALUES (?, ?, ?, ?, ?)
+	if st.SeerrRequest > 0 {
+		request = st.SeerrRequest
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO wish_states (title, state, release_on, next_try, seerr_request, updated_at) VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (title) DO UPDATE SET state = excluded.state, release_on = excluded.release_on,
-			next_try = excluded.next_try, updated_at = excluded.updated_at`,
-		st.Title, st.State, release, next, s.now().Unix())
+			next_try = excluded.next_try, seerr_request = excluded.seerr_request, updated_at = excluded.updated_at`,
+		st.Title, st.State, release, next, request, s.now().Unix())
 	return err
 }
 
@@ -437,5 +446,44 @@ func (s *Store) SetWishesOff(ctx context.Context, profileID string, off bool) er
 	} else {
 		_, err = s.db.ExecContext(ctx, `DELETE FROM wish_off WHERE profile_id = ?`, profileID)
 	}
+	return err
+}
+
+// RecordWishSend notes that a wished title was handed to Seerr now.
+func (s *Store) RecordWishSend(ctx context.Context, title string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO wish_sends (title, sent_at) VALUES (?, ?)`, title, s.now().Unix())
+	return err
+}
+
+// WishSendsSince counts the wishes handed to Seerr since a time; older
+// sends are forgotten.
+func (s *Store) WishSendsSince(ctx context.Context, since time.Time) (int, error) {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM wish_sends WHERE sent_at < ?`, since.Unix()); err != nil {
+		return 0, err
+	}
+	var n int
+	err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM wish_sends`).Scan(&n)
+	return n, err
+}
+
+// SeerrWishUser returns the Seerr user Overfin hands wishes over as; ok is
+// false when it has none yet.
+func (s *Store) SeerrWishUser(ctx context.Context) (id int, ok bool, err error) {
+	var v string
+	err = s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'seerr-wish-user'`).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	id, err = strconv.Atoi(v)
+	return id, err == nil, err
+}
+
+// SetSeerrWishUser keeps the Seerr user Overfin hands wishes over as.
+func (s *Store) SetSeerrWishUser(ctx context.Context, id int) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO meta (name, value) VALUES ('seerr-wish-user', ?)
+		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, []byte(strconv.Itoa(id)))
 	return err
 }

@@ -216,6 +216,16 @@ func (c *Client) RequestTitle(ctx context.Context, userID int, kind string, tmdb
 	return raw.request(), nil
 }
 
+// RequestByID reads one request, for its status now; ErrNotFound when it's
+// gone.
+func (c *Client) RequestByID(ctx context.Context, id int) (Request, error) {
+	var raw rawRequest
+	if err := c.get(ctx, "/request/"+strconv.Itoa(id), nil, &raw); err != nil {
+		return Request{}, err
+	}
+	return raw.request(), nil
+}
+
 // UserRequests lists a user's requests, the latest first (100 at most).
 func (c *Client) UserRequests(ctx context.Context, userID int) ([]Request, error) {
 	var page struct{ Results []rawRequest }

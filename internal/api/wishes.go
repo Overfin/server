@@ -51,8 +51,9 @@ var wishable = map[string]bool{"movie": true, "series": true, "season": true}
 
 type wishJSON struct {
 	Title library.TitleSummary `json:"title"`
-	// State is waiting, unreleased (with ReleaseDate, when known),
-	// notFound (with NextTry) or downloading.
+	// State is waiting, requested (handed to Seerr, not started yet),
+	// unreleased (with ReleaseDate, when known), notFound (with NextTry) or
+	// downloading.
 	State       string `json:"state"`
 	ReleaseDate string `json:"releaseDate,omitempty"`
 	NextTry     string `json:"nextTry,omitempty"`
@@ -75,6 +76,8 @@ func stateOfWish(st store.WishState, ok bool) wishJSON {
 		return wishJSON{State: "waiting"}
 	case st.State == store.WishUnreleased:
 		return wishJSON{State: "unreleased", ReleaseDate: st.ReleaseOn}
+	case st.State == store.WishRequested:
+		return wishJSON{State: "requested"}
 	case st.State == store.WishNotFound:
 		out := wishJSON{State: "notFound"}
 		if !st.NextTry.IsZero() {

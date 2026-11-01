@@ -86,6 +86,20 @@ func (f *fakeSeerrRequests) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		json.NewEncoder(w).Encode(map[string]any{"results": out})
+	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/v1/request/"):
+		var id int
+		fmt.Sscan(strings.TrimPrefix(r.URL.Path, "/api/v1/request/"), &id)
+		x := f.requests[id]
+		if x == nil {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		media := 2
+		if m, ok := x["mediaStatus"].(int); ok {
+			media = m
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": id, "status": x["status"], "type": x["mediaType"],
+			"media": map[string]any{"tmdbId": x["mediaId"], "status": media}})
 	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/api/v1/request/"):
 		var id int
 		fmt.Sscan(strings.TrimPrefix(r.URL.Path, "/api/v1/request/"), &id)
