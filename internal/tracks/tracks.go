@@ -45,7 +45,7 @@ func Read(streams []jellyfin.MediaStream) (audio, subtitles, forced []Track) {
 		case "Audio":
 			audio = append(audio, Audio(s))
 		case "Subtitle":
-			if !s.IsTextSubtitleStream && !isPGS(s.Codec) {
+			if !s.IsTextSubtitleStream && !IsPGS(s.Codec) {
 				continue // pictures in a format Overfin can't show (DVD)
 			}
 			t := track(s)
@@ -124,7 +124,9 @@ func isSDH(title string) bool {
 	return mentions(title, "sdh", "hearing impaired", "malentendant", "cc")
 }
 
-func isPGS(codec string) bool {
+// IsPGS says whether a subtitle codec is PGS pictures, as Blu-rays carry
+// them.
+func IsPGS(codec string) bool {
 	switch strings.ToLower(codec) {
 	case "pgssub", "hdmv_pgs_subtitle", "pgs":
 		return true

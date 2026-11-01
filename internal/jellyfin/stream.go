@@ -25,11 +25,27 @@ var streamClient = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
+// subtitlesClient waits for subtitles Jellyfin extracts first: it reads the
+// whole file for them, minutes for a large one, and gives up after its
+// SubtitleExtractionTimeoutMinutes (30 by default).
+var subtitlesClient = &http.Client{
+	Transport: &http.Transport{
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+		ResponseHeaderTimeout: 31 * time.Minute,
+		IdleConnTimeout:       90 * time.Second,
+	},
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
 // Open starts fetching a stream: a media file, a playlist or a segment. path
 // and query come from Overfin's own stream state, never from the client;
 // rangeHeader is the client's Range header, already checked. The caller
 // closes the body.
 func (c *Client) Open(ctx context.Context, a Auth, path string, query url.Values, rangeHeader string) (*http.Response, error) {
+	return c.open(ctx, streamClient, a, path, query, rangeHeader)
+}
+
+func (c *Client) open(ctx context.Context, client *http.Client, a Auth, path string, query url.Values, rangeHeader string) (*http.Response, error) {
 	u := c.baseURL()
 	u.Path += path
 	u.RawQuery = query.Encode()
@@ -41,7 +57,7 @@ func (c *Client) Open(ctx context.Context, a Auth, path string, query url.Values
 	if rangeHeader != "" {
 		req.Header.Set("Range", rangeHeader)
 	}
-	res, err := streamClient.Do(req)
+	res, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("jellyfin: stream: %w", upstream.Plain(err))
 	}
@@ -54,10 +70,21 @@ func (c *Client) Open(ctx context.Context, a Auth, path string, query url.Values
 	return nil, &StatusError{Op: "stream", Status: res.StatusCode}
 }
 
-// ReadSmall fetches a small text resource (a playlist or subtitles) whole,
+// ReadSmall fetches a small text resource (a playlist) whole,
 // refusing anything larger than max bytes.
 func (c *Client) ReadSmall(ctx context.Context, a Auth, path string, query url.Values, max int) ([]byte, error) {
-	res, err := c.Open(ctx, a, path, query, "")
+	return c.readSmall(ctx, streamClient, a, path, query, max)
+}
+
+// ReadSubtitles fetches a subtitle track whole, refusing anything larger
+// than max bytes. A track Jellyfin hasn't extracted yet is waited for: it
+// reads the whole file for it the first time.
+func (c *Client) ReadSubtitles(ctx context.Context, a Auth, path string, max int) ([]byte, error) {
+	return c.readSmall(ctx, subtitlesClient, a, path, nil, max)
+}
+
+func (c *Client) readSmall(ctx context.Context, client *http.Client, a Auth, path string, query url.Values, max int) ([]byte, error) {
+	res, err := c.open(ctx, client, a, path, query, "")
 	if err != nil {
 		return nil, err
 	}

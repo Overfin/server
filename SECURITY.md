@@ -76,7 +76,9 @@ comes from the internet, and media files can be written by anyone.
 6. Overfin never follows redirects from Jellyfin, Seerr or TMDB. Upstream responses
    have size limits and timeouts, except media streams: Jellyfin must start
    answering within a minute, but once a stream flows it has no size or
-   time limit, so a film is never cut off.
+   time limit, so a film is never cut off. Subtitles are waited for within
+   Jellyfin's own limit (31 minutes): the first time a file's subtitles
+   are asked for, Jellyfin reads the whole file to extract them.
 7. IDs that come from upstream are validated exactly like client input.
 8. HLS playlists are parsed, not searched and replaced. Only entries that match
    Jellyfin's known segment URLs are kept.
@@ -95,10 +97,14 @@ comes from the internet, and media files can be written by anyone.
     artwork and of uploads itself, from one original (images.Shrink);
     Jellyfin's own pictures come at Jellyfin's sizes, and trickplay sheets
     are never resized (the player reads them by position).
-11. Subtitles are served only as sanitized WebVTT, or, for subtitles that
-    are pictures (PGS), as the track Jellyfin extracts, which Overfin reads
-    whole and refuses unless every part of it is well-formed and within its
-    limits. Fonts and other files attached to media are never served.
+11. Subtitles Overfin serves are only sanitized WebVTT, or, for subtitles
+    that are pictures (PGS), the track Jellyfin extracts, which Overfin
+    reads whole and refuses unless every part of it is well-formed and
+    within its limits. Fonts and other files attached to media are never
+    served on their own. Remuxed and transcoded streams carry only the
+    video and audio. A file played as it is (direct play) is sent whole,
+    as any media server sends it: the subtitles, attached files and tags
+    inside it reach the device unchecked.
 12. From upstream responses, only the headers streaming needs are passed on: a
     checked `Content-Type`, `Content-Length`, `Content-Range` and
     `Accept-Ranges`. Never `Set-Cookie` or `Location`.

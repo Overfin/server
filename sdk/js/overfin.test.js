@@ -480,6 +480,10 @@ test('subtitles: forced ones whenever none are chosen; a choice shows at once, n
   const mode = () => Object.fromEntries(els.map((el) => [el.dataset.overfin, el.track.mode]));
   const canvas = { style: {}, width: 0, height: 0, getContext: () => ({ clearRect() {}, putImageData() {} }) };
   const player = await new Overfin().play(video, 'title_movie_tmdb_1', { startMs: 0, capabilities: {}, pictureCanvas: canvas });
+  // Text tracks join the video once they're loaded: playback never waits
+  // for them.
+  assert.deepEqual(mode(), {});
+  await settle();
   // None chosen: the forced ones, in the audio's language.
   assert.equal(player.subtitleTrack, null);
   assert.equal(player.forcedTrack, 's5');
