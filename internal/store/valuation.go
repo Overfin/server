@@ -7,6 +7,7 @@ import (
 	"errors"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -111,7 +112,7 @@ const activeFor = 183 * 24 * time.Hour
 
 // ValuationFacts reads what the title valuation needs, as of now, with the
 // interests the features keep (by title key).
-func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []ProfileTitle) (*ValuationFacts, error) {
+func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []ProfileTitle, keptDays int) (*ValuationFacts, error) {
 	f := &ValuationFacts{Profiles: map[string]ValuationProfile{}, Titles: map[string]*ValuedTitle{}, Interests: interests,
 		Picks: map[string]bool{}}
 	cutoff := now.Add(-activeFor).Unix()
@@ -203,6 +204,9 @@ func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []P
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.wishFacts(ctx, f, now, keptDays); err != nil {
 		return nil, err
 	}
 
@@ -533,4 +537,39 @@ func (s *Store) SetDiscoveryShare(ctx context.Context, share int) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO meta (name, value) VALUES ('discovery-share', ?)
 		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, []byte(strconv.Itoa(share)))
 	return err
+}
+
+// wishFacts counts wishes as requests: every title on a wishlist, and those
+// that arrived less than keptDays ago for a profile that hasn't watched
+// any of it yet. A series counts for every season, as a request does.
+func (s *Store) wishFacts(ctx context.Context, f *ValuationFacts, now time.Time, keptDays int) error {
+	all, err := s.wishes(ctx, ``)
+	if err != nil {
+		return err
+	}
+	for _, w := range all {
+		f.Requests = append(f.Requests, AccountTitle{w.AccountID, w.Title})
+	}
+	if keptDays <= 0 {
+		return nil
+	}
+	arrived, err := s.Arrivals(ctx, now.AddDate(0, 0, -keptDays))
+	if err != nil {
+		return err
+	}
+	watched := func(profileID, key string) bool {
+		for _, v := range f.Viewings {
+			if v.ProfileID == profileID && (v.PlayCount > 0 || v.Played || v.PositionMs > 0) &&
+				(v.Title == key || strings.HasPrefix(v.Title, key+"/")) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, a := range arrived {
+		if !watched(a.ProfileID, a.Title) {
+			f.Requests = append(f.Requests, AccountTitle{a.AccountID, a.Title})
+		}
+	}
+	return nil
 }

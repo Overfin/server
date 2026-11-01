@@ -110,6 +110,10 @@ type exportProfileJSON struct {
 	// OutOfContinue are the series it took out of Continue Watching (by
 	// title key), and when.
 	OutOfContinue map[string]string `json:"outOfContinueWatching,omitempty"`
+	// Wishlist is its wished titles (by title key), first the one wanted
+	// most; WishesOff, that its owner switched its wishing off.
+	Wishlist  []string `json:"wishlist,omitempty"`
+	WishesOff bool     `json:"wishesOff,omitempty"`
 	// Tracks are the audio and subtitles it chose while watching a title
 	// (by title key): languages, subtitles "" when turned off.
 	Tracks map[string]exportTracksJSON `json:"tracks,omitempty"`
@@ -293,6 +297,22 @@ func (a Account) export(w http.ResponseWriter, r *http.Request) {
 			problem.Send(w, problem.Internal, "")
 			return
 		}
+		wished, err := a.Sessions.Store.Wishes(ctx, p.ID)
+		if err != nil {
+			a.Logger.Error("reading a profile's wishlist for an export failed", "err", err)
+			problem.Send(w, problem.Internal, "")
+			return
+		}
+		var wishlist []string
+		for _, wi := range wished {
+			wishlist = append(wishlist, wi.Title)
+		}
+		wishesOff, err := a.Sessions.Store.WishesOff(ctx, p.ID)
+		if err != nil {
+			a.Logger.Error("reading a profile's wishing for an export failed", "err", err)
+			problem.Send(w, problem.Internal, "")
+			return
+		}
 		trackChoices := map[string]exportTracksJSON{}
 		for k, t := range chosen {
 			trackChoices[k] = exportTracksJSON{Audio: t.Audio, Subtitles: t.Subtitles}
@@ -307,6 +327,7 @@ func (a Account) export(w http.ResponseWriter, r *http.Request) {
 			MaxAge: p.MaxAge, Categories: p.Categories, Libraries: p.Libraries, BlockedTags: p.BlockedTags,
 			KidsTitles: p.KidsTitles, Theme: p.Theme, HasPIN: p.HasPIN, CreatedAt: p.Created.Format(time.RFC3339),
 			WatchHistory: history, Titles: titles, Requests: requests, Modules: mods, OutOfContinue: hidden,
+			Wishlist: wishlist, WishesOff: wishesOff,
 		})
 	}
 	sessions, err := a.Sessions.Store.Sessions(ctx, c.Account.ID)

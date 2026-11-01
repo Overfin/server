@@ -317,6 +317,8 @@ type options struct {
 	tmdb catalog.TitleSource
 	// artworkDir, when set, is where TMDB's images are kept on disk.
 	artworkDir string
+	// wishes offers wishlists.
+	wishes bool
 	// adminGroup, when set, is the control panel's group, sent in the
 	// Remote-Groups header.
 	adminGroup string
@@ -450,6 +452,9 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		extra = append(extra, disc, api.Requests{Library: lib, Seerr: func() *seerr.Client { return client }, Directory: o.directory,
 			Limit: &api.AccountLimiter{PerMinute: 20}})
 	}
+	if o.wishes {
+		extra = append(extra, api.Wishes{Library: lib})
+	}
 	if o.store != nil {
 		*o.store = st
 	}
@@ -490,7 +495,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		mounts[i].Peers = mounts
 		extra = append(extra, mounts[i])
 	}
-	sessions.Offers = api.Offers{Discovery: o.seerr != nil, Requests: o.seerr != nil}
+	sessions.Offers = api.Offers{Discovery: o.seerr != nil, Requests: o.seerr != nil, Wishes: o.wishes}
 	if sessions.SetupOffers, err = api.SetupOffers(mounts); err != nil {
 		t.Fatal(err)
 	}

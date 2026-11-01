@@ -61,6 +61,10 @@ const (
 	QuotaExceeded    Type = "quota-exceeded"
 	RequestRefused   Type = "request-refused"
 	NotPending       Type = "not-pending"
+	// Wishes: the profile's owner switched its wishing off; its wishlist
+	// is full.
+	WishesOff    Type = "wishes-off"
+	WishlistFull Type = "wishlist-full"
 	// PINRequired: the profile has a PIN and none was given. PINIncorrect:
 	// a wrong PIN. PINLocked: too many wrong PINs; retryAfter says when
 	// another attempt is possible.
@@ -113,6 +117,8 @@ var registry = map[Type]info{
 	QuotaExceeded:        {http.StatusConflict, "No requests left for now"},
 	RequestRefused:       {http.StatusConflict, "This request was refused"},
 	NotPending:           {http.StatusConflict, "This request is no longer pending"},
+	WishesOff:            {http.StatusForbidden, "Wishing is switched off for this profile"},
+	WishlistFull:         {http.StatusConflict, "The wishlist is full"},
 	PINRequired:          {http.StatusForbidden, "This profile is protected by a PIN"},
 	PINIncorrect:         {http.StatusForbidden, "Wrong PIN"},
 	PINLocked:            {http.StatusForbidden, "Too many wrong PINs; try again later"},

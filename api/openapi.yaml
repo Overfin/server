@@ -617,6 +617,126 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /me/wishlist:
+    get:
+      operationId: getWishlist
+      summary: The active profile's wishlist, in its own order
+      description: |
+        Films, whole series and seasons no library has yet, first the one
+        wanted most, each with what became of it. Overfin takes turns between
+        accounts, then between an account's profiles, and hands the titles to
+        what fetches them (Overswell or Seerr, as the operator chose), never
+        who wished them. A title that arrives leaves the wishlist for the
+        watchlist, and is listed once in `arrived`. Offered when `offers.wishes`
+        (`GET /me`); private to the profile.
+      tags: [wishlist]
+      responses:
+        "200":
+          description: The wishlist.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [on, items, arrived]
+                properties:
+                  "on":
+                    type: boolean
+                    description: False when the account's owner switched this
+                      profile's wishing off; its wishes are kept, and wait.
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Wish"
+                  arrived:
+                    type: array
+                    description: What arrived since the profile was last told
+                      (`POST /me/wishlist/seen`); it's on its watchlist now.
+                    items:
+                      $ref: "#/components/schemas/TitleSummary"
+    put:
+      operationId: orderWishlist
+      summary: Set the wishlist's order
+      tags: [wishlist]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [titles]
+              properties:
+                titles:
+                  type: array
+                  description: Every title on the wishlist, each once, first
+                    the one wanted most.
+                  maxItems: 200
+                  items:
+                    type: string
+      responses:
+        "204":
+          description: The order is kept.
+        "400":
+          description: Not the wishlist's titles, each once (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /me/wishlist/seen:
+    post:
+      operationId: seenArrivedWishes
+      summary: Mark what arrived as told
+      tags: [wishlist]
+      responses:
+        "204":
+          description: Nothing is listed in `arrived` any more.
+
+  /me/wishlist/{titleId}:
+    parameters:
+      - $ref: "#/components/parameters/TitleId"
+    put:
+      operationId: addToWishlist
+      summary: Put a title at the end of the wishlist
+      description: A film, a whole series (every season out now) or a season
+        the profile can see, known to TMDB, that no library has whole; never
+        an episode. One already there stays where it was. At most 200 titles.
+      tags: [wishlist]
+      responses:
+        "204":
+          description: It's on the wishlist.
+        "400":
+          description: Not a film, series or season known to TMDB
+            (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: The account's owner switched this profile's wishing
+            off (`wishes-off`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A library has it whole already (`already-requested`), or
+            the wishlist is full (`wishlist-full`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    delete:
+      operationId: removeFromWishlist
+      summary: Take a title off the wishlist
+      tags: [wishlist]
+      responses:
+        "204":
+          description: It's off the wishlist (or wasn't on it).
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /me/history:
     delete:
       operationId: clearHistory
@@ -1603,6 +1723,49 @@ paths:
           $ref: "#/components/responses/NotFound"
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /profiles/{profileId}/wishing:
+    parameters:
+      - $ref: "#/components/parameters/ProfileId"
+    get:
+      operationId: getProfileWishing
+      summary: Whether a profile may wish
+      description: Owner profile only. On by default.
+      tags: [wishlist]
+      responses:
+        "200":
+          description: Whether it may.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Wishing"
+        "403":
+          $ref: "#/components/responses/OwnerOnly"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: setProfileWishing
+      summary: Switch a profile's wishing on or off
+      description: Owner profile only. A profile whose wishing is off keeps its
+        wishes; they wait, out of the turns, until it's back on.
+      tags: [wishlist]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Wishing"
+      responses:
+        "200":
+          description: Switched.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Wishing"
+        "403":
+          $ref: "#/components/responses/OwnerOnly"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /profiles/{profileId}/pin:
     parameters:
@@ -3753,13 +3916,17 @@ components:
           type: object
           description: >-
             What the server offers that depends on its setup: discovery
-            (with TMDB or Seerr) and requests (with Seerr). Clients show only
-            those, without asking and getting "not found". Since 0.5.
-          required: [discovery, requests]
+            (with TMDB or Seerr), requests (with Seerr) and wishlists (when
+            the operator chose where wishes go). Clients show only those,
+            without asking and getting "not found". Since 0.5; wishes since
+            0.8.
+          required: [discovery, requests, wishes]
           properties:
             discovery:
               type: boolean
             requests:
+              type: boolean
+            wishes:
               type: boolean
         activeProfile:
           description: Absent while this session has no profile chosen; the
@@ -4140,6 +4307,29 @@ components:
           description: For series, seasons and albums, the number of children
             not yet played.
 
+    Wish:
+      type: object
+      required: [title, state]
+      properties:
+        title:
+          $ref: "#/components/schemas/TitleSummary"
+        state:
+          type: string
+          enum: [waiting, unreleased, notFound, downloading]
+          description: Waiting its turn; not out yet (with `releaseDate`, when
+            known); not found yet, tried again at `nextTry`; or downloading.
+        releaseDate:
+          type: string
+          format: date
+        nextTry:
+          type: string
+          format: date-time
+    Wishing:
+      type: object
+      required: ["on"]
+      properties:
+        "on":
+          type: boolean
     TitleSummary:
       type: object
       required: [id, kind, name, availability, playable]

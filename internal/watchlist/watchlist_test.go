@@ -35,3 +35,31 @@ func TestInterests(t *testing.T) {
 		}
 	}
 }
+
+// A wish that arrived goes on the watchlist once, and not past its cap.
+func TestAdd(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.OpenModule(ctx, "watchlist", filepath.Join(t.TempDir(), "w.db"), Feature{}.Info().Migrations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for range 2 {
+		if err := Add(ctx, db, "p1", "title_movie_tmdb_1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var n int
+	db.QueryRowContext(ctx, `SELECT count(*) FROM watchlist WHERE profile_id = 'p1'`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("%d rows", n)
+	}
+	for i := range Max {
+		db.ExecContext(ctx, `INSERT INTO watchlist (profile_id, item_id, added_at) VALUES ('p2', ?, 1)`, "title_movie_tmdb_"+string(rune('a'+i%26))+string(rune('a'+i/26)))
+	}
+	Add(ctx, db, "p2", "title_movie_tmdb_new")
+	db.QueryRowContext(ctx, `SELECT count(*) FROM watchlist WHERE profile_id = 'p2'`).Scan(&n)
+	if n != Max {
+		t.Fatalf("past the cap: %d", n)
+	}
+}

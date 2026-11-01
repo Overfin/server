@@ -46,6 +46,7 @@ import (
 	"github.com/overfin/server/internal/seerr"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/tmdb"
+	"github.com/overfin/server/internal/watchlist"
 	"golang.org/x/crypto/acme/autocert"
 )
 
@@ -475,11 +476,25 @@ func run(logger *slog.Logger) error {
 	// The catalog's index, read through Overfin's Jellyfin service account,
 	// as Jellyfin's socket says the library changed (polling only while
 	// it's out of reach), and whole once a day.
+	arrivals := &api.WishArrivals{Store: db, Logger: logger}
+	if wl := sh.moduleDBs["watchlist"]; wl != nil {
+		arrivals.Watch = func(ctx context.Context, profileID, titleID string) error {
+			return watchlist.Add(ctx, wl, profileID, titleID)
+		}
+	}
 	cat := &catalog.Sync{Jellyfin: sh.jf, Store: db, Logger: logger,
 		Service:      sh.service,
 		ChangesEvery: 5 * time.Minute, FullEvery: 24 * time.Hour,
-		// New titles matched, and their pages fetched, at once.
-		Read: sh.titles.Wake}
+		// New titles matched, and their pages fetched, at once; wished
+		// titles that arrived leave the wishlists for the watchlists.
+		Read: func() {
+			sh.titles.Wake()
+			go func() {
+				if err := arrivals.Settle(ctx); err != nil {
+					logger.Error("settling arrived wishes failed", "err", err)
+				}
+			}()
+		}}
 	go cat.Run(ctx)
 	go cat.Watch(ctx)
 	// Discovery's lists, from TMDB: 10 pages (200 titles) per list, every
