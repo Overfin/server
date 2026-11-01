@@ -243,12 +243,11 @@ func TestConvert(t *testing.T) {
 	if _, ok := convert(jellyfin.RawItem{Id: id(1), Type: "Folder"}); ok {
 		t.Error("a folder was indexed")
 	}
-	// Jellyfin's tags aren't kept (Overfin reads TMDB's keywords); the
-	// audio's languages are, two letters each, once.
-	it, _ = convert(jellyfin.RawItem{Id: id(1), Type: "Movie", Name: "19-2", Tags: []string{"gore"}, MediaStreams: []jellyfin.MediaStream{
+	// The audio's languages are kept, two letters each, once.
+	it, _ = convert(jellyfin.RawItem{Id: id(1), Type: "Movie", Name: "19-2", MediaStreams: []jellyfin.MediaStream{
 		{Type: "Video", Language: "eng"}, {Type: "Audio", Language: "fre"}, {Type: "Audio", Language: "fra"},
 		{Type: "Audio", Language: "eng"}, {Type: "Subtitle", Language: "spa"}, {Type: "Audio", Language: "und"}}})
-	if len(it.Tags) != 0 || !slices.Equal(it.AudioLanguages, []string{"fr", "en"}) {
-		t.Errorf("tags %v, audio %v", it.Tags, it.AudioLanguages)
+	if !slices.Equal(it.AudioLanguages, []string{"fr", "en"}) {
+		t.Errorf("audio %v", it.AudioLanguages)
 	}
 }
