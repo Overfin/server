@@ -131,7 +131,7 @@ func TestDeletedAccountsWatchlistIsForgotten(t *testing.T) {
 		t.Fatalf("watchlist rows before: %d", count())
 	}
 	stepUp(t, srv, idp, subject, time.Now())
-	if code, body := put(t, srv, "DELETE", "/api/v1/me", ""); code != 200 {
+	if code, body := put(t, srv, "DELETE", "/api/v1/me", ""); code != 204 {
 		t.Fatalf("delete the account: %d %s", code, body)
 	}
 	if n := count(); n != 0 {

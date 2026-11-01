@@ -10,7 +10,9 @@ import (
 	"github.com/overfin/server/internal/ids"
 )
 
-// Requests, made in Seerr on behalf of accounts (see migration 020).
+// Requests, made in Seerr on behalf of accounts before wishlists (see
+// migration 020): those still open are copied onto wishlists once
+// (api.CopyRequests), then forgotten.
 
 // SeerrUser returns an account's Seerr user ID; ok is false when it has
 // none yet.
@@ -80,71 +82,6 @@ func scanRequests(rows *sql.Rows) ([]Request, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
-}
-
-// ProfileRequests lists the requests of an account's profiles, the latest
-// first.
-func (s *Store) ProfileRequests(ctx context.Context, accountID string, profileIDs []string) ([]Request, error) {
-	if len(profileIDs) == 0 {
-		return nil, nil
-	}
-	args := []any{accountID}
-	for _, id := range profileIDs {
-		args = append(args, id)
-	}
-	rows, err := s.read.QueryContext(ctx, `SELECT `+requestColumns+` FROM requests
-		WHERE account_id = ? AND profile_id IN (`+marks(len(profileIDs))+`) ORDER BY created_at DESC, id`, args...)
-	if err != nil {
-		return nil, err
-	}
-	return scanRequests(rows)
-}
-
-// AccountRequests lists an account's requests for titles (by key), any of
-// its profiles'.
-func (s *Store) AccountRequests(ctx context.Context, accountID string, titles []string) ([]Request, error) {
-	if len(titles) == 0 {
-		return nil, nil
-	}
-	args := []any{accountID}
-	for _, t := range titles {
-		args = append(args, t)
-	}
-	rows, err := s.read.QueryContext(ctx, `SELECT `+requestColumns+` FROM requests
-		WHERE account_id = ? AND title IN (`+marks(len(titles))+`) ORDER BY created_at DESC, id`, args...)
-	if err != nil {
-		return nil, err
-	}
-	return scanRequests(rows)
-}
-
-// RequestByID returns one of an account's requests, or ErrNotFound.
-func (s *Store) RequestByID(ctx context.Context, accountID, id string) (*Request, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT `+requestColumns+` FROM requests WHERE account_id = ? AND id = ?`, accountID, id)
-	if err != nil {
-		return nil, err
-	}
-	all, err := scanRequests(rows)
-	if err != nil {
-		return nil, err
-	}
-	if len(all) == 0 {
-		return nil, ErrNotFound
-	}
-	return &all[0], nil
-}
-
-// SetRequestStatus records a request's status as Seerr has it now.
-func (s *Store) SetRequestStatus(ctx context.Context, id, status string, at time.Time) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE requests SET status = ?, updated_at = ? WHERE id = ? AND status != ?`,
-		status, at.Unix(), id, status)
-	return err
-}
-
-// DeleteRequest forgets a request.
-func (s *Store) DeleteRequest(ctx context.Context, accountID, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM requests WHERE account_id = ? AND id = ?`, accountID, id)
-	return err
 }
 
 // OpenRequests lists the requests not declined, failed or available, for

@@ -2,9 +2,12 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/overfin/server/internal/config"
@@ -205,4 +208,33 @@ func (s *WishesToSeerr) user(ctx context.Context, c *seerr.Client) (int, error) 
 		return 0, err
 	}
 	return id, s.Store.SetSeerrWishUser(ctx, id)
+}
+
+// statusOf is a Seerr request's status in Overfin's words: Seerr's request
+// status first (pending, declined, failed), then the title's.
+func statusOf(r seerr.Request) string {
+	switch r.Status {
+	case 1:
+		return "pending"
+	case 3:
+		return "declined"
+	case 4:
+		return "failed"
+	}
+	switch r.MediaStatus {
+	case 3:
+		return "processing"
+	case 4:
+		return "partiallyAvailable"
+	case 5:
+		return "available"
+	}
+	return "approved"
+}
+
+// random is n random bytes, as letters and digits.
+func random(n int) string {
+	b := make([]byte, n)
+	rand.Read(b)
+	return strings.ToLower(strings.NewReplacer("-", "a", "_", "b").Replace(base64.RawURLEncoding.EncodeToString(b)))
 }

@@ -80,7 +80,7 @@ Nothing is enforced by the UI.
   are reserved for the owner profile [25, 51, 52].
 - **Escaping a kids profile:** PINs are checked on the server, wrong guesses
   slow down and then require the owner to log in again, and the client never
-  picks who acts upstream [21, 22, 26]. Kids can only request titles
+  picks who acts upstream [21, 22, 26]. Kids can only wish for titles
   for their age (from ratings in any country), and titles without one are refused [28].
 - **Exhausting resources:** stream, transcode and rate limits, fixed image
   sizes [31]. Limits fail gently and never cut off another user [32]. Faking
@@ -160,10 +160,10 @@ subtitles and attachments) from anywhere.
   which keeps this harmless [30], but operators should know.
 - **Kids profiles are only as strong as the PINs on the adult profiles.** PINs
   are optional; without them, a child can switch to an adult profile.
-- **Deleting an account doesn't necessarily delete everything elsewhere.**
-  What Overfin holds goes, but the operator chooses whether the account's
-  Seerr user, and the Jellyfin users of profiles from before Overfin's one
-  account, are deleted or only disabled [45].
+- **Deleting an account doesn't delete everything elsewhere.** What
+  Overfin holds goes, with the Jellyfin users of profiles from before
+  Overfin's one account, but the Seerr users accounts had before wishlists
+  stay in Seerr until the operator deletes them there [45].
 - **Catalog searches reach TMDB.** With the TMDB catalog enabled, what users
   search for in the catalog is sent from the server to TMDB. Browsers never
   contact TMDB, but the operator's server does [43, 57].

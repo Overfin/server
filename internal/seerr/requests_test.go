@@ -87,24 +87,11 @@ func TestRequests(t *testing.T) {
 	if err != nil || id != 42 || bodies[0]["password"] != "secret" || bodies[0]["email"] != "abc@overfin.invalid" {
 		t.Fatalf("create user: %d %v %v", id, err, bodies[0])
 	}
-	// Everyone's open requests: pending or approved, not available yet.
-	open, err := c.OpenRequests(ctx)
-	if err != nil || len(open) != 2 || open[0].TMDBID != 949 || open[1].Kind != "series" || !slices.Equal(open[1].Seasons, []int{3}) {
-		t.Errorf("open requests: %+v %v", open, err)
-	}
 	if name, ok, err := c.Username(ctx, 42); !ok || err != nil || name != "overfin-abc" {
 		t.Errorf("user 42: %q %v %v", name, ok, err)
 	}
 	if _, ok, err := c.Username(ctx, 43); ok || err != nil {
 		t.Errorf("user 43: %v %v", ok, err)
-	}
-	// Renamed: the settings sent back whole, only the name changed.
-	if err := c.Rename(ctx, 42, "Alice Tremblay"); err != nil {
-		t.Fatal(err)
-	}
-	if last := bodies[len(bodies)-1]; last["username"] != "Alice Tremblay" || last["email"] != "abc@overfin.invalid" ||
-		last["locale"] != "fr" || last["movieQuotaLimit"] != float64(3) {
-		t.Errorf("rename: %v", last)
 	}
 
 	r, err := c.RequestTitle(ctx, 42, "series", 1399, []int{2})
@@ -121,16 +108,5 @@ func TestRequests(t *testing.T) {
 	}
 	if _, err := c.RequestTitle(ctx, 42, "movie", 2, nil); !errors.Is(err, ErrExists) {
 		t.Errorf("already requested: %v", err)
-	}
-
-	all, err := c.UserRequests(ctx, 42)
-	if err != nil || len(all) != 2 || all[0].MediaStatus != 5 || all[1].Kind != "movie" || all[1].Status != 3 {
-		t.Errorf("requests: %+v %v", all, err)
-	}
-	if err := c.CancelRequest(ctx, 42, 7); err != nil {
-		t.Errorf("cancel: %v", err)
-	}
-	if err := c.CancelRequest(ctx, 42, 9); !errors.Is(err, ErrNotFound) {
-		t.Errorf("cancel unknown: %v", err)
 	}
 }

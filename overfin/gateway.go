@@ -92,10 +92,6 @@ type shared struct {
 	texts *catalog.Texts
 	// searches limits searches per account, across reloads.
 	searches *api.AccountLimiter
-	// requests limits requests to Seerr per account, across reloads.
-	requests *api.AccountLimiter
-	// requested is what Seerr says anyone requested, kept across reloads.
-	requested *api.SeerrRequested
 	// directory is the identity provider's connector, when configured:
 	// who the people behind accounts are, kept briefly in memory.
 	directory *connector.Cache
@@ -138,18 +134,6 @@ func newProvisioner(cfg *config.Config, sh *shared) *provision.Provisioner {
 	}
 	if sh.notices != nil {
 		p.Created = sh.notices.Joined
-	}
-	// A deleted account's Seerr user goes with it, or is made anonymous,
-	// through the Seerr connected now (connecting or disconnecting one
-	// builds again). A user Seerr lost counts as done.
-	if client := sh.seerr; client != nil {
-		p.DeleteSeerrUser = client.DeleteUser
-		p.RenameSeerrUser = func(ctx context.Context, id int, name string) error {
-			if err := client.Rename(ctx, id, name); err != nil && !errors.Is(err, seerr.ErrNotFound) {
-				return err
-			}
-			return nil
-		}
 	}
 	return p
 }
@@ -233,15 +217,13 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 		checker.UnlockAfter = 15 * time.Minute
 	}
 	lib := api.Library{Sessions: sessions, Provisioner: prov, Jellyfin: sh.jf, Images: sh.images, CursorKey: k.Cursor,
-		Requested: sh.requested,
-		Folders:   sh.folders, Service: sh.service, Titles: sh.titles, Texts: sh.texts, Searches: sh.searches, Logger: logger}
+		Folders: sh.folders, Service: sh.service, Titles: sh.titles, Texts: sh.texts, Searches: sh.searches, Logger: logger}
 	// Discovery, when there's a source for TMDB's data.
 	var disc *api.Discovery
 	if sh.source() != nil {
 		disc = &api.Discovery{Library: lib, Store: db}
 	}
-	sessions.Offers = api.Offers{Discovery: disc != nil, Requests: cfg.Plugins.Enabled("library") && sh.seerr != nil,
-		Wishes: cfg.Plugins.Enabled("library") && cfg.Wishes.To != ""}
+	sessions.Offers = api.Offers{Discovery: disc != nil, Wishes: cfg.Plugins.Enabled("library") && cfg.Wishes.To != ""}
 	pb := api.Playback{Library: lib, Tickets: sh.tickets,
 		MaxBitrateKbps:  cfg.Limits.MaxBitrateKbps,
 		MaxTranscodes:   cfg.Limits.MaxTranscodesTotal,
@@ -275,7 +257,7 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	// operator enables.
 	plugins := []plugin.Plugin{
 		api.Account{Sessions: sessions, Provisioner: prov, Logger: logger, Mounts: mounts,
-			KeepOnDelete: cfg.Accounts.OnDelete == "disable", Images: sh.images, PINs: checker,
+			Images: sh.images, PINs: checker,
 			// With Overfin's own sign-in, newcomers name their profile first.
 			AskFirst: managed != nil},
 		api.Profiles{Sessions: sessions, Provisioner: prov, Store: db, Service: sh.service,
@@ -295,22 +277,6 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	}
 	if disc != nil {
 		plugins = append(plugins, disc)
-	}
-	// Requests, through the Seerr connected when this was built (connecting
-	// or disconnecting Seerr builds again); without one, they answer "not
-	// found".
-	if cfg.Plugins.Enabled("library") {
-		client := sh.seerr
-		if sh.requested != nil && client != nil {
-			sh.requested.SetClient(func() *seerr.Client { return client })
-		} else if sh.requested != nil {
-			sh.requested.SetClient(nil)
-		}
-		rq := api.Requests{Library: lib, Seerr: func() *seerr.Client { return client }, Limit: sh.requests}
-		if sh.directory != nil {
-			rq.Directory = sh.directory
-		}
-		plugins = append(plugins, rq)
 	}
 	// Wishlists, when the operator chose where wishes go.
 	if cfg.Plugins.Enabled("library") && cfg.Wishes.To != "" {
@@ -403,7 +369,7 @@ func effective(ctx context.Context, cfg *config.Config, db *store.Store, logger 
 		}
 		if cfg.FeaturesInFile {
 			logger.Warn("the configuration file's feature settings are ignored: the control panel holds them; " +
-				"remove [limits], [plugins], [accounts] and [modules] from the file")
+				"remove [limits], [plugins], [wishes] and [modules] from the file")
 		}
 	} else {
 		if raw, err = json.Marshal(f); err != nil {

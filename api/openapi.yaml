@@ -328,24 +328,14 @@ paths:
       operationId: deleteAccount
       summary: Delete the account and everything Overfin holds about it
       description: Owner profile only, and needs a fresh login. Everything
-        Overfin holds about the account goes, watch history included. Whether
-        its requests in Seerr go too or stay under an anonymous name is the
-        operator's choice; the answer says which.
+        Overfin holds about the account goes, watch history and wishlists
+        included. Before 0.8 the answer was 200 with what became of its
+        requests in Seerr.
       tags: [account]
       responses:
-        "200":
+        "204":
           description: The account is deleted, and the session and login
             ended.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [requests]
-                properties:
-                  requests:
-                    type: string
-                    enum: [deleted, kept]
-                    description: Its requests in Seerr, if it had any.
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -3366,158 +3356,6 @@ paths:
   # request titles for their age. Approvals happen in Seerr
   # itself, never here.
 
-  /requests:
-    get:
-      operationId: listMyRequests
-      summary: The active profile's requests and their status
-      description: >-
-        The owner profile also sees the requests of the account's kids
-        profiles. Statuses are read again from Seerr when they may have
-        changed. "Not found" when the server offers no requests (no Seerr
-        connected), as /me's offers says: clients hide the request button
-        then.
-      tags: [requests]
-      responses:
-        "200":
-          description: Newest first, all at once (not paged).
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [items]
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/MediaRequest"
-        "404":
-          $ref: "#/components/responses/NotFound"
-    post:
-      operationId: createRequest
-      summary: Request a film, a series, or seasons of a series
-      description: >-
-        A title no library has, or not all of. A season or an episode asks
-        for its season. Seerr's own settings decide whether it's approved
-        at once and how it counts against the account's quota. Kids profiles
-        can only request titles within their limits.
-      tags: [requests]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [titleId]
-              properties:
-                titleId:
-                  type: string
-                  maxLength: 128
-                seasons:
-                  type: array
-                  description: For a series, which seasons; absent means all.
-                    Refused for a film, a season or an episode (which asks for
-                    its own season).
-                  maxItems: 100
-                  items:
-                    type: integer
-                    minimum: 0
-                    maximum: 1000
-      responses:
-        "201":
-          description: The request.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MediaRequest"
-        "400":
-          description: |
-            `seasons` for a film, a season or an episode, or a title TMDB
-            doesn't know (`invalid-request`).
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-        "404":
-          description: No such title (or a malformed `titleId`), the profile
-            may not see it, or the server offers no requests (`not-found`).
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-        "409":
-          description: |
-            Already requested, or a library already has all of it
-            (`already-requested`); quota used up (`quota-exceeded`); or
-            refused by Seerr (`request-refused`).
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-        "429":
-          description: Too many requests this minute for the account
-            (`rate-limited`), without `retryAfter`.
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-        "503":
-          description: Seerr can't be reached (`server-busy`).
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-
-  /requests/quota:
-    get:
-      x-status: planned
-      operationId: getQuota
-      summary: How many requests the account has left
-      tags: [requests]
-      responses:
-        "200":
-          description: The quota.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Quota"
-
-  /requests/{requestId}:
-    parameters:
-      - name: requestId
-        in: path
-        required: true
-        schema:
-          type: string
-          maxLength: 64
-    delete:
-      operationId: cancelRequest
-      summary: Cancel one of my requests while it is still pending
-      tags: [requests]
-      responses:
-        "204":
-          description: Cancelled.
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          description: No longer pending (`not-pending`).
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-        "429":
-          description: Too many requests this minute for the account
-            (`rate-limited`), without `retryAfter`.
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-        "503":
-          description: Seerr can't be reached (`server-busy`).
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-
   /issues:
     get:
       x-status: planned
@@ -3919,15 +3757,12 @@ components:
           type: object
           description: >-
             What the server offers that depends on its setup: discovery
-            (with TMDB or Seerr), requests (with Seerr) and wishlists (when
-            the operator chose where wishes go). Clients show only those,
-            without asking and getting "not found". Since 0.5; wishes since
-            0.8.
-          required: [discovery, requests, wishes]
+            (with TMDB or Seerr) and wishlists (when the operator chose where
+            wishes go). Clients show only those, without asking and getting
+            "not found". Since 0.5; wishes since 0.8, when requests went.
+          required: [discovery, wishes]
           properties:
             discovery:
-              type: boolean
-            requests:
               type: boolean
             wishes:
               type: boolean
@@ -4435,27 +4270,13 @@ components:
           $ref: "#/components/schemas/Images"
         userState:
           $ref: "#/components/schemas/UserState"
-        request:
-          type: object
-          description: The account's latest request covering it, else one
-            someone else made, in Seerr or through another account, still
-            to come (pending or approved). Who made it is never said.
-          required: [status]
-          properties:
-            id:
-              type: string
-              description: Only on the account's own requests, which it may
-                cancel.
-            status:
-              type: string
-              description: As a request's.
         upcoming:
           type: boolean
           description: >-
             Only in a collection's films (since 0.7). A film no library has
             that isn't out yet as the server shows titles, listed all the
             same; it has no page (`/titles/{titleId}` answers 404) and can't
-            be requested until it's out.
+            be wished for until it's out.
 
     Collection:
       type: object
@@ -4686,54 +4507,7 @@ components:
           description: Open set. Absent when the list mixes kinds.
           examples: [movie, series]
 
-    # ---- Catalog and requests -----------------------------------------------
-
-    MediaRequest:
-      type: object
-      required: [id, title, status, requestedAt]
-      properties:
-        id:
-          type: string
-          examples: [req_4n7x2k9m5q1w]
-        title:
-          $ref: "#/components/schemas/TitleSummary"
-        seasons:
-          type: array
-          items:
-            type: integer
-            minimum: 0
-        status:
-          type: string
-          description: Open set; clients must handle unknown values.
-          examples: [pending, approved, declined, processing, partiallyAvailable, available, failed]
-        requestedAt:
-          $ref: "#/components/schemas/Timestamp"
-        profileName:
-          type: string
-          description: Which of the account's own profiles made it; shown to
-            the owner for kids profiles.
-
-    Quota:
-      type: object
-      properties:
-        movie:
-          $ref: "#/components/schemas/QuotaPart"
-        series:
-          $ref: "#/components/schemas/QuotaPart"
-
-    QuotaPart:
-      description: Absent `limit` means unlimited.
-      type: object
-      properties:
-        limit:
-          type: integer
-          minimum: 0
-        used:
-          type: integer
-          minimum: 0
-        periodDays:
-          type: integer
-          minimum: 1
+    # ---- Catalog -----------------------------------------------------------
 
     IssueReport:
       type: object

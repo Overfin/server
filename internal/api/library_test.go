@@ -26,7 +26,6 @@ import (
 	"github.com/overfin/server/internal/api"
 	"github.com/overfin/server/internal/catalog"
 	"github.com/overfin/server/internal/config"
-	"github.com/overfin/server/internal/connector"
 	"github.com/overfin/server/internal/emails"
 	"github.com/overfin/server/internal/feature"
 	"github.com/overfin/server/internal/identity"
@@ -311,8 +310,6 @@ type options struct {
 	store **store.Store
 	// dbPath, when set, receives the database file's path.
 	dbPath *string
-	// directory, when set, is the identity provider's connector.
-	directory connector.Directory
 	// tmdb, when set, is TMDB for the pages fetched when opened.
 	tmdb catalog.TitleSource
 	// artworkDir, when set, is where TMDB's images are kept on disk.
@@ -444,13 +441,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 	lib.Images = images.New(jf, 1<<20)
 	lib.Images.ArtworkDir = o.artworkDir
 	if o.seerr != nil {
-		disc := &api.Discovery{Library: lib, Store: st}
-		client := o.seerr
-		lib.Requested = &api.SeerrRequested{}
-		lib.Requested.SetClient(func() *seerr.Client { return client })
-		disc.Library = lib
-		extra = append(extra, disc, api.Requests{Library: lib, Seerr: func() *seerr.Client { return client }, Directory: o.directory,
-			Limit: &api.AccountLimiter{PerMinute: 20}})
+		extra = append(extra, &api.Discovery{Library: lib, Store: st})
 	}
 	if o.wishes {
 		extra = append(extra, api.Wishes{Library: lib})
@@ -495,7 +486,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		mounts[i].Peers = mounts
 		extra = append(extra, mounts[i])
 	}
-	sessions.Offers = api.Offers{Discovery: o.seerr != nil, Requests: o.seerr != nil, Wishes: o.wishes}
+	sessions.Offers = api.Offers{Discovery: o.seerr != nil, Wishes: o.wishes}
 	if sessions.SetupOffers, err = api.SetupOffers(mounts); err != nil {
 		t.Fatal(err)
 	}

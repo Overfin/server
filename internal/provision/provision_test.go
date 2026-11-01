@@ -5,13 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -390,44 +388,6 @@ func TestCopyHooks(t *testing.T) {
 	// And it can be done properly afterwards.
 	if _, _, err := copyFrom(p, identity.Identity{Subject: "s"}, "alice", alicePass, nil); err != nil {
 		t.Errorf("a copy after the undo: %v", err)
-	}
-}
-
-// A deleted account's Seerr user goes with it, unless the operator keeps
-// requests: then it's kept, with them, under an anonymous name.
-func TestDeletingAnAccountDeletesItsSeerrUser(t *testing.T) {
-	p := setup(t, &fakeJellyfin{}, "")
-	ctx := context.Background()
-	var deleted []int
-	renamed := map[int]string{}
-	p.DeleteSeerrUser = func(_ context.Context, id int) error {
-		deleted = append(deleted, id)
-		return nil
-	}
-	p.RenameSeerrUser = func(_ context.Context, id int, name string) error {
-		renamed[id] = name
-		return nil
-	}
-	for i, keep := range []bool{true, false} {
-		acct, _, err := p.Ensure(ctx, identity.Identity{Subject: fmt.Sprint("subject-", i)}, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		p.Store.SetSeerrUser(ctx, acct.ID, 40+i, time.Now())
-		if _, kept, err := p.DeleteAccount(ctx, acct.ID, keep); err != nil || kept != keep {
-			t.Fatalf("keep %v: requests kept %v, %v", keep, kept, err)
-		}
-	}
-	// Without a Seerr user, there are no requests to keep.
-	acct, _, _ := p.Ensure(ctx, identity.Identity{Subject: "no-seerr"}, nil)
-	if _, kept, err := p.DeleteAccount(ctx, acct.ID, true); err != nil || kept {
-		t.Errorf("without Seerr: requests kept %v, %v", kept, err)
-	}
-	if len(deleted) != 1 || deleted[0] != 41 {
-		t.Errorf("Seerr users deleted: %v", deleted)
-	}
-	if len(renamed) != 1 || !regexp.MustCompile(`^overfin-[a-z2-7]{10}$`).MatchString(renamed[40]) {
-		t.Errorf("Seerr users renamed: %v", renamed)
 	}
 }
 

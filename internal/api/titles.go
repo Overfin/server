@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -304,10 +303,6 @@ func (l Library) summaries(ctx context.Context, p *store.Profile, keys []string,
 	if err != nil {
 		return nil, err
 	}
-	requests, err := l.requestsCovering(ctx, p.AccountID, list)
-	if err != nil {
-		return nil, err
-	}
 	out := []library.TitleSummary{}
 	for i, t := range list {
 		if !visible[i] {
@@ -317,7 +312,6 @@ func (l Library) summaries(ctx context.Context, p *store.Profile, keys []string,
 		if st, ok := states[t.Ref.Key()]; ok {
 			s.UserState = stateOf(st)
 		}
-		s.Request = requests[t.Ref.Key()]
 		s.Upcoming = soon[i]
 		out = append(out, s)
 	}
@@ -700,54 +694,6 @@ func (l Library) copyOf(ctx context.Context, p *store.Profile, id string) (strin
 		}
 	}
 	return "", nil
-}
-
-// requestsCovering finds, for titles, the account's latest request covering
-// each: a film's or a series' own, and for a season or an episode, its
-// series' when it asked for every season or for that one.
-func (l Library) requestsCovering(ctx context.Context, accountID string, titles []*store.TitleInfo) (map[string]*library.TitleRequest, error) {
-	var keys []string
-	for _, t := range titles {
-		switch t.Ref.Kind {
-		case "movie", "series":
-			keys = append(keys, t.Ref.Key())
-		case "season", "episode":
-			keys = append(keys, t.Ref.Series().Key())
-		}
-	}
-	all, err := l.Provisioner.Store.AccountRequests(ctx, accountID, keys)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]*library.TitleRequest{}
-	for _, t := range titles {
-		for _, x := range all { // the latest first
-			covers := x.Title == t.Ref.Key()
-			if t.Ref.Kind == "season" || t.Ref.Kind == "episode" {
-				covers = x.Title == t.Ref.Series().Key() && (len(x.Seasons) == 0 || slices.Contains(x.Seasons, t.Ref.Season))
-			}
-			if covers {
-				out[t.Ref.Key()] = &library.TitleRequest{ID: x.ID, Status: x.Status}
-				break
-			}
-		}
-		// Someone else's request, in Seerr: it's requested, but not by whom,
-		// and only its requester may cancel it.
-		if out[t.Ref.Key()] != nil || l.Requested == nil {
-			continue
-		}
-		key, season := t.Ref.Key(), -1
-		if t.Ref.Kind == "season" || t.Ref.Kind == "episode" {
-			key, season = t.Ref.Series().Key(), t.Ref.Season
-		}
-		for _, r := range l.Requested.Lookup(key) {
-			if season < 0 || len(r.Seasons) == 0 || slices.Contains(r.Seasons, season) {
-				out[t.Ref.Key()] = &library.TitleRequest{Status: statusOf(r)}
-				break
-			}
-		}
-	}
-	return out, nil
 }
 
 // nextEpisode is the episode after ep that the profile may see: the next

@@ -2,10 +2,15 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -83,5 +88,103 @@ func TestWishesToSeerr(t *testing.T) {
 	}
 	if s2 := states["series/tmdb/1399/s2"]; s2.State != store.WishDownloading {
 		t.Errorf("started: %+v", s2)
+	}
+}
+
+// fakeSeerrRequests is Seerr for the wishes handed to it: users, requests
+// and their statuses, as Seerr keeps them.
+type fakeSeerrRequests struct {
+	mu       sync.Mutex
+	users    map[int]map[string]any
+	requests map[int]map[string]any
+	next     int
+}
+
+func (f *fakeSeerrRequests) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var body map[string]any
+	json.NewDecoder(r.Body).Decode(&body)
+	switch {
+	case r.Method == "POST" && r.URL.Path == "/api/v1/user":
+		f.next++
+		f.users[f.next] = body
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintf(w, `{"id":%d}`, f.next)
+	case strings.HasPrefix(r.URL.Path, "/api/v1/user/"):
+		var id int
+		fmt.Sscan(strings.TrimPrefix(r.URL.Path, "/api/v1/user/"), &id)
+		user := f.users[id]
+		switch {
+		case user == nil:
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/settings/main"):
+			json.NewEncoder(w).Encode(map[string]any{"username": user["username"], "email": user["email"], "locale": "fr"})
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/settings/main"):
+			if body["email"] != user["email"] || body["locale"] != "fr" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			user["username"] = body["username"]
+		default:
+			json.NewEncoder(w).Encode(map[string]any{"id": id, "username": user["username"]})
+		}
+	case r.Method == "POST" && r.URL.Path == "/api/v1/request":
+		// As Seerr does: the requester is the user the header names; the
+		// API key alone would be its admin.
+		var as float64
+		fmt.Sscan(r.Header.Get("X-Api-User"), &as)
+		if as == 0 || body["userId"] != nil {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		body["userId"] = as
+		for _, x := range f.requests {
+			if x["mediaId"] == body["mediaId"] && x["userId"] == body["userId"] {
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+		}
+		f.next++
+		body["status"] = 1
+		f.requests[f.next] = body
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{"id": f.next, "status": 1, "type": body["mediaType"],
+			"media": map[string]any{"tmdbId": body["mediaId"], "status": 2}})
+	case r.Method == "GET" && r.URL.Path == "/api/v1/request":
+		var out []map[string]any
+		for id, x := range f.requests {
+			if by := r.URL.Query().Get("requestedBy"); by == "" || fmt.Sprint(x["userId"]) == by {
+				out = append(out, map[string]any{"id": id, "status": x["status"], "type": x["mediaType"],
+					"media": map[string]any{"tmdbId": x["mediaId"], "status": 2}})
+			}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"results": out})
+	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/v1/request/"):
+		var id int
+		fmt.Sscan(strings.TrimPrefix(r.URL.Path, "/api/v1/request/"), &id)
+		x := f.requests[id]
+		if x == nil {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		media := 2
+		if m, ok := x["mediaStatus"].(int); ok {
+			media = m
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": id, "status": x["status"], "type": x["mediaType"],
+			"media": map[string]any{"tmdbId": x["mediaId"], "status": media}})
+	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/api/v1/request/"):
+		var id int
+		fmt.Sscan(strings.TrimPrefix(r.URL.Path, "/api/v1/request/"), &id)
+		if x := f.requests[id]; x != nil && fmt.Sprint(x["userId"]) != r.Header.Get("X-Api-User") {
+			w.WriteHeader(http.StatusForbidden) // someone else's
+			return
+		}
+		delete(f.requests, id)
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusNotFound)
 	}
 }

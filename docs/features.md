@@ -129,7 +129,7 @@ watchlist are always on; the rest is switched on in the control panel.
 | Migration | Bringing Jellyfin accounts over | Switch |
 | Catalog | The library's index, matched to TMDB by Overfin | Always on |
 | Discovery | Trending, popular and upcoming titles, from TMDB | With a TMDB token or Seerr; kids profiles see what their age allows |
-| Requests | Asking for titles no library has, through Seerr | When Seerr is connected |
+| Wishlists | Each profile's films and seasons to get, taken in turns account by account | When the operator chooses where wishes go (Overswell or Seerr) |
 
 Everything people see about a title, its text and its images, comes from
 TMDB, in each account's language. For that, Overfin needs **your own TMDB
@@ -155,14 +155,16 @@ titles your libraries have are kept on disk ahead of time, in `artwork/`
 next to the database, so browsing the library never waits for TMDB; the
 others are fetched when first shown. TMDB's free API is for non-commercial
 use: a site that charges for access needs TMDB's commercial terms. Seerr,
-when connected, is a second source, and takes requests.
+when connected, is a second source.
 
-Each account asks Seerr through a Seerr user of its own, which Overfin makes
-and names after the account (the name the control panel shows), so Seerr's
-pages say who asked for what. Seerr's own settings give those users their
-permissions, auto-approval and quotas. No one signs in to Seerr as them, and
-people never need Seerr itself: keep it private on your network, reachable
-by Overfin and you only.
+Wishes go where you choose (Features, Wishes): to Overswell, which fetches
+them in Overfin's turns, or to Seerr, where Overfin requests them itself, a
+few a day, as one Seerr user of its own named "Overfin" (give it the Request
+permission, and auto-approval if you like). Seerr never learns who wished
+for what, and people never need Seerr itself: keep it private on your
+network, reachable by Overfin and you only. Requests made before wishlists
+became wishes; the Seerr users accounts had then stay in Seerr, for you to
+delete there.
 
 
 ---

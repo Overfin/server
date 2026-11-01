@@ -93,7 +93,7 @@
       </select>
     {/snippet}
   </Setting>
-  <Setting label="Titles shown" hint="Of those no library has, in discovery and requests. A title a library has is always shown.">
+  <Setting label="Titles shown" hint="Of those no library has, in discovery and wishlists. A title a library has is always shown.">
     {#snippet children(ids)}
       <select bind:value={shown} aria-labelledby={ids.label} aria-describedby={ids.hint}>
         <option value="all">All, announced ones too</option>

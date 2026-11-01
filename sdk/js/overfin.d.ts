@@ -95,8 +95,8 @@ export interface Me {
    * one answered (or chose to say nothing). */
   tastes: { asked: boolean; answered: boolean };
   /** What the server offers that depends on its setup: discovery (TMDB or
-   * Seerr), requests (Seerr), wishlists (since 0.8). Absent before 0.5. */
-  offers?: { discovery: boolean; requests: boolean; wishes?: boolean };
+   * Seerr) and wishlists (since 0.8, when requests went). Absent before 0.5. */
+  offers?: { discovery: boolean; wishes?: boolean };
   /** The control panel's path on the site ("/admin/"), only for an admin
    * who can open it there; absent otherwise. Since 0.6. */
   panel?: string;
@@ -257,22 +257,8 @@ export interface TitleSummary {
   episodeCount?: { inLibrary: number; aired: number };
   images?: Images;
   userState?: UserState;
-  /** Its request, if any: by this account (with an id, to cancel), or by someone else (without). */
-  request?: { id?: string; status: RequestStatus };
-  /** In a collection's films: one no library has that isn't out yet. It has no page and can't be requested until it's out (since 0.7). */
+  /** In a collection's films: one no library has that isn't out yet. It has no page and can't be wished for until it's out (since 0.7). */
   upcoming?: boolean;
-}
-
-export type RequestStatus = 'pending' | 'approved' | 'declined' | 'processing' | 'partiallyAvailable' | 'available' | 'failed' | (string & {});
-
-export interface MediaRequest {
-  id: string;
-  title: TitleSummary;
-  seasons?: number[];
-  status: RequestStatus;
-  requestedAt: string;
-  /** For the owner: which kids profile made it. */
-  profileName?: string;
 }
 
 /** A title's page: a series with its seasons, a season with its episodes. */
@@ -503,7 +489,7 @@ export class Overfin {
   /** Whose brand to show: Overfin's (without `custom`), or the operator's own, with "Powered by" Overfin. No sign-in needed. */
   branding(): Promise<Branding>;
   setPassword(password: string): Promise<{ hasPassword: boolean }>;
-  deleteAccount(): Promise<{ requests: 'deleted' | 'kept' }>;
+  deleteAccount(): Promise<null>;
   exportData(pin?: string): Promise<Record<string, unknown>>;
 
   profiles(): Promise<Profile[]>;
@@ -569,9 +555,6 @@ export class Overfin {
 
   watchlist(): Promise<TitleSummary[]>;
 
-  requests(): Promise<MediaRequest[]>;
-  requestTitle(titleId: string, seasons?: number[]): Promise<MediaRequest>;
-  cancelRequest(id: string): Promise<null>;
   onWatchlist(id: string): Promise<boolean>;
   addToWatchlist(id: string): Promise<null>;
   removeFromWatchlist(id: string): Promise<null>;

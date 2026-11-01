@@ -224,12 +224,16 @@ from = ""
 # always takes an invitation.
 required = "off"
 
-[accounts]
-# When someone deletes their account, everything Overfin holds about it goes,
-# watch history included. Its Seerr user is "delete"d with its requests (the
-# default), or "disable"d: kept with them, under an anonymous name. The site
-# tells the person which.
-on_delete = "delete"
+[wishes]
+# Where the titles people wish for go: "" (nowhere: no wishlist is offered),
+# "overswell" (it fetches them, in Overfin's turns) or "seerr" (Overfin
+# requests them there itself, as a user named Overfin).
+to = ""
+# How long, in days, an arrived wish weighs in the values while those who
+# wished for it haven't watched it.
+kept_days = 60
+# With Seerr, how many wishes Overfin requests there in 24 hours.
+per_day = 10
 
 [plugins]
 # The features switched on, besides those always on (accounts and profiles,

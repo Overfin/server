@@ -104,7 +104,7 @@ func TestAccounts(t *testing.T) {
 	}
 
 	rec = b.do("DELETE", "/admin/api/accounts/"+acct.ID, "", nil)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"requests":"deleted"`) {
+	if rec.Code != 204 {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
 	}
 	if _, err := db.AccountByID(ctx, acct.ID); err == nil {

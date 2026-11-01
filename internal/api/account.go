@@ -27,9 +27,6 @@ type Account struct {
 	Sessions    *Sessions
 	Provisioner *provision.Provisioner
 	Logger      *slog.Logger
-	// KeepOnDelete keeps a deleted account's Seerr user, with its requests,
-	// under an anonymous name, instead of deleting it (accounts.on_delete).
-	KeepOnDelete bool
 	// Images, when set, forgets a deleted account's image access.
 	Images *images.Pipeline
 	// PINs checks a profile's PIN before it downloads its own data.
@@ -48,7 +45,6 @@ type Account struct {
 // without asking and getting "not found".
 type Offers struct {
 	Discovery bool `json:"discovery"`
-	Requests  bool `json:"requests"`
 	// Wishes: each profile has a wishlist (/me/wishlist).
 	Wishes bool `json:"wishes"`
 }

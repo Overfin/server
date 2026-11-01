@@ -22,7 +22,7 @@ func TestAppCategories(t *testing.T) {
 		accts, profs = append(accts, acct.ID), append(profs, prof.ID)
 	}
 	for i := range accts {
-		if err := db.AddRequest(ctx, &store.Request{AccountID: accts[i], ProfileID: profs[i], Title: "movie/tmdb/13", Status: "pending", CreatedAt: now, UpdatedAt: now}); err != nil {
+		if err := db.AddWish(ctx, profs[i], "movie/tmdb/13"); err != nil {
 			t.Fatal(err)
 		}
 	}

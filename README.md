@@ -3,8 +3,8 @@
 **Your own streaming service, on top of Jellyfin.**
 
 Share your films and series with family and friends the way a streaming
-service would: their own sign-in, profiles, kids limits that hold, requests,
-and a clean web app. Jellyfin stays private behind Overfin, and nobody needs
+service would: their own sign-in, profiles, kids limits that hold,
+wishlists, and a clean web app. Jellyfin stays private behind Overfin, and nobody needs
 a Jellyfin account.
 
 <p>
@@ -43,7 +43,8 @@ folders and a Jellyfin you run yourself.
 - **Profiles**, with PINs, and **kids profiles** that only ever see titles
   for their age.
 - **A catalog that looks the part**: artwork from TMDB, cast pages, search,
-  trending titles, and requests for what you don't have (with Seerr).
+  trending titles, and wishlists for what you don't have: Overfin takes
+  turns between people, and Overswell or Seerr fetches.
 - **Watching in the browser**, phones included: subtitles, audio tracks,
   skip intro, next episode, and resume on any device.
 - **Recommendations** per profile, a list, favorites, and their language.

@@ -55,12 +55,8 @@ const (
 	InvalidRequest       Type = "invalid-request"
 	InvalidCursor        Type = "invalid-cursor"
 	RateLimited          Type = "rate-limited"
-	// Requests: already asked for (or there), the quota used up, refused
-	// by Seerr, and no longer pending (to cancel).
+	// AlreadyRequested: a wish for what a library has whole already.
 	AlreadyRequested Type = "already-requested"
-	QuotaExceeded    Type = "quota-exceeded"
-	RequestRefused   Type = "request-refused"
-	NotPending       Type = "not-pending"
 	// Wishes: the profile's owner switched its wishing off; its wishlist
 	// is full.
 	WishesOff    Type = "wishes-off"
@@ -113,10 +109,7 @@ var registry = map[Type]info{
 	InvalidRequest:       {http.StatusBadRequest, "Invalid request"},
 	InvalidCursor:        {http.StatusBadRequest, "Invalid cursor"},
 	RateLimited:          {http.StatusTooManyRequests, "Too many requests"},
-	AlreadyRequested:     {http.StatusConflict, "This is already requested or available"},
-	QuotaExceeded:        {http.StatusConflict, "No requests left for now"},
-	RequestRefused:       {http.StatusConflict, "This request was refused"},
-	NotPending:           {http.StatusConflict, "This request is no longer pending"},
+	AlreadyRequested:     {http.StatusConflict, "This is here already"},
 	WishesOff:            {http.StatusForbidden, "Wishing is switched off for this profile"},
 	WishlistFull:         {http.StatusConflict, "The wishlist is full"},
 	PINRequired:          {http.StatusForbidden, "This profile is protected by a PIN"},

@@ -8,17 +8,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/overfin/server/internal/upstream"
 )
 
-// Requests, made in Seerr on behalf of Overfin's accounts: each has a Seerr
-// user of its own, under the account's name (a placeholder address no one
-// can write to, a password no one keeps), which Seerr's own settings give
-// its permissions, auto-approval and quotas.
+// Wishes handed to Seerr (api.WishesToSeerr): requested as one user of
+// Overfin's own (a placeholder address no one can write to, a password no
+// one keeps), which Seerr's own settings give its permissions,
+// auto-approval and quotas.
 
 var (
 	// ErrQuota: the user's request quota is used up.
@@ -135,22 +134,6 @@ func (c *Client) Username(ctx context.Context, id int) (name string, ok bool, er
 	return name, true, nil
 }
 
-// Rename changes a user's name in Seerr. Seerr takes the user's main
-// settings whole, so they're read first and sent back with only the name
-// changed.
-func (c *Client) Rename(ctx context.Context, id int, name string) error {
-	path := "/user/" + strconv.Itoa(id) + "/settings/main"
-	var settings map[string]any
-	if err := c.get(ctx, path, nil, &settings); err != nil {
-		return err
-	}
-	if settings == nil {
-		return errors.New("seerr: the user has no settings")
-	}
-	settings["username"] = name
-	return c.send(ctx, http.MethodPost, path, settings, nil)
-}
-
 // Request is a request as Seerr has it.
 type Request struct {
 	ID int
@@ -224,60 +207,4 @@ func (c *Client) RequestByID(ctx context.Context, id int) (Request, error) {
 		return Request{}, err
 	}
 	return raw.request(), nil
-}
-
-// UserRequests lists a user's requests, the latest first (100 at most).
-func (c *Client) UserRequests(ctx context.Context, userID int) ([]Request, error) {
-	var page struct{ Results []rawRequest }
-	q := url.Values{"requestedBy": {strconv.Itoa(userID)}, "take": {"100"}, "filter": {"all"}, "sort": {"added"}}
-	if err := c.get(ctx, "/request", q, &page); err != nil {
-		return nil, err
-	}
-	out := make([]Request, 0, len(page.Results))
-	for _, r := range page.Results {
-		out = append(out, r.request())
-	}
-	return out, nil
-}
-
-// maxOpenPages caps how many pages of 100 requests OpenRequests reads.
-const maxOpenPages = 50
-
-// OpenRequests lists the requests anyone made that are still to come:
-// pending or approved, for a title not available yet. Declined, failed
-// and completed ones are left out.
-func (c *Client) OpenRequests(ctx context.Context) ([]Request, error) {
-	var out []Request
-	for page := 0; page < maxOpenPages; page++ {
-		var res struct{ Results []rawRequest }
-		q := url.Values{"take": {"100"}, "skip": {strconv.Itoa(page * 100)}, "filter": {"all"}, "sort": {"modified"}}
-		if err := c.get(ctx, "/request", q, &res); err != nil {
-			return nil, err
-		}
-		for _, raw := range res.Results {
-			r := raw.request()
-			if (r.Status == 1 || r.Status == 2) && r.MediaStatus != 5 && r.TMDBID > 0 {
-				out = append(out, r)
-			}
-		}
-		if len(res.Results) < 100 {
-			break
-		}
-	}
-	return out, nil
-}
-
-// CancelRequest removes a request (Seerr removes pending ones only, for a
-// user without the right to manage requests).
-func (c *Client) CancelRequest(ctx context.Context, userID, id int) error {
-	return c.sendAs(ctx, userID, http.MethodDelete, "/request/"+strconv.Itoa(id), nil, nil)
-}
-
-// DeleteUser deletes a Seerr user (gone already counts as done).
-func (c *Client) DeleteUser(ctx context.Context, id int) error {
-	err := c.send(ctx, http.MethodDelete, "/user/"+strconv.Itoa(id), nil, nil)
-	if errors.Is(err, ErrNotFound) {
-		return nil
-	}
-	return err
 }

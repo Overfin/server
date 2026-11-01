@@ -196,7 +196,6 @@ func TestAppTitlesPlaysNeedTwoPlayers(t *testing.T) {
 func TestAppTitlesOneWishStaysUnseen(t *testing.T) {
 	ctx := context.Background()
 	p, b, db, _ := signedInPanel(t)
-	now := time.Now()
 	var accts, profs []string
 	for _, s := range []string{"1", "2"} {
 		acct, prof, _ := db.CreateAccount(ctx, "person-"+s, store.NewOwner{Name: "Main", JellyfinUserID: strings.Repeat(s, 32), JellyfinUsername: "of-" + s, JellyfinToken: "t"})
@@ -208,7 +207,7 @@ func TestAppTitlesOneWishStaysUnseen(t *testing.T) {
 	}
 	ask := func(acct, prof, title string) {
 		t.Helper()
-		if err := db.AddRequest(ctx, &store.Request{AccountID: acct, ProfileID: prof, Title: title, Status: "pending", CreatedAt: now, UpdatedAt: now}); err != nil {
+		if err := db.AddWish(ctx, prof, title); err != nil {
 			t.Fatal(err)
 		}
 	}

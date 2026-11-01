@@ -66,13 +66,6 @@ type Provisioner struct {
 	AdminGroup string
 	LogKey     []byte // keys.LogID, for pseudonymous log entries
 	Logger     *slog.Logger
-	// DeleteSeerrUser, when set, deletes a deleted account's Seerr user
-	// (by its Seerr ID); nil when no Seerr is connected.
-	DeleteSeerrUser func(ctx context.Context, seerrID int) error
-	// RenameSeerrUser, when set, renames a Seerr user: a disabled
-	// account's gets an anonymous name (AnonymousName); nil when no Seerr
-	// is connected.
-	RenameSeerrUser func(ctx context.Context, seerrID int, name string) error
 	// Created, when set, is told of each account made (notices). It must
 	// not block.
 	Created func(acct *store.Account)
@@ -168,7 +161,7 @@ func (p *Provisioner) Create(ctx context.Context, id identity.Identity, hooks *H
 	}
 	if err := hooks.after(ctx, acct, owner); err != nil {
 		// Undone whole: the account and its Jellyfin users go.
-		if _, _, derr := p.DeleteAccount(ctx, acct.ID, false); derr != nil {
+		if _, derr := p.DeleteAccount(ctx, acct.ID); derr != nil {
 			p.Logger.Error("undoing an account failed", "account", p.logID(acct.ID), "err", derr)
 		}
 		return nil, nil, err
@@ -341,7 +334,7 @@ func (p *Provisioner) CopyIn(ctx context.Context, id identity.Identity, from *je
 	}
 	if err != nil {
 		// Undone whole: the account and what was copied go.
-		if _, _, derr := p.DeleteAccount(ctx, acct.ID, false); derr != nil {
+		if _, derr := p.DeleteAccount(ctx, acct.ID); derr != nil {
 			p.Logger.Error("undoing an account failed", "account", p.logID(acct.ID), "err", derr)
 		}
 		return nil, nil, err
@@ -425,70 +418,25 @@ func (p *Provisioner) Relogin(ctx context.Context, jellyfinUserID, username stri
 }
 
 // DeleteAccount deletes an account and everything Overfin holds about it,
-// watch history included. Its Seerr user goes first, deleted with its
-// requests, or with keep renamed to an anonymous name and kept with them
-// (no one can sign in as it); so do the Jellyfin users of profiles from
-// before Overfin's one Jellyfin account, deleted or disabled. A failure
-// deletes nothing here, and a retry picks up where it stopped. It returns
-// the account's profiles, as they were, and whether Seerr requests were
-// kept.
-func (p *Provisioner) DeleteAccount(ctx context.Context, accountID string, keep bool) ([]*store.Profile, bool, error) {
+// watch history included, and the Jellyfin users of its profiles from
+// before Overfin's one Jellyfin account, first: a failure deletes nothing
+// here, and a retry picks up where it stopped. It returns the account's
+// profiles, as they were.
+func (p *Provisioner) DeleteAccount(ctx context.Context, accountID string) ([]*store.Profile, error) {
 	profiles, err := p.Store.Profiles(ctx, accountID)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	for _, pr := range profiles {
-		if pr.JellyfinUserID == "" {
-			continue // none of its own
-		}
-		if keep {
-			err = p.DisableJellyfinUser(ctx, pr.JellyfinUserID)
-		} else {
-			err = p.DeleteJellyfinUser(ctx, pr.JellyfinUserID)
-		}
-		if err != nil {
-			return nil, false, err
-		}
-	}
-	keptRequests := false
-	if id, ok, err := p.Store.SeerrUser(ctx, accountID); err != nil {
-		return nil, false, err
-	} else if ok {
-		switch {
-		case !keep && p.DeleteSeerrUser != nil:
-			err = p.DeleteSeerrUser(ctx, id)
-		case keep && p.RenameSeerrUser != nil:
-			err = p.RenameSeerrUser(ctx, id, AnonymousName())
-			keptRequests = err == nil
-		}
-		if err != nil {
-			return nil, false, err
+		if err := p.DeleteJellyfinUser(ctx, pr.JellyfinUserID); err != nil {
+			return nil, err
 		}
 	}
 	if err := p.Store.DeleteAccount(ctx, accountID); err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	p.Logger.Info("account deleted", "account", p.logID(accountID))
-	return profiles, keptRequests, nil
-}
-
-// DisableJellyfinUser disables a profile's Jellyfin user, keeping its
-// history on the server: for operators who keep it when an account is
-// deleted.
-func (p *Provisioner) DisableJellyfinUser(ctx context.Context, jellyfinUserID string) error {
-	if jellyfinUserID == "" {
-		return nil // a profile without one
-	}
-	admin := jellyfin.Auth{Token: p.AdminKey, DeviceID: "overfin-admin"}
-	policy, err := p.Jellyfin.UserPolicy(ctx, admin, jellyfinUserID)
-	if jellyfin.IsStatus(err, http.StatusNotFound) {
-		return nil // already gone
-	}
-	if err != nil {
-		return err
-	}
-	policy["IsDisabled"] = true
-	return p.Jellyfin.SetUserPolicy(ctx, admin, jellyfinUserID, policy)
+	return profiles, nil
 }
 
 // DeleteJellyfinUser deletes a profile's Jellyfin user, with its watch
@@ -541,14 +489,6 @@ func randomName() string {
 }
 
 // randomSecret is a 256-bit password, used once.
-// AnonymousName is a name that says nothing of anyone, for a Seerr user
-// whose person can't or mustn't be named: "overfin-" and random letters.
-func AnonymousName() string {
-	b := make([]byte, 6)
-	rand.Read(b)
-	return "overfin-" + nameEncoding.EncodeToString(b)
-}
-
 func randomSecret() string {
 	b := make([]byte, 32)
 	rand.Read(b)
