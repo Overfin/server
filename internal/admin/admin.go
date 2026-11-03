@@ -143,8 +143,8 @@ type Panel struct {
 	// for the apps that import them (/apps/v1/episode-orders).
 	EpisodeOrders func(ctx context.Context, tmdbID int) (*tmdb.EpisodeOrders, error)
 	// ReadSeriesOrders, when set, reads a series' episode orders, TMDB's own
-	// first, for the admin to compare with the files; ChooseSeriesOrder
-	// numbers the series as one does ("": TMDB's own).
+	// first, for the admin to choose among; ChooseSeriesOrder shows the
+	// series as one has it ("": TMDB's own).
 	ReadSeriesOrders  func(ctx context.Context, tmdbID int) ([]catalog.SeriesOrder, error)
 	ChooseSeriesOrder func(ctx context.Context, tmdbID int, group string) error
 	Images            *images.Pipeline

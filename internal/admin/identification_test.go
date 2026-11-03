@@ -132,11 +132,12 @@ func TestSeriesOrders(t *testing.T) {
 	num := func(i int) *int { return &i }
 	db.PutCatalog(ctx, []store.CatalogItem{
 		{ID: id(0), Kind: "series", Name: "F", SortName: "f", TMDB: "615"},
-		{ID: id(1), Kind: "episode", Name: "F S01E01 - Space Pilot", SortName: "a", SeriesID: id(0), SeasonNumber: num(1), EpisodeNumber: num(1)},
-		{ID: id(2), Kind: "episode", Name: "F S01E02 - Fry", SortName: "b", SeriesID: id(0), SeasonNumber: num(1), EpisodeNumber: num(2)},
+		{ID: id(1), Kind: "episode", Name: "F S01E01", SortName: "a", SeriesID: id(0), SeasonNumber: num(1), EpisodeNumber: num(1)},
+		{ID: id(2), Kind: "episode", Name: "F S01E02", SortName: "b", SeriesID: id(0), SeasonNumber: num(1), EpisodeNumber: num(2)},
 		{ID: id(3), Kind: "movie", Name: "M", SortName: "m", TMDB: "949"},
 	}, 1)
 	db.RefreshTitleKeys(ctx)
+	db.SetSeason(ctx, "615", store.Season{Number: 1, Name: "S", Episodes: []store.Episode{{ID: 100, Number: 1, Name: "A"}, {ID: 101, Number: 2, Name: "B"}}}, time.Now())
 	season := func(names ...string) *tmdb.SeasonFull {
 		se := &tmdb.SeasonFull{Number: 1}
 		for i, n := range names {
@@ -150,7 +151,7 @@ func TestSeriesOrders(t *testing.T) {
 		}
 		return []catalog.SeriesOrder{
 			{Seasons: map[int]*tmdb.SeasonFull{1: season("A", "B", "C")}},
-			{ID: "aa", Name: "Short", Type: 3, Seasons: map[int]*tmdb.SeasonFull{1: season("Space Pilot", "Other")}},
+			{ID: "aa", Name: "Short", Type: 3, Seasons: map[int]*tmdb.SeasonFull{1: season("Space Pilot")}},
 		}, nil
 	}
 	var chosen []string
@@ -163,20 +164,19 @@ func TestSeriesOrders(t *testing.T) {
 	}
 	rec := b.do("GET", "/admin/api/identification/"+id(0)+"/orders", "", nil)
 	var got struct {
-		Current string
-		Seasons int
-		Orders  []struct {
-			ID         string
-			Fits       bool
-			SeasonsFit int
-			Named      int
+		Current  string
+		Episodes int
+		Unplaced int
+		Orders   []struct {
+			ID  string
+			Has int
 		}
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != 200 {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
-	if got.Seasons != 1 || len(got.Orders) != 2 || got.Orders[0].ID != "aa" || !got.Orders[0].Fits || got.Orders[0].SeasonsFit != 1 ||
-		got.Orders[0].Named != 1 || got.Orders[1].ID != "" || got.Orders[1].Fits {
+	if got.Episodes != 2 || got.Unplaced != 0 || len(got.Orders) != 2 || got.Orders[0].ID != "" || got.Orders[0].Has != 2 ||
+		got.Orders[1].ID != "aa" || got.Orders[1].Has != 1 {
 		t.Errorf("%+v", got)
 	}
 	if rec := b.do("PUT", "/admin/api/identification/"+id(0)+"/order", `{"group":"aa"}`, nil); rec.Code != 204 || len(chosen) != 1 || chosen[0] != "aa" {

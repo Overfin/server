@@ -18,10 +18,10 @@ func (s *Store) SeriesUpNext(ctx context.Context, profileID string, series Title
 	if a != nil {
 		allowed, args = a.itemAllowed("catalog_items")
 	}
-	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT title_key, season_number, episode_number FROM catalog_items
+	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT title_key, coalesce(shown_season, season_number) AS sn, coalesce(shown_episode, episode_number) AS en FROM catalog_items
 		WHERE kind = 'episode' AND title_key >= ? AND title_key < ? AND season_number IS NOT NULL AND episode_number IS NOT NULL
 		AND `+allowed+`
-		ORDER BY season_number = 0, season_number, episode_number`, append([]any{lo, hi}, args...)...)
+		ORDER BY sn = 0, sn, en`, append([]any{lo, hi}, args...)...)
 	if err != nil {
 		return "", 0, err
 	}

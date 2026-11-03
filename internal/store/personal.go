@@ -59,8 +59,9 @@ const showKey = `CASE WHEN s.tmdb IS NOT NULL THEN 'series/tmdb/' || s.tmdb
 // RefreshTitleKeys computes every indexed item's title key: a film or a
 // show by the first external ID it has (TMDB, then TVDB for shows, then
 // IMDb), a season by its show's key and its number, an episode by TMDB's ID
-// for the place its numbers are in the series' order, else by its show's key
-// and its numbers, and any item that can't be named so by its own ID. Anything missing (an ID, a
+// of what its numbers are in TMDB's own order, else by its show's key and its
+// numbers, and any item that can't be named so by its own ID. Where a chosen
+// order shows the episodes follows. Anything missing (an ID, a
 // number) makes the whole key NULL, which falls back to the item's own.
 func (s *Store) RefreshTitleKeys(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE catalog_items SET title_key = coalesce(CASE
@@ -70,12 +71,48 @@ func (s *Store) RefreshTitleKeys(ctx context.Context) error {
 		WHEN kind = 'season' THEN (SELECT `+showKey+` FROM catalog_items s
 			WHERE s.id = catalog_items.series_id AND s.kind = 'series') || '/s' || season_number
 		WHEN kind = 'episode' THEN coalesce((SELECT 'series/tmdb/' || s.tmdb || '/e' || e.tmdb_id FROM catalog_items s
-				JOIN catalog_episodes e ON e.series = s.tmdb AND e.season = catalog_items.season_number AND e.episode = catalog_items.episode_number
-				WHERE s.id = catalog_items.series_id AND s.kind = 'series' AND e.tmdb_id IS NOT NULL),
+				JOIN own_episodes e ON e.series = s.tmdb AND e.season = catalog_items.season_number AND e.episode = catalog_items.episode_number
+				WHERE s.id = catalog_items.series_id AND s.kind = 'series'),
 			(SELECT `+showKey+` FROM catalog_items s
 				WHERE s.id = catalog_items.series_id AND s.kind = 'series') || '/s' || season_number || '/e' || episode_number)
 		END, 'item/' || id)`)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.showOrderedFiles(ctx)
+}
+
+// showOrderedFiles says where the chosen orders put the series' files, new
+// ones included.
+func (s *Store) showOrderedFiles(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT series FROM series_orders`)
+	if err != nil {
+		return err
+	}
+	var ordered []string
+	for rows.Next() {
+		var series string
+		if err := rows.Scan(&series); err != nil {
+			rows.Close()
+			return err
+		}
+		ordered = append(ordered, series)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || len(ordered) == 0 {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, series := range ordered {
+		if err := showFiles(ctx, tx, series); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // MergePersonal adds what a profile did with titles to what's kept, the
@@ -85,11 +122,11 @@ func (s *Store) MergePersonal(ctx context.Context, profileID string, states []Pe
 	// What's brought in names episodes by their numbers.
 	for i, p := range states {
 		if r, ok := ParseTitleKey(p.Title); ok && r.Kind == "episode" {
-			placed, err := s.PlaceTitle(ctx, r)
+			key, err := s.ownEpisodeKey(ctx, r)
 			if err != nil {
 				return err
 			}
-			states[i].Title = placed.Key()
+			states[i].Title = key
 		}
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -336,9 +373,9 @@ func (s *Store) InProgress(ctx context.Context, profileID string, kinds []string
 // when it last watched one. Specials (season 0) come next only after a
 // special.
 const nextUpCTEs = `watched AS (
-		SELECT e.series_id AS series, e.season_number AS sn, e.episode_number AS en, pt.last_played_at AS at,
+		SELECT e.series_id AS series, coalesce(e.shown_season, e.season_number) AS sn, coalesce(e.shown_episode, e.episode_number) AS en, pt.last_played_at AS at,
 			row_number() OVER (PARTITION BY e.series_id
-				ORDER BY pt.last_played_at DESC, e.season_number DESC, e.episode_number DESC) AS r
+				ORDER BY pt.last_played_at DESC, coalesce(e.shown_season, e.season_number) DESC, coalesce(e.shown_episode, e.episode_number) DESC) AS r
 		FROM profile_titles pt
 		JOIN catalog_items e ON e.title_key = pt.title AND e.kind = 'episode'
 		WHERE pt.profile_id = ? AND pt.played = 1 AND e.series_id IS NOT NULL
@@ -346,11 +383,12 @@ const nextUpCTEs = `watched AS (
 	), next AS (
 		SELECT w.series, w.at, (SELECT n.id FROM catalog_items n
 			WHERE n.kind = 'episode' AND n.series_id = w.series
-				AND (n.season_number > w.sn OR (n.season_number = w.sn AND n.episode_number > w.en))
-				AND (n.season_number > 0 OR w.sn = 0)
+				AND (coalesce(n.shown_season, n.season_number) > w.sn OR (coalesce(n.shown_season, n.season_number) = w.sn
+					AND coalesce(n.shown_episode, n.episode_number) > w.en))
+				AND (coalesce(n.shown_season, n.season_number) > 0 OR w.sn = 0)
 				AND NOT EXISTS (SELECT 1 FROM profile_titles x
 					WHERE x.profile_id = ? AND x.title = n.title_key AND x.played = 1)
-			ORDER BY n.season_number, n.episode_number, n.id LIMIT 1) AS id
+			ORDER BY coalesce(n.shown_season, n.season_number), coalesce(n.shown_episode, n.episode_number), n.id LIMIT 1) AS id
 		FROM watched w WHERE w.r = 1
 	)`
 

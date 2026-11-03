@@ -436,8 +436,8 @@ func (s *Store) countEpisodes(ctx context.Context, t *TitleInfo, today string) e
 		season = t.Ref.Season
 	}
 	err := s.read.QueryRowContext(ctx, `SELECT count(DISTINCT title_key) FROM catalog_items
-		WHERE kind = 'episode' AND title_key >= ? AND title_key < ? AND (coalesce(season_number, 0) > 0 OR ?)
-		AND (? < 0 OR season_number = ?)`, lo, hi, specials, season, season).Scan(&t.Have)
+		WHERE kind = 'episode' AND title_key >= ? AND title_key < ? AND (coalesce(shown_season, season_number, 0) > 0 OR ?)
+		AND (? < 0 OR coalesce(shown_season, season_number) = ?)`, lo, hi, specials, season, season).Scan(&t.Have)
 	if err != nil {
 		return err
 	}
@@ -495,8 +495,8 @@ func (s *Store) SeasonEpisodes(ctx context.Context, season TitleRef) ([]int, err
 		}
 	}
 	lo, hi := keyRange(season.Series().Key() + "/")
-	if err := add(`SELECT DISTINCT episode_number FROM catalog_items WHERE kind = 'episode' AND title_key >= ? AND title_key < ?
-		AND season_number = ? AND episode_number IS NOT NULL ORDER BY episode_number`, lo, hi, season.Season); err != nil {
+	if err := add(`SELECT DISTINCT coalesce(shown_episode, episode_number) FROM catalog_items WHERE kind = 'episode' AND title_key >= ? AND title_key < ?
+		AND coalesce(shown_season, season_number) = ? AND episode_number IS NOT NULL ORDER BY 1`, lo, hi, season.Season); err != nil {
 		return nil, err
 	}
 	slices.Sort(out)
@@ -515,8 +515,9 @@ func (s *Store) SeriesSeasons(ctx context.Context, series TitleRef, listed []Sea
 		}
 	}
 	lo, hi := keyRange(series.Key() + "/")
-	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT season_number FROM catalog_items WHERE kind IN ('season', 'episode')
-		AND title_key >= ? AND title_key < ? AND season_number IS NOT NULL`, lo, hi)
+	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT coalesce(shown_season, season_number) FROM catalog_items
+		WHERE (kind = 'episode' OR (kind = 'season' AND NOT EXISTS (SELECT 1 FROM series_orders o WHERE o.series = ?)))
+		AND title_key >= ? AND title_key < ? AND season_number IS NOT NULL`, series.ID, lo, hi)
 	if err != nil {
 		return nil, err
 	}
@@ -696,7 +697,7 @@ func (s *Store) nextEpisode(ctx context.Context, profileID string, w TitleRef, t
 	// TMDB's aired episodes and the library's, as (season, episode).
 	q := `SELECT season, episode FROM (
 			SELECT season, episode FROM catalog_episodes WHERE series = ? AND ? = 'tmdb' AND air_date IS NOT NULL AND air_date <= ?
-			UNION SELECT season_number, episode_number FROM catalog_items WHERE kind = 'episode'
+			UNION SELECT coalesce(shown_season, season_number), coalesce(shown_episode, episode_number) FROM catalog_items WHERE kind = 'episode'
 				AND title_key >= ? AND title_key < ? AND season_number IS NOT NULL AND episode_number IS NOT NULL) o
 		WHERE (season > ? OR (season = ? AND episode > ?)) AND (season > 0 OR ? = 0)
 			AND NOT EXISTS (SELECT 1 FROM profile_titles x WHERE x.profile_id = ? AND x.played = 1
@@ -754,7 +755,7 @@ func (s *Store) LibraryTitleKeys(ctx context.Context) ([]string, error) {
 	}
 	// The seasons of the episodes, by the files' numbers: an episode's key by
 	// ID doesn't say them.
-	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT title_key, season_number FROM catalog_items
+	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT title_key, coalesce(shown_season, season_number) FROM catalog_items
 		WHERE kind = 'episode' AND title_key IS NOT NULL AND title_key NOT LIKE 'item/%' AND season_number IS NOT NULL`)
 	if err != nil {
 		return nil, err

@@ -14,9 +14,36 @@ import (
 	"github.com/overfin/server/internal/tmdb"
 )
 
-// orderedTitles is fakeTitles with another order: season 1 and 2 swap their
-// episodes, under plain and own names.
+// orderedTitles is fakeTitles, its episodes with IDs (101, 102; 201), with
+// another order: the first of season 2, then one of season 1.
 type orderedTitles struct{ fakeTitles }
+
+func (o *orderedTitles) withIDs(se *tmdb.SeasonFull) *tmdb.SeasonFull {
+	for i := range se.Episodes {
+		se.Episodes[i].ID = se.Number*100 + se.Episodes[i].Number
+	}
+	return se
+}
+
+func (o *orderedTitles) Season(ctx context.Context, series, n int) (*tmdb.SeasonFull, error) {
+	se, err := o.fakeTitles.Season(ctx, series, n)
+	if err != nil {
+		return nil, err
+	}
+	return o.withIDs(se), nil
+}
+
+func (o *orderedTitles) Seasons(ctx context.Context, series int, numbers []int) (map[int]*tmdb.SeasonFull, error) {
+	out := map[int]*tmdb.SeasonFull{}
+	for _, n := range numbers {
+		se, err := o.Season(ctx, series, n)
+		if err != nil {
+			return nil, err
+		}
+		out[n] = se
+	}
+	return out, nil
+}
 
 func (o *orderedTitles) OtherOrders(context.Context, int) ([]tmdb.EpisodeOrder, error) {
 	return []tmdb.EpisodeOrder{{ID: "abc", Name: "Production", Type: 6}}, nil
@@ -27,8 +54,8 @@ func (o *orderedTitles) ArrangedOrder(_ context.Context, _ int, id string) (*tmd
 		return nil, tmdb.ErrNotFound
 	}
 	return &tmdb.ArrangedSeasons{Name: "Production", Seasons: map[int]*tmdb.SeasonFull{
-		1: {Number: 1, Name: "Season 1", Episodes: []tmdb.Episode{{ID: 9001, Number: 1, Name: "Other first"}}},
-		3: {Number: 3, Name: "Volume 3", Episodes: []tmdb.Episode{{ID: 9002, Number: 1, Name: "Other last"}}},
+		1: {Number: 1, Name: "Season 1", Episodes: []tmdb.Episode{{ID: 201, Number: 1, Name: "Other first"}}},
+		3: {Number: 3, Name: "Volume 3", Episodes: []tmdb.Episode{{ID: 101, Number: 1, Name: "Other last"}}},
 	}}, nil
 }
 
@@ -62,7 +89,7 @@ func TestChooseOrderAndKeepIt(t *testing.T) {
 	}
 	check := func(when string) {
 		t.Helper()
-		if keys, _ := st.TitleKeys(ctx, []string{id(2)}); keys[id(2)] != "series/tmdb/1399/e9001" {
+		if keys, _ := st.TitleKeys(ctx, []string{id(2)}); keys[id(2)] != "series/tmdb/1399/e101" {
 			t.Errorf("%s: file %v", when, keys)
 		}
 		se, err := st.SeasonByTMDB(ctx, "1399", 1)
@@ -74,6 +101,11 @@ func TestChooseOrderAndKeepIt(t *testing.T) {
 		}
 		if se, _ := st.SeasonByTMDB(ctx, "1399", 3); se == nil || se.Name != "Volume 3" {
 			t.Errorf("%s: season 3: %+v", when, se)
+		}
+		// The file that was S1E1 is shown where the order has its episode.
+		ep, err := st.TitleInfos(ctx, []string{"series/tmdb/1399/e101"}, "2030-01-01", "")
+		if err != nil || ep["series/tmdb/1399/e101"].Ref.Season != 3 || len(ep["series/tmdb/1399/e101"].Items) != 1 {
+			t.Errorf("%s: episode: %+v %v", when, ep["series/tmdb/1399/e101"], err)
 		}
 		infos, err := st.TitleInfos(ctx, []string{"series/tmdb/1399"}, "2030-01-01", "")
 		if err != nil || len(infos["series/tmdb/1399"].Details.Seasons) != 2 {

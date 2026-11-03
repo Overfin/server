@@ -15,7 +15,8 @@ import (
 // profile did, who its account is, and what TMDB and the libraries say
 // about each film and season. Nothing in it leaves Overfin as it is.
 type ValuationFacts struct {
-	// Places say where episodes by ID are in their series' orders.
+	// Places say where episodes by ID are in TMDB's own order: the files'
+	// numbers, which the apps go by, whatever a series is shown in.
 	Places Places
 	// Profiles are every profile, by ID.
 	Profiles map[string]ValuationProfile
@@ -115,7 +116,7 @@ const activeFor = 183 * 24 * time.Hour
 // ValuationFacts reads what the title valuation needs, as of now, with the
 // interests the features keep (by title key).
 func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []ProfileTitle, keptDays int) (*ValuationFacts, error) {
-	places, err := s.AllPlaces(ctx)
+	places, err := s.OwnPlaces(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -395,8 +396,9 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 		k := series + "/" + strconv.Itoa(season)
 		episodes[k] = append(episodes[k], e)
 		return nil
-	}, `SELECT series, season, episode, coalesce(runtime, 0) FROM catalog_episodes
-		WHERE air_date IS NOT NULL AND air_date <= ?`, today)
+	}, `SELECT e.series, coalesce(o.season, e.season), coalesce(o.episode, e.episode), coalesce(e.runtime, 0) FROM catalog_episodes e
+		LEFT JOIN own_episodes o ON o.series = e.series AND o.tmdb_id = e.tmdb_id
+		WHERE e.air_date IS NOT NULL AND e.air_date <= ?`, today)
 	if err != nil {
 		return err
 	}
