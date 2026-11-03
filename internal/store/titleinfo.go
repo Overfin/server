@@ -752,11 +752,28 @@ func (s *Store) LibraryTitleKeys(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The seasons of the episodes, by the files' numbers: an episode's key by
+	// ID doesn't say them.
+	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT title_key, season_number FROM catalog_items
+		WHERE kind = 'episode' AND title_key IS NOT NULL AND title_key NOT LIKE 'item/%' AND season_number IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	seasons := map[string]bool{}
-	for _, k := range keys {
+	for rows.Next() {
+		var k string
+		var n int
+		if err := rows.Scan(&k, &n); err != nil {
+			return nil, err
+		}
 		if r, ok := ParseTitleKey(k); ok && r.Kind == "episode" {
+			r.Season = n
 			seasons[r.SeasonOf().Key()] = true
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	for k := range seasons {
 		keys = append(keys, k)
