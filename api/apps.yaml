@@ -426,6 +426,86 @@ paths:
               schema:
                 $ref: "#/components/schemas/AppError"
 
+  /apps/v1/episode-orders:
+    get:
+      operationId: appEpisodeOrders
+      summary: What TMDB says of a series' episodes
+      description: |
+        Each season's episodes with their air dates and names, and whether
+        another order on TMDB (DVD, production, digital…) puts other
+        episodes in that season's places. For an app that imports episodes
+        (Overswell), to tell what a file's number means. Story arcs and
+        absolute numbering don't count as other orders. Any valid key.
+      tags: [apps]
+      security:
+        - appKey: []
+      parameters:
+        - name: tmdbId
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The series' seasons, specials included.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [seasons]
+                properties:
+                  seasons:
+                    type: array
+                    items:
+                      type: object
+                      required: [season, rearranged, episodes]
+                      properties:
+                        season:
+                          type: integer
+                        rearranged:
+                          type: boolean
+                        episodes:
+                          type: array
+                          items:
+                            type: object
+                            required: [episode]
+                            properties:
+                              episode:
+                                type: integer
+                              airDate:
+                                type: string
+                                description: YYYY-MM-DD, when TMDB knows it.
+                              name:
+                                type: string
+                                description: In English.
+                              translated:
+                                type: string
+                                description: In the server's language, when it isn't English.
+        "400":
+          description: No valid tmdbId.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+        "401":
+          description: No valid key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+        "404":
+          description: TMDB has no such series.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+        "503":
+          description: Overfin has no TMDB token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+
   /apps/v1/categories:
     get:
       operationId: appCategories

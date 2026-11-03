@@ -558,6 +558,14 @@ func run(logger *slog.Logger) error {
 		}
 		p.Images = sh.images
 		p.OnRetitled = sh.titles.Wake
+		// What an app that imports episodes asks: from TMDB itself.
+		p.EpisodeOrders = func(ctx context.Context, tmdbID int) (*tmdb.EpisodeOrders, error) {
+			c, ok := gw.titleSource().(*tmdb.Client)
+			if !ok || c == nil {
+				return nil, admin.ErrNoTMDB
+			}
+			return c.EpisodeOrders(ctx, tmdbID)
+		}
 		// The metadata editor: TMDB's images of a title, from TMDB itself.
 		p.TitleImages = func(ctx context.Context, kind string, tmdbID int) (map[string][]tmdb.Image, error) {
 			c, ok := gw.titleSource().(*tmdb.Client)
