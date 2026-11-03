@@ -139,8 +139,11 @@ type Panel struct {
 	// (Identification); Images serves their posters; OnRetitled runs after
 	// a title was identified by hand.
 	SearchTMDB func(ctx context.Context, query string) ([]tmdb.Title, error)
-	Images     *images.Pipeline
-	OnRetitled func()
+	// EpisodeOrders, when set, reads what TMDB says of a series' episodes,
+	// for the apps that import them (/apps/v1/episode-orders).
+	EpisodeOrders func(ctx context.Context, tmdbID int) (*tmdb.EpisodeOrders, error)
+	Images        *images.Pipeline
+	OnRetitled    func()
 	// TitleImages, when set, lists the images TMDB has of a film or a
 	// series, for the metadata editor to choose from.
 	TitleImages func(ctx context.Context, kind string, tmdbID int) (map[string][]tmdb.Image, error)
@@ -317,6 +320,7 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("GET /apps/v1/titles", p.appTitles)
 	mux.HandleFunc("GET /apps/v1/history", p.appHistory)
 	mux.HandleFunc("GET /apps/v1/categories", p.appCategories)
+	mux.HandleFunc("GET /apps/v1/episode-orders", p.appEpisodeOrders)
 	mux.HandleFunc("GET /apps/v1/wishes", p.appWishes)
 	mux.HandleFunc("POST /apps/v1/wishes/status", p.appWishStatus)
 	mux.HandleFunc("GET /admin/api/valuation", p.signedIn(p.valuationSettings))

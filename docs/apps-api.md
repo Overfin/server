@@ -40,6 +40,18 @@ at `cursor=` what `next` says. An app that frees space (such as Overtide)
 asks for the least valuable titles the libraries have, as above; an app
 that adds titles (such as Overswell), for `list=suggestions`.
 
+What TMDB says of a series' episodes, for an app that imports them and has
+to tell what a file's number means (any key):
+
+```
+GET /apps/v1/episode-orders?tmdbId=615
+```
+
+Each season's episodes with their air dates, English names and names in the
+server's language (`translated`, when it isn't English), and whether another
+order on TMDB (DVD, production, digital…) puts other episodes in that
+season's places (`rearranged`). 503 when Overfin has no TMDB token.
+
 When each film and season arrived in the libraries and left them, as
 Overfin's index saw it (what the libraries had before this history began
 arrived at the date Jellyfin added it):

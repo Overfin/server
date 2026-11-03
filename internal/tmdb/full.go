@@ -391,6 +391,7 @@ type rawSeason struct {
 
 // rawEpisode is one of a season's episodes as TMDB sends it.
 type rawEpisode struct {
+	ID            int    `json:"id"`
 	EpisodeNumber int    `json:"episode_number"`
 	Name          string `json:"name"`
 	Overview      string `json:"overview"`
