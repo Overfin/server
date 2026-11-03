@@ -302,3 +302,29 @@ func TestValuationFactsPlaceEpisodes(t *testing.T) {
 		t.Error("an unknown ID was placed")
 	}
 }
+
+// The artwork keeper's list holds the seasons of episodes by ID: their
+// posters would be deleted otherwise.
+func TestLibraryTitleKeysKeepSeasonsOfEpisodesByID(t *testing.T) {
+	s, _, _ := episodeKeysFixture(t)
+	ctx := context.Background()
+	if err := s.SetSeason(ctx, "7", season(1, 101, 102), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := s.LibraryTitleKeys(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, k := range keys {
+		seen[k] = true
+	}
+	for _, want := range []string{"series/tmdb/7/s1", "series/tmdb/7/s2", "series/tmdb/7/s9", "series/tmdb/7/e101"} {
+		if !seen[want] {
+			t.Errorf("%s not listed: %v", want, keys)
+		}
+	}
+	if seen["series/tmdb/7/s0"] {
+		t.Errorf("a season no file is in: %v", keys)
+	}
+}
