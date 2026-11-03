@@ -14,20 +14,24 @@ import (
 // and the library's copies of it.
 
 // TitleRef is a title key, parsed: movie/tmdb/949, series/tmdb/1399,
-// series/tmdb/1399/s1, series/tmdb/1399/s1/e2 (TMDB's, IMDb's or TVDB's
-// IDs), or item/<id> for a file no one identified.
+// series/tmdb/1399/s1, series/tmdb/1399/e63056 (an episode by TMDB's own
+// ID), series/tmdb/1399/s1/e2 (one TMDB gives no ID; TMDB's, IMDb's or
+// TVDB's IDs), or item/<id> for a file no one identified.
 type TitleRef struct {
 	Kind    string // movie, series, season, episode, item
 	Source  string // tmdb, imdb, tvdb; "" for an item
 	ID      string // the external ID, or the item's own
-	Season  int    // seasons and episodes
-	Episode int    // episodes
+	Season  int    // seasons and episodes: where it is in the series' order
+	Episode int    // episodes; an episode by ID has them once placed (Places)
+	// EpisodeID is TMDB's ID of an episode; 0 for one known by its numbers.
+	EpisodeID int
 }
 
 // ParseTitleKey checks a title key: a film's or a series' kind, its ID's
 // source, the ID (1 to 20 letters and digits), then for a series a season
-// ("s" and 1 to 4 digits) and an episode ("e" and 1 to 5 digits); or
-// "item/" and 32 lowercase hexadecimal digits. Read by hand rather than by
+// ("s" and 1 to 4 digits) and an episode ("e" and 1 to 5 digits), or for a
+// series on TMDB an episode by ID ("e" and 1 to 10 digits); or "item/" and
+// 32 lowercase hexadecimal digits. Read by hand rather than by
 // a regular expression: the valuation reads every key of every history,
 // and the expression took a fifth of its time.
 func ParseTitleKey(key string) (TitleRef, bool) {
@@ -58,6 +62,12 @@ func ParseTitleKey(key string) (TitleRef, bool) {
 		return TitleRef{}, false
 	}
 	var ok bool
+	if len(parts) == 4 && r.Source == "tmdb" {
+		if id, ok := keyNumber(parts[3], "e", 10); ok && id > 0 {
+			r.Kind, r.EpisodeID = "episode", id
+			return r, true
+		}
+	}
 	if r.Season, ok = keyNumber(parts[3], "s", 4); !ok {
 		return TitleRef{}, false
 	}
@@ -110,6 +120,9 @@ func (r TitleRef) Key() string {
 		return "series/" + r.Source + "/" + r.ID
 	case "season":
 		return "series/" + r.Source + "/" + r.ID + "/s" + strconv.Itoa(r.Season)
+	}
+	if r.EpisodeID > 0 {
+		return "series/" + r.Source + "/" + r.ID + "/e" + strconv.Itoa(r.EpisodeID)
 	}
 	return "series/" + r.Source + "/" + r.ID + "/s" + strconv.Itoa(r.Season) + "/e" + strconv.Itoa(r.Episode)
 }
@@ -295,9 +308,12 @@ func (s *Store) TitleCopies(ctx context.Context, keys []string) (map[string][]st
 }
 
 func (s *Store) titleInfo(ctx context.Context, r TitleRef, today string, b *infoBatch) (*TitleInfo, error) {
+	r, err := s.PlaceTitle(ctx, r)
+	if err != nil {
+		return nil, err
+	}
 	t := &TitleInfo{Ref: r}
 	key := r.Key()
-	var err error
 	if b.has(key) {
 		t.Items = b.items[key]
 	} else if t.Items, err = s.ids(ctx, `SELECT id FROM catalog_items WHERE title_key = ? ORDER BY id`, key); err != nil {
@@ -412,16 +428,16 @@ func or(a, b string) string {
 // those the library has, and those that aired by today (from TMDB's
 // seasons when they're kept, else from its series page).
 func (s *Store) countEpisodes(ctx context.Context, t *TitleInfo, today string) error {
-	prefix := t.Ref.Key() + "/"
-	if t.Ref.Kind == "series" {
-		prefix += "s"
-	}
 	// A specials season counts its own; a series, the others'.
 	specials := t.Ref.Kind == "season" && t.Ref.Season == 0
-	lo, hi := keyRange(prefix)
+	lo, hi := keyRange(t.Ref.Series().Key() + "/")
+	season := -1
+	if t.Ref.Kind == "season" {
+		season = t.Ref.Season
+	}
 	err := s.read.QueryRowContext(ctx, `SELECT count(DISTINCT title_key) FROM catalog_items
-		WHERE kind = 'episode' AND title_key >= ? AND title_key < ? AND (coalesce(season_number, 0) > 0 OR ?)`,
-		lo, hi, specials).Scan(&t.Have)
+		WHERE kind = 'episode' AND title_key >= ? AND title_key < ? AND (coalesce(season_number, 0) > 0 OR ?)
+		AND (? < 0 OR season_number = ?)`, lo, hi, specials, season, season).Scan(&t.Have)
 	if err != nil {
 		return err
 	}
@@ -478,9 +494,9 @@ func (s *Store) SeasonEpisodes(ctx context.Context, season TitleRef) ([]int, err
 			return nil, err
 		}
 	}
-	lo, hi := keyRange(season.Key() + "/e")
+	lo, hi := keyRange(season.Series().Key() + "/")
 	if err := add(`SELECT DISTINCT episode_number FROM catalog_items WHERE kind = 'episode' AND title_key >= ? AND title_key < ?
-		AND episode_number IS NOT NULL ORDER BY episode_number`, lo, hi); err != nil {
+		AND season_number = ? AND episode_number IS NOT NULL ORDER BY episode_number`, lo, hi, season.Season); err != nil {
 		return nil, err
 	}
 	slices.Sort(out)
@@ -498,7 +514,7 @@ func (s *Store) SeriesSeasons(ctx context.Context, series TitleRef, listed []Sea
 			out = append(out, se.Number)
 		}
 	}
-	lo, hi := keyRange(series.Key() + "/s")
+	lo, hi := keyRange(series.Key() + "/")
 	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT season_number FROM catalog_items WHERE kind IN ('season', 'episode')
 		AND title_key >= ? AND title_key < ? AND season_number IS NOT NULL`, lo, hi)
 	if err != nil {
@@ -598,10 +614,15 @@ func (s *Store) ContinueTitles(ctx context.Context, profileID, today string, lim
 	lasts := map[string]last{}
 	var order []string
 	rows, err = s.read.QueryContext(ctx, `SELECT title, coalesce(last_played_at, 0) FROM profile_titles
-		WHERE profile_id = ? AND played = 1 AND title LIKE 'series/%/s%/e%' ORDER BY last_played_at DESC`, profileID)
+		WHERE profile_id = ? AND played = 1 AND title LIKE 'series/%/e%' ORDER BY last_played_at DESC`, profileID)
 	if err != nil {
 		return nil, err
 	}
+	type played struct {
+		ref TitleRef
+		at  int64
+	}
+	var watched []played
 	for rows.Next() {
 		var key string
 		var at int64
@@ -609,10 +630,24 @@ func (s *Store) ContinueTitles(ctx context.Context, profileID, today string, lim
 			rows.Close()
 			return nil, err
 		}
-		r, ok := ParseTitleKey(key)
-		if !ok || r.Kind != "episode" {
+		if r, ok := ParseTitleKey(key); ok && r.Kind == "episode" {
+			watched = append(watched, played{r, at})
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	places := Places{}
+	for _, w := range watched {
+		if err := s.addPlaces(ctx, places, w.ref); err != nil {
+			return nil, err
+		}
+		r, ok := places.Of(w.ref)
+		if !ok {
 			continue
 		}
+		at := w.at
 		sk := r.Series().Key()
 		l, seen := lasts[sk]
 		if !seen {
@@ -621,10 +656,6 @@ func (s *Store) ContinueTitles(ctx context.Context, profileID, today string, lim
 		if !seen || at > l.at || (at == l.at && (r.Season > l.ref.Season || (r.Season == l.ref.Season && r.Episode > l.ref.Episode))) {
 			lasts[sk] = last{r, at}
 		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	dismissed, err := s.dismissed(ctx, profileID)
 	if err != nil {
@@ -666,15 +697,16 @@ func (s *Store) nextEpisode(ctx context.Context, profileID string, w TitleRef, t
 	q := `SELECT season, episode FROM (
 			SELECT season, episode FROM catalog_episodes WHERE series = ? AND ? = 'tmdb' AND air_date IS NOT NULL AND air_date <= ?
 			UNION SELECT season_number, episode_number FROM catalog_items WHERE kind = 'episode'
-				AND title_key >= ? AND title_key < ? AND season_number IS NOT NULL AND episode_number IS NOT NULL)
+				AND title_key >= ? AND title_key < ? AND season_number IS NOT NULL AND episode_number IS NOT NULL) o
 		WHERE (season > ? OR (season = ? AND episode > ?)) AND (season > 0 OR ? = 0)
 			AND NOT EXISTS (SELECT 1 FROM profile_titles x WHERE x.profile_id = ? AND x.played = 1
-				AND x.title = ? || '/s' || season || '/e' || episode)
+				AND x.title IN (? || '/s' || o.season || '/e' || o.episode, ? || '/e' || (SELECT e.tmdb_id FROM catalog_episodes e
+					WHERE e.series = ? AND e.season = o.season AND e.episode = o.episode)))
 		ORDER BY season, episode LIMIT 1`
 	var sn, en int
-	lo, hi := keyRange(series + "/s")
+	lo, hi := keyRange(series + "/")
 	err := s.read.QueryRowContext(ctx, q, w.ID, w.Source, today, lo, hi,
-		w.Season, w.Season, w.Episode, w.Season, profileID, series).Scan(&sn, &en)
+		w.Season, w.Season, w.Episode, w.Season, profileID, series, series, w.ID).Scan(&sn, &en)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}

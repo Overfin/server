@@ -15,6 +15,8 @@ import (
 // profile did, who its account is, and what TMDB and the libraries say
 // about each film and season. Nothing in it leaves Overfin as it is.
 type ValuationFacts struct {
+	// Places say where episodes by ID are in their series' orders.
+	Places Places
 	// Profiles are every profile, by ID.
 	Profiles map[string]ValuationProfile
 	// Viewings are what profiles watched: films and episodes.
@@ -113,7 +115,11 @@ const activeFor = 183 * 24 * time.Hour
 // ValuationFacts reads what the title valuation needs, as of now, with the
 // interests the features keep (by title key).
 func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []ProfileTitle, keptDays int) (*ValuationFacts, error) {
-	f := &ValuationFacts{Profiles: map[string]ValuationProfile{}, Titles: map[string]*ValuedTitle{}, Interests: interests,
+	places, err := s.AllPlaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	f := &ValuationFacts{Places: places, Profiles: map[string]ValuationProfile{}, Titles: map[string]*ValuedTitle{}, Interests: interests,
 		Picks: map[string]bool{}}
 	cutoff := now.Add(-activeFor).Unix()
 	rows, err := s.read.QueryContext(ctx, `SELECT p.id, p.account_id, p.kind = 'kids', coalesce(p.kids_titles, 0) = 1,
@@ -193,7 +199,7 @@ func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []P
 		}
 		if t := f.title(key); t != nil {
 			t.InLibrary = true
-			if r, _ := ParseTitleKey(key); r.Kind == "episode" {
+			if r, _ := f.Ref(key); r.Kind == "episode" {
 				t.Episodes[r.Episode] = runtime
 			} else {
 				t.RuntimeMs = runtime
@@ -212,7 +218,7 @@ func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []P
 	// And those people did something with.
 	for _, v := range f.Viewings {
 		if t := f.title(v.Title); t != nil {
-			if r, _ := ParseTitleKey(v.Title); r.Kind == "episode" {
+			if r, _ := f.Ref(v.Title); r.Kind == "episode" {
 				if _, ok := t.Episodes[r.Episode]; !ok {
 					t.Episodes[r.Episode] = 0
 				}
@@ -250,10 +256,20 @@ func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []P
 	return f, nil
 }
 
+// Ref parses a title key, an episode's with its place in its series' order;
+// false for one that doesn't parse, or an episode by an ID TMDB dropped.
+func (f *ValuationFacts) Ref(key string) (TitleRef, bool) {
+	r, ok := ParseTitleKey(key)
+	if !ok {
+		return r, false
+	}
+	return f.Places.Of(r)
+}
+
 // title is the valued film or season key belongs to (an episode's season),
 // added if it's new; nil for other keys.
 func (f *ValuationFacts) title(key string) *ValuedTitle {
-	r, ok := ParseTitleKey(key)
+	r, ok := f.Ref(key)
 	if !ok {
 		return nil
 	}

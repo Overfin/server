@@ -566,6 +566,8 @@ func run(logger *slog.Logger) error {
 			}
 			return c.EpisodeOrders(ctx, tmdbID)
 		}
+		p.ReadSeriesOrders = sh.titles.ReadOrders
+		p.ChooseSeriesOrder = sh.titles.ChooseOrder
 		// The metadata editor: TMDB's images of a title, from TMDB itself.
 		p.TitleImages = func(ctx context.Context, kind string, tmdbID int) (map[string][]tmdb.Image, error) {
 			c, ok := gw.titleSource().(*tmdb.Client)

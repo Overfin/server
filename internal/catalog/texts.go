@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"slices"
 	"strconv"
 	"time"
@@ -165,6 +166,15 @@ func (x *Texts) fetch(ctx context.Context, w want) error {
 	for _, se := range full.Seasons {
 		det.Seasons = append(det.Seasons, store.SeasonInfo{Number: se.Number, Name: se.Name})
 	}
+	var ordered map[int]*tmdb.SeasonFull
+	if w.kind == "series" {
+		if ordered, err = orderSeasons(ctx, x.Store, src, id, full); err != nil {
+			return err
+		}
+		if ordered != nil {
+			det.Seasons = seasonInfos(ordered)
+		}
+	}
 	raw, err := json.Marshal(det)
 	if err != nil {
 		return err
@@ -174,7 +184,9 @@ func (x *Texts) fetch(ctx context.Context, w want) error {
 		numbers = append(numbers, se.Number)
 	}
 	var got map[int]*tmdb.SeasonFull
-	if len(numbers) > 0 {
+	if ordered != nil {
+		got, numbers = ordered, slices.Sorted(maps.Keys(ordered))
+	} else if len(numbers) > 0 {
 		if err := x.pause(ctx); err != nil {
 			return err
 		}

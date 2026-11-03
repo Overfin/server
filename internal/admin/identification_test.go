@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/overfin/server/internal/catalog"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/tmdb"
 )
@@ -121,5 +122,78 @@ func TestIdentificationUnsureMatch(t *testing.T) {
 	json.Unmarshal(b.do("GET", "/admin/api/identification", "", nil).Body.Bytes(), &list)
 	if list.Suspects != 0 || len(list.Items[0].Candidates) != 0 {
 		t.Errorf("after: %+v", list)
+	}
+}
+
+func TestSeriesOrders(t *testing.T) {
+	ctx := context.Background()
+	p, b, db, _ := signedInPanel(t)
+	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
+	num := func(i int) *int { return &i }
+	db.PutCatalog(ctx, []store.CatalogItem{
+		{ID: id(0), Kind: "series", Name: "F", SortName: "f", TMDB: "615"},
+		{ID: id(1), Kind: "episode", Name: "F S01E01 - Space Pilot", SortName: "a", SeriesID: id(0), SeasonNumber: num(1), EpisodeNumber: num(1)},
+		{ID: id(2), Kind: "episode", Name: "F S01E02 - Fry", SortName: "b", SeriesID: id(0), SeasonNumber: num(1), EpisodeNumber: num(2)},
+		{ID: id(3), Kind: "movie", Name: "M", SortName: "m", TMDB: "949"},
+	}, 1)
+	db.RefreshTitleKeys(ctx)
+	season := func(names ...string) *tmdb.SeasonFull {
+		se := &tmdb.SeasonFull{Number: 1}
+		for i, n := range names {
+			se.Episodes = append(se.Episodes, tmdb.Episode{ID: 100 + i, Number: i + 1, Name: n})
+		}
+		return se
+	}
+	p.ReadSeriesOrders = func(_ context.Context, n int) ([]catalog.SeriesOrder, error) {
+		if n != 615 {
+			return nil, tmdb.ErrNotFound
+		}
+		return []catalog.SeriesOrder{
+			{Seasons: map[int]*tmdb.SeasonFull{1: season("A", "B", "C")}},
+			{ID: "aa", Name: "Short", Type: 3, Seasons: map[int]*tmdb.SeasonFull{1: season("Space Pilot", "Other")}},
+		}, nil
+	}
+	var chosen []string
+	p.ChooseSeriesOrder = func(_ context.Context, n int, group string) error {
+		if group == "gone" {
+			return tmdb.ErrNotFound
+		}
+		chosen = append(chosen, group)
+		return nil
+	}
+	rec := b.do("GET", "/admin/api/identification/"+id(0)+"/orders", "", nil)
+	var got struct {
+		Current string
+		Seasons int
+		Orders  []struct {
+			ID         string
+			Fits       bool
+			SeasonsFit int
+			Named      int
+		}
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if got.Seasons != 1 || len(got.Orders) != 2 || got.Orders[0].ID != "aa" || !got.Orders[0].Fits || got.Orders[0].SeasonsFit != 1 ||
+		got.Orders[0].Named != 1 || got.Orders[1].ID != "" || got.Orders[1].Fits {
+		t.Errorf("%+v", got)
+	}
+	if rec := b.do("PUT", "/admin/api/identification/"+id(0)+"/order", `{"group":"aa"}`, nil); rec.Code != 204 || len(chosen) != 1 || chosen[0] != "aa" {
+		t.Errorf("choose: %d %s %v", rec.Code, rec.Body, chosen)
+	}
+	if rec := b.do("PUT", "/admin/api/identification/"+id(0)+"/order", `{"group":""}`, nil); rec.Code != 204 || chosen[1] != "" {
+		t.Errorf("TMDB's own: %d %s %v", rec.Code, rec.Body, chosen)
+	}
+	for _, bad := range []string{`{"group":"../x"}`, `{"group":"AA"}`, `{"other":"aa"}`, `nope`} {
+		if rec := b.do("PUT", "/admin/api/identification/"+id(0)+"/order", bad, nil); rec.Code != 400 {
+			t.Errorf("%s: %d", bad, rec.Code)
+		}
+	}
+	if rec := b.do("PUT", "/admin/api/identification/"+id(3)+"/order", `{"group":"aa"}`, nil); rec.Code != 404 {
+		t.Errorf("a film: %d", rec.Code)
+	}
+	if rec := b.do("GET", "/admin/api/identification/"+id(9)+"/orders", "", nil); rec.Code != 404 {
+		t.Errorf("no such series: %d", rec.Code)
 	}
 }

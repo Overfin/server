@@ -4,7 +4,7 @@
   import { Badge, Busy, ask, toast } from '@overfin/ui';
   import { api } from '../../lib/api';
   import { languageName, message } from '../../lib/format';
-  import type { Candidate, Identified } from '../../lib/types-library';
+  import type { Candidate, Identified, SeriesOrder, SeriesOrders } from '../../lib/types-library';
 
   let { title: t, reload }: { title: Identified; reload: () => Promise<void> } = $props();
 
@@ -43,6 +43,42 @@
   async function back() {
     if (t.edited && t.jellyfinTmdb !== t.tmdb && !(await ask('Its texts or artwork were changed here. They stay with the title it is now, and come back if it\'s identified as that title again.', { title: 'Back to Jellyfin\'s title?', yes: 'Go back' }))) return;
     await act('DELETE', undefined, 'Back to Jellyfin\'s title.');
+  }
+
+  // A series' episode orders: Overfin says which fit the files, the admin
+  // chooses.
+  let orders = $state<SeriesOrders | null>(null);
+  let ordersFailure = $state('');
+  const typeNames: Record<number, string> = { 1: 'Original air date', 3: 'DVD', 4: 'Digital', 6: 'Production', 7: 'TV' };
+
+  async function loadOrders() {
+    orders = null;
+    ordersFailure = '';
+    try {
+      orders = await api<SeriesOrders>('GET', `/admin/api/identification/${t.itemId}/orders`);
+    } catch (err) {
+      ordersFailure = message(err);
+    }
+  }
+
+  $effect(() => {
+    if (t.kind === 'series' && t.tmdb) void loadOrders();
+  });
+
+  const orderName = (o: SeriesOrder) => o.id ? o.name || 'Unnamed order' : 'TMDB\'s order';
+  // Its kind, unless its name says it already.
+  const orderLabel = (o: SeriesOrder) => {
+    const kind = o.type ? typeNames[o.type] : '';
+    return kind && !orderName(o).toLowerCase().includes(kind.toLowerCase()) ? `${orderName(o)} (${kind})` : orderName(o);
+  };
+  const seasonCounts = (o: SeriesOrder) => o.seasons.filter((s) => s.number > 0).map((s) => s.episodes).join(' · ');
+
+  async function chooseOrder(o: SeriesOrder) {
+    if (!(await ask('Seasons and episodes are numbered as in this order, for everyone. What people watched stays with the files they watched.', { title: `Use “${orderName(o)}”?`, yes: 'Use this order' }))) return;
+    await api('PUT', `/admin/api/identification/${t.itemId}/order`, { group: o.id });
+    toast('Order changed.');
+    if (orders) orders.current = o.id;
+    await reload();
   }
 
   async function find(e?: SubmitEvent) {
@@ -90,6 +126,30 @@
     {/each}
   </ul>
 {/if}
+{#if t.kind === 'series' && t.tmdb}
+  <h3>Episode order</h3>
+  <ul class="list top">
+    {#if ordersFailure}
+      <li class="error">{ordersFailure}</li>
+    {:else if !orders}
+      <li class="hint">Reading TMDB…</li>
+    {:else}
+      {#each orders.orders as o (o.id)}
+        <li class="order">
+          <div class="order-text">
+            <div class="name">{orderLabel(o)}</div>
+            <div class="hint">Episodes per season: {seasonCounts(o) || 'none'}</div>
+            <div class="hint">{`${o.seasonsFit} of ${orders.seasons} ${orders.seasons === 1 ? 'season' : 'seasons'} here ${o.seasonsFit === 1 ? 'fits' : 'fit'} · ${o.named} ${o.named === 1 ? 'file name matches' : 'file names match'} its episodes`}</div>
+          </div>
+          <div class="order-actions">
+            {#if o.fits}<Badge kind="ok">Fits the files</Badge>{/if}
+            {#if o.id === orders.current}<Badge kind="info">Current</Badge>{:else}<Busy small action={() => chooseOrder(o)}>Use this</Busy>{/if}
+          </div>
+        </li>
+      {/each}
+    {/if}
+  </ul>
+{/if}
 <h3>Find the right one on TMDB</h3>
 <form class="toolbar" onsubmit={find}>
   <input type="search" bind:value={query} aria-label="Search TMDB" />
@@ -116,3 +176,11 @@
     {/each}
   {/if}
 </ul>
+
+<style>
+  .order-actions { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+  @media (max-width: 640px) {
+    li.order { flex-direction: column; align-items: stretch; }
+    .order-text { flex: none; }
+  }
+</style>

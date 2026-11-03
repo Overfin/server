@@ -276,6 +276,7 @@ type SeasonFull struct {
 
 // Episode is one episode of a season, in plain text.
 type Episode struct {
+	ID       int // TMDB's own: stays when TMDB or an order renumbers it
 	Number   int
 	Name     string
 	Overview string
@@ -439,7 +440,7 @@ func (raw rawSeason) full(season int) (*SeasonFull, error) {
 			continue
 		}
 		seen[e.EpisodeNumber] = true
-		ep := Episode{Number: e.EpisodeNumber, Name: textclean.Plain(e.Name, 300), Overview: textclean.Plain(e.Overview, 2000),
+		ep := Episode{ID: e.ID, Number: e.EpisodeNumber, Name: textclean.Plain(e.Name, 300), Overview: textclean.Plain(e.Overview, 2000),
 			AirDate: date(e.AirDate)}
 		if e.Runtime > 0 && e.Runtime < 10_000 {
 			ep.Runtime = e.Runtime

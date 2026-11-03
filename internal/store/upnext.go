@@ -13,7 +13,7 @@ import (
 // order, specials last; with a, only those it allows. "" when the
 // libraries have none.
 func (s *Store) SeriesUpNext(ctx context.Context, profileID string, series TitleRef, a *Access) (key string, positionMs int64, err error) {
-	lo, hi := keyRange(series.Key() + "/s")
+	lo, hi := keyRange(series.Key() + "/")
 	allowed, args := "1 = 1", []any(nil)
 	if a != nil {
 		allowed, args = a.itemAllowed("catalog_items")
@@ -36,6 +36,7 @@ func (s *Store) SeriesUpNext(ctx context.Context, profileID string, series Title
 		}
 		if r, ok := ParseTitleKey(k); ok && !at[k] {
 			at[k] = true
+			r.Season, r.Episode = sn, en
 			episodes = append(episodes, r)
 		}
 	}
@@ -66,6 +67,7 @@ func (s *Store) SeriesUpNext(ctx context.Context, profileID string, series Title
 	if err != nil {
 		return "", 0, err
 	}
+	var finished []TitleRef
 	var latest *TitleRef
 	for rows.Next() {
 		var k string
@@ -73,14 +75,23 @@ func (s *Store) SeriesUpNext(ctx context.Context, profileID string, series Title
 			rows.Close()
 			return "", 0, err
 		}
-		if r, ok := ParseTitleKey(k); ok && r.Kind == "episode" && (latest == nil || r.Season > latest.Season ||
-			(r.Season == latest.Season && r.Episode > latest.Episode)) {
-			latest = &r
+		if r, ok := ParseTitleKey(k); ok && r.Kind == "episode" {
+			finished = append(finished, r)
 		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return "", 0, err
+	}
+	places := Places{}
+	if err := s.addPlaces(ctx, places, series); err != nil {
+		return "", 0, err
+	}
+	for _, f := range finished {
+		if r, ok := places.Of(f); ok && (latest == nil || r.Season > latest.Season ||
+			(r.Season == latest.Season && r.Episode > latest.Episode)) {
+			latest = &r
+		}
 	}
 	if latest != nil {
 		// Specials come next only after a special.

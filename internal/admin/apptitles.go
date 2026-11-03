@@ -343,7 +343,7 @@ func wantedBy(f *store.ValuationFacts) map[string]map[string]bool {
 	}
 	out := map[string]map[string]bool{}
 	add := func(title, account string) {
-		ref, ok := store.ParseTitleKey(title)
+		ref, ok := f.Ref(title)
 		if !ok || !active[account] {
 			return
 		}
@@ -407,7 +407,7 @@ func titleStats(f *store.ValuationFacts) map[string]*titleStatsJSON {
 		return t
 	}
 	for _, v := range f.Viewings {
-		ref, ok := store.ParseTitleKey(v.Title)
+		ref, ok := f.Ref(v.Title)
 		if !ok {
 			continue
 		}

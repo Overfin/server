@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -95,10 +96,22 @@ func (s *Store) retitle(ctx context.Context, tx *sql.Tx, itemID, kind, tmdb, old
 		AND kind IN ('movie', 'series'))`, oldKey, itemID).Scan(&shared); err != nil || shared {
 		return err
 	}
+	// The new title's episodes have other IDs: what profiles did stays with
+	// the files, by their numbers, until the new title's are known.
+	if old, ok := strings.CutPrefix(oldKey, "series/tmdb/"); ok {
+		if err := marksToNumbers(ctx, tx, old); err != nil {
+			return err
+		}
+	}
 	lo, hi := keyRange(oldKey + "/")
-	_, err := tx.ExecContext(ctx, `UPDATE OR IGNORE profile_titles SET title = ? || substr(title, ?)
-		WHERE title = ? OR (title >= ? AND title < ?)`, newKey, len(oldKey)+1, oldKey, lo, hi)
-	return err
+	if _, err := tx.ExecContext(ctx, `UPDATE OR IGNORE profile_titles SET title = ? || substr(title, ?)
+		WHERE title = ? OR (title >= ? AND title < ?)`, newKey, len(oldKey)+1, oldKey, lo, hi); err != nil {
+		return err
+	}
+	if kind == "series" {
+		return marksToIDs(ctx, tx, tmdb, -1)
+	}
+	return nil
 }
 
 // Overrides returns the TMDB IDs admins chose, by item ID.

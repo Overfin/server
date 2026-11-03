@@ -14,6 +14,7 @@ func TestParseTitleKey(t *testing.T) {
 		"movie/tmdb/949":                   {Kind: "movie", Source: "tmdb", ID: "949"},
 		"series/tvdb/81189/s2":             {Kind: "season", Source: "tvdb", ID: "81189", Season: 2},
 		"series/tmdb/1399/s0/e12":          {Kind: "episode", Source: "tmdb", ID: "1399", Season: 0, Episode: 12},
+		"series/tmdb/1399/e63056":          {Kind: "episode", Source: "tmdb", ID: "1399", EpisodeID: 63056},
 		"item/" + strings.Repeat("ab", 16): {Kind: "item", ID: strings.Repeat("ab", 16)},
 	} {
 		got, ok := ParseTitleKey(key)
@@ -21,7 +22,7 @@ func TestParseTitleKey(t *testing.T) {
 			t.Errorf("%s: %+v %v", key, got, ok)
 		}
 	}
-	for _, bad := range []string{"movie/tmdb/949/s1", "show/tmdb/1", "movie/tmdb/../x", "item/xyz", "series/tmdb/1/e2"} {
+	for _, bad := range []string{"movie/tmdb/949/s1", "show/tmdb/1", "movie/tmdb/../x", "item/xyz", "series/tmdb/1/e0", "series/tvdb/1/e2", "movie/tmdb/1/e2", "series/tmdb/1/e2/s1"} {
 		if _, ok := ParseTitleKey(bad); ok {
 			t.Errorf("%s parsed", bad)
 		}

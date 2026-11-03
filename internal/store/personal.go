@@ -23,7 +23,7 @@ type Personal struct {
 
 // TitleKeys gives library items their title's key, which names the title
 // itself rather than one of its copies: "movie/tmdb/949",
-// "series/tmdb/1399/s1/e2". An item the index can't name that way (no
+// "series/tmdb/1399/e63056". An item the index can't name that way (no
 // external ID, no numbers, or not indexed) keeps a key of its own,
 // "item/<id>". Keys are computed in the index (RefreshTitleKeys).
 func (s *Store) TitleKeys(ctx context.Context, itemIDs []string) (map[string]string, error) {
@@ -58,8 +58,9 @@ const showKey = `CASE WHEN s.tmdb IS NOT NULL THEN 'series/tmdb/' || s.tmdb
 
 // RefreshTitleKeys computes every indexed item's title key: a film or a
 // show by the first external ID it has (TMDB, then TVDB for shows, then
-// IMDb), a season or an episode by its show's key and its numbers, and any
-// item that can't be named so by its own ID. Anything missing (an ID, a
+// IMDb), a season by its show's key and its number, an episode by TMDB's ID
+// for the place its numbers are in the series' order, else by its show's key
+// and its numbers, and any item that can't be named so by its own ID. Anything missing (an ID, a
 // number) makes the whole key NULL, which falls back to the item's own.
 func (s *Store) RefreshTitleKeys(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE catalog_items SET title_key = coalesce(CASE
@@ -68,8 +69,11 @@ func (s *Store) RefreshTitleKeys(ctx context.Context) error {
 		WHEN kind = 'series' THEN (SELECT `+showKey+` FROM catalog_items s WHERE s.id = catalog_items.id)
 		WHEN kind = 'season' THEN (SELECT `+showKey+` FROM catalog_items s
 			WHERE s.id = catalog_items.series_id AND s.kind = 'series') || '/s' || season_number
-		WHEN kind = 'episode' THEN (SELECT `+showKey+` FROM catalog_items s
-			WHERE s.id = catalog_items.series_id AND s.kind = 'series') || '/s' || season_number || '/e' || episode_number
+		WHEN kind = 'episode' THEN coalesce((SELECT 'series/tmdb/' || s.tmdb || '/e' || e.tmdb_id FROM catalog_items s
+				JOIN catalog_episodes e ON e.series = s.tmdb AND e.season = catalog_items.season_number AND e.episode = catalog_items.episode_number
+				WHERE s.id = catalog_items.series_id AND s.kind = 'series' AND e.tmdb_id IS NOT NULL),
+			(SELECT `+showKey+` FROM catalog_items s
+				WHERE s.id = catalog_items.series_id AND s.kind = 'series') || '/s' || season_number || '/e' || episode_number)
 		END, 'item/' || id)`)
 	return err
 }
@@ -78,6 +82,16 @@ func (s *Store) RefreshTitleKeys(ctx context.Context) error {
 // way two copies of one title add up: watched if either is, the furthest
 // position, the most plays, the latest play, a favorite if either is.
 func (s *Store) MergePersonal(ctx context.Context, profileID string, states []Personal) error {
+	// What's brought in names episodes by their numbers.
+	for i, p := range states {
+		if r, ok := ParseTitleKey(p.Title); ok && r.Kind == "episode" {
+			placed, err := s.PlaceTitle(ctx, r)
+			if err != nil {
+				return err
+			}
+			states[i].Title = placed.Key()
+		}
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
