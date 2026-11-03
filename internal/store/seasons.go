@@ -60,6 +60,7 @@ type Season struct {
 
 // Episode is one episode of a season, from TMDB.
 type Episode struct {
+	ID       int // TMDB's, 0 when unknown
 	Number   int
 	Name     string
 	Overview string
@@ -76,6 +77,15 @@ func (s *Store) SetSeason(ctx context.Context, series string, se Season, at time
 		return err
 	}
 	defer tx.Rollback()
+	if err := setSeason(ctx, tx, series, se, at); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// setSeason is SetSeason, in tx: the season's files and marks then go by
+// its episodes' TMDB IDs (episodekeys.go).
+func setSeason(ctx context.Context, tx *sql.Tx, series string, se Season, at time.Time) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM catalog_seasons WHERE series = ? AND season = ?`, series, se.Number); err != nil {
 		return err
 	}
@@ -85,13 +95,13 @@ func (s *Store) SetSeason(ctx context.Context, series string, se Season, at time
 		return err
 	}
 	for _, e := range se.Episodes {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_episodes (series, season, episode, name, overview, air_date, runtime, still)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, series, se.Number, e.Number, e.Name, e.Overview, nullString(e.AirDate),
-			nullInt(e.Runtime), nullString(e.Still)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_episodes (series, season, episode, name, overview, air_date, runtime, still, tmdb_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, series, se.Number, e.Number, e.Name, e.Overview, nullString(e.AirDate),
+			nullInt(e.Runtime), nullString(e.Still), nullInt(e.ID)); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	return settleSeason(ctx, tx, series, se.Number)
 }
 
 // SeasonByTMDB returns a series' season with its episodes, in order, or nil
@@ -110,19 +120,52 @@ func (s *Store) SeasonByTMDB(ctx context.Context, series string, number int) (*S
 	}
 	se.FetchedAt = time.Unix(fetched, 0)
 	rows, err := s.read.QueryContext(ctx, `SELECT episode, name, overview, coalesce(air_date, ''), coalesce(runtime, 0),
-		coalesce(still, '') FROM catalog_episodes WHERE series = ? AND season = ? ORDER BY episode`, series, number)
+		coalesce(still, ''), coalesce(tmdb_id, 0) FROM catalog_episodes WHERE series = ? AND season = ? ORDER BY episode`, series, number)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var e Episode
-		if err := rows.Scan(&e.Number, &e.Name, &e.Overview, &e.AirDate, &e.Runtime, &e.Still); err != nil {
+		if err := rows.Scan(&e.Number, &e.Name, &e.Overview, &e.AirDate, &e.Runtime, &e.Still, &e.ID); err != nil {
 			return nil, err
 		}
 		se.Episodes = append(se.Episodes, e)
 	}
 	return &se, rows.Err()
+}
+
+// SeriesSeasonsKept returns a series' seasons as they're kept, with their
+// episodes.
+func (s *Store) SeriesSeasonsKept(ctx context.Context, series string) ([]Season, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT season FROM catalog_seasons WHERE series = ? ORDER BY season`, series)
+	if err != nil {
+		return nil, err
+	}
+	var numbers []int
+	for rows.Next() {
+		var n int
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		numbers = append(numbers, n)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var out []Season
+	for _, n := range numbers {
+		se, err := s.SeasonByTMDB(ctx, series, n)
+		if err != nil {
+			return nil, err
+		}
+		if se != nil {
+			out = append(out, *se)
+		}
+	}
+	return out, nil
 }
 
 // PurgeSeasons deletes the seasons (and their episodes) not fetched again

@@ -152,7 +152,7 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 		if !ok || !p.Active {
 			continue
 		}
-		r, ok := store.ParseTitleKey(v.Title)
+		r, ok := f.Ref(v.Title)
 		if !ok {
 			continue
 		}
@@ -229,7 +229,7 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 
 	// What people marked, keep for later, and asked for.
 	each := func(key string, fn func(t *store.ValuedTitle)) {
-		r, ok := store.ParseTitleKey(key)
+		r, ok := f.Ref(key)
 		if !ok {
 			return
 		}

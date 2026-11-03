@@ -960,6 +960,13 @@ nothing beyond what that needs.
 - ~~**Metadata editor**~~ Done (2026-10-31) in the panel: the operator
   changes a title's details by hand, and Overfin keeps the changes itself,
   over what TMDB says.
+- ~~**Episode orders**~~ Done (2026-11-02). Episodes go by TMDB's own IDs
+  (`series/tmdb/1399/e63056`), so what profiles did stays with an episode
+  when TMDB renumbers it; one TMDB gives no ID keeps its numbers. In the
+  panel's Identification, a series lists TMDB's other orders (DVD,
+  production, digital, TV), each compared with the files; Overfin never
+  chooses. Choosing one numbers the series that way for everyone, and what
+  people watched stays with the files they watched.
 - ~~**Overfin identifies titles itself; Jellyfin fetches no metadata**~~
   Done (2026-10-31), except anime numbered across the whole series: their
   numbers are read and the placing is written (`identify.readEpisode`,

@@ -2,6 +2,7 @@ package tmdb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -80,5 +81,63 @@ func TestEpisodeOrders(t *testing.T) {
 	groupsFail = true
 	if _, err := c.EpisodeOrders(context.Background(), 615); err == nil {
 		t.Error("no error when the orders can't be read")
+	}
+}
+
+func TestArrangedOrder(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/3/tv/615/episode_groups":
+			io.WriteString(w, `{"results":[{"id":"aa","name":"Production","type":6},{"id":"bb","name":"Arcs","type":5},{"id":"not/valid","type":3}]}`)
+		case "/3/tv/episode_group/aa":
+			io.WriteString(w, `{"name":"Production","groups":[
+				{"name":"Specials","order":0,"episodes":[{"id":91,"order":0,"show_id":615,"name":"Bonus"}]},
+				{"name":"Season 1","order":1,"episodes":[
+					{"id":12,"order":1,"show_id":615,"name":"Second","air_date":"1999-04-02","season_number":4,"episode_number":9,"runtime":22,"still_path":"/still1234.jpg"},
+					{"id":11,"order":0,"show_id":615,"name":"First","air_date":"1999-03-28","season_number":1,"episode_number":3}]}]}`)
+		case "/3/tv/episode_group/cc":
+			io.WriteString(w, `{"groups":[{"name":"Volume 1","order":0,"episodes":[{"id":11,"order":0,"show_id":615}]},
+				{"name":"Volume 2","order":1,"episodes":[{"id":12,"order":0,"show_id":615}]}]}`)
+		case "/3/tv/episode_group/dd":
+			io.WriteString(w, `{"groups":[{"name":"S","order":1,"episodes":[{"id":5,"order":0,"show_id":999}]}]}`)
+		default:
+			t.Errorf("unexpected %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL+"/3", testToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	others, err := c.OtherOrders(ctx, 615)
+	if err != nil || len(others) != 1 || others[0].ID != "aa" || others[0].Name != "Production" || others[0].Type != 6 {
+		t.Fatalf("%+v %v", others, err)
+	}
+	order, err := c.ArrangedOrder(ctx, 615, "aa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	one := order.Seasons[1]
+	if one == nil || len(one.Episodes) != 2 || one.AirDate != "1999-03-28" {
+		t.Fatalf("%+v", one)
+	}
+	first, second := one.Episodes[0], one.Episodes[1]
+	if first.ID != 11 || first.Number != 1 || second.ID != 12 || second.Number != 2 || second.Runtime != 22 || second.Still != "/still1234.jpg" {
+		t.Errorf("%+v %+v", first, second)
+	}
+	if sp := order.Seasons[0]; sp == nil || sp.Episodes[0].ID != 91 {
+		t.Errorf("specials: %+v", sp)
+	}
+	// Orders from 0 without specials start at season 1.
+	shifted, err := c.ArrangedOrder(ctx, 615, "cc")
+	if err != nil || shifted.Seasons[0] != nil || shifted.Seasons[1] == nil || shifted.Seasons[2] == nil {
+		t.Errorf("%+v %v", shifted, err)
+	}
+	if _, err := c.ArrangedOrder(ctx, 615, "dd"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("another series' order: %v", err)
+	}
+	if _, err := c.ArrangedOrder(ctx, 615, "not/valid"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a bad ID: %v", err)
 	}
 }

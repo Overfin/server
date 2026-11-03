@@ -57,7 +57,7 @@ func TestLogosCheckedAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`DROP TABLE logos_to_check; DROP TABLE collections_to_find; DROP TABLE collections;
-		DROP INDEX catalog_titles_collection; ALTER TABLE catalog_titles DROP COLUMN collection; DROP TABLE title_history; DROP TABLE title_edits; DROP TABLE title_uploads; DROP TABLE title_matches; DROP TABLE catalog_title_keywords; ALTER TABLE catalog_items DROP COLUMN audio_languages; ALTER TABLE profiles DROP COLUMN audio_language; DROP TABLE title_tracks; CREATE TABLE catalog_genres (item_id TEXT); CREATE TABLE catalog_studios (item_id TEXT); CREATE TABLE catalog_tags (item_id TEXT); CREATE TABLE catalog_people (item_id TEXT); DROP TABLE wishes; DROP TABLE wish_states; DROP TABLE wish_turns; DROP TABLE wish_arrivals; DROP TABLE wish_off; DROP TABLE wish_sends; PRAGMA user_version = 65`); err != nil {
+		DROP INDEX catalog_titles_collection; ALTER TABLE catalog_titles DROP COLUMN collection; DROP TABLE title_history; DROP TABLE title_edits; DROP TABLE title_uploads; DROP TABLE title_matches; DROP TABLE catalog_title_keywords; ALTER TABLE catalog_items DROP COLUMN audio_languages; ALTER TABLE profiles DROP COLUMN audio_language; DROP TABLE title_tracks; CREATE TABLE catalog_genres (item_id TEXT); CREATE TABLE catalog_studios (item_id TEXT); CREATE TABLE catalog_tags (item_id TEXT); CREATE TABLE catalog_people (item_id TEXT); DROP TABLE wishes; DROP TABLE wish_states; DROP TABLE wish_turns; DROP TABLE wish_arrivals; DROP TABLE wish_off; DROP TABLE wish_sends; DROP INDEX catalog_episodes_tmdb_id; ALTER TABLE catalog_episodes DROP COLUMN tmdb_id; DROP INDEX profile_titles_title; DROP TABLE series_orders; PRAGMA user_version = 65`); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()

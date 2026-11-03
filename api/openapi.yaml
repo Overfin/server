@@ -3476,7 +3476,9 @@ components:
       required: true
       description: >-
         A title's key, with underscores, such as `title_movie_tmdb_949`,
-        `title_series_tmdb_1399_s1_e2`, or `title_item_` and a file's ID for
+        `title_series_tmdb_1399_e63056` (an episode by TMDB's ID; by its numbers,
+        `title_series_tmdb_1399_s1_e2`, when TMDB gives it none or for an older
+        link), or `title_item_` and a file's ID for
         one no one identified.
       schema:
         type: string
@@ -4175,7 +4177,7 @@ components:
       properties:
         id:
           type: string
-          examples: [title_series_tmdb_1399_s1_e2]
+          examples: [title_series_tmdb_1399_e63056]
         kind:
           type: string
           description: Open set; `other` is a file no one identified.

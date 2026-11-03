@@ -343,7 +343,8 @@ func (l Library) describe(ctx context.Context, r store.TitleRef) {
 	if err == nil && (t == nil || len(t.Details) == 0) {
 		err = l.Titles.FetchTitle(ctx, kind, tmdbID)
 	}
-	if err == nil && (r.Kind == "season" || r.Kind == "episode") {
+	// An episode by ID is of a season kept already.
+	if err == nil && (r.Kind == "season" || (r.Kind == "episode" && r.EpisodeID == 0)) {
 		var se *store.Season
 		if se, err = st.SeasonByTMDB(ctx, tmdbID, r.Season); err == nil && se == nil {
 			err = l.Titles.FetchSeason(ctx, tmdbID, r.Season)
@@ -474,12 +475,12 @@ func (l Library) title(w http.ResponseWriter, r *http.Request) {
 			l.storeError(w, err)
 			return
 		}
+		overviews := map[string]string{}
+		for _, t := range infos {
+			overviews[titleID(t.Ref.Key())] = t.Overview
+		}
 		for _, e := range episodes {
-			ej := episodeJSON{TitleSummary: e}
-			if ref, ok := titleRef(e.ID); ok && infos[ref.Key()] != nil {
-				ej.Overview = infos[ref.Key()].Overview
-			}
-			out.Episodes = append(out.Episodes, ej)
+			out.Episodes = append(out.Episodes, episodeJSON{TitleSummary: e, Overview: overviews[e.ID]})
 		}
 	}
 	writeOK(w, out)
@@ -701,6 +702,10 @@ func (l Library) copyOf(ctx context.Context, p *store.Profile, id string) (strin
 // (specials only after a special); nil when there's none.
 func (l Library) nextEpisode(ctx context.Context, p *store.Profile, ep store.TitleRef) (*library.TitleSummary, error) {
 	st := l.Provisioner.Store
+	ep, err := st.PlaceTitle(ctx, ep)
+	if err != nil {
+		return nil, err
+	}
 	var keys []string
 	add := func(season int, after int) error {
 		numbers, err := st.SeasonEpisodes(ctx, store.TitleRef{Kind: "season", Source: ep.Source, ID: ep.ID, Season: season})

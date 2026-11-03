@@ -142,8 +142,13 @@ type Panel struct {
 	// EpisodeOrders, when set, reads what TMDB says of a series' episodes,
 	// for the apps that import them (/apps/v1/episode-orders).
 	EpisodeOrders func(ctx context.Context, tmdbID int) (*tmdb.EpisodeOrders, error)
-	Images        *images.Pipeline
-	OnRetitled    func()
+	// ReadSeriesOrders, when set, reads a series' episode orders, TMDB's own
+	// first, for the admin to compare with the files; ChooseSeriesOrder
+	// numbers the series as one does ("": TMDB's own).
+	ReadSeriesOrders  func(ctx context.Context, tmdbID int) ([]catalog.SeriesOrder, error)
+	ChooseSeriesOrder func(ctx context.Context, tmdbID int, group string) error
+	Images            *images.Pipeline
+	OnRetitled        func()
 	// TitleImages, when set, lists the images TMDB has of a film or a
 	// series, for the metadata editor to choose from.
 	TitleImages func(ctx context.Context, kind string, tmdbID int) (map[string][]tmdb.Image, error)
@@ -330,6 +335,8 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/identification/search", p.signedIn(p.identificationSearch))
 	mux.HandleFunc("PUT /admin/api/identification/{id}", p.signedIn(p.identify))
 	mux.HandleFunc("DELETE /admin/api/identification/{id}", p.signedIn(p.unidentify))
+	mux.HandleFunc("GET /admin/api/identification/{id}/orders", p.signedIn(p.seriesOrders))
+	mux.HandleFunc("PUT /admin/api/identification/{id}/order", p.signedIn(p.chooseSeriesOrder))
 	mux.HandleFunc("GET /admin/api/posters/{id}", p.signedIn(p.poster))
 	mux.HandleFunc("GET /admin/api/metadata/{kind}/{tmdb}", p.signedIn(p.metadata))
 	mux.HandleFunc("GET /admin/api/metadata/{kind}/{tmdb}/images", p.signedIn(p.metadataImages))

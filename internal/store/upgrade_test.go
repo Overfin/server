@@ -69,13 +69,12 @@ func TestUpgradeFrom048KeepsData(t *testing.T) {
 	now := time.Now()
 	fetched := now.Add(-24 * time.Hour)
 	oldTitleDetails(t, s, Title{Kind: "series", TMDB: "1399", Name: "Game of Thrones"}, `{"language":"en"}`, fetched)
-	if err := s.SetSeason(ctx, "1399", Season{Number: 1, Name: "Season 1", Episodes: []Episode{{Number: 1, Name: "Winter Is Coming", Still: "/a.jpg"}}}, fetched); err != nil {
-		t.Fatal(err)
-	}
 	for _, q := range []struct {
 		sql  string
 		args []any
 	}{
+		{`INSERT INTO catalog_seasons (series, season, name, overview, fetched_at) VALUES ('1399', 1, 'Season 1', '', ?)`, []any{fetched.Unix()}},
+		{`INSERT INTO catalog_episodes (series, season, episode, name, overview, still) VALUES ('1399', 1, 1, 'Winter Is Coming', '', '/a.jpg')`, nil},
 		{`INSERT INTO artwork (key, type, path) VALUES ('series/tmdb/1399', 'poster', '/p.jpg')`, nil},
 		{`INSERT INTO artwork_fetched (key, fetched_at) VALUES ('series/tmdb/1399', ?)`, []any{fetched.Unix()}},
 		{`INSERT INTO title_ratings (kind, tmdb, country, certification) VALUES ('series', '1399', 'US', 'TV-MA')`, nil},

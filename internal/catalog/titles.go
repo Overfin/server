@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"slices"
 	"strconv"
 	"sync"
@@ -245,7 +246,10 @@ func (a *Titles) fetch(ctx context.Context, src TitleSource, t store.ArtworkTarg
 	if len(seasons) == 0 {
 		return out, nil
 	}
-	got, err := src.Seasons(ctx, id, seasons)
+	got, err := orderSeasons(ctx, a.Store, src, id, nil)
+	if got == nil && err == nil {
+		got, err = src.Seasons(ctx, id, seasons)
+	}
 	if err != nil && !errors.Is(err, tmdb.ErrNotFound) {
 		return nil, err
 	}
@@ -284,6 +288,16 @@ func (a *Titles) page(ctx context.Context, src TitleSource, kind string, id int,
 			AirDate: se.AirDate})
 		seasons = append(seasons, se.Number)
 	}
+	// A series in another order lists that order's seasons.
+	if kind == "series" {
+		ordered, err := orderSeasons(ctx, a.Store, src, id, full)
+		if err != nil {
+			return nil, err
+		}
+		if ordered != nil {
+			det.Seasons, seasons = seasonInfos(ordered), slices.Sorted(maps.Keys(ordered))
+		}
+	}
 	// Similar titles: kept like a list's, so they can be shown.
 	similar := make([]store.Title, 0, len(full.Similar))
 	for _, t := range full.Similar {
@@ -321,6 +335,16 @@ func (a *Titles) page(ctx context.Context, src TitleSource, kind string, id int,
 // season reads and keeps one of a series' seasons with its episodes, and
 // adds their images to images.
 func (a *Titles) season(ctx context.Context, src TitleSource, series, n int, images map[string]map[string]string) error {
+	ordered, err := orderSeasons(ctx, a.Store, src, series, nil)
+	if err != nil {
+		return err
+	}
+	if ordered != nil {
+		if se := ordered[n]; se != nil {
+			return a.keepSeason(ctx, series, se, images)
+		}
+		return tmdb.ErrNotFound
+	}
 	season, err := src.Season(ctx, series, n)
 	if err != nil {
 		return err
@@ -336,7 +360,7 @@ func (a *Titles) keepSeason(ctx context.Context, series int, season *tmdb.Season
 	sk := "series/tmdb/" + strconv.Itoa(series) + "/s" + strconv.Itoa(n)
 	images[sk] = map[string]string{"poster": season.Poster}
 	for _, e := range season.Episodes {
-		kept.Episodes = append(kept.Episodes, store.Episode{Number: e.Number, Name: e.Name, Overview: e.Overview,
+		kept.Episodes = append(kept.Episodes, store.Episode{ID: e.ID, Number: e.Number, Name: e.Name, Overview: e.Overview,
 			AirDate: e.AirDate, Runtime: e.Runtime, Still: e.Still})
 		images[sk+"/e"+strconv.Itoa(e.Number)] = map[string]string{"still": e.Still}
 	}

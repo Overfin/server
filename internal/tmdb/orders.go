@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/overfin/server/internal/textclean"
 )
 
 // EpisodeOrders is what TMDB says of a series' episodes, for an app that
@@ -145,6 +147,118 @@ func (c *Client) rawSeasons(ctx context.Context, path string, numbers []int, q u
 			}
 			out[n] = &season
 		}
+	}
+	return out, nil
+}
+
+// EpisodeOrder is one of a series' other orders on TMDB, as an admin chooses
+// among them.
+type EpisodeOrder struct {
+	ID   string
+	Name string
+	Type int // an episode group's type: 1 air, 3 DVD, 4 digital, 6 production, 7 TV
+}
+
+// ArrangedSeasons are a series' seasons and episodes as an order numbers
+// them, by season number, each with TMDB's ID of its episodes. Season 0 is
+// the order's specials, when it says which they are.
+type ArrangedSeasons struct {
+	Name    string
+	Seasons map[int]*SeasonFull
+}
+
+// OtherOrders lists a series' orders that number seasons as releases do.
+func (c *Client) OtherOrders(ctx context.Context, seriesID int) ([]EpisodeOrder, error) {
+	if !ValidID(seriesID) {
+		return nil, ErrNotFound
+	}
+	var list struct {
+		Results []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			Type int    `json:"type"`
+		} `json:"results"`
+	}
+	if err := c.get(ctx, "/tv/"+strconv.Itoa(seriesID)+"/episode_groups", nil, &list); err != nil {
+		return nil, err
+	}
+	out := []EpisodeOrder{}
+	for _, r := range list.Results {
+		if slices.Contains(seasonGroupTypes, r.Type) && groupID.MatchString(r.ID) && len(out) < maxOrderGroups {
+			out = append(out, EpisodeOrder{ID: r.ID, Name: textclean.Plain(r.Name, 120), Type: r.Type})
+		}
+	}
+	return out, nil
+}
+
+// rawGroupEpisode is an episode as an episode group lists it. Runtime and the
+// rest are as a season's episodes.
+type rawGroupEpisode struct {
+	rawEpisode
+	ShowID int `json:"show_id"`
+	Order  int `json:"order"`
+}
+
+// specialsName is how a group's specials are named.
+var specialsName = regexp.MustCompile(`(?i)\bsp[eé]cial`)
+
+// ArrangedOrder reads an order of a series: another series' is ErrNotFound.
+// A group's order says a season's number. Numbers start at 1, specials aside:
+// a group whose first season, not its specials, has order 0 is shifted.
+func (c *Client) ArrangedOrder(ctx context.Context, seriesID int, id string) (*ArrangedSeasons, error) {
+	if !ValidID(seriesID) || !groupID.MatchString(id) {
+		return nil, ErrNotFound
+	}
+	var raw struct {
+		Name   string `json:"name"`
+		Groups []struct {
+			Name     string            `json:"name"`
+			Order    int               `json:"order"`
+			Episodes []rawGroupEpisode `json:"episodes"`
+		} `json:"groups"`
+	}
+	if err := c.get(ctx, "/tv/episode_group/"+id, c.withLanguage(nil), &raw); err != nil {
+		return nil, err
+	}
+	shift := 0
+	for _, g := range raw.Groups {
+		if g.Order == 0 && !specialsName.MatchString(g.Name) {
+			shift = 1
+		}
+	}
+	out := &ArrangedSeasons{Name: textclean.Plain(raw.Name, 120), Seasons: map[int]*SeasonFull{}}
+	for _, g := range raw.Groups {
+		number := g.Order + shift
+		if specialsName.MatchString(g.Name) {
+			number = 0
+		}
+		if number < 0 || number > 1000 || out.Seasons[number] != nil {
+			continue
+		}
+		episodes := g.Episodes
+		slices.SortStableFunc(episodes, func(a, b rawGroupEpisode) int { return a.Order - b.Order })
+		season := rawSeason{Name: g.Name, SeasonNumber: &number}
+		for i, e := range episodes {
+			if e.ShowID != 0 && e.ShowID != seriesID {
+				return nil, ErrNotFound
+			}
+			e.rawEpisode.EpisodeNumber = i + 1
+			season.Episodes = append(season.Episodes, e.rawEpisode)
+		}
+		full, err := season.full(number)
+		if err != nil {
+			return nil, err
+		}
+		// A season's date is its first episode's.
+		for _, e := range full.Episodes {
+			if e.AirDate != "" && (full.AirDate == "" || e.AirDate < full.AirDate) {
+				full.AirDate = e.AirDate
+			}
+		}
+		out.Seasons[number] = full
+	}
+	if len(out.Seasons) == 0 {
+		return nil, ErrNotFound
 	}
 	return out, nil
 }
