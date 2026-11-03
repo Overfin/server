@@ -51,22 +51,24 @@ export interface Identified {
   reasons: Reason[];
 }
 
-/** One of a series' episode orders, compared with its files. */
+/** One of a series' episode orders. */
 export interface SeriesOrder {
   /** "" for TMDB's own. */
   id: string;
   name: string;
   type?: number;
   seasons: { number: number; episodes: number }[];
-  fits: boolean;
-  seasonsFit: number;
-  named: number;
+  /** The episodes here that it lists. */
+  has: number;
 }
 
 export interface SeriesOrders {
   current: string;
   orders: SeriesOrder[];
-  seasons: number;
+  /** The different episodes the files are. */
+  episodes: number;
+  /** Files TMDB's own order has no episode for: no order can place them. */
+  unplaced: number;
 }
 
 export interface Candidate {

@@ -87,9 +87,9 @@ func (s *Store) LibraryTitles(ctx context.Context) ([]LibraryTitle, error) {
 			bySeries[out[i].ItemID] = &out[i]
 		}
 	}
-	counts, err := s.read.QueryContext(ctx, `SELECT series_id, season_number, count(DISTINCT episode_number) FROM catalog_items
+	counts, err := s.read.QueryContext(ctx, `SELECT series_id, coalesce(shown_season, season_number) AS sn, count(DISTINCT coalesce(shown_episode, episode_number)) FROM catalog_items
 		WHERE kind = 'episode' AND series_id IS NOT NULL AND season_number IS NOT NULL AND episode_number IS NOT NULL
-		GROUP BY series_id, season_number`)
+		GROUP BY series_id, sn`)
 	if err != nil {
 		return nil, err
 	}

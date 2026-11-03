@@ -45,8 +45,8 @@
     await act('DELETE', undefined, 'Back to Jellyfin\'s title.');
   }
 
-  // A series' episode orders: Overfin says which fit the files, the admin
-  // chooses.
+  // A series' episode orders: they arrange the episodes the files are, and
+  // the admin chooses.
   let orders = $state<SeriesOrders | null>(null);
   let ordersFailure = $state('');
   const typeNames: Record<number, string> = { 1: 'Original air date', 3: 'DVD', 4: 'Digital', 6: 'Production', 7: 'TV' };
@@ -74,7 +74,7 @@
   const seasonCounts = (o: SeriesOrder) => o.seasons.filter((s) => s.number > 0).map((s) => s.episodes).join(' · ');
 
   async function chooseOrder(o: SeriesOrder) {
-    if (!(await ask('Seasons and episodes are numbered as in this order, for everyone. What people watched stays with the files they watched.', { title: `Use “${orderName(o)}”?`, yes: 'Use this order' }))) return;
+    if (!(await ask('Everyone sees this series\' seasons and episodes arranged this way. Files and what people watched don\'t change.', { title: `Use “${orderName(o)}”?`, yes: 'Use this order' }))) return;
     await api('PUT', `/admin/api/identification/${t.itemId}/order`, { group: o.id });
     toast('Order changed.');
     if (orders) orders.current = o.id;
@@ -128,6 +128,7 @@
 {/if}
 {#if t.kind === 'series' && t.tmdb}
   <h3>Episode order</h3>
+  {#if orders?.unplaced}<p class="hint">{`${orders.unplaced} ${orders.unplaced === 1 ? 'file is' : 'files are'} at numbers TMDB's order doesn't have: no order can place ${orders.unplaced === 1 ? 'it' : 'them'}.`}</p>{/if}
   <ul class="list top">
     {#if ordersFailure}
       <li class="error">{ordersFailure}</li>
@@ -139,10 +140,9 @@
           <div class="order-text">
             <div class="name">{orderLabel(o)}</div>
             <div class="hint">Episodes per season: {seasonCounts(o) || 'none'}</div>
-            <div class="hint">{`${o.seasonsFit} of ${orders.seasons} ${orders.seasons === 1 ? 'season' : 'seasons'} here ${o.seasonsFit === 1 ? 'fits' : 'fit'} · ${o.named} ${o.named === 1 ? 'file name matches' : 'file names match'} its episodes`}</div>
+            <div class="hint">{`Lists ${o.has} of the ${orders.episodes} ${orders.episodes === 1 ? 'episode' : 'episodes'} here`}</div>
           </div>
           <div class="order-actions">
-            {#if o.fits}<Badge kind="ok">Fits the files</Badge>{/if}
             {#if o.id === orders.current}<Badge kind="info">Current</Badge>{:else}<Busy small action={() => chooseOrder(o)}>Use this</Busy>{/if}
           </div>
         </li>

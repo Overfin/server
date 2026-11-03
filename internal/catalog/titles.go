@@ -247,6 +247,14 @@ func (a *Titles) fetch(ctx context.Context, src TitleSource, t store.ArtworkTarg
 		return out, nil
 	}
 	got, err := orderSeasons(ctx, a.Store, src, id, nil)
+	arranged := got != nil
+	if arranged && err == nil {
+		// Which episode each file is stays TMDB's own order.
+		var own map[int]*tmdb.SeasonFull
+		if own, err = ownSeasons(ctx, src, id); err == nil {
+			err = a.Store.SetOwnSeasons(ctx, t.TMDB, storeSeasons(own))
+		}
+	}
 	if got == nil && err == nil {
 		got, err = src.Seasons(ctx, id, seasons)
 	}
@@ -255,7 +263,7 @@ func (a *Titles) fetch(ctx context.Context, src TitleSource, t store.ArtworkTarg
 	}
 	for _, n := range seasons {
 		if se := got[n]; se != nil {
-			if err := a.keepSeason(ctx, id, se, out); err != nil {
+			if err := a.keepSeason(ctx, id, se, arranged, out); err != nil {
 				return nil, err
 			}
 		}
@@ -341,7 +349,7 @@ func (a *Titles) season(ctx context.Context, src TitleSource, series, n int, ima
 	}
 	if ordered != nil {
 		if se := ordered[n]; se != nil {
-			return a.keepSeason(ctx, series, se, images)
+			return a.keepSeason(ctx, series, se, true, images)
 		}
 		return tmdb.ErrNotFound
 	}
@@ -349,14 +357,14 @@ func (a *Titles) season(ctx context.Context, src TitleSource, series, n int, ima
 	if err != nil {
 		return err
 	}
-	return a.keepSeason(ctx, series, season, images)
+	return a.keepSeason(ctx, series, season, false, images)
 }
 
 // keepSeason keeps one of a series' seasons with its episodes, and adds
 // their images to images.
-func (a *Titles) keepSeason(ctx context.Context, series int, season *tmdb.SeasonFull, images map[string]map[string]string) error {
+func (a *Titles) keepSeason(ctx context.Context, series int, season *tmdb.SeasonFull, arranged bool, images map[string]map[string]string) error {
 	n := season.Number
-	kept := store.Season{Number: n, Name: season.Name, Overview: season.Overview, AirDate: season.AirDate, Poster: season.Poster}
+	kept := store.Season{Number: n, Name: season.Name, Overview: season.Overview, AirDate: season.AirDate, Poster: season.Poster, Arranged: arranged}
 	sk := "series/tmdb/" + strconv.Itoa(series) + "/s" + strconv.Itoa(n)
 	images[sk] = map[string]string{"poster": season.Poster}
 	for _, e := range season.Episodes {

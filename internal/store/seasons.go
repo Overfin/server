@@ -56,6 +56,8 @@ type Season struct {
 	Poster    string // a TMDB image path, or ""
 	Episodes  []Episode
 	FetchedAt time.Time
+	// Arranged: as an order an admin chose has it, not TMDB's own.
+	Arranged bool
 }
 
 // Episode is one episode of a season, from TMDB.
@@ -83,8 +85,9 @@ func (s *Store) SetSeason(ctx context.Context, series string, se Season, at time
 	return tx.Commit()
 }
 
-// setSeason is SetSeason, in tx: the season's files and marks then go by
-// its episodes' TMDB IDs (episodekeys.go).
+// setSeason is SetSeason, in tx: as TMDB's own order has it, the season's
+// files and marks then go by its episodes' IDs; arranged, only where its
+// episodes' files are shown changes (episodekeys.go).
 func setSeason(ctx context.Context, tx *sql.Tx, series string, se Season, at time.Time) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM catalog_seasons WHERE series = ? AND season = ?`, series, se.Number); err != nil {
 		return err
@@ -101,7 +104,31 @@ func setSeason(ctx context.Context, tx *sql.Tx, series string, se Season, at tim
 			return err
 		}
 	}
-	return settleSeason(ctx, tx, series, se.Number)
+	if !se.Arranged {
+		if err := keepOwnSeason(ctx, tx, series, se); err != nil {
+			return err
+		}
+	}
+	return showFiles(ctx, tx, series)
+}
+
+// SetOwnSeasons keeps a series' seasons as TMDB's own order has them, while
+// it's shown in another: which episode each file is.
+func (s *Store) SetOwnSeasons(ctx context.Context, series string, seasons []Season) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, se := range seasons {
+		if err := keepOwnSeason(ctx, tx, series, se); err != nil {
+			return err
+		}
+	}
+	if err := showFiles(ctx, tx, series); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SeasonByTMDB returns a series' season with its episodes, in order, or nil

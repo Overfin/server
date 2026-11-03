@@ -6,11 +6,13 @@ import (
 	"errors"
 )
 
-// Episodes go by TMDB's own IDs: series/tmdb/1399/e63056. Numbers say where
-// one is in its series' order, which TMDB, or an admin choosing another
-// order, can change. A key by numbers remains for what TMDB gives no ID (a
-// series known by another source, a file past TMDB's end, a season not
-// fetched yet); it's turned into the ID as soon as the ID is known.
+// Episodes go by TMDB's own IDs: series/tmdb/1399/e63056. A file is the
+// episode its numbers are in TMDB's own order (own_episodes), which is what
+// importing it made sure of; an order an admin chooses only changes where an
+// episode is shown (catalog_episodes), never which episode a file is. A key
+// by numbers remains for what TMDB gives no ID (a series known by another
+// source, a file past TMDB's end, a season not fetched yet); it's turned into
+// the ID as soon as the ID is known.
 
 type place struct{ season, episode int }
 
@@ -38,10 +40,30 @@ func (s *Store) addPlaces(ctx context.Context, p Places, r TitleRef) error {
 	return s.readPlaces(ctx, p, `WHERE series = ? AND tmdb_id IS NOT NULL`, r.ID)
 }
 
-// AllPlaces reads every series' places.
-func (s *Store) AllPlaces(ctx context.Context) (Places, error) {
+// OwnPlaces reads where every series' episodes are in TMDB's own order: the
+// files' numbers, which apps go by whatever a series is shown in.
+func (s *Store) OwnPlaces(ctx context.Context) (Places, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT series, tmdb_id, season, episode FROM own_episodes ORDER BY season = 0, season, episode`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	p := Places{}
-	return p, s.readPlaces(ctx, p, `WHERE tmdb_id IS NOT NULL`)
+	for rows.Next() {
+		var series string
+		var id int
+		var at place
+		if err := rows.Scan(&series, &id, &at.season, &at.episode); err != nil {
+			return nil, err
+		}
+		if p[series] == nil {
+			p[series] = map[int]place{}
+		}
+		if _, seen := p[series][id]; !seen {
+			p[series][id] = at
+		}
+	}
+	return p, rows.Err()
 }
 
 // readPlaces reads places. An order can list an episode twice: it's where
@@ -95,25 +117,53 @@ func (s *Store) PlaceTitle(ctx context.Context, r TitleRef) (TitleRef, error) {
 	return r, nil
 }
 
-// settleSeason gives a season's files and what profiles did with its
-// episodes their keys by ID, now that they're known.
-func settleSeason(ctx context.Context, tx *sql.Tx, series string, season int) error {
-	if err := filesToIDs(ctx, tx, series, season); err != nil {
+// keepOwnSeason keeps a season as TMDB's own order has it, and gives its files
+// and what profiles did with its episodes their keys by ID.
+func keepOwnSeason(ctx context.Context, tx *sql.Tx, series string, se Season) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM own_episodes WHERE series = ? AND season = ?`, series, se.Number); err != nil {
 		return err
 	}
-	return marksToIDs(ctx, tx, series, season)
+	for _, e := range se.Episodes {
+		if e.ID <= 0 {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO own_episodes (series, season, episode, tmdb_id) VALUES (?, ?, ?, ?)`,
+			series, se.Number, e.Number, e.ID); err != nil {
+			return err
+		}
+	}
+	if err := filesToIDs(ctx, tx, series, se.Number); err != nil {
+		return err
+	}
+	return marksToIDs(ctx, tx, series, se.Number)
 }
 
-// filesToIDs renames a series' episode files to the IDs at their numbers; a
-// season below 0: all its seasons'.
+// filesToIDs renames a series' episode files to the IDs at their numbers in
+// TMDB's own order; a season below 0: all its seasons'.
 func filesToIDs(ctx context.Context, tx *sql.Tx, series string, season int) error {
-	_, err := tx.ExecContext(ctx, `UPDATE catalog_items SET title_key = (SELECT 'series/tmdb/' || e.series || '/e' || e.tmdb_id
-			FROM catalog_episodes e WHERE e.series = ?1 AND e.season = catalog_items.season_number
-			AND e.episode = catalog_items.episode_number)
+	_, err := tx.ExecContext(ctx, `UPDATE catalog_items SET title_key = (SELECT 'series/tmdb/' || o.series || '/e' || o.tmdb_id
+			FROM own_episodes o WHERE o.series = ?1 AND o.season = catalog_items.season_number
+			AND o.episode = catalog_items.episode_number)
 		WHERE kind = 'episode' AND (?2 < 0 OR season_number = ?2)
 			AND series_id IN (SELECT id FROM catalog_items WHERE kind = 'series' AND tmdb = ?1)
-			AND EXISTS (SELECT 1 FROM catalog_episodes e WHERE e.series = ?1 AND e.season = catalog_items.season_number
-				AND e.episode = catalog_items.episode_number AND e.tmdb_id IS NOT NULL)`, series, season)
+			AND EXISTS (SELECT 1 FROM own_episodes o WHERE o.series = ?1 AND o.season = catalog_items.season_number
+				AND o.episode = catalog_items.episode_number)`, series, season)
+	return err
+}
+
+// showFiles says where a series' chosen order puts its files: where their
+// episodes are in it; a series on TMDB's own, nothing: their numbers.
+func showFiles(ctx context.Context, tx *sql.Tx, series string) error {
+	_, err := tx.ExecContext(ctx, `UPDATE catalog_items SET
+			shown_season = CASE WHEN EXISTS (SELECT 1 FROM series_orders WHERE series = ?1) THEN (SELECT e.season FROM own_episodes o
+				JOIN catalog_episodes e ON e.series = o.series AND e.tmdb_id = o.tmdb_id
+				WHERE o.series = ?1 AND o.season = catalog_items.season_number AND o.episode = catalog_items.episode_number
+				ORDER BY e.season = 0, e.season, e.episode LIMIT 1) END,
+			shown_episode = CASE WHEN EXISTS (SELECT 1 FROM series_orders WHERE series = ?1) THEN (SELECT e.episode FROM own_episodes o
+				JOIN catalog_episodes e ON e.series = o.series AND e.tmdb_id = o.tmdb_id
+				WHERE o.series = ?1 AND o.season = catalog_items.season_number AND o.episode = catalog_items.episode_number
+				ORDER BY e.season = 0, e.season, e.episode LIMIT 1) END
+		WHERE kind = 'episode' AND series_id IN (SELECT id FROM catalog_items WHERE kind = 'series' AND tmdb = ?1)`, series)
 	return err
 }
 
@@ -161,23 +211,43 @@ func mergeMarks(ctx context.Context, tx *sql.Tx, from string, args ...any) error
 	return nil
 }
 
-// marksToIDs renames what profiles did under an episode's numbers to its ID:
-// a series' season, or below 0 all its seasons.
+// marksToIDs renames what profiles did under an episode's numbers in TMDB's
+// own order to its ID: a series' season, or below 0 all its seasons.
 func marksToIDs(ctx context.Context, tx *sql.Tx, series string, season int) error {
 	return mergeMarks(ctx, tx, `FROM (SELECT 'series/tmdb/' || series || '/s' || season || '/e' || episode AS old,
 			'series/tmdb/' || series || '/e' || tmdb_id AS new
-			FROM catalog_episodes WHERE series = ? AND (? < 0 OR season = ?) AND tmdb_id IS NOT NULL) n
+			FROM own_episodes WHERE series = ? AND (? < 0 OR season = ?)) n
 		JOIN profile_titles p ON p.title = n.old`, series, season, season)
 }
 
 // marksToNumbers renames what profiles did under a series' episodes' IDs to
-// their numbers in its order as it is: what follows the files when the IDs
-// at those numbers are about to change. An episode listed twice is where it's
-// first listed.
+// their numbers in TMDB's own order, the files': for a series identified as
+// another, whose episodes have other IDs. An episode listed twice is where
+// it's first listed.
 func marksToNumbers(ctx context.Context, tx *sql.Tx, series string) error {
 	return mergeMarks(ctx, tx, `FROM (SELECT 'series/tmdb/' || series || '/e' || tmdb_id AS old,
 			'series/tmdb/' || series || '/s' || season || '/e' || episode AS new
 			FROM (SELECT *, row_number() OVER (PARTITION BY tmdb_id ORDER BY season = 0, season, episode) AS r
-				FROM catalog_episodes WHERE series = ? AND tmdb_id IS NOT NULL) WHERE r = 1) n
+				FROM own_episodes WHERE series = ?) WHERE r = 1) n
 		JOIN profile_titles p ON p.title = n.old`, series)
+}
+
+// ownEpisodeKey is the key by ID of an episode by its numbers in TMDB's own
+// order, for what names files by their numbers (an import); the same key
+// when TMDB has no such episode.
+func (s *Store) ownEpisodeKey(ctx context.Context, r TitleRef) (string, error) {
+	if r.TMDB() == "" || r.EpisodeID > 0 {
+		return r.Key(), nil
+	}
+	var id int
+	err := s.read.QueryRowContext(ctx, `SELECT tmdb_id FROM own_episodes WHERE series = ? AND season = ? AND episode = ?`,
+		r.ID, r.Season, r.Episode).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return r.Key(), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	r.EpisodeID = id
+	return r.Key(), nil
 }

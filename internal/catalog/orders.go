@@ -122,7 +122,7 @@ func (a *Titles) ReadOrders(ctx context.Context, series int) ([]SeriesOrder, err
 	if src == nil {
 		return nil, ErrNoSource
 	}
-	own, err := a.ownSeasons(ctx, src, series)
+	own, err := ownSeasons(ctx, src, series)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +149,7 @@ func (a *Titles) ReadOrders(ctx context.Context, series int) ([]SeriesOrder, err
 }
 
 // ownSeasons reads TMDB's own seasons of a series.
-func (a *Titles) ownSeasons(ctx context.Context, src TitleSource, series int) (map[int]*tmdb.SeasonFull, error) {
+func ownSeasons(ctx context.Context, src TitleSource, series int) (map[int]*tmdb.SeasonFull, error) {
 	full, err := src.Title(ctx, "series", series)
 	if err != nil {
 		return nil, err
@@ -164,47 +164,52 @@ func (a *Titles) ownSeasons(ctx context.Context, src TitleSource, series int) (m
 	return src.Seasons(ctx, series, numbers)
 }
 
-// ChooseOrder numbers a series as an order does (group ""; TMDB's own): the
-// order must still be on TMDB. See store.ArrangeSeries.
-func (a *Titles) ChooseOrder(ctx context.Context, series int, group string) error {
-	src := a.Source()
-	if src == nil {
-		return ErrNoSource
-	}
-	var seasons map[int]*tmdb.SeasonFull
-	name := ""
-	var err error
-	if group == "" {
-		seasons, err = a.ownSeasons(ctx, src, series)
-	} else {
-		source, ok := src.(OrderSource)
-		if !ok {
-			return tmdb.ErrNotFound
-		}
-		others, listErr := source.OtherOrders(ctx, series)
-		if listErr != nil {
-			return listErr
-		}
-		i := slices.IndexFunc(others, func(o tmdb.EpisodeOrder) bool { return o.ID == group })
-		if i < 0 {
-			return tmdb.ErrNotFound
-		}
-		name = others[i].Name
-		seasons, err = arranged(ctx, source, src, series, group, nil)
-	}
-	if err != nil {
-		return err
-	}
-	kept := make([]store.Season, 0, len(seasons))
+// storeSeasons are seasons as the store keeps them.
+func storeSeasons(seasons map[int]*tmdb.SeasonFull) []store.Season {
+	out := make([]store.Season, 0, len(seasons))
 	for _, se := range seasons {
 		season := store.Season{Number: se.Number, Name: se.Name, Overview: se.Overview, AirDate: se.AirDate, Poster: se.Poster}
 		for _, e := range se.Episodes {
 			season.Episodes = append(season.Episodes, store.Episode{ID: e.ID, Number: e.Number, Name: e.Name, Overview: e.Overview,
 				AirDate: e.AirDate, Runtime: e.Runtime, Still: e.Still})
 		}
-		kept = append(kept, season)
+		out = append(out, season)
 	}
-	if err := a.Store.ArrangeSeries(ctx, strconv.Itoa(series), group, name, kept, a.clock()); err != nil {
+	return out
+}
+
+// ChooseOrder shows a series as an order has it (group "": TMDB's own): the
+// order must still be on TMDB. Which episode a file is doesn't change. See
+// store.ArrangeSeries.
+func (a *Titles) ChooseOrder(ctx context.Context, series int, group string) error {
+	src := a.Source()
+	if src == nil {
+		return ErrNoSource
+	}
+	own, err := ownSeasons(ctx, src, series)
+	if err != nil {
+		return err
+	}
+	seasons, name := own, ""
+	if group != "" {
+		source, ok := src.(OrderSource)
+		if !ok {
+			return tmdb.ErrNotFound
+		}
+		others, err := source.OtherOrders(ctx, series)
+		if err != nil {
+			return err
+		}
+		i := slices.IndexFunc(others, func(o tmdb.EpisodeOrder) bool { return o.ID == group })
+		if i < 0 {
+			return tmdb.ErrNotFound
+		}
+		name = others[i].Name
+		if seasons, err = arranged(ctx, source, src, series, group, nil); err != nil {
+			return err
+		}
+	}
+	if err := a.Store.ArrangeSeries(ctx, strconv.Itoa(series), group, name, storeSeasons(seasons), storeSeasons(own), a.clock()); err != nil {
 		return err
 	}
 	a.Wake()

@@ -174,9 +174,9 @@ func TestNextEpisodesByID(t *testing.T) {
 	}
 }
 
-// An order says what the files are: whoever watched a file still has it, as
-// the episode it turns out to be; choosing back gives the marks back.
-func TestChoosingAnOrderKeepsMarksOnFiles(t *testing.T) {
+// An order only rearranges what's shown: a file stays the episode it is, and
+// so does what profiles did with it.
+func TestChoosingAnOrderOnlyRearranges(t *testing.T) {
 	s, prof, id := episodeKeysFixture(t)
 	ctx := context.Background()
 	now := time.Now()
@@ -189,32 +189,139 @@ func TestChoosingAnOrderKeepsMarksOnFiles(t *testing.T) {
 	if err := s.PutTitles(ctx, []Title{{Kind: "series", TMDB: "7", Name: "S"}}, now); err != nil {
 		t.Fatal(err)
 	}
-	s.RecordPlay(ctx, prof.ID, keyOfItem(t, s, id(1)), id(1), 0, true, now) // file S1E1, taken for 101
+	s.RecordPlay(ctx, prof.ID, "series/tmdb/7/e101", id(1), 0, true, now) // file S1E1
+	files := func(when string, want map[int]string) {
+		t.Helper()
+		for item, key := range want {
+			if got := keyOfItem(t, s, id(item)); got != key {
+				t.Errorf("%s: file %d is %s, not %s", when, item, got, key)
+			}
+		}
+	}
+	keys := map[int]string{1: "series/tmdb/7/e101", 2: "series/tmdb/7/e102", 3: "series/tmdb/7/e201"}
+	files("TMDB's own", keys)
 
+	// S1: 201, 101; S2: 102.
 	other := []Season{season(1, 201, 101), season(2, 102)}
-	if err := s.ArrangeSeries(ctx, "7", "abc", "Production", other, now); err != nil {
+	if err := s.ArrangeSeries(ctx, "7", "abc", "Production", other, own, now); err != nil {
 		t.Fatal(err)
 	}
-	if got := keyOfItem(t, s, id(1)); got != "series/tmdb/7/e201" {
-		t.Errorf("file S1E1 is now %s", got)
+	files("arranged", keys)
+	if st := personal(t, s, prof.ID, "series/tmdb/7/e101"); !st.Played {
+		t.Errorf("the mark left its episode: %+v", st)
 	}
-	if st := personal(t, s, prof.ID, "series/tmdb/7/e201"); !st.Played {
-		t.Errorf("the mark didn't follow the file: %+v", st)
+	infos, err := s.TitleInfos(ctx, []string{"series/tmdb/7/e101", "series/tmdb/7/e102", "series/tmdb/7/s1/e1", "series/tmdb/7/s1", "series/tmdb/7/s2"}, "2030-01-01", "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if st := personal(t, s, prof.ID, "series/tmdb/7/e101"); st.Played {
-		t.Errorf("the mark stayed on the episode: %+v", st)
+	if r := infos["series/tmdb/7/e101"].Ref; r.Season != 1 || r.Episode != 2 {
+		t.Errorf("e101 is shown at %d/%d", r.Season, r.Episode)
+	}
+	if e := infos["series/tmdb/7/e102"]; e.Ref.Season != 2 || e.Ref.Episode != 1 || e.Items[0] != id(2) {
+		t.Errorf("e102: %+v", e)
+	}
+	// What the order has first is the file that was S2E1.
+	if e := infos["series/tmdb/7/s1/e1"]; e.Ref.EpisodeID != 201 || e.Items[0] != id(3) {
+		t.Errorf("the order's S1E1: %+v", e)
+	}
+	if got := infos["series/tmdb/7/s1"].Have; got != 2 {
+		t.Errorf("season 1 has %d", got)
+	}
+	if got := infos["series/tmdb/7/s2"].Have; got != 1 {
+		t.Errorf("season 2 has %d", got)
+	}
+	if ns, err := s.SeasonEpisodes(ctx, TitleRef{Kind: "season", Source: "tmdb", ID: "7", Season: 2}); err != nil || len(ns) != 1 || ns[0] != 1 {
+		t.Errorf("season 2's episodes: %v %v", ns, err)
+	}
+	// Next comes by the order: after e101, at S1E2, e102 at S2E1.
+	key, _, err := s.SeriesUpNext(ctx, prof.ID, TitleRef{Kind: "series", Source: "tmdb", ID: "7"}, nil)
+	if err != nil || key != "series/tmdb/7/e102" {
+		t.Errorf("up next: %q %v", key, err)
+	}
+	// Apps go by the files' numbers.
+	f, err := s.ValuationFacts(ctx, now, nil, 90)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, ok := f.Ref("series/tmdb/7/e102"); !ok || r.Season != 1 || r.Episode != 2 {
+		t.Errorf("apps see e102 at %+v %v", r, ok)
+	}
+	// A new file of a series in an order is placed too.
+	if err := s.RefreshTitleKeys(ctx); err != nil {
+		t.Fatal(err)
+	}
+	files("after a pass", keys)
+	if ns, _ := s.SeasonEpisodes(ctx, TitleRef{Kind: "season", Source: "tmdb", ID: "7", Season: 2}); len(ns) != 1 || ns[0] != 1 {
+		t.Errorf("after a pass: %v", ns)
 	}
 	if g, name, err := s.SeriesOrder(ctx, "7"); g != "abc" || name != "Production" || err != nil {
 		t.Errorf("order: %q %q %v", g, name, err)
 	}
-	if err := s.ArrangeSeries(ctx, "7", "", "", own, now); err != nil {
+
+	if err := s.ArrangeSeries(ctx, "7", "", "", own, own, now); err != nil {
 		t.Fatal(err)
 	}
+	files("back", keys)
 	if st := personal(t, s, prof.ID, "series/tmdb/7/e101"); !st.Played {
 		t.Errorf("back on TMDB's own: %+v", st)
 	}
+	back, err := s.TitleInfos(ctx, []string{"series/tmdb/7/e101"}, "2030-01-01", "")
+	if r := back["series/tmdb/7/e101"].Ref; err != nil || r.Season != 1 || r.Episode != 1 {
+		t.Errorf("back: %+v %v", r, err)
+	}
 	if g, _, err := s.SeriesOrder(ctx, "7"); g != "" || err != nil {
 		t.Errorf("order: %q %v", g, err)
+	}
+}
+
+// A series whose order was chosen when choosing one still renamed files: its
+// marks go back to the files' numbers, then to TMDB's own IDs.
+func TestUpgradeRepairsChosenOrders(t *testing.T) {
+	ctx := context.Background()
+	s := openAt(t, 80)
+	n := func(i int) *int { return &i }
+	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
+	_, prof, err := s.CreateAccount(ctx, "subject-1", owner("1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO catalog_seasons (series, season, name, overview, fetched_at) VALUES ('7', 1, 'S', '', 1)`,
+		`INSERT INTO catalog_episodes (series, season, episode, name, overview, tmdb_id) VALUES ('7', 1, 1, 'E', '', 900)`,
+		`INSERT INTO series_orders (series, group_id, name, chosen_at) VALUES ('7', 'abc', 'Digital', 1)`,
+		`INSERT INTO artwork_fetched (key, fetched_at) VALUES ('series/tmdb/7', 5)`,
+	} {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.PutCatalog(ctx, []CatalogItem{{ID: id(0), Kind: "series", Name: "S", SortName: "s", TMDB: "7"},
+		{ID: id(1), Kind: "episode", Name: "E", SortName: "e", SeriesID: id(0), SeasonNumber: n(1), EpisodeNumber: n(1)}}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE catalog_items SET title_key = 'series/tmdb/7/e900' WHERE id = ?`, id(1)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO profile_titles (profile_id, title, played, updated_at) VALUES (?, 'series/tmdb/7/e900', 1, 1)`, prof.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st := personal(t, s, prof.ID, "series/tmdb/7/s1/e1"); !st.Played {
+		t.Errorf("the mark: %+v", st)
+	}
+	if got := keyOfItem(t, s, id(1)); got != "series/tmdb/7/s1/e1" {
+		t.Errorf("the file: %s", got)
+	}
+	if err := s.SetOwnSeasons(ctx, "7", []Season{season(1, 111)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := keyOfItem(t, s, id(1)); got != "series/tmdb/7/e111" {
+		t.Errorf("the file, TMDB's own known: %s", got)
+	}
+	if st := personal(t, s, prof.ID, "series/tmdb/7/e111"); !st.Played {
+		t.Errorf("the mark, TMDB's own known: %+v", st)
 	}
 }
 
