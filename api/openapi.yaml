@@ -58,8 +58,8 @@ info:
     (`application/problem+json`). The `type` is a short, stable name such as
     `stream-limit-reached`; clients should branch on `type`, never on `detail`.
     Anything the caller may not see is reported as `not-found`. Every
-    endpoint marked `security: []` (the gateway's health, theme and
-    branding, the sign-in steps and their pages' files, `/login`, `/gate`)
+    endpoint marked `security: []` (the gateway's health, theme, branding
+    and info, the sign-in steps and their pages' files, `/login`, `/gate`)
     answers without a login; every other one answers `not-authenticated`
     (401) without one. Actions reserved for
     the account's owner profile answer `owner-only` (403) to other profiles.
@@ -225,13 +225,12 @@ paths:
 
   /info:
     get:
-      x-status: planned
       operationId: getInfo
-      summary: Describe this Overfin instance
+      summary: Describe this Overfin server
       description: |
-        Public, so a site can adapt before anyone logs in. It describes
-        features and settings only; it never reveals software versions,
-        upstream servers or anything about users.
+        Public, so an app can tell that an address is an Overfin server, and
+        a site can adapt, before anyone signs in. It never reveals software
+        versions, upstream servers or anything about users.
       tags: [system]
       security: []
       responses:
@@ -3619,66 +3618,27 @@ components:
     # ---- System and account --------------------------------------------------
 
     Info:
-      description: What this instance offers. Never includes software
-        versions, upstream details or user data.
+      description: What this server is. Never includes software versions,
+        upstream details or user data.
       type: object
-      required: [apiVersion, features]
+      required: [name, apiVersion, features]
       properties:
         name:
           type: string
-          description: The instance's display name, as set by the operator.
+          description: The name people see, the operator's when their
+            branding is on, else `Overfin`.
+          examples: [Overfin]
         apiVersion:
           type: string
           description: The API level, e.g. `1.3`. Not a software version.
           examples: ["1.0"]
         features:
           type: array
-          description: |
-            Enabled features. Open set; clients ignore unknown values. Known
-            values: `profiles`, `claim` (bring an existing media server
-            account), `catalog` (TMDB), `lists` (curated catalog lists),
-            `requests` (Seerr), `issueConversations`.
+          description: The optional features switched on. Open set; clients
+            ignore unknown values.
           items:
             type: string
-          examples: [[profiles, catalog, lists, requests]]
-        attributions:
-          type: array
-          description: Data sources whose terms require the site to credit
-            them, e.g. `tmdb` when the TMDB catalog is enabled. Open set.
-          items:
-            type: string
-          examples: [[tmdb]]
-        login:
-          type: object
-          properties:
-            url:
-              type: string
-              format: uri-reference
-              description: Where to send a user who isn't logged in. After
-                logging in, users return only to a path on the same origin.
-        imageSizes:
-          type: array
-          description: The sizes images can be requested in.
-          items:
-            type: string
-          examples: [[small, medium, large]]
-        ratingsCountry:
-          type: string
-          description: ISO 3166-1 country whose ratings titles' ages go by
-            first (for kids profiles and categories); a title it doesn't
-            rate gets the middle of the other countries' ages.
-          examples: [CA]
-        maxProfilesPerAccount:
-          type: integer
-          minimum: 0
-        maxStreamsPerAccount:
-          type: integer
-          minimum: 0
-        accountDeletion:
-          type: string
-          description: What deleting an account does to its media server
-            users. Open set.
-          examples: [delete, disable]
+          examples: [[invites, watchlist]]
 
     Me:
       type: object
