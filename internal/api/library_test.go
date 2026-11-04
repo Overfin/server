@@ -498,6 +498,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		api.Profiles{Sessions: sessions, Provisioner: prov, Store: st, Service: service, LogoutURL: "/sign-out", Logger: logger,
 			PINs: checker},
 		api.Branding{Store: st},
+		api.Info{Store: st},
 		api.Pages{Proof: checker2},
 		api.Invitations{Mounts: mounts, Managed: managed, Store: st, Logger: logger},
 	}, extra...)

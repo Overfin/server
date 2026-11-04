@@ -42,6 +42,7 @@ var publicRoutes = map[string]string{
 	"GET /api/v1/theme.css":        "theme.css",
 	"GET /api/v1/branding":         "the operator's branding",
 	"GET /api/v1/branding/{kind}":  "the operator's branding",
+	"GET /api/v1/info":             "what this server is",
 }
 
 // publicLog keeps the routes the server logs as public.

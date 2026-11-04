@@ -263,6 +263,7 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 		api.Profiles{Sessions: sessions, Provisioner: prov, Store: db, Service: sh.service,
 			PINs: checker, Images: sh.images, LogoutURL: cfg.Identity.LogoutURL, Logger: logger},
 		api.Branding{Store: db},
+		api.Info{Store: db, Mounts: mounts},
 		// Overfin's own pages (signing in, invitations), whatever the
 		// sign-in.
 		api.Pages{Proof: sh.proof},

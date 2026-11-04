@@ -266,7 +266,8 @@ comes from the internet, and media files can be written by anyone.
     forgotten-password pages with their script, style, logo and check
     against scripts, the sign-in, registration and forgotten-password calls,
     the login's start, the identity provider's return and the login's
-    finish, the gate, logout, `theme.css`, and the operator's branding)
+    finish, the gate, logout, `theme.css`, the operator's branding, and
+    `/api/v1/info`)
     never reveal software versions, upstream servers or anything about
     users. This list is the whole set: a test fails on any other route
     that needs no session.
