@@ -10,8 +10,9 @@ import (
 )
 
 // LibraryArtwork keeps the library titles' artwork on disk, ahead of time
-// (images.Pipeline.Keep), in the background: the pictures their pages and
-// cards show, at once, without waiting for TMDB; their collections' too.
+// (images.Pipeline.Keep), in the background, at every size served: the
+// pictures their pages and cards show, at once, without waiting for TMDB
+// or for a size to be made; their collections' too.
 // Titles no library has get theirs when first shown.
 type LibraryArtwork struct {
 	Store  *store.Store
@@ -43,9 +44,9 @@ func (k *LibraryArtwork) Once(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	fetched, deleted, err := k.Images.Keep(ctx, wanted, time.Now().Add(-TitlesFresh))
-	if fetched > 0 || deleted > 0 {
-		k.Logger.Info("catalog: the library's artwork kept", "fetched", fetched, "deleted", deleted)
+	fetched, made, deleted, err := k.Images.Keep(ctx, wanted, time.Now().Add(-TitlesFresh))
+	if fetched > 0 || made > 0 || deleted > 0 {
+		k.Logger.Info("catalog: the library's artwork kept", "fetched", fetched, "made", made, "deleted", deleted)
 	}
 	return err
 }

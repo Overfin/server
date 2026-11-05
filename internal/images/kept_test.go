@@ -76,8 +76,10 @@ func width(t *testing.T, data []byte) int {
 }
 
 // Library artwork: its original kept on disk (TMDB's, no wider than the
-// largest size served), each size made from it the first time it's asked
-// for and kept beside it; served from disk after; fetched again when old;
+// largest size served), and every size narrower made from it, kept beside
+// it; the original itself the sizes it's no wider than (copies of it
+// deleted); served from disk after; a size gone
+// made again when asked for; fetched again when old;
 // deleted with what was made of it once unwanted, and an older layout's
 // files too.
 func TestKeep(t *testing.T) {
@@ -100,9 +102,16 @@ func TestKeep(t *testing.T) {
 	still := TMDBRef{Type: "still", Path: "/still12345.jpg"}
 	wanted := []TMDBRef{poster, still, poster, {Type: "still", Path: "/missing1234.jpg"}, {Type: "poster", Path: "../../etc"}}
 
-	fetched, deleted, err := p.Keep(ctx, wanted, time.Now().Add(-time.Hour))
-	if err != nil || fetched != 2 || deleted != 1 {
-		t.Fatalf("first pass: %d %d %v", fetched, deleted, err)
+	fetched, made, deleted, err := p.Keep(ctx, wanted, time.Now().Add(-time.Hour))
+	if err != nil || fetched != 2 || made != 6 || deleted != 1 {
+		t.Fatalf("first pass: %d %d %d %v", fetched, made, deleted, err)
+	}
+	has := func(typ, size, name string) bool {
+		_, err := os.Stat(filepath.Join(dir, typ, size, name))
+		return err == nil
+	}
+	if has("poster", "2000", "poster1234.jpg") || has("still", "1280", "still12345.jpg") || !has("poster", "1200", "poster1234.jpg") {
+		t.Error("a size the original is kept apart, or one narrower isn't")
 	}
 	original, err := os.ReadFile(filepath.Join(dir, "poster", "original", "poster1234.jpg"))
 	if err != nil || width(t, original) != 2000 {
@@ -115,9 +124,14 @@ func TestKeep(t *testing.T) {
 		t.Error("an older layout's folder kept")
 	}
 
-	// A size: made from the original, kept beside it, TMDB not asked.
+	// A size: the original for the widest, made again when gone; TMDB
+	// not asked.
 	n := f.count()
 	ok := func(context.Context) error { return nil }
+	os.Remove(filepath.Join(dir, "poster", "400", "poster1234.jpg"))
+	if data, _, err := p.TMDB(ctx, poster, 2000, ok); err != nil || !bytes.Equal(data, original) || has("poster", "2000", "poster1234.jpg") {
+		t.Errorf("2000 isn't the original: %v", err)
+	}
 	data, ct, err := p.TMDB(ctx, poster, 400, ok)
 	if err != nil || ct != "image/jpeg" || width(t, data) != 400 {
 		t.Fatalf("400: %v", err)
@@ -136,17 +150,21 @@ func TestKeep(t *testing.T) {
 	}
 
 	// Fresh: nothing fetched again. Old: fetched again, sizes left.
-	if fetched, _, _ := p.Keep(ctx, wanted, time.Now().Add(-time.Hour)); fetched != 0 {
-		t.Errorf("fetched again while fresh: %d", fetched)
+	// A copy of the original (an older Overfin's): deleted.
+	copied, _ := os.ReadFile(filepath.Join(dir, "still", "original", "still12345.jpg"))
+	os.MkdirAll(filepath.Join(dir, "still", "1280"), 0o700)
+	os.WriteFile(filepath.Join(dir, "still", "1280", "still12345.jpg"), copied, 0o600)
+	if fetched, made, deleted, _ := p.Keep(ctx, wanted, time.Now().Add(-time.Hour)); fetched != 0 || made != 0 || deleted != 1 {
+		t.Errorf("fresh: %d fetched, %d made, %d deleted", fetched, made, deleted)
 	}
-	if fetched, _, _ := p.Keep(ctx, wanted, time.Now().Add(time.Hour)); fetched != 2 {
-		t.Errorf("old ones: %d", fetched)
+	if fetched, made, _, _ := p.Keep(ctx, wanted, time.Now().Add(time.Hour)); fetched != 2 || made != 0 {
+		t.Errorf("old ones: %d %d", fetched, made)
 	}
 
 	// The poster's title left the libraries: its original and its size
 	// go, the still stays; nothing wanted at all deletes nothing.
 	os.WriteFile(filepath.Join(dir, "still", "original", ".new-123"), []byte("half"), 0o600)
-	if _, deleted, err := p.Keep(ctx, []TMDBRef{still}, time.Now().Add(-time.Hour)); err != nil || deleted != 2 {
+	if _, _, deleted, err := p.Keep(ctx, []TMDBRef{still}, time.Now().Add(-time.Hour)); err != nil || deleted != 5 {
 		t.Errorf("unwanted: %d %v", deleted, err)
 	}
 	for _, gone := range []string{"poster/original/poster1234.jpg", "poster/400/poster1234.jpg", "still/original/.new-123"} {
@@ -154,7 +172,7 @@ func TestKeep(t *testing.T) {
 			t.Errorf("kept: %s", gone)
 		}
 	}
-	if _, deleted, _ := p.Keep(ctx, nil, time.Now().Add(-time.Hour)); deleted != 0 {
+	if _, _, deleted, _ := p.Keep(ctx, nil, time.Now().Add(-time.Hour)); deleted != 0 {
 		t.Errorf("empty wanted deleted %d", deleted)
 	}
 

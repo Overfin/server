@@ -32,8 +32,12 @@ func New(logger *slog.Logger, identify func(http.Handler) http.Handler, site htt
 	// Which routes are slow, to know where speed is lost: the route alone,
 	// never who asked or for what (rule 54).
 	reg.SlowAfter = slowAfter
-	reg.Slow = func(pattern string, took time.Duration) {
-		logger.Info("a slow request", "route", pattern, "ms", took.Milliseconds())
+	reg.Slow = func(pattern string, took time.Duration, note string) {
+		if note == "" {
+			logger.Info("a slow request", "route", pattern, "ms", took.Milliseconds())
+			return
+		}
+		logger.Info("a slow request", "route", pattern, "ms", took.Milliseconds(), "note", note)
 	}
 
 	if err := reg.HandlePublic("GET /api/v1/health", http.HandlerFunc(health)); err != nil {

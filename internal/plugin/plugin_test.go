@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -109,20 +110,27 @@ func TestNavigationCodes(t *testing.T) {
 	}
 }
 
-// Slow requests are told by route, streams aside.
+// Slow requests are told by route, with their last note, streams aside.
 func TestSlowRequests(t *testing.T) {
 	mux := http.NewServeMux()
 	reg := NewRegistrar(mux, func(h http.Handler) http.Handler { return h })
-	var told []string
-	reg.Slow, reg.SlowAfter = func(pattern string, _ time.Duration) { told = append(told, pattern) }, 5*time.Millisecond
-	slow := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { time.Sleep(10 * time.Millisecond) })
+	var told, notes []string
+	reg.Slow, reg.SlowAfter = func(pattern string, _ time.Duration, note string) {
+		told, notes = append(told, pattern), append(notes, note)
+	}, 5*time.Millisecond
+	slow := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		Note(r.Context(), "first")
+		Note(r.Context(), "made")
+		time.Sleep(10 * time.Millisecond)
+	})
+	Note(context.Background(), "outside a request: nothing")
 	reg.HandlePublic("GET /api/v1/slow/{id}", slow)
 	reg.HandlePublic("GET /api/v1/stream/{ticket}/file", slow)
 	reg.HandlePublic("GET /api/v1/fast", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	for _, path := range []string{"/api/v1/slow/secret-title", "/api/v1/stream/t/file", "/api/v1/fast"} {
 		mux.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", path, nil))
 	}
-	if len(told) != 1 || told[0] != "GET /api/v1/slow/{id}" {
-		t.Errorf("told: %v", told)
+	if len(told) != 1 || told[0] != "GET /api/v1/slow/{id}" || notes[0] != "made" {
+		t.Errorf("told: %v %v", told, notes)
 	}
 }

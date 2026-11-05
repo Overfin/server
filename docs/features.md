@@ -152,7 +152,11 @@ Overfin asks TMDB by itself, by title, never saying who's asking; browsers
 never contact TMDB. It keeps TMDB's data as its terms allow (five months at
 most), and overfin-web shows TMDB's attribution. The pictures of the
 titles your libraries have are kept on disk ahead of time, in `artwork/`
-next to the database, so browsing the library never waits for TMDB; the
+next to the database, at every size the apps are served, so browsing the
+library never waits for TMDB or for a picture to be resized. They're made
+in the background, one at a time: with a large library, the first start
+takes hours to make them all, and the sizes take room on disk besides the
+originals (they can always be made again, so backups can skip them). The
 others are fetched when first shown. TMDB's free API is for non-commercial
 use: a site that charges for access needs TMDB's commercial terms. Seerr,
 when connected, is a second source.

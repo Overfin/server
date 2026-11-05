@@ -1,9 +1,11 @@
 package images
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"net/http"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/overfin/server/internal/jellyfin"
+	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/upstream"
 )
 
@@ -140,7 +143,9 @@ var tmdbHTTP = &http.Client{
 // images: it says whether the profile may see the title, and that ref's
 // path is the title's real one, so invented paths never reach TMDB or the
 // cache. An image whose original is kept on disk (a library title's, Keep)
-// has its sizes kept there too, made the first time they're asked for.
+// has its sizes narrower than it kept there too: one Keep hasn't made yet
+// is made now, ahead of it. The original is every size it's no wider than. Where the image came from goes in the request's slow log
+// (plugin.Note).
 func (p *Pipeline) TMDB(ctx context.Context, ref TMDBRef, width int, check func(ctx context.Context) error) ([]byte, string, error) {
 	if !slices.Contains(ladders[ref.Type], width) {
 		return nil, "", ErrInvalid
@@ -151,11 +156,13 @@ func (p *Pipeline) TMDB(ctx context.Context, ref TMDBRef, width int, check func(
 	contentType := contentTypeOf(ref.Type)
 	key := "tmdb/" + ref.Path + "/" + strconv.Itoa(width)
 	if e, ok := p.cache.get(key); ok {
+		plugin.Note(ctx, "in memory")
 		return e.data, e.contentType, nil
 	}
 	made := p.keptFile(ref, strconv.Itoa(width))
 	if made != "" {
 		if data, err := os.ReadFile(made); err == nil {
+			plugin.Note(ctx, "kept")
 			p.cache.put(key, entry{data: data, contentType: contentType})
 			return data, contentType, nil
 		}
@@ -164,11 +171,21 @@ func (p *Pipeline) TMDB(ctx context.Context, ref TMDBRef, width int, check func(
 	if err != nil {
 		return nil, "", err
 	}
+	// An original no wider than asked is that size, as it is: nothing to
+	// make or keep. It's Overfin's own encoding: its header can be trusted.
+	if cfg, _, err := image.DecodeConfig(bytes.NewReader(original)); err == nil && cfg.Width <= width {
+		if kept {
+			plugin.Note(ctx, "kept")
+		}
+		p.cache.put(key, entry{data: original, contentType: contentType})
+		return original, contentType, nil
+	}
 	data, err := p.sized(ctx, original, contentType, width, p.slots)
 	if err != nil {
 		return nil, "", err
 	}
 	if kept && made != "" {
+		plugin.Note(ctx, "made from the kept original")
 		// Not kept is only slower next time: never a failure.
 		_ = writeKept(made, data)
 	}
@@ -186,8 +203,10 @@ func (p *Pipeline) original(ctx context.Context, ref TMDBRef, slots chan struct{
 	}
 	key := "tmdb/" + ref.Path + "/original"
 	if e, ok := p.cache.get(key); ok {
+		plugin.Note(ctx, "original in memory")
 		return e.data, false, nil
 	}
+	plugin.Note(ctx, "fetched from TMDB")
 	data, err := p.fetchOriginal(ctx, ref, slots)
 	if err != nil {
 		return nil, false, err

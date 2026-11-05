@@ -1,8 +1,11 @@
 package images
 
 import (
+	"bufio"
+	"cmp"
 	"context"
 	"errors"
+	"image"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,10 +16,13 @@ import (
 )
 
 // Library titles' artwork is kept on disk, ahead of time, so browsing the
-// library never waits for TMDB: under ArtworkDir, each image's original as
-// <type>/original/<file> (Keep), and the sizes made of it, the first time
-// they're asked for, as <type>/<width>/<file> (TMDB). The rest (titles no
-// library has, people) is fetched when first shown, and kept in memory
+// library never waits for TMDB or for a size to be made: under ArtworkDir,
+// each image's original as <type>/original/<file>, and every size of it
+// served narrower than it, as <type>/<width>/<file> (Keep, in the
+// background; TMDB makes one asked for before Keep got to it). The
+// original, no wider than the largest size served, is itself every size
+// it's no wider than: those have no file of their own. The rest (titles
+// no library has, people) is fetched when first shown, and kept in memory
 // only. Kept files are served like the others: the access check runs
 // first, every time.
 
@@ -57,48 +63,66 @@ const maxFailures = 10
 
 // Keep makes sure each image in wanted (type and path; Kind and TMDBID
 // unused; those without a path skipped) has its original kept: those
-// missing, or kept before refetch, are fetched from TMDB. Then the files
-// no longer wanted are deleted: images whose titles left the libraries (or
-// TMDB changed the picture), with the sizes made of them, and what isn't an
-// original or one of its sizes (an older layout's); not when nothing is
-// wanted, which is more likely a fault than an empty library. It returns
-// how many originals it fetched, and how many files it deleted.
-func (p *Pipeline) Keep(ctx context.Context, wanted []TMDBRef, refetch time.Time) (fetched, deleted int, err error) {
+// missing, or kept before refetch, are fetched from TMDB. Then every size
+// served narrower than it is made, those missing, one image at a time in
+// the background slot. Then the files no longer wanted are deleted: images
+// whose titles left the libraries (or TMDB changed the picture), with the
+// sizes made of them, and what isn't an original or one of its sizes (an
+// older layout's); not when nothing is wanted, which is more likely a
+// fault than an empty library. It returns how many originals it fetched,
+// how many sizes it made, and how many files it deleted.
+func (p *Pipeline) Keep(ctx context.Context, wanted []TMDBRef, refetch time.Time) (fetched, made, deleted int, err error) {
 	if p.ArtworkDir == "" {
-		return 0, 0, nil
+		return 0, 0, 0, nil
 	}
 	keep := map[string]bool{} // originals, by file
 	failures := 0
+	// failed says whether a failure ends the pass: a stop, or too many in
+	// a row.
+	failed := func(err error) bool {
+		if ctx.Err() != nil {
+			return true
+		}
+		failures++
+		return failures >= maxFailures
+	}
 	for _, ref := range wanted {
 		file := p.keptFile(ref, "original")
 		if file == "" || keep[file] || len(ladders[ref.Type]) == 0 {
 			continue
 		}
 		keep[file] = true
-		if info, err := os.Stat(file); err == nil && info.ModTime().After(refetch) {
-			continue
+		if info, err := os.Stat(file); err != nil || !info.ModTime().After(refetch) {
+			data, err := p.fetchOriginal(ctx, ref, p.background)
+			if errors.Is(err, ErrHidden) || errors.Is(err, ErrUnsafe) {
+				continue // TMDB has no such image, or a bad one: tried again next pass
+			}
+			if err == nil {
+				err = writeKept(file, data)
+			}
+			if err != nil {
+				if failed(err) {
+					return fetched, made, deleted, cmp.Or(ctx.Err(), err)
+				}
+				continue
+			}
+			fetched++
 		}
-		data, err := p.fetchOriginal(ctx, ref, p.background)
-		if errors.Is(err, ErrHidden) || errors.Is(err, ErrUnsafe) {
-			continue // TMDB has no such image, or a bad one: tried again next pass
-		}
-		if err == nil {
-			err = writeKept(file, data)
+		n, gone, err := p.keepSizes(ctx, ref, file)
+		made, deleted = made+n, deleted+gone
+		if errors.Is(err, ErrUnsafe) {
+			continue // a damaged original: fetched again when old
 		}
 		if err != nil {
-			if ctx.Err() != nil {
-				return fetched, deleted, ctx.Err()
-			}
-			if failures++; failures >= maxFailures {
-				return fetched, deleted, err
+			if failed(err) {
+				return fetched, made, deleted, cmp.Or(ctx.Err(), err)
 			}
 			continue
 		}
 		failures = 0
-		fetched++
 	}
 	if len(keep) == 0 {
-		return fetched, 0, nil
+		return fetched, made, 0, nil
 	}
 	err = filepath.WalkDir(p.ArtworkDir, func(file string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -121,12 +145,12 @@ func (p *Pipeline) Keep(ctx context.Context, wanted []TMDBRef, refetch time.Time
 		return nil
 	})
 	if err != nil {
-		return fetched, deleted, err
+		return fetched, made, deleted, err
 	}
 	// An older layout's folders, emptied: gone too.
 	types, err := os.ReadDir(p.ArtworkDir)
 	if err != nil {
-		return fetched, deleted, err
+		return fetched, made, deleted, err
 	}
 	for _, t := range types {
 		sizes, err := os.ReadDir(filepath.Join(p.ArtworkDir, t.Name()))
@@ -141,7 +165,79 @@ func (p *Pipeline) Keep(ctx context.Context, wanted []TMDBRef, refetch time.Time
 			}
 		}
 	}
-	return fetched, deleted, nil
+	return fetched, made, deleted, nil
+}
+
+// keepSizes makes the sizes served narrower than an image's original,
+// kept as file, that aren't kept yet, and deletes those it isn't narrower
+// than (the original serves them: an older Overfin kept copies). It
+// returns how many it made and deleted. It reads the original's header
+// every time, the whole of it only when a size is missing.
+func (p *Pipeline) keepSizes(ctx context.Context, ref TMDBRef, file string) (made, deleted int, err error) {
+	wide, err := imageWidth(file)
+	if err != nil {
+		return 0, 0, err
+	}
+	var missing []int
+	for _, w := range ladders[ref.Type] {
+		size := p.keptFile(ref, strconv.Itoa(w))
+		_, err := os.Stat(size)
+		switch {
+		case w >= wide && err == nil:
+			if err := os.Remove(size); err != nil {
+				return 0, deleted, err
+			}
+			deleted++
+		case w < wide && err != nil:
+			missing = append(missing, w)
+		}
+	}
+	if len(missing) == 0 {
+		return 0, deleted, nil
+	}
+	original, err := os.ReadFile(file)
+	if err != nil {
+		return 0, deleted, err
+	}
+	select {
+	case p.background <- struct{}{}:
+	case <-ctx.Done():
+		return 0, deleted, ctx.Err()
+	}
+	defer func() { <-p.background }()
+	img, err := decodeChecked(original)
+	if err != nil {
+		return 0, deleted, err
+	}
+	for _, w := range missing {
+		if ctx.Err() != nil {
+			return made, deleted, ctx.Err()
+		}
+		data, err := encode(Shrink(img, w), contentTypeOf(ref.Type))
+		if err == nil {
+			err = writeKept(p.keptFile(ref, strconv.Itoa(w)), data)
+		}
+		if err != nil {
+			return made, deleted, err
+		}
+		made++
+	}
+	return made, deleted, nil
+}
+
+// imageWidth reads a kept image's width from its header: ErrUnsafe when
+// it isn't one.
+func imageWidth(file string) (int, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	cfg, _, err := image.DecodeConfig(bufio.NewReader(f))
+	if err != nil {
+		return 0, ErrUnsafe
+	}
+	return cfg.Width, nil
 }
 
 // stillKept says whether a file under ArtworkDir is a wanted original, or
