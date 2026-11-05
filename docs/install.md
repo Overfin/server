@@ -11,8 +11,8 @@ image for x86 and ARM (`ghcr.io/overfin/overfin`).
 
 ```sh
 mkdir overfin && cd overfin
-curl -fsSLO https://raw.githubusercontent.com/overfin/server/v0.8.1/deploy/compose.yaml
-curl -fsSL -o .env https://raw.githubusercontent.com/overfin/server/v0.8.1/deploy/.env.example
+curl -fsSLO https://raw.githubusercontent.com/overfin/server/v0.9.0/deploy/compose.yaml
+curl -fsSL -o .env https://raw.githubusercontent.com/overfin/server/v0.9.0/deploy/.env.example
 # in compose.yaml, change /srv/media to where your films and series are, then:
 docker compose up -d
 ```
@@ -80,7 +80,7 @@ To run Overfin alone, next to a Jellyfin you run yourself:
 ```sh
 docker run -d --name overfin -p 8080:8080 \
   -v overfin-data:/data -v overfin-secrets:/secrets \
-  ghcr.io/overfin/overfin:0.8.1
+  ghcr.io/overfin/overfin:0.9.0
 ```
 
 and give the wizard Jellyfin's address (or set `OVERFIN_JELLYFIN_URL`).
@@ -101,7 +101,7 @@ domain at the machine, open ports 80 and 443, and run it with your domain:
 docker run -d --name overfin -p 80:8080 -p 443:8443 \
   -e OVERFIN_DOMAIN=media.example.org \
   -v overfin-data:/data -v overfin-secrets:/secrets \
-  ghcr.io/overfin/overfin:0.8.1
+  ghcr.io/overfin/overfin:0.9.0
 ```
 
 With the compose file, set `OVERFIN_DOMAIN` in `.env` instead: it already
