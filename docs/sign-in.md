@@ -25,6 +25,10 @@ with the client secret in `OVERFIN_OIDC_CLIENT_SECRET`. Anyone who can log
 in at your provider gets an account, unless you set
 `identity.required_group`, or make invitations required.
 
+With a required group or a panel admin group, let your provider send an ID
+token with the groups claim on refresh too: Overfin takes a claim that's
+missing to mean no groups, and without an ID token logins end within 12 hours.
+
 **Leaving your identity provider for Overfin's own sign-in?** While it's
 still configured (with its `[connector]`), run `overfin -import-people`
 once: everyone it has, with an email, can then sign in with that email,

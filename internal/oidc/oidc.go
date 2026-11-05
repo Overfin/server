@@ -277,7 +277,8 @@ func (p *Provider) Exchange(ctx context.Context, code, verifier, nonce string) (
 // Refresh re-checks a login with its refresh token. The provider refuses
 // (ErrRevoked) once the user logged out, was disabled or lost access. The
 // returned login carries the refresh token to use next time, and the
-// current groups when the provider sent a new ID token.
+// current groups when the provider sent a new ID token: none if it doesn't
+// list any. Groups stay nil only without an ID token, when nothing is known.
 func (p *Provider) Refresh(ctx context.Context, refreshToken, subject string) (*Login, error) {
 	m, err := p.discover(ctx)
 	if err != nil {
@@ -310,6 +311,9 @@ func (p *Provider) Refresh(ctx context.Context, refreshToken, subject string) (*
 			return nil, errors.New("oidc: refreshed token is for another user")
 		}
 		login.Groups, login.AuthTime = got.Groups, got.AuthTime
+		if p.GroupsClaim != "" && login.Groups == nil {
+			login.Groups = []string{}
+		}
 	}
 	return login, nil
 }

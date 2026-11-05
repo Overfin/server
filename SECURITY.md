@@ -134,8 +134,11 @@ comes from the internet, and media files can be written by anyone.
     default; if the provider stays unreachable for an hour, logins fail
     closed). A provider that gives no refresh tokens gets logins that last
     12 hours at most, without extension. Disabling an identity ends its
-    sessions. The required group is checked
-    on every request, so someone taken out of it is out at once.
+    sessions. The required group is checked on every request, against the
+    groups Overfin last heard of: with Overfin's login, someone taken out of
+    it is out at the next re-check. A re-check whose ID token lists no groups
+    means none, and one with no ID token can't confirm them, so that login
+    stops being extended and ends within 12 hours.
 17. Session cookies are `HttpOnly` and `SameSite=Strict`, and over HTTPS
     they use the `__Host-` prefix and are `Secure`. A secure default: a
     server run without HTTPS (the operator's choice, for a LAN or a test)
