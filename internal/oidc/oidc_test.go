@@ -63,6 +63,12 @@ func (f *fakeIdP) serve(w http.ResponseWriter, r *http.Request) {
 			delete(c, "nonce")
 			c["groups"] = []string{"media", "family"}
 			json.NewEncoder(w).Encode(map[string]string{"id_token": f.sign(c), "refresh_token": "next"})
+		case "no-id-token":
+			json.NewEncoder(w).Encode(map[string]string{"refresh_token": "next"})
+		case "no-claim":
+			c := f.claims(time.Now())
+			delete(c, "nonce")
+			json.NewEncoder(w).Encode(map[string]string{"id_token": f.sign(c)})
 		case "other-user":
 			c := f.claims(time.Now())
 			c["sub"] = "user-2"
@@ -210,6 +216,14 @@ func TestRefresh(t *testing.T) {
 	got, err := p.Refresh(ctx, "good", "user-1")
 	if err != nil || got.RefreshToken != "next" || len(got.Groups) != 2 {
 		t.Fatalf("refresh: %+v %v", got, err)
+	}
+	// Without an ID token nothing is known; with one, a missing claim means
+	// no groups.
+	if got, err := p.Refresh(ctx, "no-id-token", "user-1"); err != nil || got.Groups != nil {
+		t.Errorf("no ID token: %+v %v", got, err)
+	}
+	if got, err := p.Refresh(ctx, "no-claim", "user-1"); err != nil || got.Groups == nil || len(got.Groups) != 0 {
+		t.Errorf("no groups claim: %+v %v", got, err)
 	}
 	if _, err := p.Refresh(ctx, "revoked", "user-1"); !errors.Is(err, ErrRevoked) {
 		t.Errorf("revoked: %v", err)

@@ -962,6 +962,18 @@ func (s *Store) LoginChecked(ctx context.Context, id string, groups []string, re
 	return oneRow(res, err)
 }
 
+// LoginCheckedUnconfirmed records a re-check that couldn't confirm the
+// login's groups: they stay as they are, and the login ends within atMost
+// at the latest, however often it's checked.
+func (s *Store) LoginCheckedUnconfirmed(ctx context.Context, id, refreshToken string, atMost time.Duration) error {
+	now := s.now()
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE logins SET refresh_token = ?, checked_at = ?, last_active_at = ?, expires_at = min(expires_at, ?)
+		WHERE id = ?`, s.box.Seal([]byte(refreshToken), "login refresh token "+id),
+		now.Unix(), now.Unix(), now.Add(atMost).Unix(), id)
+	return oneRow(res, err)
+}
+
 // DeleteLogin ends a login.
 func (s *Store) DeleteLogin(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM logins WHERE id = ?`, id)

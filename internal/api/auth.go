@@ -181,7 +181,18 @@ func (a *Auth) current(ctx context.Context, token string) *store.Login {
 		a.Logger.Error("re-checking a login failed for too long; refusing it", "err", err)
 		return nil
 	}
-	if a.asksGroups() && got.Groups != nil {
+	if a.asksGroups() && got.Groups == nil {
+		// Still a valid login, but its groups can't be confirmed: it stops
+		// sliding, so groups nobody confirms don't last.
+		a.Logger.Warn("the identity provider re-checked a login without an ID token, so its groups can't be " +
+			"confirmed and it ends within 12 hours")
+		if err := a.Store.LoginCheckedUnconfirmed(ctx, l.ID, got.RefreshToken, min(shortLogin, a.LoginLifetime)); err != nil {
+			a.Logger.Error("saving a login check failed", "err", err)
+			return nil
+		}
+		return l
+	}
+	if a.asksGroups() {
 		l.Groups = a.keptGroups(got.Groups)
 	}
 	if err := a.Store.LoginChecked(ctx, l.ID, l.Groups, got.RefreshToken, a.LoginLifetime); err != nil {
