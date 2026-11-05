@@ -10,6 +10,7 @@
 package plugin
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -36,8 +37,9 @@ type Registrar struct {
 	codes   map[string]bool   // their prefixes, for those ending in a code
 	cross   map[string]bool   // paths registered with HandleCrossSite
 	// Slow, when set, is told of every request a route took longer than
-	// SlowAfter to answer, by its pattern (streams aside: they last).
-	Slow      func(pattern string, took time.Duration)
+	// SlowAfter to answer, by its pattern (streams aside: they last), with
+	// the request's note (Note).
+	Slow      func(pattern string, took time.Duration, note string)
 	SlowAfter time.Duration
 }
 
@@ -175,11 +177,23 @@ func (r *Registrar) timed(pattern string, h http.Handler) http.Handler {
 	slow, after := r.Slow, r.SlowAfter
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		start := time.Now()
-		h.ServeHTTP(w, req)
+		var note string
+		h.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), noteKey{}, &note)))
 		if took := time.Since(start); took > after {
-			slow(pattern, took)
+			slow(pattern, took, note)
 		}
 	})
+}
+
+type noteKey struct{}
+
+// Note says, for a request's slow log, what its answer took: a few fixed
+// words (where an image came from, say), never who asked or for what
+// (SECURITY.md rule 54). The last one said is logged.
+func Note(ctx context.Context, note string) {
+	if n, ok := ctx.Value(noteKey{}).(*string); ok {
+		*n = note
+	}
 }
 
 // IsPublic reports whether pattern was registered with HandlePublic.

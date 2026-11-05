@@ -1024,9 +1024,12 @@ nothing beyond what that needs.
     `medium` and `large` stay, as fixed widths. The site uses `srcset`,
     so each screen gets its own size; the panel's thumbnails, the
     smallest.
-  - A library title's sizes are made the first time they're asked for and
-    kept on disk with the original (and go with it); titles no library
-    has, in memory only; a memory cache in front of both.
+  - A library title's sizes are all made ahead of time, in the background
+    (one image at a time, never in a visitor's slot), and kept on disk
+    with the original (and go with it); one asked for before that is made
+    then. The original, no wider than the largest size, is itself every
+    size it's no wider than: no second file. Titles no library has, in memory only; a memory cache in front
+    of both.
   - Order: the resizer and its tests; originals, sizes on disk and
     `?width=`; the panel's thumbnails; uploads; `srcset` on the site.
 
