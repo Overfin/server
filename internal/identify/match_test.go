@@ -136,19 +136,3 @@ func TestMatch(t *testing.T) {
 		t.Error("an episode matched")
 	}
 }
-
-// An episode numbered across a series is placed in TMDB's seasons,
-// specials aside.
-func TestPlaceAbsolute(t *testing.T) {
-	seasons := []tmdb.Season{{Number: 2, EpisodeCount: 12}, {Number: 0, EpisodeCount: 5}, {Number: 1, EpisodeCount: 25}}
-	for _, tc := range []struct{ abs, season, episode int }{{1, 1, 1}, {25, 1, 25}, {26, 2, 1}, {37, 2, 12}} {
-		if s, e, ok := PlaceAbsolute(seasons, tc.abs); !ok || s != tc.season || e != tc.episode {
-			t.Errorf("%d: S%dE%d %v", tc.abs, s, e, ok)
-		}
-	}
-	for _, n := range []int{0, -1, 38} {
-		if _, _, ok := PlaceAbsolute(seasons, n); ok {
-			t.Errorf("%d placed", n)
-		}
-	}
-}

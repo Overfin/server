@@ -969,9 +969,10 @@ nothing beyond what that needs.
   only rearranges how its seasons and episodes are shown, for everyone.
   Files, marks and what apps are told (the files' numbers) don't change.
 - ~~**Overfin identifies titles itself; Jellyfin fetches no metadata**~~
-  Done (2026-10-31), except anime numbered across the whole series: their
-  numbers are read and the placing is written (`identify.readEpisode`,
-  `PlaceAbsolute`), but nothing calls them yet. Jellyfin's matching is thin (an ID in the
+  Done (2026-10-31), except anime numbered across the whole series (decided:
+  counted through TMDB's seasons, specials aside, misfits to "To check").
+  The file-name reading and the placing were written but never called, and
+  were removed on 2026-11-06 until this is built. Jellyfin's matching is thin (an ID in the
   folder name or an .nfo file, else TMDB's search by name and year,
   scored on the title and the year only, TMDB's first result when in
   doubt), and its metadata brings what Overfin doesn't use: synopses,

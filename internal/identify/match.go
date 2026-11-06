@@ -289,25 +289,3 @@ func or(a, b string) string {
 	}
 	return b
 }
-
-// PlaceAbsolute finds where an episode numbered across a whole series
-// (absolute, from 1) is in its seasons as TMDB lists them, specials aside:
-// its season and its number there; false when the seasons don't reach
-// it.
-func PlaceAbsolute(listed []tmdb.Season, absolute int) (season, episode int, ok bool) {
-	if absolute < 1 {
-		return 0, 0, false
-	}
-	ordered := slices.Clone(listed)
-	slices.SortFunc(ordered, func(a, b tmdb.Season) int { return a.Number - b.Number })
-	for _, se := range ordered {
-		if se.Number <= 0 || se.EpisodeCount <= 0 {
-			continue
-		}
-		if absolute <= se.EpisodeCount {
-			return se.Number, absolute, true
-		}
-		absolute -= se.EpisodeCount
-	}
-	return 0, 0, false
-}
