@@ -9,12 +9,11 @@ import (
 )
 
 // suggestionOrder orders what the libraries lack for list=suggestions:
-// of every hundred titles, share come from TMDB's trending and popular
-// lists (by place, trending first at the same place), whatever their
+// of every hundred titles, share come from the operator's import lists
+// (by place, the first list first at the same place), whatever their
 // value; the rest are the picks, by value. Either fills in when the other
 // runs out, and a title comes once (a series with all its seasons). lists
-// are the trending and popular
-// places by kind and TMDB ID ("movie/550").
+// are the lists' places by kind and TMDB ID ("movie/550").
 func suggestionOrder(rows []valuation.Value, lists []map[string]int, share int) []valuation.Value {
 	type ranked struct {
 		v        valuation.Value
@@ -22,7 +21,7 @@ func suggestionOrder(rows []valuation.Value, lists []map[string]int, share int) 
 		list     int
 		season   int
 	}
-	var discovered []ranked
+	var listed []ranked
 	for _, v := range rows {
 		r, _ := store.ParseTitleKey(v.Key)
 		top := "movie/"
@@ -36,11 +35,11 @@ func suggestionOrder(rows []valuation.Value, lists []map[string]int, share int) 
 			}
 		}
 		if best.position >= 0 {
-			discovered = append(discovered, best)
+			listed = append(listed, best)
 		}
 	}
-	sort.SliceStable(discovered, func(i, j int) bool {
-		a, b := discovered[i], discovered[j]
+	sort.SliceStable(listed, func(i, j int) bool {
+		a, b := listed[i], listed[j]
 		if a.position != b.position {
 			return a.position < b.position
 		}
@@ -70,11 +69,11 @@ func suggestionOrder(rows []valuation.Value, lists []map[string]int, share int) 
 	out := make([]valuation.Value, 0, len(rows))
 	given := map[string]bool{}
 	titles, taken := 0, 0
-	for len(discovered) > 0 || len(picks) > 0 {
+	for len(listed) > 0 || len(picks) > 0 {
 		var next valuation.Value
-		fromDiscovery := len(discovered) > 0 && (len(picks) == 0 || taken*100 < share*(titles+1))
-		if fromDiscovery {
-			next, discovered = discovered[0].v, discovered[1:]
+		fromLists := len(listed) > 0 && (len(picks) == 0 || taken*100 < share*(titles+1))
+		if fromLists {
+			next, listed = listed[0].v, listed[1:]
 		} else {
 			next, picks = picks[0], picks[1:]
 		}
@@ -90,7 +89,7 @@ func suggestionOrder(rows []valuation.Value, lists []map[string]int, share int) 
 		given[title] = true
 		out = append(out, group...)
 		titles++
-		if fromDiscovery {
+		if fromLists {
 			taken++
 		}
 	}

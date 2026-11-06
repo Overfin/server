@@ -7,7 +7,7 @@ import (
 	"github.com/overfin/server/internal/valuation"
 )
 
-// Suggestions mix the picks, by value, and trending and popular titles,
+// Suggestions mix the picks, by value, and the import lists' titles,
 // by place, by the share; a title comes once, and either side fills in
 // when the other runs out.
 func TestSuggestionOrder(t *testing.T) {
@@ -23,8 +23,8 @@ func TestSuggestionOrder(t *testing.T) {
 		{Title: &valuation.Title{Key: "series/tmdb/7/s2"}, Score: 85},
 		{Title: &valuation.Title{Key: "series/tmdb/7/s1"}, Score: 3},
 	}, rows...)
-	trending := map[string]int{"movie/5": 0, "movie/1": 1}
-	popular := map[string]int{"movie/4": 0}
+	first := map[string]int{"movie/5": 0, "movie/1": 1}
+	second := map[string]int{"movie/4": 0}
 	keys := func(vs []valuation.Value) string {
 		var out []string
 		for _, v := range vs {
@@ -40,7 +40,7 @@ func TestSuggestionOrder(t *testing.T) {
 		{100, "5 4 1 2 3"},
 		{50, "5 1 4 2 3"},
 	} {
-		if got := keys(suggestionOrder(rows, []map[string]int{trending, popular}, c.share)); got != c.want {
+		if got := keys(suggestionOrder(rows, []map[string]int{first, second}, c.share)); got != c.want {
 			t.Errorf("share %d: %s, want %s", c.share, got, c.want)
 		}
 	}

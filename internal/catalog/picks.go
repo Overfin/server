@@ -21,8 +21,8 @@ type PickSource interface {
 	ByGenre(ctx context.Context, kind string, genre, page int) (*tmdb.Page, error)
 }
 
-// Picks keeps the lists of titles Overfin may suggest beside TMDB's
-// trending and popular ones (store.PickLists): "recommended", those like
+// Picks keeps the lists of titles Overfin may suggest beside the
+// operator's import lists (store.PickLists): "recommended", those like
 // what people here watch and like, and "liked", those in the genres
 // accounts said they like. The titles keeper fetches their pages, and the
 // valuation values those the libraries lack.

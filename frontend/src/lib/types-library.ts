@@ -94,7 +94,8 @@ export interface Valuation {
   criteria: { name: string; weight: number }[];
   max: number;
   askTastes: boolean;
-  discoveryShare: number;
+  listShare: number;
+  lists: string[];
   accounts: number;
   titles: number;
 }

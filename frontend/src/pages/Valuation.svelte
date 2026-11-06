@@ -50,7 +50,7 @@
       weights = Object.fromEntries(d.criteria.map((c) => [c.name, c.weight]));
       saved = { ...weights };
       askTastes = d.askTastes;
-      share = d.discoveryShare;
+      share = d.listShare;
       preview();
     },
     (err) => (problem = message(err)),
@@ -115,14 +115,14 @@
 
   async function setShare() {
     try {
-      const n = Math.round(numberIn(share, 'Discovery share', '0: the picks alone'));
-      if (!(n >= 0 && n <= 100)) throw new Error('The discovery share goes from 0 to 100.');
-      await api('PUT', '/admin/api/valuation', { discoveryShare: n });
+      const n = Math.round(numberIn(share, 'Lists share', '0: the picks alone'));
+      if (!(n >= 0 && n <= 100)) throw new Error('The lists share goes from 0 to 100.');
+      await api('PUT', '/admin/api/valuation', { listShare: n });
       share = n;
-      data!.discoveryShare = n;
-      toast(n ? `${n}% of the suggestions will come from trending and popular titles.` : 'Suggestions come from the picks alone.');
+      data!.listShare = n;
+      toast(n ? `${n}% of the suggestions will come from your import lists.` : 'Suggestions come from the picks alone.');
     } catch (err) {
-      share = data!.discoveryShare;
+      share = data!.listShare;
       toast(message(err), true);
     }
   }
@@ -181,7 +181,7 @@
       </Card>
       <Card title="Suggestions" description="What apps you give a key, like Overtide, are told to add: the titles the libraries lack, the most valuable first.">
         <div>
-          <Setting label="Discovery share" hint={'The part of the suggestions taken from TMDB\'s trending and popular titles whatever their value, so people find new things and the titles they hear about. 0 turns it off.'}>
+          <Setting label="Lists share" hint={`The part of the suggestions taken from your Radarr and Sonarr import lists, in their order, whatever their value; the rest are Overfin's picks, by value. Overtide sends the lists; its key needs Import lists to send (Apps). ${data.lists.length ? 'Lists received: ' + data.lists.join(', ') + '.' : 'No lists received yet.'} 0 turns it off.`}>
             {#snippet children(ids)}
               <div class="weight">
                 <input type="number" min="0" max="100" step="1" bind:value={share} onchange={setShare} aria-labelledby={ids.label} aria-describedby={ids.hint} />
