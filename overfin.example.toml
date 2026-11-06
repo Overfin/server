@@ -226,7 +226,8 @@ required = "off"
 
 [wishes]
 # Where the titles people wish for go: "" (nowhere: no wishlist is offered),
-# "overswell" (it fetches them, in Overfin's turns) or "seerr" (Overfin
+# "overtide" (it fetches them, in Overfin's turns; "overswell", its former
+# name, still works) or "seerr" (Overfin
 # requests them there itself, as a user named Overfin).
 to = ""
 # How long, in days, an arrived wish weighs in the values while those who

@@ -9,7 +9,7 @@ import (
 )
 
 // appEpisodeOrders (GET /apps/v1/episode-orders?tmdbId=N, any key) says what
-// TMDB says of a series' episodes: an app that imports them (Overswell) has
+// TMDB says of a series' episodes: an app that imports them (Overtide) has
 // no TMDB token of its own.
 func (p *Panel) appEpisodeOrders(w http.ResponseWriter, r *http.Request) {
 	if p.appKey(w, r, "") == nil {

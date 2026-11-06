@@ -270,7 +270,7 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		stats = titleStats(f)
 	}
 	// A suggestion's categories, for an app that adds it where the
-	// operator wants that kind of title (Overswell).
+	// operator wants that kind of title (Overtide).
 	var categories map[string][]string
 	if list == "suggestions" {
 		var keys []string

@@ -371,7 +371,7 @@ func dropCategory(ctx context.Context, tx *sql.Tx, table, id string) error {
 // categories each fits (their IDs, in the categories' order), by what
 // TMDB says of it: kind, genres, original language, age, tags (its
 // keywords, once its page is kept). Rules on libraries need the title in a
-// library: a category with one fits none of these titles (Overswell, say,
+// library: a category with one fits none of these titles (Overtide, say,
 // asks before adding them).
 func (s *Store) TitleCategories(ctx context.Context, keys []string) (map[string][]string, error) {
 	out := map[string][]string{}

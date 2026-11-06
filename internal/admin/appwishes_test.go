@@ -19,7 +19,7 @@ type appWishesPage struct {
 }
 
 // /apps/v1/wishes: the wished titles in turn order, nothing about who, only
-// when wishes go to Overswell; a search said back spends the turn of the
+// when wishes go to Overtide; a search said back spends the turn of the
 // account whose wish it was, a release waited for doesn't.
 func TestAppWishes(t *testing.T) {
 	ctx := context.Background()
@@ -33,7 +33,7 @@ func TestAppWishes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	rec := b.do("POST", "/admin/api/apps", `{"name":"Overswell","scopes":["wishes"]}`, nil)
+	rec := b.do("POST", "/admin/api/apps", `{"name":"Overtide","scopes":["wishes"]}`, nil)
 	var made struct{ Key string }
 	if json.Unmarshal(rec.Body.Bytes(), &made); rec.Code != 201 {
 		t.Fatalf("key: %d %s", rec.Code, rec.Body)
@@ -62,10 +62,10 @@ func TestAppWishes(t *testing.T) {
 	}
 	// Wishes go nowhere yet: none to fetch.
 	if got := list(); got != "" {
-		t.Fatalf("not to Overswell: %q", got)
+		t.Fatalf("not to Overtide: %q", got)
 	}
 	feats := p.Features.(*memFeatures)
-	feats.f.Wishes.To = config.WishesToOverswell
+	feats.f.Wishes.To = config.WishesToOvertide
 	// Ann's and Bob's accounts in turn (neither had one: by ID), each its
 	// first wish; film 2, wished by both, once.
 	first, second := "movie 1", "season 1399 s2 121361"

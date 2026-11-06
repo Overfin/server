@@ -129,7 +129,7 @@ watchlist are always on; the rest is switched on in the control panel.
 | Migration | Bringing Jellyfin accounts over | Switch |
 | Catalog | The library's index, matched to TMDB by Overfin | Always on |
 | Discovery | Trending, popular and upcoming titles, from TMDB | With a TMDB token or Seerr; kids profiles see what their age allows |
-| Wishlists | Each profile's films and seasons to get, taken in turns account by account | When the operator chooses where wishes go (Overswell or Seerr) |
+| Wishlists | Each profile's films and seasons to get, taken in turns account by account | When the operator chooses where wishes go (Overtide or Seerr) |
 
 Everything people see about a title, its text and its images, comes from
 TMDB, in each account's language. For that, Overfin needs **your own TMDB
@@ -161,7 +161,7 @@ others are fetched when first shown. TMDB's free API is for non-commercial
 use: a site that charges for access needs TMDB's commercial terms. Seerr,
 when connected, is a second source.
 
-Wishes go where you choose (Features, Wishes): to Overswell, which fetches
+Wishes go where you choose (Features, Wishes): to Overtide, which fetches
 them in Overfin's turns, or to Seerr, where Overfin requests them itself, a
 few a day, as one Seerr user of its own named "Overfin" (give it the Request
 permission, and auto-approval if you like). Seerr never learns who wished

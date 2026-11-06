@@ -221,7 +221,7 @@ paths:
       operationId: appWishes
       summary: The wished titles to fetch, next first
       description: |
-        For the app that fetches what people wish for (Overswell), when the
+        For the app that fetches what people wish for (Overtide), when the
         operator chose it as where wishes go; otherwise an empty list. The
         order is Overfin's turns: accounts in turn, then their profiles,
         each turn the highest wish that can be tried now. Titles downloading,
@@ -434,7 +434,7 @@ paths:
         Each season's episodes with their air dates and names, and whether
         another order on TMDB (DVD, production, digital…) puts other
         episodes in that season's places. For an app that imports episodes
-        (Overswell), to tell what a file's number means. Story arcs and
+        (Overtide), to tell what a file's number means. Story arcs and
         absolute numbering don't count as other orders. Any valid key.
       tags: [apps]
       security:
@@ -514,7 +514,7 @@ paths:
         The categories the operator made in the control panel, in their
         order: their IDs, as `categories` on `list=suggestions` titles
         gives them, and their names in each language. For an app that adds
-        titles (Overswell), to let the operator say where each category's
+        titles (Overtide), to let the operator say where each category's
         titles go. Any valid key.
       tags: [apps]
       security:

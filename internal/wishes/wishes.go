@@ -3,7 +3,7 @@
 // oldest goes first, then the next, and so on, round after round; inside
 // an account, its profiles take turns too, so more profiles don't mean
 // more turns. Each turn takes the highest wish of that profile that can be
-// tried now. A fetcher (Overswell or Seerr) gets the titles in that order,
+// tried now. A fetcher (Overtide or Seerr) gets the titles in that order,
 // and never who wished them.
 package wishes
 
