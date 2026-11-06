@@ -328,7 +328,6 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("GET /apps/v1/episode-orders", p.appEpisodeOrders)
 	mux.HandleFunc("GET /apps/v1/wishes", p.appWishes)
 	mux.HandleFunc("POST /apps/v1/wishes/status", p.appWishStatus)
-	mux.HandleFunc("PUT /apps/v1/lists", p.appLists)
 	mux.HandleFunc("GET /admin/api/valuation", p.signedIn(p.valuationSettings))
 	mux.HandleFunc("PUT /admin/api/valuation", p.signedIn(p.setValuation))
 	mux.HandleFunc("POST /admin/api/valuation/preview", p.signedIn(p.valuationPreview))

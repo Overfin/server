@@ -3,7 +3,7 @@
 <script lang="ts">
   import { PageHead, Card, Setting, Status, Busy, Notice, Loading, toast } from '@overfin/ui';
   import { api } from '../lib/api';
-  import { message, numberIn, plural } from '../lib/format';
+  import { message, plural } from '../lib/format';
   import { route } from '../lib/router.svelte';
   import type { Valuation, Valued } from '../lib/types-library';
 
@@ -33,7 +33,6 @@
   let weights = $state<Record<string, number>>({});
   let saved = $state<Record<string, number>>({});
   let askTastes = $state(false);
-  let share = $state<number | string>(0);
   let status = $state<{ text: string; kind: '' | 'ok' | 'error' }>({ text: '', kind: '' });
   let search = $state('');
   let most = $state<Valued[] | null>(null);
@@ -50,7 +49,6 @@
       weights = Object.fromEntries(d.criteria.map((c) => [c.name, c.weight]));
       saved = { ...weights };
       askTastes = d.askTastes;
-      share = d.listShare;
       preview();
     },
     (err) => (problem = message(err)),
@@ -112,20 +110,6 @@
       toast(message(err), true);
     }
   }
-
-  async function setShare() {
-    try {
-      const n = Math.round(numberIn(share, 'Lists share', '0: the picks alone'));
-      if (!(n >= 0 && n <= 100)) throw new Error('The lists share goes from 0 to 100.');
-      await api('PUT', '/admin/api/valuation', { listShare: n });
-      share = n;
-      data!.listShare = n;
-      toast(n ? `${n}% of the suggestions will come from your import lists.` : 'Suggestions come from the picks alone.');
-    } catch (err) {
-      share = data!.listShare;
-      toast(message(err), true);
-    }
-  }
 </script>
 
 {#snippet list(title: string, rows: Valued[] | null, empty: string)}
@@ -178,18 +162,6 @@
           <Busy action={reset}>Reset to defaults</Busy>
           <Busy kind="primary" disabled={!changed} action={save}>Save</Busy>
         {/snippet}
-      </Card>
-      <Card title="Suggestions" description="What apps you give a key, like Overtide, are told to add: the titles the libraries lack, the most valuable first.">
-        <div>
-          <Setting label="Lists share" hint={`The part of the suggestions taken from your Radarr and Sonarr import lists, in their order, whatever their value; the rest are Overfin's picks, by value. Overtide sends the lists; its key needs Import lists to send (Apps). ${data.lists.length ? 'Lists received: ' + data.lists.join(', ') + '.' : 'No lists received yet.'} 0 turns it off.`}>
-            {#snippet children(ids)}
-              <div class="weight">
-                <input type="number" min="0" max="100" step="1" bind:value={share} onchange={setShare} aria-labelledby={ids.label} aria-describedby={ids.hint} />
-                <span>%</span>
-              </div>
-            {/snippet}
-          </Setting>
-        </div>
       </Card>
       <div class="columns">
         <section><h2>Most valuable</h2>{@render list('In the libraries', most, 'No titles in the libraries yet.')}</section>

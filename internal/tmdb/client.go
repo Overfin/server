@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -403,6 +404,87 @@ func (c *Client) Discover(ctx context.Context, list, kind string, page int) (*Pa
 		return nil, errors.New("tmdb: invalid discovery list")
 	}
 	return c.page(ctx, path, kind, q)
+}
+
+// validCountry is what an ISO 3166-1 country code looks like ("CA").
+func validCountry(c string) bool {
+	if len(c) != 2 {
+		return false
+	}
+	for _, r := range c {
+		if r < 'A' || r > 'Z' {
+			return false
+		}
+	}
+	return true
+}
+
+// Providers returns the streaming services TMDB knows for a kind in a
+// country (ISO 3166-1), the ones it shows first there first, at most n.
+func (c *Client) Providers(ctx context.Context, kind, country string, n int) ([]int, error) {
+	k := tv(kind)
+	if k == "" || !validCountry(country) || n < 1 {
+		return nil, errors.New("tmdb: invalid providers query")
+	}
+	var raw struct {
+		Results []struct {
+			ID       int            `json:"provider_id"`
+			Priority map[string]int `json:"display_priorities"`
+		} `json:"results"`
+	}
+	if err := c.get(ctx, "/watch/providers/"+k, url.Values{"watch_region": {country}}, &raw); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(raw.Results, func(i, j int) bool {
+		a, okA := raw.Results[i].Priority[country]
+		b, okB := raw.Results[j].Priority[country]
+		if okA != okB {
+			return okA
+		}
+		return a < b
+	})
+	var out []int
+	for _, p := range raw.Results[:min(n, len(raw.Results))] {
+		if p.ID > 0 {
+			out = append(out, p.ID)
+		}
+	}
+	return out, nil
+}
+
+// Streaming returns one page (from 1) of a kind's titles out since since
+// that stream with a subscription in a country on one of providers, the
+// most popular first: a film released since, a series with an episode
+// aired since. Foreign titles are in it as long as they stream there.
+func (c *Client) Streaming(ctx context.Context, kind, country string, providers []int, since time.Time, page int) (*Page, error) {
+	k := tv(kind)
+	if k == "" || !validCountry(country) || len(providers) == 0 || page < 1 || page > 500 {
+		return nil, errors.New("tmdb: invalid streaming query")
+	}
+	ids := make([]string, 0, len(providers))
+	for _, p := range providers {
+		ids = append(ids, strconv.Itoa(p))
+	}
+	q := url.Values{"page": {strconv.Itoa(page)}, "watch_region": {country}, "with_watch_providers": {strings.Join(ids, "|")},
+		"with_watch_monetization_types": {"flatrate"}, "sort_by": {"popularity.desc"}}
+	day := since.UTC().Format(time.DateOnly)
+	if kind == "movie" {
+		q.Set("primary_release_date.gte", day)
+	} else {
+		q.Set("air_date.gte", day)
+	}
+	return c.page(ctx, "/discover/"+k, kind, q)
+}
+
+// OutAtHome returns one page (from 1) of the films released at home in a
+// country (digital, disc or TV) since since, the most popular first, by
+// the dates TMDB has for that country.
+func (c *Client) OutAtHome(ctx context.Context, country string, since time.Time, page int) (*Page, error) {
+	if !validCountry(country) || page < 1 || page > 500 {
+		return nil, errors.New("tmdb: invalid release query")
+	}
+	return c.page(ctx, "/discover/movie", "movie", url.Values{"page": {strconv.Itoa(page)}, "region": {country}, "with_release_type": {"4|5|6"},
+		"release_date.gte": {since.UTC().Format(time.DateOnly)}, "release_date.lte": {time.Now().UTC().Format(time.DateOnly)}, "sort_by": {"popularity.desc"}})
 }
 
 // Recommendations returns the first page of TMDB's titles like a film or

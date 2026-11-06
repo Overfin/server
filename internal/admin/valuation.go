@@ -73,11 +73,6 @@ type valuationJSON struct {
 	// AskTastes: accounts are asked what they like (Tastes then mixes
 	// what they said with what they watch; otherwise only the latter).
 	AskTastes bool `json:"askTastes"`
-	// ListShare is the part, in percent, of the suggestions taken from the
-	// operator's import lists whatever their value; Lists, those lists'
-	// names, as the app that reads them last sent them.
-	ListShare int      `json:"listShare"`
-	Lists     []string `json:"lists"`
 }
 
 // valuationSettings (GET /admin/api/valuation) answers the weights, the
@@ -103,18 +98,8 @@ func (p *Panel) writeValuation(w http.ResponseWriter, r *http.Request) {
 		p.fail(w, "reading whether tastes are asked", err)
 		return
 	}
-	share, err := p.Store.ListShare(ctx)
-	if err != nil {
-		p.fail(w, "reading the lists' share", err)
-		return
-	}
-	lists, err := p.Store.OperatorListNames(ctx)
-	if err != nil {
-		p.fail(w, "reading the operator's lists", err)
-		return
-	}
 	weights, defaults := valuation.Weights(saved), valuation.Defaults()
-	out := valuationJSON{Max: valuation.MaxWeight, Accounts: m.Accounts, Titles: len(m.Titles), AskTastes: asked, ListShare: share, Lists: append([]string{}, lists...)}
+	out := valuationJSON{Max: valuation.MaxWeight, Accounts: m.Accounts, Titles: len(m.Titles), AskTastes: asked}
 	for _, c := range valuation.Criteria {
 		out.Criteria = append(out.Criteria, criterionJSON{Name: c, Weight: weights[c], Default: defaults[c]})
 	}
@@ -134,32 +119,16 @@ func weightsOf(w http.ResponseWriter, sent map[string]int) (map[string]int, bool
 }
 
 // setValuation (PUT /admin/api/valuation) keeps new weights, or with
-// reset, goes back to the defaults; with askTastes or listShare alone,
-// it only switches asking accounts what they like, or sets the share.
+// reset, goes back to the defaults; with askTastes alone, it only switches
+// asking accounts what they like.
 func (p *Panel) setValuation(w http.ResponseWriter, r *http.Request, s *session) {
 	var req struct {
 		Weights   map[string]int `json:"weights"`
 		Reset     bool           `json:"reset"`
 		AskTastes *bool          `json:"askTastes"`
-		ListShare *int           `json:"listShare"`
 	}
 	if !decode(w, r, &req) {
 		return
-	}
-	if req.ListShare != nil {
-		if *req.ListShare < 0 || *req.ListShare > 100 {
-			invalid(w, "listShare: 0 to 100")
-			return
-		}
-		if err := p.Store.SetListShare(r.Context(), *req.ListShare); err != nil {
-			p.fail(w, "saving the lists' share", err)
-			return
-		}
-		p.Logger.Info("the lists' share changed in the control panel", "share", *req.ListShare, "by", s.logID)
-		if req.AskTastes == nil && req.Weights == nil && !req.Reset {
-			p.writeValuation(w, r)
-			return
-		}
 	}
 	if req.AskTastes != nil {
 		if err := p.Store.SetTastesAsked(r.Context(), *req.AskTastes); err != nil {

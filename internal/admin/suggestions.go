@@ -8,51 +8,13 @@ import (
 	"github.com/overfin/server/internal/valuation"
 )
 
-// suggestionOrder orders what the libraries lack for list=suggestions:
-// of every hundred titles, share come from the operator's import lists
-// (by place, the first list first at the same place), whatever their
-// value; the rest are the picks, by value. Either fills in when the other
-// runs out, and a title comes once (a series with all its seasons). lists
-// are the lists' places by kind and TMDB ID ("movie/550").
-func suggestionOrder(rows []valuation.Value, lists []map[string]int, share int) []valuation.Value {
-	type ranked struct {
-		v        valuation.Value
-		position int
-		list     int
-		season   int
-	}
-	var listed []ranked
-	for _, v := range rows {
-		r, _ := store.ParseTitleKey(v.Key)
-		top := "movie/"
-		if r.Kind != "movie" {
-			top = "series/"
-		}
-		best := ranked{v: v, position: -1, season: r.Season}
-		for i, positions := range lists {
-			if n, ok := positions[top+r.TMDB()]; ok && (best.position < 0 || n < best.position) {
-				best.position, best.list = n, i
-			}
-		}
-		if best.position >= 0 {
-			listed = append(listed, best)
-		}
-	}
-	sort.SliceStable(listed, func(i, j int) bool {
-		a, b := listed[i], listed[j]
-		if a.position != b.position {
-			return a.position < b.position
-		}
-		if a.list != b.list {
-			return a.list < b.list
-		}
-		return a.season < b.season
-	})
+// suggestionOrder orders what the libraries lack for list=suggestions: the
+// picks by value, the most valuable first, each title once: a series is
+// one title to add, its seasons together, in order, at its most valuable
+// season's place.
+func suggestionOrder(rows []valuation.Value) []valuation.Value {
 	picks := append([]valuation.Value(nil), rows...)
 	sort.SliceStable(picks, func(i, j int) bool { return picks[i].Score > picks[j].Score })
-
-	// A series is one title to add: its seasons come together, in order, at
-	// its first season's place, and take one place in the mix.
 	seasons := map[string][]valuation.Value{}
 	for _, v := range rows {
 		if r, _ := store.ParseTitleKey(v.Key); r.Kind == "season" {
@@ -68,15 +30,7 @@ func suggestionOrder(rows []valuation.Value, lists []map[string]int, share int) 
 	}
 	out := make([]valuation.Value, 0, len(rows))
 	given := map[string]bool{}
-	titles, taken := 0, 0
-	for len(listed) > 0 || len(picks) > 0 {
-		var next valuation.Value
-		fromLists := len(listed) > 0 && (len(picks) == 0 || taken*100 < share*(titles+1))
-		if fromLists {
-			next, listed = listed[0].v, listed[1:]
-		} else {
-			next, picks = picks[0], picks[1:]
-		}
+	for _, next := range picks {
 		title := next.Key
 		group := []valuation.Value{next}
 		if r, _ := store.ParseTitleKey(next.Key); r.Kind == "season" {
@@ -88,10 +42,6 @@ func suggestionOrder(rows []valuation.Value, lists []map[string]int, share int) 
 		}
 		given[title] = true
 		out = append(out, group...)
-		titles++
-		if fromLists {
-			taken++
-		}
 	}
 	return out
 }

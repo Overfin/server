@@ -19,13 +19,23 @@ type PickSource interface {
 	// ByGenre is one page of a kind's titles in a genre, the most popular
 	// first.
 	ByGenre(ctx context.Context, kind string, genre, page int) (*tmdb.Page, error)
+	// Providers, Streaming and OutAtHome are what's out in a country: the
+	// streaming services there, the titles they have, and the films
+	// released at home there.
+	Providers(ctx context.Context, kind, country string, n int) ([]int, error)
+	Streaming(ctx context.Context, kind, country string, providers []int, since time.Time, page int) (*tmdb.Page, error)
+	OutAtHome(ctx context.Context, country string, since time.Time, page int) (*tmdb.Page, error)
 }
 
-// Picks keeps the lists of titles Overfin may suggest beside the
-// operator's import lists (store.PickLists): "recommended", those like
-// what people here watch and like, and "liked", those in the genres
-// accounts said they like. The titles keeper fetches their pages, and the
-// valuation values those the libraries lack.
+// Picks keeps the lists of titles Overfin may suggest (store.PickLists):
+// "recommended", those like what people here watch and like; "liked",
+// those in the genres accounts said they like; and "regional", what's out
+// in the server's country (its ratings country): recent titles on its
+// streaming services, foreign ones too, and films just released at home
+// there. TMDB knows what's out where, not what people watch where: it has
+// one popularity, worldwide, so the order is the valuation's, made from
+// what people here watch, like and wish for. The titles keeper fetches
+// their pages, and the valuation values those the libraries lack.
 type Picks struct {
 	Source func() PickSource
 	Store  *store.Store
@@ -47,6 +57,13 @@ const (
 	pickGenrePages = 2
 	// seedsSince is how far back what people watched counts.
 	seedsSince = 183 * 24 * time.Hour
+	// What's out in the country: titles out within streamingSince on its
+	// regionProviders most shown streaming services, films released at
+	// home within homeSince, regionPages pages each.
+	streamingSince  = 365 * 24 * time.Hour
+	homeSince       = 90 * 24 * time.Hour
+	regionProviders = 15
+	regionPages     = 3
 )
 
 // NewPicks returns the picks' keeper.
@@ -80,7 +97,7 @@ func (k *Picks) Run(ctx context.Context) {
 	}
 }
 
-// Refresh makes both lists again.
+// Refresh makes the lists again.
 func (k *Picks) Refresh(ctx context.Context) error {
 	src := k.Source()
 	if src == nil {
@@ -89,7 +106,55 @@ func (k *Picks) Refresh(ctx context.Context) error {
 	if err := k.recommended(ctx, src); err != nil {
 		return err
 	}
-	return k.liked(ctx, src)
+	if err := k.liked(ctx, src); err != nil {
+		return err
+	}
+	return k.regional(ctx, src)
+}
+
+func (k *Picks) regional(ctx context.Context, src PickSource) error {
+	country, err := k.Store.RatingsCountry(ctx)
+	if err != nil {
+		return err
+	}
+	now := k.clock()
+	l := newList()
+	read := func(kind string, fetch func(page int) (*tmdb.Page, error)) error {
+		for page := 1; page <= regionPages; page++ {
+			p, err := fetch(page)
+			if err != nil {
+				return err
+			}
+			if err := k.add(ctx, l, kind, p); err != nil {
+				return err
+			}
+			if err := k.pause(ctx); err != nil {
+				return err
+			}
+			if page >= p.TotalPages {
+				break
+			}
+		}
+		return nil
+	}
+	for _, kind := range []string{"movie", "series"} {
+		providers, err := src.Providers(ctx, kind, country, regionProviders)
+		if err != nil {
+			return err
+		}
+		if len(providers) == 0 {
+			continue
+		}
+		if err := read(kind, func(page int) (*tmdb.Page, error) {
+			return src.Streaming(ctx, kind, country, providers, now.Add(-streamingSince), page)
+		}); err != nil {
+			return err
+		}
+	}
+	if err := read("movie", func(page int) (*tmdb.Page, error) { return src.OutAtHome(ctx, country, now.Add(-homeSince), page) }); err != nil {
+		return err
+	}
+	return k.save(ctx, "regional", l)
 }
 
 // pickList collects a list's titles by kind, each once, in the order seen.

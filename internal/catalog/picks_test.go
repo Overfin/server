@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -36,6 +37,24 @@ func (f *fakePicks) ByGenre(_ context.Context, kind string, genre, page int) (*t
 		p.Titles = []tmdb.Title{{TMDBID: 1399, Kind: "series", Name: "Le Trône de fer"}}
 	}
 	return p, nil
+}
+
+func (f *fakePicks) Providers(_ context.Context, kind, country string, _ int) ([]int, error) {
+	f.asked = append(f.asked, "providers "+kind+" "+country)
+	if kind == "series" {
+		return nil, nil // none known: nothing asked of series
+	}
+	return []int{8}, nil
+}
+
+func (f *fakePicks) Streaming(_ context.Context, kind, country string, providers []int, _ time.Time, page int) (*tmdb.Page, error) {
+	f.asked = append(f.asked, "streaming "+kind+" "+country)
+	return &tmdb.Page{Page: page, TotalPages: 1, Titles: []tmdb.Title{{TMDBID: 200, Kind: "movie", Name: "Streams here"}}}, nil
+}
+
+func (f *fakePicks) OutAtHome(_ context.Context, country string, _ time.Time, page int) (*tmdb.Page, error) {
+	f.asked = append(f.asked, "home "+country)
+	return &tmdb.Page{Page: page, TotalPages: 1, Titles: []tmdb.Title{{TMDBID: 201, Kind: "movie", Name: "Out at home here"}, {TMDBID: 200, Kind: "movie", Name: "Streams here"}}}, nil
 }
 
 // The picks' lists come from what people watch and the genres they like;
@@ -77,6 +96,20 @@ func TestPicks(t *testing.T) {
 	series, _ := st.ListTitles(ctx, "liked", "series", "", nil, 0, 10)
 	if len(series) != 1 || series[0].TMDB != "1399" {
 		t.Errorf("liked series: %+v (asked %v)", series, src.asked)
+	}
+	// What's out in the server's country (its ratings country): on its
+	// streaming services, and released at home there, each film once.
+	regional, _ := st.ListTitles(ctx, "regional", "movie", "", nil, 0, 10)
+	if len(regional) != 2 || regional[0].TMDB != "200" || regional[1].TMDB != "201" {
+		t.Errorf("regional: %+v", regional)
+	}
+	for _, want := range []string{"providers movie US", "streaming movie US", "providers series US", "home US"} {
+		if !slices.Contains(src.asked, want) {
+			t.Errorf("not asked %q: %v", want, src.asked)
+		}
+	}
+	if slices.Contains(src.asked, "streaming series US") {
+		t.Errorf("series asked without providers: %v", src.asked)
 	}
 
 	// TMDB describes the series, not film 100: only the series is valued,
