@@ -14,8 +14,8 @@
     lastUsedAt?: string;
   }
 
-  const scopeNames: Record<string, string> = { score: 'Values', stats: 'Watch statistics', availability: 'In the libraries', history: 'What came and went', wishes: 'Wishes to fetch', 'watch-stats': 'Watch statistics' };
-  const scopes = ['score', 'stats', 'availability', 'history', 'wishes'];
+  const scopeNames: Record<string, string> = { score: 'Values', stats: 'Watch statistics', availability: 'In the libraries', history: 'What came and went', wishes: 'Wishes to fetch', lists: 'Import lists to send', 'watch-stats': 'Watch statistics' };
+  const scopes = ['score', 'stats', 'availability', 'history', 'wishes', 'lists'];
 
   let items = $state<Key[] | null>(null);
   let problem = $state('');

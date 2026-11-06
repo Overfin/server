@@ -9,13 +9,14 @@ import (
 )
 
 // PickLists are the lists whose titles the libraries lack are Overfin's
-// picks, valued like every other title: TMDB's trending and popular titles,
-// those like what people here watch ("recommended"), and those in the
-// genres they like ("liked").
-var PickLists = []string{"trending", "popular", "recommended", "liked"}
+// picks, valued like every other title: those like what people here watch
+// ("recommended"), those in the genres they like ("liked"), and those on
+// the operator's import lists (OperatorListPrefix).
+var PickLists = []string{"recommended", "liked"}
 
-// pickLists is PickLists for a query's IN.
-var pickLists = "'" + strings.Join(PickLists, "', '") + "'"
+// pickLists picks PickLists' rows and the operator's lists in a query on
+// catalog_lists l.
+var pickLists = "(l.list IN ('" + strings.Join(PickLists, "', '") + "') OR l.list LIKE '" + OperatorListPrefix + "%')"
 
 // PickSeeds are the films and series people here watched or marked a
 // favourite since, the most accounts first, at most limit: those whose
@@ -76,7 +77,7 @@ func (s *Store) PickSeeds(ctx context.Context, since time.Time, limit int) ([]Ti
 func (s *Store) PicksToDescribe(ctx context.Context, before time.Time, limit int) ([]ArtworkTarget, error) {
 	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT t.kind, t.tmdb FROM catalog_lists l
 		JOIN catalog_titles t ON t.kind = l.kind AND t.tmdb = l.tmdb
-		WHERE l.list IN (`+pickLists+`) AND coalesce(t.details_at, 0) < ?
+		WHERE `+pickLists+` AND coalesce(t.details_at, 0) < ?
 			AND NOT EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = t.kind AND i.tmdb = t.tmdb)
 		ORDER BY t.kind, t.tmdb LIMIT ?`, before.Unix(), limit)
 	if err != nil {
@@ -100,7 +101,7 @@ func (s *Store) PicksToDescribe(ctx context.Context, before time.Time, limit int
 func (s *Store) picks(ctx context.Context, f *ValuationFacts, now time.Time) error {
 	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT t.kind, t.tmdb, t.details FROM catalog_lists l
 		JOIN catalog_titles t ON t.kind = l.kind AND t.tmdb = l.tmdb
-		WHERE l.list IN (`+pickLists+`) AND t.details IS NOT NULL
+		WHERE `+pickLists+` AND t.details IS NOT NULL
 			AND NOT EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = t.kind AND i.tmdb = t.tmdb)`)
 	if err != nil {
 		return err

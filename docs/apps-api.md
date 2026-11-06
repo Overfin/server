@@ -30,8 +30,8 @@ the groups the key may read, or those named in `fields` (`score`, `stats`,
 unless `sort` is given, films and series side by side by their place; a
 season by its series' place; or `suggestions`: the titles the libraries
 lack and that are out (or out within two days), in the order an app
-should add them, the most valuable first with trending and popular titles
-mixed in by the **Discovery share** set on the Valuation tab; never sorted
+should add them, the most valuable first with titles from the operator's
+import lists mixed in by the **Lists share** set on the Valuation tab; never sorted
 otherwise; each with the `categories` it fits, by what TMDB says of it, as
 `GET /apps/v1/categories` lists them).
 Sorting: `sort=score` (keys with the value only) or `name`, `order=asc` or
@@ -39,6 +39,21 @@ Sorting: `sort=score` (keys with the value only) or `name`, `order=asc` or
 at `cursor=` what `next` says. An app that frees space (such as Overtide)
 asks for the least valuable titles the libraries have, as above; an app
 that adds titles (such as Overtide), for `list=suggestions`.
+
+The operator's Radarr and Sonarr import lists, sent by the app that reads
+them (such as Overtide), all at once, replacing what it sent before (key
+with **Import lists to send**):
+
+```
+PUT /apps/v1/lists
+Authorization: Bearer ofapp_…
+
+{"lists": [{"name": "Latest films", "titles": [{"kind": "movie", "tmdbId": "550"}, {"kind": "series", "tmdbId": "1399"}]}]}
+```
+
+Their titles the libraries lack are picks, valued like every other; the
+**Lists share** of the suggestions comes from them, in their order. At
+most 200 lists and 100,000 titles in all.
 
 What TMDB says of a series' episodes, for an app that imports them and has
 to tell what a file's number means (any key):

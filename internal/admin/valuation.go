@@ -73,9 +73,11 @@ type valuationJSON struct {
 	// AskTastes: accounts are asked what they like (Tastes then mixes
 	// what they said with what they watch; otherwise only the latter).
 	AskTastes bool `json:"askTastes"`
-	// DiscoveryShare is the part, in percent, of the suggestions taken from
-	// TMDB's trending and popular titles whatever their value.
-	DiscoveryShare int `json:"discoveryShare"`
+	// ListShare is the part, in percent, of the suggestions taken from the
+	// operator's import lists whatever their value; Lists, those lists'
+	// names, as the app that reads them last sent them.
+	ListShare int      `json:"listShare"`
+	Lists     []string `json:"lists"`
 }
 
 // valuationSettings (GET /admin/api/valuation) answers the weights, the
@@ -101,13 +103,18 @@ func (p *Panel) writeValuation(w http.ResponseWriter, r *http.Request) {
 		p.fail(w, "reading whether tastes are asked", err)
 		return
 	}
-	share, err := p.Store.DiscoveryShare(ctx)
+	share, err := p.Store.ListShare(ctx)
 	if err != nil {
-		p.fail(w, "reading the discovery share", err)
+		p.fail(w, "reading the lists' share", err)
+		return
+	}
+	lists, err := p.Store.OperatorListNames(ctx)
+	if err != nil {
+		p.fail(w, "reading the operator's lists", err)
 		return
 	}
 	weights, defaults := valuation.Weights(saved), valuation.Defaults()
-	out := valuationJSON{Max: valuation.MaxWeight, Accounts: m.Accounts, Titles: len(m.Titles), AskTastes: asked, DiscoveryShare: share}
+	out := valuationJSON{Max: valuation.MaxWeight, Accounts: m.Accounts, Titles: len(m.Titles), AskTastes: asked, ListShare: share, Lists: append([]string{}, lists...)}
 	for _, c := range valuation.Criteria {
 		out.Criteria = append(out.Criteria, criterionJSON{Name: c, Weight: weights[c], Default: defaults[c]})
 	}
@@ -127,28 +134,28 @@ func weightsOf(w http.ResponseWriter, sent map[string]int) (map[string]int, bool
 }
 
 // setValuation (PUT /admin/api/valuation) keeps new weights, or with
-// reset, goes back to the defaults; with askTastes or discoveryShare alone,
+// reset, goes back to the defaults; with askTastes or listShare alone,
 // it only switches asking accounts what they like, or sets the share.
 func (p *Panel) setValuation(w http.ResponseWriter, r *http.Request, s *session) {
 	var req struct {
-		Weights        map[string]int `json:"weights"`
-		Reset          bool           `json:"reset"`
-		AskTastes      *bool          `json:"askTastes"`
-		DiscoveryShare *int           `json:"discoveryShare"`
+		Weights   map[string]int `json:"weights"`
+		Reset     bool           `json:"reset"`
+		AskTastes *bool          `json:"askTastes"`
+		ListShare *int           `json:"listShare"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.DiscoveryShare != nil {
-		if *req.DiscoveryShare < 0 || *req.DiscoveryShare > 100 {
-			invalid(w, "discoveryShare: 0 to 100")
+	if req.ListShare != nil {
+		if *req.ListShare < 0 || *req.ListShare > 100 {
+			invalid(w, "listShare: 0 to 100")
 			return
 		}
-		if err := p.Store.SetDiscoveryShare(r.Context(), *req.DiscoveryShare); err != nil {
-			p.fail(w, "saving the discovery share", err)
+		if err := p.Store.SetListShare(r.Context(), *req.ListShare); err != nil {
+			p.fail(w, "saving the lists' share", err)
 			return
 		}
-		p.Logger.Info("the discovery share changed in the control panel", "share", *req.DiscoveryShare, "by", s.logID)
+		p.Logger.Info("the lists' share changed in the control panel", "share", *req.ListShare, "by", s.logID)
 		if req.AskTastes == nil && req.Weights == nil && !req.Reset {
 			p.writeValuation(w, r)
 			return
