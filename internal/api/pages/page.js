@@ -154,6 +154,15 @@ $('resend')?.addEventListener('click', async () => {
 
 run($('fresh'), () => post('/api/v1/signin', { password: $('password').value, fresh: true }));
 run($('change'), () => post('/api/v1/signin/password', { password: same('password', 'password2') }));
+// Not choosing one: that login ends, and signing in starts again.
+$('leave')?.addEventListener('click', async (event) => {
+  event.preventDefault();
+  try {
+    await post('/api/v1/logout', {});
+  } finally {
+    location.href = '/signin';
+  }
+});
 
 run($('register'), async () => {
   const password = same('password', 'password2');

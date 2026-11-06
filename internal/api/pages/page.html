@@ -55,6 +55,7 @@
     <p class="hint muted">{{.Rules}}</p>
     <button class="primary" type="submit">{{.T.save}}</button>
   </form>
+  <p class="links"><a href="/signin" id="leave">{{.T.signOut}}</a></p>
 
   {{else if eq .P.Mode "invite"}}
   <h1>{{.InviteTitle}}</h1>
