@@ -442,7 +442,7 @@ comes from the internet, and media files can be written by anyone.
     (watched, marked, asked for or kept for later), or when it's one of
     Overfin's picks from TMDB's lists. So no title and no time points at
     one person. The one exception is the fetcher's key (`wishes`, for
-    Overswell): to fetch what people wish for, it reads the wished titles
+    Overtide): to fetch what people wish for, it reads the wished titles
     in turn order, one person's wish included, but never who wished a
     title nor how many did, and it says back only what became of each.
 

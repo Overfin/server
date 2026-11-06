@@ -615,7 +615,7 @@ paths:
         most, each with what became of it; a series' seasons follow each
         other. Overfin takes turns between
         accounts, then between an account's profiles, and hands the titles to
-        what fetches them (Overswell or Seerr, as the operator chose), never
+        what fetches them (Overtide or Seerr, as the operator chose), never
         who wished them. A title that arrives leaves the wishlist for the
         watchlist, and is listed once in `arrived`. Offered when `offers.wishes`
         (`GET /me`); private to the profile.

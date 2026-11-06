@@ -194,11 +194,11 @@
     <!-- Wishlists: each profile's titles to get, taken in turns, account
          by account; what fetches them. -->
     <Card title="Wishes" description="Each profile lists the films and seasons it would like here; Overfin takes turns, account by account.">
-      <Setting label="Wishes go to" hint="Nowhere: no wishlist is offered. Overswell: it fetches them in Overfin's turns, and says back what became of each; its key needs Wishes to fetch (Apps). Seerr: Overfin requests them there itself, as a user named Overfin it makes (give it the Request permission, and auto-approval if you like).">
+      <Setting label="Wishes go to" hint="Nowhere: no wishlist is offered. Overtide: it fetches them in Overfin's turns, and says back what became of each; its key needs Wishes to fetch (Apps). Seerr: Overfin requests them there itself, as a user named Overfin it makes (give it the Request permission, and auto-approval if you like).">
         {#snippet children(ids)}
           <select bind:value={values['wishes.to']} aria-labelledby={ids.label} aria-describedby={ids.hint}>
             <option value="">Nowhere</option>
-            <option value="overswell">Overswell</option>
+            <option value="overtide">Overtide</option>
             <option value="seerr">Seerr</option>
           </select>
         {/snippet}

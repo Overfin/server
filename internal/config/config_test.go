@@ -58,6 +58,24 @@ func TestLoadValid(t *testing.T) {
 	}
 }
 
+// Wishes that went to Overswell, Overtide's adding while it was a separate
+// app, go to Overtide: from the file and from the panel's settings.
+func TestWishesToOverswellIsOvertide(t *testing.T) {
+	cfg, err := Load(writeFile(t, goodFile+"\n[wishes]\nto = \"overswell\"\n"), env(goodEnv()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Wishes.To != WishesToOvertide {
+		t.Fatalf("from the file: %q", cfg.Wishes.To)
+	}
+	f := cfg.Features()
+	f.Wishes.To = "overswell"
+	n, err := cfg.WithFeatures(f)
+	if err != nil || n.Wishes.To != WishesToOvertide {
+		t.Fatalf("from the panel: %v, %q", err, n.Wishes.To)
+	}
+}
+
 func TestLoadRejects(t *testing.T) {
 	tests := []struct {
 		name    string

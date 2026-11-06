@@ -38,7 +38,7 @@ Sorting: `sort=score` (keys with the value only) or `name`, `order=asc` or
 `desc`. Pages of `limit` rows (100 by default, at most 1000); the next one
 at `cursor=` what `next` says. An app that frees space (such as Overtide)
 asks for the least valuable titles the libraries have, as above; an app
-that adds titles (such as Overswell), for `list=suggestions`.
+that adds titles (such as Overtide), for `list=suggestions`.
 
 What TMDB says of a series' episodes, for an app that imports them and has
 to tell what a file's number means (any key):
@@ -68,7 +68,7 @@ Authorization: Bearer ofapp_…
 
 `event` is `arrived` or `left` (both when left out); pages of `limit`
 events (500 by default, at most 1000), the next one at `cursor=` what
-`next` says. Overswell uses it not to take a title again soon after it
+`next` says. Overtide uses it not to take a title again soon after it
 left.
 
 The older endpoint, for keys made for watch statistics before, still

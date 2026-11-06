@@ -160,10 +160,11 @@ only ever sees its own tables and reaches the core's data through its host;
 the core tells them of deleted profiles and accounts (`feature.Forgetter`),
 and existing installs' tables moved there once.
 
-**Connectors to sibling tools**: Overtide (storage, built from Stewarr,
-which stays a standalone tool) and Overswell (adding), which read what
-Overfin knows (title values and wishes, never who) and decide what the
-server keeps and gets (see "Wishlists, replacing requests" below).
+**Connectors to sibling tools**: Overtide (storage and adding, built from
+Stewarr, which stays a standalone tool; adding was a separate app,
+Overswell, from 2026-10-30 to 11-05), which reads what Overfin knows
+(title values and wishes, never who) and decides what the server keeps and
+gets (see "Wishlists, replacing requests" below).
 
 ## Milestone 2: administration (done)
 
@@ -703,12 +704,12 @@ nothing beyond what that needs.
     person who wished for it has watched it, or a set time has passed (60
     days by default); then it counts like any title. The "requested"
     criterion becomes "wished".
-  - **Where wishes go** is one setting: nowhere (no wishlist), **Overswell**
+  - **Where wishes go** is one setting: nowhere (no wishlist), **Overtide**
     (Overfin's own fetcher, which keeps its pace, tracker limits and disk
     room) or **Seerr**, one only. Overfin never connects to Radarr or Sonarr
     itself: it faces the internet and shouldn't hold their keys, and it
-    would duplicate Overswell. Fetchers get titles in turn order, never
-    names, and report each title's status back. With Overswell, nothing
+    would duplicate Overtide. Fetchers get titles in turn order, never
+    names, and report each title's status back. With Overtide, nothing
     goes to Seerr; with Seerr, Overfin paces itself (wishes a day, 10 by
     default) through one Seerr user of its own, so the per-account Seerr
     users, and `accounts.on_delete`, go.

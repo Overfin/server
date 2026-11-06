@@ -10,7 +10,7 @@ import (
 
 func TestAppEpisodeOrders(t *testing.T) {
 	p, b, _, _ := signedInPanel(t)
-	rec := b.do("POST", "/admin/api/apps", `{"name":"Overswell","scopes":["score"]}`, nil)
+	rec := b.do("POST", "/admin/api/apps", `{"name":"Overtide","scopes":["score"]}`, nil)
 	var made struct{ Key string }
 	if json.Unmarshal(rec.Body.Bytes(), &made); rec.Code != 201 {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body)

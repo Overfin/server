@@ -44,7 +44,7 @@ folders and a Jellyfin you run yourself.
   for their age.
 - **A catalog that looks the part**: artwork from TMDB, cast pages, search,
   trending titles, and wishlists for what you don't have: Overfin takes
-  turns between people, and Overswell or Seerr fetches.
+  turns between people, and Overtide or Seerr fetches.
 - **Watching in the browser**, phones included: subtitles, audio tracks,
   skip intro, next episode, and resume on any device.
 - **Recommendations** per profile, a list, favorites, and their language.
@@ -98,7 +98,7 @@ has reviewed them yet.
 - [Moving people over from Jellyfin](docs/moving-from-jellyfin.md)
 - [Features, in detail](docs/features.md): everything it does, TMDB and
   Seerr, building your own client.
-- [Other apps](docs/apps-api.md): the API Overtide and Overswell read.
+- [Other apps](docs/apps-api.md): the API Overtide reads.
 - [Useful to know](docs/operations.md): checks, reloads, recovery.
 - [Development](docs/development.md)
 

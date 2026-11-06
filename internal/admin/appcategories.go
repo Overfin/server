@@ -10,7 +10,7 @@ type appCategoryJSON struct {
 }
 
 // appCategories (GET /apps/v1/categories, any key) lists the operator's
-// categories, in their order: an app that adds titles (Overswell) lets the
+// categories, in their order: an app that adds titles (Overtide) lets the
 // operator say where each category's titles go.
 func (p *Panel) appCategories(w http.ResponseWriter, r *http.Request) {
 	if p.appKey(w, r, "") == nil {

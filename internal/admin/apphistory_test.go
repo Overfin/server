@@ -60,7 +60,7 @@ func TestAppHistory(t *testing.T) {
 		}
 		return page
 	}
-	history := key(`{"name":"Overswell","scopes":["history"]}`)
+	history := key(`{"name":"Overtide","scopes":["history"]}`)
 	all := get(history, "", 200)
 	got := []string{}
 	for _, e := range all.Events {

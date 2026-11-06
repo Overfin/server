@@ -11,7 +11,7 @@ import (
 	"github.com/overfin/server/internal/wishes"
 )
 
-// The wishes, for the app that fetches them (Overswell): the titles people
+// The wishes, for the app that fetches them (Overtide): the titles people
 // wished for, in the order Overfin's turns give (internal/wishes), never
 // who wished them or how many did (SECURITY.md rule 40). The app says back
 // what became of each title; a search spends the turn of every account
@@ -32,10 +32,10 @@ type appWishJSON struct {
 	Categories []string `json:"categories,omitempty"`
 }
 
-// toOverswell reports whether wishes go to an app (Overswell): with Seerr,
+// toOvertide reports whether wishes go to an app (Overtide): with Seerr,
 // Overfin hands them over itself, and with none, there are none.
-func (p *Panel) toOverswell() bool {
-	return p.Features.Features().Wishes.To == config.WishesToOverswell
+func (p *Panel) toOvertide() bool {
+	return p.Features.Features().Wishes.To == config.WishesToOvertide
 }
 
 // order reads the turns: the titles to fetch, next first.
@@ -78,7 +78,7 @@ func (p *Panel) appWishes(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 	out := []appWishJSON{}
-	if p.toOverswell() {
+	if p.toOvertide() {
 		order, err := p.wishOrder(r, limit)
 		if err != nil {
 			p.fail(w, "reading the wishes", err)

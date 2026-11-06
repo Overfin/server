@@ -36,7 +36,7 @@ limits); apps, official or not, use only its public API. MIT, public.
   A colon followed by a space inside a plain-text description breaks it.
 - The control panel and the setup page are a Svelte app in `frontend/`, on
   Overfin UI (github.com/overfin/ui), the look and components every
-  Overfin panel shares (Overtide and Overswell too): never restyled here.
+  Overfin panel shares (Overtide too): never restyled here.
   Lists with Edit/Delete, forms in a `FormModal`, confirmations with `ask`.
   After a change: `npm run check` and `npm run build` in `frontend/`, and
   commit `internal/admin/dist` (Go embeds it; `go build` needs no Node);

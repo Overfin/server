@@ -42,12 +42,12 @@ func TestWishesToSeerr(t *testing.T) {
 	st.AddWish(ctx, ann.ID, "movie/tmdb/2")
 	st.AddWish(ctx, bob.ID, "series/tmdb/1399/s2")
 
-	to := config.WishesToOverswell
+	to := config.WishesToOvertide
 	s := &api.WishesToSeerr{Store: st, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Setup: func() (string, int, *seerr.Client) { return to, 2, client }}
-	// Wishes go to Overswell: nothing goes to Seerr.
+	// Wishes go to Overtide: nothing goes to Seerr.
 	if err := s.Pass(ctx); err != nil || len(fake.requests) != 0 || len(fake.users) != 0 {
-		t.Fatalf("to Overswell: %v, %d requests", err, len(fake.requests))
+		t.Fatalf("to Overtide: %v, %d requests", err, len(fake.requests))
 	}
 	to = config.WishesToSeerr
 	if err := s.Pass(ctx); err != nil {

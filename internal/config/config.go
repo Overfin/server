@@ -124,20 +124,23 @@ func (o OIDC) Enabled() bool { return o.Issuer != "" }
 // requests").
 type Wishes struct {
 	// To is where wished titles go: "" (nowhere: no wishlist is offered),
-	// "overswell" or "seerr", never both.
+	// "overtide" or "seerr", never both. "overswell", Overtide's adding as
+	// a separate app (2026-10-30 to 11-05), is read as "overtide".
 	To string `toml:"to" json:"to"`
 	// KeptDays is how long an arrived wish keeps its weight in the score
 	// while the people who wished it haven't watched it.
 	KeptDays int `toml:"kept_days" json:"keptDays"`
 	// PerDay is how many wishes a day go to Seerr, which has no pace of its
-	// own; Overswell keeps its own.
+	// own; Overtide keeps its own.
 	PerDay int `toml:"per_day" json:"perDay"`
 }
 
 // Wishing values.
 const (
-	WishesToOverswell = "overswell"
-	WishesToSeerr     = "seerr"
+	WishesToOvertide = "overtide"
+	WishesToSeerr    = "seerr"
+	// wishesToOverswell is WishesToOvertide's former name.
+	wishesToOverswell = "overswell"
 )
 
 type Plugins struct {
@@ -771,8 +774,11 @@ func (c *Config) validate() error {
 		}
 	}
 
-	if c.Wishes.To != "" && c.Wishes.To != WishesToOverswell && c.Wishes.To != WishesToSeerr {
-		add("wishes.to must be \"\", \"overswell\" or \"seerr\", got %q", c.Wishes.To)
+	if c.Wishes.To == wishesToOverswell {
+		c.Wishes.To = WishesToOvertide
+	}
+	if c.Wishes.To != "" && c.Wishes.To != WishesToOvertide && c.Wishes.To != WishesToSeerr {
+		add("wishes.to must be \"\", \"overtide\" or \"seerr\", got %q", c.Wishes.To)
 	}
 	if c.Wishes.KeptDays < 1 || c.Wishes.KeptDays > 365 {
 		add("wishes.kept_days must be between 1 and 365")
