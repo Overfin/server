@@ -927,8 +927,9 @@ paths:
       operationId: login
       summary: Log in (navigate here, don't fetch)
       description: With Overfin's own login only. Sends the browser to the
-        identity provider, then back to `return`. Requests needing a login
-        answer `not-authenticated` until then.
+        identity provider, then back to `return`; with Overfin's own
+        accounts, to its sign-in page. Requests needing a login answer
+        `not-authenticated` until then.
       tags: [account]
       security: []
       parameters:
@@ -941,7 +942,8 @@ paths:
       responses:
         "303":
           description: Off to the identity provider, or straight to `return`
-            when already logged in.
+            when already logged in; with Overfin's own accounts, to its
+            sign-in page.
         "503":
           description: The identity provider can't be reached (`server-busy`).
           content:

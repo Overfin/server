@@ -140,6 +140,12 @@ func (m *Managed) Register(r *plugin.Registrar) error {
 			return err
 		}
 	}
+	// The apps' login address (the SDK's loginUrl, where an app sends
+	// someone whose session ended) is an identity provider's; here, it's
+	// the sign-in page.
+	if err := r.HandlePublic("GET "+loginPath, http.HandlerFunc(m.login)); err != nil {
+		return err
+	}
 	if err := r.HandleFunc("GET "+StepUpPath, m.stepUp); err != nil {
 		return err
 	}
@@ -245,6 +251,12 @@ func (m *Managed) Logout(w http.ResponseWriter, r *http.Request) string {
 	}
 	cookie.Clear(w, r, LoginCookie)
 	return ""
+}
+
+// login sends someone to the sign-in page, coming back where they were.
+func (m *Managed) login(w http.ResponseWriter, r *http.Request) {
+	q := url.Values{"return": {safeReturn(r.URL.Query().Get("return"))}}
+	http.Redirect(w, r, signinPagePath+"?"+q.Encode(), http.StatusSeeOther)
 }
 
 // stepUp sends someone signed in to confirm it's them.

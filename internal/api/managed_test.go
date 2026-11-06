@@ -463,7 +463,7 @@ func TestManagedMustChange(t *testing.T) {
 	if res, _ := visit(t, b, srv, "/movies", map[string]string{"Sec-Fetch-Dest": "document"}); res.StatusCode != http.StatusFound {
 		t.Errorf("the site, before: %d", res.StatusCode)
 	}
-	if res, body := openPage(t, b, srv, "/signin?return=%2Fmovies"); res.StatusCode != 200 || !strings.Contains(body, `id="change"`) {
+	if res, body := openPage(t, b, srv, "/signin?return=%2Fmovies"); res.StatusCode != 200 || !strings.Contains(body, `id="change"`) || !strings.Contains(body, `id="leave"`) {
 		t.Errorf("the page: %d %s", res.StatusCode, body)
 	}
 	if c, _ := signinPost(t, b, srv, "/api/v1/signin/password", map[string]any{"password": "short", "return": "/movies"}); c != 400 {
@@ -1058,6 +1058,15 @@ func TestGateAndStepUp(t *testing.T) {
 	}
 	if res, _ := visit(t, b, srv, "/api/v1/gate", nil); res.StatusCode != http.StatusUnauthorized {
 		t.Errorf("gate, signed out, not a page: %d", res.StatusCode)
+	}
+	// The apps' login address, where they send someone whose session
+	// ended: the sign-in page.
+	for ret, want := range map[string]string{"/title/s48866/les-100/e972730": "/title/s48866/les-100/e972730", "//evil.example": "/", "": "/"} {
+		res, _ := visit(t, b, srv, "/api/v1/login?return="+url.QueryEscape(ret), page)
+		loc, _ := url.Parse(res.Header.Get("Location"))
+		if res.StatusCode != http.StatusSeeOther || loc.Path != "/signin" || loc.Query().Get("return") != want {
+			t.Errorf("login, %q: %d %s", ret, res.StatusCode, res.Header.Get("Location"))
+		}
 	}
 	if c, out := signinPost(t, b, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "someone@example.org", "password": "a long password 1"})); c != 200 {
 		t.Fatalf("signing in: %d %v", c, out)
