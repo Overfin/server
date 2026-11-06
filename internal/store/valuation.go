@@ -496,34 +496,6 @@ func (s *Store) SetValuationWeights(ctx context.Context, w map[string]int) error
 	return err
 }
 
-// DefaultListShare is the lists' share until the operator sets one.
-const DefaultListShare = 50
-
-// ListShare is the part, in percent, of the suggestions taken from the
-// operator's import lists, in their order, whatever their value.
-func (s *Store) ListShare(ctx context.Context) (int, error) {
-	var v []byte
-	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'list-share'`).Scan(&v)
-	if errors.Is(err, sql.ErrNoRows) {
-		return DefaultListShare, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	n, err := strconv.Atoi(string(v))
-	if err != nil || n < 0 || n > 100 {
-		return DefaultListShare, nil
-	}
-	return n, nil
-}
-
-// SetListShare keeps the lists' share, 0 to 100.
-func (s *Store) SetListShare(ctx context.Context, share int) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO meta (name, value) VALUES ('list-share', ?)
-		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, []byte(strconv.Itoa(share)))
-	return err
-}
-
 // wishFacts counts wishes as requests: every title on a wishlist, and those
 // that arrived less than keptDays ago for a profile that hasn't watched
 // any of it yet. A series counts for every season, as a request does.

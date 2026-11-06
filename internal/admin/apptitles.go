@@ -54,8 +54,7 @@ const (
 // for (fields=score,stats,availability; all the key may read when left
 // out). Filters: inLibrary, kind (movie or season), list (trending or
 // popular: the titles in TMDB's list, in its order unless sort is given;
-// suggestions: what the libraries lack, mixed by the lists' share, see
-// suggestionOrder, never sorted otherwise, each with the categories it
+// suggestions: what the libraries lack, by value, see suggestionOrder, never sorted otherwise, each with the categories it
 // fits).
 // Sorting: by score (needs the score scope) or name, order asc or desc.
 // Pages of limit rows
@@ -214,22 +213,12 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		rows = append(rows, v)
 	}
 	if list == "suggestions" {
-		lists, err := p.Store.OperatorListPositions(ctx)
-		if err != nil {
-			p.fail(w, "reading the operator's lists", err)
-			return
-		}
-		share, err := p.Store.ListShare(ctx)
-		if err != nil {
-			p.fail(w, "reading the lists' share", err)
-			return
-		}
 		releases, err := p.Store.FilmReleases(ctx)
 		if err != nil {
 			p.fail(w, "reading the films' releases", err)
 			return
 		}
-		rows = suggestionOrder(outSoon(rows, releases, p.clock()), lists, share)
+		rows = suggestionOrder(outSoon(rows, releases, p.clock()))
 	}
 	less := func(i, j int) bool {
 		if sortBy == "list" {

@@ -805,12 +805,16 @@ nothing beyond what that needs.
   knows, and values them like every other title (it needs TMDB: each
   pick's page has its rating, genres and seasons; a series is valued as
   its aired seasons):
-  - **Sources** only bring titles into view: the operator's Radarr and
-    Sonarr import lists (sent by Overtide, `PUT /apps/v1/lists`, since
-    2026-11-06), TMDB's recommendations for what people here watch and
-    mark as favourites, and the genres accounts said they like (Tastes).
-    TMDB's trending and popular lists are no source any more (2026-11-06):
-    the same worldwide, the operator had no say in them. Recommendations come from the 25 titles the most accounts
+  - **Sources** only bring titles into view: TMDB's recommendations for
+    what people here watch and mark as favourites, the genres accounts
+    said they like (Tastes), and what's out in the server's country (its
+    ratings country; 2026-11-06): titles out in the last year on its
+    15 most shown streaming services, foreign ones too, and films released
+    at home there in the last 90 days. TMDB knows what's out where, not
+    what people watch where (one popularity, worldwide), so the order is
+    the valuation's. TMDB's trending and popular lists are no source any
+    more (2026-11-06): the same worldwide, they say nothing of the people
+    here; nor are import lists (the operator's, in Radarr and Sonarr). Recommendations come from the 25 titles the most accounts
     watched or liked in six months, the genres from the 5 most liked;
     both lists are made once a day. Later, maybe: actors and directors
     people watch a lot, collections (a film's sequels).
@@ -824,14 +828,13 @@ nothing beyond what that needs.
     same endpoint give the missing titles of TMDB's lists in TMDB's order,
     not by score.
   - **Suggestions** (built 2026-10-25): `list=suggestions` is what an app
-    like Overtide adds, in order: the picks by value, with the import
-    lists' titles mixed in, in their order, by the **Lists share**
-    (Valuation page, default 50%; the Discovery share, of TMDB's trending
-    and popular titles, until 2026-11-06), only titles out at home or out
-    within 2 days (a film by its digital, disc or TV release, else 90 days
-    after cinemas; a season by its air date), so the operator's lists count
-    whether or not they fit the server's tastes. Overtide reads it every
-    hour and adds in that order, after requests.
+    like Overtide adds, in order: the picks by value (the Discovery share,
+    which mixed in TMDB's trending and popular titles whatever their value,
+    went on 2026-11-06), only titles out at home or out within 2 days (a
+    film by its digital, disc or TV release, else 90 days after cinemas; a
+    season by its air date). Overtide reads it every hour and adds in that
+    order, after requests; import lists are the operator's business,
+    neither Overfin nor Overtide reads them.
 - **Overtide**, when the operator plugs requests into it, is the one that
   cares about storage. It reads the requests (by an anonymous account ID,
   for nothing but counting) and the values through Overfin's apps API, so
