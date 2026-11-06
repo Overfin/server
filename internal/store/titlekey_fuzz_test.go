@@ -47,11 +47,19 @@ func FuzzParseTitleKey(f *testing.F) {
 var (
 	titleKeyPattern = regexp.MustCompile(`^(movie|series)/(tmdb|imdb|tvdb)/([A-Za-z0-9]{1,20})(?:/s([0-9]{1,4})(?:/e([0-9]{1,5}))?)?$`)
 	itemKeyPattern  = regexp.MustCompile(`^item/([0-9a-f]{32})$`)
+	// An episode by its own TMDB ID, whatever order shows it (since episode
+	// orders, 2026-11-02): series/tmdb/<series>/e<episode ID>, the ID above 0.
+	episodeIDKeyPattern = regexp.MustCompile(`^series/tmdb/([A-Za-z0-9]{1,20})/e([0-9]{1,10})$`)
 )
 
 func parseTitleKeyByPattern(key string) (TitleRef, bool) {
 	if m := itemKeyPattern.FindStringSubmatch(key); m != nil {
 		return TitleRef{Kind: "item", ID: m[1]}, true
+	}
+	if m := episodeIDKeyPattern.FindStringSubmatch(key); m != nil {
+		if id := atoi(m[2]); id > 0 {
+			return TitleRef{Kind: "episode", Source: "tmdb", ID: m[1], EpisodeID: id}, true
+		}
 	}
 	m := titleKeyPattern.FindStringSubmatch(key)
 	if m == nil || (m[1] == "movie" && m[4] != "") {
@@ -74,7 +82,8 @@ func FuzzParseTitleKeyAsPattern(f *testing.F) {
 		"series/tmdb/1/s12345", "series/tmdb/1/s1/e123456", "series/tmdb/123456789012345678901", "series/tmdb//s1",
 		"series/tmdb/1/s/e1", "series/tmdb/1/s1/e", "series/tmdb/1/s1/e1/", "series/tmdb/1/", "movie/tmdb/1\\n",
 		"movie/tmdb/é", "series/tmdb/1/x1", "series/tmdb/1/s1/x1", "show/tmdb/1", "movie/tvdb/1", "movie/tmdb/-1",
-		"series/tmdb/1/s+1", "series/tmdb/1/s1/e1/e2", "item/", "item/0123456789abcdef0123456789abcdef/s1", ""} {
+		"series/tmdb/1/s+1", "series/tmdb/1/s1/e1/e2", "item/", "item/0123456789abcdef0123456789abcdef/s1", "",
+		"series/tmdb/1399/e63056", "series/tmdb/1/e0", "series/tvdb/1/e5", "movie/tmdb/1/e5", "series/tmdb/1/e+5", "series/tmdb/1/e12345678901"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {
