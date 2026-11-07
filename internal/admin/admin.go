@@ -34,6 +34,7 @@ import (
 	"github.com/overfin/server/internal/connector"
 	"github.com/overfin/server/internal/cookie"
 	"github.com/overfin/server/internal/images"
+	"github.com/overfin/server/internal/imdb"
 	"github.com/overfin/server/internal/introskipper"
 	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/notices"
@@ -189,6 +190,9 @@ type Panel struct {
 	// Interests, when set, lists what profiles keep for later (the
 	// watchlist), for the title valuation.
 	Interests func(ctx context.Context) ([]store.ProfileTitle, error)
+	// IMDb, when set, keeps IMDb's data while the operator has it on: its
+	// ratings then count in the valuation instead of TMDB's.
+	IMDb *imdb.Keeper
 	// Group is the identity provider group whose members are admins.
 	Group  string
 	Logger *slog.Logger

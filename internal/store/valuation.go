@@ -95,6 +95,11 @@ type ValuedTitle struct {
 	Rating     float64
 	Votes      int
 	Popularity float64
+	// IMDbRating and IMDbVotes are IMDb's, when the operator has IMDb's
+	// data on and it has the title: a season's from its episodes, else
+	// its series'. 0 and 0 otherwise.
+	IMDbRating float64
+	IMDbVotes  int
 	// Released is the film's release, or the season's first air date;
 	// zero when unknown.
 	Released time.Time

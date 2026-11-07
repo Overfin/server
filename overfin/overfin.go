@@ -32,6 +32,7 @@ import (
 	"github.com/overfin/server/internal/cookie"
 	"github.com/overfin/server/internal/emails"
 	"github.com/overfin/server/internal/images"
+	"github.com/overfin/server/internal/imdb"
 	"github.com/overfin/server/internal/introskipper"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/keys"
@@ -511,6 +512,10 @@ func run(logger *slog.Logger) error {
 	// minutes, a tenth of a second apart.
 	sh.ratings = ratings.NewKeeper(gw.ratingSource, db, logger, 10*time.Minute, 100*time.Millisecond)
 	go sh.ratings.Run(ctx)
+	// IMDb's data, while the operator has it on: downloaded once a day,
+	// beside the database (rule 68).
+	imdbData := imdb.NewKeeper(filepath.Join(filepath.Dir(cfg.Storage.Path), "imdb"), db.IMDbOn, logger)
+	go imdbData.Run(ctx)
 	// The library's titles from TMDB: looked for every 10 minutes, a tenth
 	// of a second between requests.
 	go sh.titles.Run(ctx)
@@ -540,7 +545,7 @@ func run(logger *slog.Logger) error {
 			TMDB: func() bool { return gw.tmdbSource() != nil }, TMDBTokens: gw, IntroSkipper: skipper,
 			// A new language: artwork and discovery's lists, read again now.
 			OnLanguage: func() { sh.titles.Wake(); sh.lists.Wake() },
-			Store:      db, Provisioner: gw.Provisioner, Interests: gw.Interests, Playing: gw, Notices: sh.notices,
+			Store:      db, Provisioner: gw.Provisioner, Interests: gw.Interests, Playing: gw, Notices: sh.notices, IMDb: imdbData,
 			Provider: &oidc.Provider{Issuer: o.Issuer, ClientID: o.ClientID, ClientSecret: cfg.Secrets.OIDCClientSecret,
 				RedirectURL: a.RedirectURL, GroupsClaim: o.GroupsClaim, HTTP: oidc.NewClient(o.Dial)}}
 		if sh.directory != nil {

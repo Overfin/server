@@ -581,6 +581,19 @@ comes from the internet, and media files can be written by anyone.
     removing it from the panel takes the plugin and its repository off
     again. Overfin installs no other plugin.
 
+### Outside data
+68. IMDb's free datasets are off until the operator switches them on
+    (Valuation, in the control panel). Then the server downloads three of
+    them itself, once a day, from IMDb's own address only
+    (datasets.imdbws.com): plain files, the same for everyone, so nothing
+    about the server's titles or people is sent. It keeps what it uses of
+    them in one file beside the database, readable by Overfin alone, and
+    deletes the downloads once that file is made; a file that can't be
+    read whole is never used. Switched off, the file and its folder are
+    deleted. IMDb's data counts only in titles' values; it's never shown
+    or served. IMDb allows the datasets for personal and non-commercial
+    use: the panel says so where they're switched on.
+
 ## Deployment
 
 Overfin needs a Jellyfin of its own (rule 67), on the same media as any

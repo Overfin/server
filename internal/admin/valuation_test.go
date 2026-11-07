@@ -1,13 +1,17 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/overfin/server/internal/imdb"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/valuation"
 )
@@ -100,4 +104,77 @@ func TestValuation(t *testing.T) {
 	if w, _ := db.ValuationWeights(ctx); w != nil {
 		t.Errorf("after reset: %v", w)
 	}
+}
+
+// IMDb's data: switched in the Valuation view where Overfin can have it,
+// and refused where it can't.
+func TestValuationIMDbSwitch(t *testing.T) {
+	ctx := context.Background()
+	p, b, db, _ := signedInPanel(t)
+	if rec := b.do("GET", "/admin/api/valuation", "", nil); strings.Contains(rec.Body.String(), `"imdb"`) {
+		t.Errorf("without a keeper: %s", rec.Body)
+	}
+	if rec := b.do("PUT", "/admin/api/valuation", `{"imdb":true}`, nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("switched on without a keeper: %d", rec.Code)
+	}
+
+	p.IMDb = imdb.NewKeeper(t.TempDir(), db.IMDbOn, p.Logger)
+	var got valuationJSON
+	rec := b.do("GET", "/admin/api/valuation", "", nil)
+	if json.Unmarshal(rec.Body.Bytes(), &got) != nil || got.IMDb == nil || got.IMDb.On || got.IMDb.Titles != 0 || got.IMDb.Built != "" {
+		t.Fatalf("GET: %s", rec.Body)
+	}
+	rec = b.do("PUT", "/admin/api/valuation", `{"imdb":true}`, nil)
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil || !got.IMDb.On {
+		t.Errorf("on: %d %s", rec.Code, rec.Body)
+	}
+	if on, _ := db.IMDbOn(ctx); !on {
+		t.Error("not kept")
+	}
+	if w, _ := db.ValuationWeights(ctx); w != nil {
+		t.Errorf("switching IMDb's data changed the weights: %v", w)
+	}
+	b.do("PUT", "/admin/api/valuation", `{"imdb":false}`, nil)
+	if on, _ := db.IMDbOn(ctx); on {
+		t.Error("not switched off")
+	}
+}
+
+// The valued titles get IMDb's ratings: a film its own, a season its
+// episodes', and its series' when IMDb has no such season.
+func TestWithIMDb(t *testing.T) {
+	basics := "tconst\ttitleType\tisAdult\tstartYear\tendYear\truntimeMinutes\n" +
+		"tt0133093\tmovie\t0\t1999\t\\N\t136\n" +
+		"tt0903747\ttvSeries\t0\t2008\t2013\t49\n" +
+		"tt0959621\ttvEpisode\t0\t2008\t\\N\t58\n"
+	episodes := "tconst\tparentTconst\tseasonNumber\tepisodeNumber\ntt0959621\ttt0903747\t1\t1\n"
+	ratings := "tconst\taverageRating\tnumVotes\ntt0133093\t8.7\t2200000\ntt0903747\t9.5\t2300000\ntt0959621\t9.0\t300\n"
+	var out bytes.Buffer
+	if _, err := imdb.Build(&out, strings.NewReader(basics), strings.NewReader(episodes), strings.NewReader(ratings), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "imdb")
+	os.WriteFile(path, out.Bytes(), 0o600)
+	d, err := imdb.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	f := &store.ValuationFacts{Titles: map[string]*store.ValuedTitle{
+		"movie/tmdb/603":      {Key: "movie/tmdb/603", IMDb: "tt0133093"},
+		"series/tmdb/1396/s1": {Key: "series/tmdb/1396/s1", IMDb: "tt0903747", Season: 1},
+		"series/tmdb/1396/s7": {Key: "series/tmdb/1396/s7", IMDb: "tt0903747", Season: 7},
+		"movie/tmdb/1":        {Key: "movie/tmdb/1"},
+		"movie/tmdb/2":        {Key: "movie/tmdb/2", IMDb: "tt9999999"},
+	}}
+	withIMDb(f, d)
+	for key, want := range map[string][2]float64{
+		"movie/tmdb/603": {8.7, 2200000}, "series/tmdb/1396/s1": {9, 300}, "series/tmdb/1396/s7": {9.5, 2300000},
+		"movie/tmdb/1": {0, 0}, "movie/tmdb/2": {0, 0},
+	} {
+		if v := f.Titles[key]; v.IMDbRating != want[0] || float64(v.IMDbVotes) != want[1] {
+			t.Errorf("%s: %v from %d", key, v.IMDbRating, v.IMDbVotes)
+		}
+	}
+	withIMDb(f, nil) // no file: nothing changes, nothing breaks
 }
