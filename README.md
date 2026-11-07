@@ -18,7 +18,8 @@ a Jellyfin account.
 
 ## Try it
 
-You need Docker with Compose, and your media in a folder this machine can read:
+Run it on the machine that has your films and series, or can reach them through
+a mounted network share. It needs Docker with Compose:
 
 ```sh
 mkdir overfin && cd overfin
