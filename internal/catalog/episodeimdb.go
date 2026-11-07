@@ -11,6 +11,10 @@ import (
 	"github.com/overfin/server/internal/tmdb"
 )
 
+// noneAgain is how soon an episode TMDB gave no IMDb ID is asked again:
+// TMDB often adds it a while after the episode airs.
+const noneAgain = 30 * 24 * time.Hour
+
 // EpisodeIMDbSource is TMDB itself, asked for an episode's IMDb ID. Seerr,
 // the other source of TMDB's data, can't say it.
 type EpisodeIMDbSource interface {
@@ -78,7 +82,8 @@ func (e *EpisodeIMDb) Once(ctx context.Context) error {
 		if src == nil {
 			return nil
 		}
-		todo, err := e.Store.EpisodesToLink(ctx, e.clock().Add(-TitlesFresh), 100)
+		now := e.clock()
+		todo, err := e.Store.EpisodesToLink(ctx, now, now.Add(-TitlesFresh), now.Add(-noneAgain), 100)
 		if err != nil || len(todo) == 0 {
 			return err
 		}

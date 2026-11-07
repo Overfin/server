@@ -19,10 +19,12 @@ import (
 type fakeEpisodeIMDb struct {
 	ids   map[[3]int]string
 	asked int
+	log   [][3]int
 }
 
 func (f *fakeEpisodeIMDb) EpisodeIMDb(_ context.Context, series, season, episode int) (string, error) {
 	f.asked++
+	f.log = append(f.log, [3]int{series, season, episode})
 	id, ok := f.ids[[3]int{series, season, episode}]
 	if !ok {
 		return "", tmdb.ErrNotFound
@@ -49,6 +51,8 @@ func TestEpisodeIMDb(t *testing.T) {
 		{ID: 63056, Number: 1, Name: "Winter", AirDate: "2011-04-17"},
 		{ID: 63057, Number: 2, Name: "Kingsroad", AirDate: "2011-04-24"},
 		{ID: 63058, Number: 3, Name: "Lord Snow", AirDate: "2011-05-01"},
+		{ID: 63059, Number: 4, Name: "Not aired yet", AirDate: time.Now().AddDate(0, 3, 0).Format(time.DateOnly)},
+		{ID: 63060, Number: 5, Name: "No date"},
 	}}
 	if err := st.SetSeason(ctx, "1399", season, time.Now()); err != nil {
 		t.Fatal(err)
@@ -72,9 +76,15 @@ func TestEpisodeIMDb(t *testing.T) {
 	if err := job.Once(ctx); err != nil || src.asked != 3 {
 		t.Errorf("again: asked %d, %v", src.asked, err)
 	}
+	// An episode TMDB gave none (the third) is asked again sooner; the
+	// others once TMDB's data is old, by when the fourth has aired.
+	job.now = func() time.Time { return time.Now().Add(noneAgain + time.Hour) }
+	if err := job.Once(ctx); err != nil || src.asked != 4 {
+		t.Errorf("none again: asked %d, %v", src.asked, err)
+	}
 	job.now = func() time.Time { return time.Now().Add(TitlesFresh + time.Hour) }
-	if err := job.Once(ctx); err != nil || src.asked != 6 {
-		t.Errorf("once old: asked %d, %v", src.asked, err)
+	if err := job.Once(ctx); err != nil || src.asked != 8 {
+		t.Errorf("once old: asked %d, %v: %v", src.asked, err, src.log)
 	}
 	job.now = nil
 
@@ -86,7 +96,7 @@ func TestEpisodeIMDb(t *testing.T) {
 	if s1 == nil || len(s1.EpisodesIMDb) != 3 || s1.EpisodesIMDb[0] != "tt1480055" || s1.EpisodesIMDb[1] != "tt1668746" || s1.EpisodesIMDb[2] != "" {
 		t.Errorf("season 1: %+v", s1)
 	}
-	todo, err := st.EpisodesToLink(ctx, time.Now().Add(-time.Hour), 10)
+	todo, err := st.EpisodesToLink(ctx, time.Now(), time.Now().Add(-time.Hour), time.Now().Add(-time.Hour), 10)
 	if err != nil || len(todo) != 0 {
 		t.Errorf("left: %+v %v", todo, err)
 	}
