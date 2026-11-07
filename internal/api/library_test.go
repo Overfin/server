@@ -70,6 +70,9 @@ type fakeJellyfin struct {
 	users          map[string]string // created users: name -> ID (the first gets partnerJF)
 	// direct offers the movie to play as it is, instead of transcoded.
 	direct bool
+	// unmarked marks no audio track as default: as Jellyfin does, the
+	// movie is offered as it is unless a track is named.
+	unmarked bool
 }
 
 func (f *fakeJellyfin) setDirect(on bool) {
@@ -217,17 +220,19 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			streamed = int(n)
 		}
 		f.calls = append(f.calls, fmt.Sprintf("PlaybackInfo audio=%v subtitles=%v streamed=%d", asked["AudioStreamIndex"], asked["SubtitleStreamIndex"], streamed))
+		_, named := asked["AudioStreamIndex"]
+		direct := f.direct || (f.unmarked && !named)
 		json.NewEncoder(w).Encode(map[string]any{
 			"PlaySessionId": "abc123",
 			"MediaSources": []map[string]any{{
 				"Id": fmt.Sprintf("%032x", 1), "Name": "1080p", "Protocol": "File", "Path": "/mnt/media/secret.mkv",
-				"SupportsTranscoding": true, "TranscodingSubProtocol": "hls", "SupportsDirectPlay": f.direct,
+				"SupportsTranscoding": true, "TranscodingSubProtocol": "hls", "SupportsDirectPlay": direct,
 				"TranscodingUrl": "/videos/" + fmt.Sprintf("%032x", 1) + "/master.m3u8?ApiKey=" + token + "&MediaSourceId=x&TranscodeReasons=VideoCodecNotSupported,AudioCodecNotSupported" + "&AudioStreamIndex=" + strconv.Itoa(streamed),
 				"RunTimeTicks":   72000000000, "Container": "mkv", "Bitrate": 9258000,
 				"MediaStreams": []map[string]any{
 					{"Index": 0, "Type": "Video", "Codec": "hevc", "Profile": "Main 10", "Width": 3840, "Height": 2160, "BitDepth": 10,
 						"VideoRangeType": "HDR10Plus", "BitRate": 4601924},
-					{"Index": 1, "Type": "Audio", "Codec": "eac3", "Language": "fre", "DisplayTitle": "Français - EAC3 5.1", "Channels": 6, "IsDefault": true},
+					{"Index": 1, "Type": "Audio", "Codec": "eac3", "Language": "fre", "DisplayTitle": "Français - EAC3 5.1", "Channels": 6, "IsDefault": !f.unmarked},
 					{"Index": 2, "Type": "Audio", "Codec": "aac", "Language": "eng", "DisplayTitle": "English - AAC 2.0", "Channels": 2},
 					{"Index": 3, "Type": "Subtitle", "Codec": "srt", "Language": "eng", "DisplayTitle": "English", "IsTextSubtitleStream": true},
 					{"Index": 4, "Type": "Subtitle", "Codec": "PGSSUB", "DisplayTitle": "Blu-ray"},
@@ -1109,6 +1114,26 @@ func TestPlaybackTrackReachesJellyfin(t *testing.T) {
 	}
 	if a := streamed(`,"audioLanguage":"fr-CA"`); a != "1" {
 		t.Errorf("in French: audio %q", a)
+	}
+}
+
+// A file that marks no audio track as default: Jellyfin checks no audio
+// codec and offers the file as it is, audio the browser may not play
+// (silence). Overfin names the track, so Jellyfin checks it.
+func TestUnmarkedAudioIsChecked(t *testing.T) {
+	srv, fake := newServer(t)
+	fake.mu.Lock()
+	fake.unmarked = true
+	fake.mu.Unlock()
+	code, body := post(t, srv, "/api/v1/playback",
+		`{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{},"device":"Laptop"}`)
+	var pb struct {
+		Method     string
+		AudioTrack string
+	}
+	json.Unmarshal([]byte(body), &pb)
+	if code != 201 || pb.Method == "direct" || pb.AudioTrack != "a1" {
+		t.Errorf("start: %d %s", code, body)
 	}
 }
 
