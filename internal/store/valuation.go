@@ -95,6 +95,13 @@ type ValuedTitle struct {
 	Rating     float64
 	Votes      int
 	Popularity float64
+	// TitleIMDb is the IMDb ID TMDB gives the film or the series (IMDb
+	// above is the libraries'); EpisodesIMDb, the IMDb IDs TMDB gives a
+	// season's aired episodes, by TMDB's ID of each ("" for those it gives
+	// none yet). They match IMDb's data by ID, never by numbers, which
+	// IMDb's own orders change.
+	TitleIMDb    string
+	EpisodesIMDb []string
 	// IMDbRating and IMDbVotes are IMDb's, when the operator has IMDb's
 	// data on and it has the title: a season's from its episodes, else
 	// its series'. 0 and 0 otherwise.
@@ -339,19 +346,19 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 		name               string
 		rating, popularity float64
 		votes              int
-		released           string
+		released, imdb     string
 	}
 	tops := map[string]top{}
 	err = s.each(ctx, func(rows *sql.Rows) error {
 		var kind, tmdb string
 		var t top
-		if err := rows.Scan(&kind, &tmdb, &t.name, &t.rating, &t.votes, &t.popularity, &t.released); err != nil {
+		if err := rows.Scan(&kind, &tmdb, &t.name, &t.rating, &t.votes, &t.popularity, &t.released, &t.imdb); err != nil {
 			return err
 		}
 		tops[kind+"/"+tmdb] = t
 		return nil
 	}, `SELECT kind, tmdb, name, coalesce(rating, 0), coalesce(rating_votes, 0), coalesce(popularity, 0),
-		coalesce(release_date, '') FROM catalog_titles`)
+		coalesce(release_date, ''), coalesce(imdb, '') FROM catalog_titles`)
 	if err != nil {
 		return err
 	}
@@ -388,6 +395,7 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 	type episode struct {
 		number  int
 		minutes int64
+		imdb    string
 	}
 	episodes := map[string][]episode{}
 	today := now.UTC().Format(time.DateOnly)
@@ -395,14 +403,16 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 		var series string
 		var season int
 		var e episode
-		if err := rows.Scan(&series, &season, &e.number, &e.minutes); err != nil {
+		if err := rows.Scan(&series, &season, &e.number, &e.minutes, &e.imdb); err != nil {
 			return err
 		}
 		k := series + "/" + strconv.Itoa(season)
 		episodes[k] = append(episodes[k], e)
 		return nil
-	}, `SELECT e.series, coalesce(o.season, e.season), coalesce(o.episode, e.episode), coalesce(e.runtime, 0) FROM catalog_episodes e
+	}, `SELECT e.series, coalesce(o.season, e.season), coalesce(o.episode, e.episode), coalesce(e.runtime, 0), coalesce(i.imdb, '')
+		FROM catalog_episodes e
 		LEFT JOIN own_episodes o ON o.series = e.series AND o.tmdb_id = e.tmdb_id
+		LEFT JOIN episode_imdb i ON i.series = e.series AND i.tmdb_id = e.tmdb_id
 		WHERE e.air_date IS NOT NULL AND e.air_date <= ?`, today)
 	if err != nil {
 		return err
@@ -430,6 +440,7 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 			}
 			t.Name, t.Rating, t.Votes, t.Popularity = d.name, d.rating, d.votes, d.popularity
 			t.Released, _ = time.Parse(time.DateOnly, d.released)
+			t.TitleIMDb = d.imdb
 			continue
 		}
 		d, err := read("series", r.ID)
@@ -437,6 +448,7 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 			return err
 		}
 		t.Name, t.Rating, t.Votes, t.Popularity = d.name, d.rating, d.votes, d.popularity
+		t.TitleIMDb = d.imdb
 		season := r.ID + "/" + strconv.Itoa(r.Season)
 		air := aired[season]
 		if air == "" {
@@ -447,6 +459,7 @@ func (s *Store) describeValued(ctx context.Context, f *ValuationFacts, now time.
 			if e.minutes > 0 || t.Episodes[e.number] == 0 {
 				t.Episodes[e.number] = e.minutes * 60_000
 			}
+			t.EpisodesIMDb = append(t.EpisodesIMDb, e.imdb)
 		}
 	}
 	return nil

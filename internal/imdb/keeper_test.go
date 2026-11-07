@@ -68,7 +68,7 @@ func TestKeeper(t *testing.T) {
 		t.Errorf("status: %+v", s)
 	}
 	entries, _ := os.ReadDir(dir)
-	if len(entries) != 1 || entries[0].Name() != fileName {
+	if len(entries) != 2 || entries[0].Name() != fileName || entries[1].Name() != "votes-2026-11-07" {
 		t.Errorf("left in the folder: %v", entries)
 	}
 	// Within a day, nothing's downloaded again.
@@ -108,6 +108,9 @@ func TestKeeper(t *testing.T) {
 	}
 	if m, _ := k.Data().Title("tt0133093"); m.Rating != 9.1 {
 		t.Errorf("after the new download: %+v", m)
+	}
+	if days, _ := VoteDays(dir); len(days) != 2 {
+		t.Errorf("days of votes: %v", days)
 	}
 	if s := k.Status(); s.Problem != "" {
 		t.Errorf("status: %+v", s)

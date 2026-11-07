@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -61,27 +62,53 @@ func (p *Panel) measuredFacts(ctx context.Context) (*valuation.Measured, *store.
 	return p.valued.m, f, nil
 }
 
-// withIMDb gives the valued titles IMDb's ratings, from d (none when nil):
-// a film's own, a season's from its episodes, or its series' when IMDb
-// numbers the seasons otherwise.
+// withIMDb gives the valued titles IMDb's ratings, from d (none when nil),
+// matched by the IMDb IDs TMDB gives, never by numbers: a film its own; a
+// season its episodes', each counting for its votes, once at least half
+// its episodes are matched; until then, its series'.
 func withIMDb(f *store.ValuationFacts, d *imdb.Data) {
 	if d == nil {
 		return
 	}
 	for _, t := range f.Titles {
-		if t.IMDb == "" {
-			continue
-		}
 		if r, _ := store.ParseTitleKey(t.Key); r.Kind == "season" {
-			if s, ok := d.Season(t.IMDb, t.Season); ok {
-				t.IMDbRating, t.IMDbVotes = s.Rating, s.Votes
+			if rating, votes, ok := seasonRating(d, t.EpisodesIMDb); ok {
+				t.IMDbRating, t.IMDbVotes = rating, votes
 				continue
 			}
 		}
-		if it, ok := d.Title(t.IMDb); ok {
+		if t.TitleIMDb == "" {
+			continue
+		}
+		if it, ok := d.Title(t.TitleIMDb); ok {
 			t.IMDbRating, t.IMDbVotes = it.Rating, it.Votes
 		}
 	}
+}
+
+// seasonRating is a season's rating from its episodes' IMDb IDs ("" for
+// those not matched): their ratings, each counting for its votes, when at
+// least half its episodes are matched and one has a rating.
+func seasonRating(d *imdb.Data, episodes []string) (float64, int, bool) {
+	matched := 0
+	seen := map[string]bool{}
+	var weighted float64
+	var votes int
+	for _, id := range episodes {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		matched++
+		if e, ok := d.Title(id); ok && e.Kind == imdb.Episode && e.Votes > 0 {
+			weighted += e.Rating * float64(e.Votes)
+			votes += e.Votes
+		}
+	}
+	if votes == 0 || matched*2 < len(episodes) {
+		return 0, 0, false
+	}
+	return math.Round(weighted/float64(votes)*100) / 100, votes, true
 }
 
 type criterionJSON struct {

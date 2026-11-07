@@ -201,6 +201,10 @@ func (k *Keeper) refresh(ctx context.Context, path string) (int, error) {
 			return 0, err
 		}
 	}
+	// The day's votes first: they're kept whatever comes of the rest.
+	if _, err := WriteVotes(k.Dir, local[2], k.clock()); err != nil {
+		return 0, err
+	}
 	tmp := path + ".new"
 	n, err := BuildFiles(tmp, local[0], local[1], local[2], k.clock())
 	if err != nil {

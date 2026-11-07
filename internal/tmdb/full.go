@@ -49,6 +49,10 @@ type Full struct {
 	// TVDB is a series' TheTVDB ID, which Sonarr knows it by; 0 when TMDB
 	// doesn't say.
 	TVDB int
+	// IMDb ("tt0133093") and Wikidata ("Q83495") are the other IDs TMDB
+	// gives it, checked; "" when it gives none. They come with its page:
+	// no request of their own.
+	IMDb, Wikidata string
 	// Similar are the titles of its kind TMDB recommends with it, best
 	// first (its first page: 20 at most).
 	Similar []Title
@@ -106,7 +110,9 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 			Results []struct{ Title string } `json:"results"`
 		} `json:"alternative_titles"`
 		ExternalIDs struct {
-			TVDB int `json:"tvdb_id"`
+			TVDB     int    `json:"tvdb_id"`
+			IMDb     string `json:"imdb_id"`
+			Wikidata string `json:"wikidata_id"`
 		} `json:"external_ids"`
 		// Films list their keywords under keywords, series under results.
 		Keywords struct {
@@ -130,7 +136,7 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 		} `json:"translations"`
 	}
 	// The certifications and release dates come along: one request.
-	extra := "credits,images,alternative_titles,translations,release_dates,recommendations,keywords"
+	extra := "credits,images,alternative_titles,translations,release_dates,external_ids,recommendations,keywords"
 	if kind == "series" {
 		extra = "aggregate_credits,images,alternative_titles,translations,content_ratings,external_ids,recommendations,keywords"
 	}
@@ -203,6 +209,12 @@ func (c *Client) Title(ctx context.Context, kind string, tmdbID int) (*Full, err
 	out.GenreIDs = genreIDs
 	if kind == "series" && raw.ExternalIDs.TVDB > 0 && raw.ExternalIDs.TVDB < 1e9 {
 		out.TVDB = raw.ExternalIDs.TVDB
+	}
+	if IMDbID.MatchString(raw.ExternalIDs.IMDb) {
+		out.IMDb = raw.ExternalIDs.IMDb
+	}
+	if wikidataID.MatchString(raw.ExternalIDs.Wikidata) {
+		out.Wikidata = raw.ExternalIDs.Wikidata
 	}
 	if kind == "movie" && raw.BelongsToCollection != nil && ValidID(raw.BelongsToCollection.ID) {
 		out.Collection = raw.BelongsToCollection.ID
@@ -480,6 +492,33 @@ func (c *Client) Find(ctx context.Context, kind, source, id string) (int, error)
 
 // externalID is what an IMDb or a TVDB ID looks like.
 var externalID = regexp.MustCompile(`^(tt)?[0-9]{1,12}$`)
+
+// IMDbID is what an IMDb title's ID looks like; wikidataID, a Wikidata
+// item's.
+var (
+	IMDbID     = regexp.MustCompile(`^tt[0-9]{7,10}$`)
+	wikidataID = regexp.MustCompile(`^Q[0-9]{1,12}$`)
+)
+
+// EpisodeIMDb returns the IMDb ID TMDB gives an episode, by its numbers in
+// TMDB's own order; "" when it gives none. TMDB has no way to ask for many
+// episodes at once: one request each.
+func (c *Client) EpisodeIMDb(ctx context.Context, seriesID, season, episode int) (string, error) {
+	if !ValidID(seriesID) || season < 0 || season > 1000 || episode < 0 || episode > 100000 {
+		return "", ErrNotFound
+	}
+	var raw struct {
+		IMDb string `json:"imdb_id"`
+	}
+	path := "/tv/" + strconv.Itoa(seriesID) + "/season/" + strconv.Itoa(season) + "/episode/" + strconv.Itoa(episode) + "/external_ids"
+	if err := c.get(ctx, path, nil, &raw); err != nil {
+		return "", err
+	}
+	if !IMDbID.MatchString(raw.IMDb) {
+		return "", nil
+	}
+	return raw.IMDb, nil
+}
 
 // PersonFull is a person, as TMDB has them: who they are, and the films
 // and series they're credited in.

@@ -516,6 +516,10 @@ func run(logger *slog.Logger) error {
 	// beside the database (rule 68).
 	imdbData := imdb.NewKeeper(filepath.Join(filepath.Dir(cfg.Storage.Path), "imdb"), db.IMDbOn, logger)
 	go imdbData.Run(ctx)
+	// With it, each episode's IMDb ID, asked of TMDB once: looked for every
+	// 10 minutes, a tenth of a second between requests.
+	go (&catalog.EpisodeIMDb{Store: db, Source: gw.episodeIMDbSource, On: db.IMDbOn, Logger: logger,
+		Every: 10 * time.Minute, Pause: 100 * time.Millisecond}).Run(ctx)
 	// The library's titles from TMDB: looked for every 10 minutes, a tenth
 	// of a second between requests.
 	go sh.titles.Run(ctx)

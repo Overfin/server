@@ -163,12 +163,18 @@ when connected, is a second source.
 
 IMDb's ratings can count in titles' values instead of TMDB's (Valuation,
 "Ratings from IMDb", off by default): they come from far more votes, and
-each season gets its own, from its episodes'. Overfin then downloads
-IMDb's free datasets once a day (about 300 MB), keeps what it uses in one
-file of about 135 MB in `imdb/` next to the database, and deletes the
-downloads. Titles IMDb doesn't have keep TMDB's rating. IMDb allows its
-datasets for personal and non-commercial use only. Switched off, the file
-is deleted.
+each season gets its own, from its episodes', matched by the IMDb IDs
+TMDB gives (never by numbers: sites number episodes in different orders).
+Overfin then downloads IMDb's free datasets once a day (about 300 MB),
+keeps what it uses in one file of about 135 MB in `imdb/` next to the
+database, with each day's votes for 35 days (about 125 MB), and deletes
+the downloads. TMDB gives films' and series' IMDb IDs with their pages;
+an episode's takes one request of its own, asked once, a tenth of a
+second apart (a first pass over a large library takes a while). Titles
+IMDb doesn't have keep TMDB's rating, and a season most of whose
+episodes aren't matched yet takes its series'. IMDb allows its datasets
+for personal and non-commercial use only. Switched off, the folder is
+deleted.
 
 Wishes go where you choose (Features, Wishes): to Overtide, which fetches
 them in Overfin's turns, or to Seerr, where Overfin requests them itself, a

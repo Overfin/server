@@ -2,7 +2,9 @@ package imdb
 
 import (
 	"bytes"
+	"compress/gzip"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -215,5 +217,58 @@ func TestRealDatasets(t *testing.T) {
 	t.Logf("Breaking Bad season 5: %+v %v", s, ok)
 	if m.Kind != Movie || m.Start != 1999 || m.Votes < 1000000 || !ok || s.Episodes < 10 {
 		t.Error("not what IMDb says")
+	}
+}
+
+// The day's votes from the real ratings, when IMDB_DATASETS names their
+// folder: how large a day is.
+func TestRealVotes(t *testing.T) {
+	dir := os.Getenv("IMDB_DATASETS")
+	if dir == "" {
+		t.Skip("IMDB_DATASETS is the folder of IMDb's three datasets")
+	}
+	out := t.TempDir()
+	n, err := WriteVotes(out, filepath.Join(dir, RatingsFile), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	days, _ := VoteDays(out)
+	st, _ := os.Stat(filepath.Join(out, votesPrefix+days[0]))
+	t.Logf("%d titles' votes, %.1f MB", n, float64(st.Size())/1e6)
+}
+
+// Each day's votes are kept, read back as they were, and days past
+// VotesKept go.
+func TestVotes(t *testing.T) {
+	dir := t.TempDir()
+	gz := filepath.Join(dir, RatingsFile+".in")
+	var b bytes.Buffer
+	z := gzip.NewWriter(&b)
+	io.WriteString(z, ratings)
+	z.Close()
+	os.WriteFile(gz, b.Bytes(), 0o600)
+
+	day := time.Date(2026, 11, 7, 18, 0, 0, 0, time.UTC)
+	old := day.AddDate(0, 0, -VotesKept-1).Format(time.DateOnly)
+	os.WriteFile(filepath.Join(dir, votesPrefix+old), nil, 0o600)
+	n, err := WriteVotes(dir, gz, day)
+	if err != nil || n != 6 {
+		t.Fatalf("%d, %v", n, err)
+	}
+	if days, _ := VoteDays(dir); len(days) != 1 || days[0] != "2026-11-07" {
+		t.Errorf("days: %v", days)
+	}
+	got := map[string]int{}
+	if err := ReadVotes(dir, "2026-11-07", func(id string, votes int) { got[id] = votes }); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{"tt0000001": 2100, "tt0133093": 2200000, "tt0903747": 2300000, "tt0959621": 300, "tt10000000": 100, "tt1054606": 50}
+	if len(got) != len(want) {
+		t.Errorf("votes: %v", got)
+	}
+	for id, v := range want {
+		if got[id] != v {
+			t.Errorf("%s: %d, not %d", id, got[id], v)
+		}
 	}
 }

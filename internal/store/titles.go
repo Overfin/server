@@ -33,6 +33,9 @@ type Title struct {
 	Rating      float64
 	Votes       int
 	Popularity  float64
+	// IMDb, TVDB and Wikidata are the other IDs TMDB gives it, with its
+	// page; "" until then, or when TMDB gives none.
+	IMDb, TVDB, Wikidata string
 	// Genres are TMDB's, by ID, with their names in TMDB's language; they
 	// come with a title's page.
 	Genres []TitleGenre
@@ -110,8 +113,8 @@ func (s *Store) SetTitleDetails(ctx context.Context, t Title, details []byte, at
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `UPDATE catalog_titles SET details = ?, details_at = ?, release_date = ?, rating = ?,
-		rating_votes = ?, popularity = ?, collection = ? WHERE kind = ? AND tmdb = ?`, string(details), at.Unix(), nullString(t.ReleaseDate),
-		rating, votes, popularity, nullInt(t.Collection), t.Kind, t.TMDB); err != nil {
+		rating_votes = ?, popularity = ?, collection = ?, imdb = ?, tvdb = ?, wikidata = ? WHERE kind = ? AND tmdb = ?`, string(details), at.Unix(), nullString(t.ReleaseDate),
+		rating, votes, popularity, nullInt(t.Collection), nullString(t.IMDb), nullString(t.TVDB), nullString(t.Wikidata), t.Kind, t.TMDB); err != nil {
 		return err
 	}
 	// Its collection is known now: none to find.
