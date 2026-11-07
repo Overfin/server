@@ -121,5 +121,5 @@ func (l *Lists) read(ctx context.Context, s tmdb.Source, list, kind string) erro
 // StoreTitle is a title from TMDB as the catalog keeps it.
 func StoreTitle(t tmdb.Title) store.Title {
 	return store.Title{Kind: t.Kind, TMDB: strconv.Itoa(t.TMDBID), Name: t.Name, Year: t.Year, Overview: t.Overview,
-		Poster: t.Poster, Backdrop: t.Backdrop, Status: t.Status}
+		Poster: t.Poster, Backdrop: t.Backdrop, Status: t.Status, ListGenres: t.ListGenres}
 }

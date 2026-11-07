@@ -539,7 +539,7 @@ func (a *Titles) FetchPerson(ctx context.Context, tmdbID string) error {
 	for _, c := range full.Credits {
 		t := c.Title
 		key := store.Title{Kind: t.Kind, TMDB: strconv.Itoa(t.TMDBID), Name: t.Name, Year: t.Year, Overview: t.Overview,
-			Poster: t.Poster, Backdrop: t.Backdrop}
+			Poster: t.Poster, Backdrop: t.Backdrop, ListGenres: t.ListGenres}
 		titles = append(titles, key)
 		p.Credits = append(p.Credits, store.PersonCredit{Kind: t.Kind, TMDB: key.TMDB, Role: c.Role, Crew: c.Crew})
 	}
@@ -563,7 +563,7 @@ func (a *Titles) Search(ctx context.Context, query string) (_ []store.Title, _ [
 	titles := make([]store.Title, 0, len(found))
 	for _, t := range found {
 		titles = append(titles, store.Title{Kind: t.Kind, TMDB: strconv.Itoa(t.TMDBID), Name: t.Name, Year: t.Year,
-			Overview: t.Overview, Poster: t.Poster, Backdrop: t.Backdrop})
+			Overview: t.Overview, Poster: t.Poster, Backdrop: t.Backdrop, ListGenres: t.ListGenres})
 	}
 	if err := a.Store.PutTitles(ctx, titles, now); err != nil {
 		return nil, nil, false, err

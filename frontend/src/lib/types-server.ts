@@ -90,3 +90,15 @@ export interface MailTemplates {
 }
 
 export type Line = { text: string; kind: '' | 'ok' | 'error' };
+
+/** One of TMDB's genres, and whether the server leaves its titles out. */
+export interface GenreLeftOut {
+  id: number;
+  name: string;
+  left: boolean;
+}
+
+export interface GenresLeftOut {
+  movie: GenreLeftOut[];
+  series: GenreLeftOut[];
+}

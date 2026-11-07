@@ -76,11 +76,15 @@ func (s *Store) PickSeeds(ctx context.Context, since time.Time, limit int) ([]Ti
 // most limit: their page has what the valuation needs (rating,
 // popularity, genres, seasons).
 func (s *Store) PicksToDescribe(ctx context.Context, before time.Time, limit int) ([]ArtworkTarget, error) {
+	left, args, err := s.leftOutPicks(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT t.kind, t.tmdb FROM catalog_lists l
 		JOIN catalog_titles t ON t.kind = l.kind AND t.tmdb = l.tmdb
 		WHERE l.list IN (`+pickLists+`) AND coalesce(t.details_at, 0) < ?
-			AND NOT EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = t.kind AND i.tmdb = t.tmdb)
-		ORDER BY t.kind, t.tmdb LIMIT ?`, before.Unix(), limit)
+			AND NOT EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = t.kind AND i.tmdb = t.tmdb)`+left+`
+		ORDER BY t.kind, t.tmdb LIMIT ?`, append(append([]any{before.Unix()}, args...), limit)...)
 	if err != nil {
 		return nil, err
 	}
@@ -96,14 +100,19 @@ func (s *Store) PicksToDescribe(ctx context.Context, before time.Time, limit int
 	return out, rows.Err()
 }
 
-// picks adds to f the picks the libraries lack and TMDB described: a film
-// as itself, a series as each of its seasons that has aired or airs within
-// ReleaseSoon. Seasons TMDB hasn't dated yet are left out (nothing to add).
+// picks adds to f the picks the libraries lack and TMDB described, but
+// those in a genre left out: a film as itself, a series as each of its
+// seasons that has aired or airs within ReleaseSoon. Seasons TMDB hasn't
+// dated yet are left out (nothing to add).
 func (s *Store) picks(ctx context.Context, f *ValuationFacts, now time.Time) error {
+	left, args, err := s.leftOutPicks(ctx)
+	if err != nil {
+		return err
+	}
 	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT t.kind, t.tmdb, t.details FROM catalog_lists l
 		JOIN catalog_titles t ON t.kind = l.kind AND t.tmdb = l.tmdb
 		WHERE l.list IN (`+pickLists+`) AND t.details IS NOT NULL
-			AND NOT EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = t.kind AND i.tmdb = t.tmdb)`)
+			AND NOT EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = t.kind AND i.tmdb = t.tmdb)`+left, args...)
 	if err != nil {
 		return err
 	}

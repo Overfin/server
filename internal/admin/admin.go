@@ -152,7 +152,10 @@ type Panel struct {
 	// TitleImages, when set, lists the images TMDB has of a film or a
 	// series, for the metadata editor to choose from.
 	TitleImages func(ctx context.Context, kind string, tmdbID int) (map[string][]tmdb.Image, error)
-	Store       *store.Store
+	// TMDBGenres, when set, lists TMDB's genres of a kind, for choosing
+	// those the server leaves out.
+	TMDBGenres func(ctx context.Context, kind string) ([]tmdb.Genre, error)
+	Store      *store.Store
 	// Provisioner is the one in effect now: Seerr and the features change
 	// live.
 	Provisioner func() *provision.Provisioner
@@ -266,6 +269,8 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("PUT /admin/api/seerr", p.signedIn(p.setSeerr))
 	mux.HandleFunc("GET /admin/api/ratings", p.signedIn(p.ratings))
 	mux.HandleFunc("PUT /admin/api/ratings", p.signedIn(p.setRatings))
+	mux.HandleFunc("GET /admin/api/genres-left-out", p.signedIn(p.genres))
+	mux.HandleFunc("PUT /admin/api/genres-left-out", p.signedIn(p.setGenres))
 	mux.HandleFunc("GET /admin/api/home", p.signedIn(p.home))
 	mux.HandleFunc("PUT /admin/api/home", p.signedIn(p.setHome))
 	mux.HandleFunc("PUT /admin/api/jellyfin", p.signedIn(p.setJellyfin))

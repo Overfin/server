@@ -125,6 +125,27 @@ func TestDiscover(t *testing.T) {
 			t.Errorf("%s: %+v", avail, out.Items)
 		}
 	}
+	// A genre left out hides the title no library has, not the other.
+	ctx := context.Background()
+	for _, id := range []string{"949", "100"} {
+		if err := st.PutTitles(ctx, []store.Title{{Kind: "movie", TMDB: id, Name: "Film " + id, ListGenres: []int{80, 18}}}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st.SetGenresLeftOut(ctx, store.GenresLeftOut{Series: []int{80}}) // a series genre: films stay
+	out.Items = nil
+	get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie", &out)
+	if len(out.Items) != 2 {
+		t.Errorf("a series genre left out: %+v", out.Items)
+	}
+	st.SetGenresLeftOut(ctx, store.GenresLeftOut{Movie: []int{80}})
+	out.Items = nil
+	get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie", &out)
+	if len(out.Items) != 1 || out.Items[0].ID != "title_movie_tmdb_949" {
+		t.Errorf("crime left out: %+v", out.Items)
+	}
+	st.SetGenresLeftOut(ctx, store.GenresLeftOut{})
+
 	for _, bad := range []string{"list=nope&mediaKind=movie", "list=trending&mediaKind=book",
 		"list=trending&mediaKind=movie&availability=x", "list=trending&mediaKind=movie&extra=1"} {
 		if code := get(t, srv, "/api/v1/discover?"+bad, nil); code != 400 {

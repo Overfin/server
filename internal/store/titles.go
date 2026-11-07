@@ -41,6 +41,9 @@ type Title struct {
 	Collection int
 	// Keywords are TMDB's, with a title's page.
 	Keywords []string
+	// ListGenres are TMDB's genres by number, as its lists carry them:
+	// kept when there are some (GenresLeftOut).
+	ListGenres []int
 }
 
 // TitleGenre is one of TMDB's genres.
@@ -71,6 +74,18 @@ func (s *Store) PutTitles(ctx context.Context, titles []Title, at time.Time) err
 		if _, err := stmt.ExecContext(ctx, t.Kind, t.TMDB, t.Name, nullInt(t.Year), t.Overview,
 			nullString(t.Poster), nullString(t.Backdrop), t.Status, at.Unix(), SortName(t.Name), Fold(t.Name)); err != nil {
 			return err
+		}
+		if len(t.ListGenres) == 0 {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM catalog_list_genres WHERE kind = ? AND tmdb = ?`, t.Kind, t.TMDB); err != nil {
+			return err
+		}
+		for _, g := range t.ListGenres {
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO catalog_list_genres (kind, tmdb, genre) VALUES (?, ?, ?)`,
+				t.Kind, t.TMDB, g); err != nil {
+				return err
+			}
 		}
 	}
 	return tx.Commit()

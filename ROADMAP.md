@@ -835,6 +835,14 @@ nothing beyond what that needs.
     season by its air date). Overtide reads it every hour and adds in that
     order, after requests; import lists are the operator's business,
     neither Overfin nor Overtide reads them.
+- **Genres left out.** *Built* 2026-11-06. The operator ticks, in the
+  panel (Server, next to TMDB), TMDB genres for films and for series
+  (talk shows, news, reality…) whose titles the server doesn't take: one
+  no library has is hidden everywhere (search, discovery, people's pages,
+  collections, wishlists) and never picked, so no app adds it. A title a
+  library has always shows: what's there stays, whoever added it. A title
+  is in a genre when its page or a TMDB list says so (lists carry
+  genre numbers, kept with the title). None by default.
 - **Overtide**, when the operator plugs requests into it, is the one that
   cares about storage. It reads the requests (by an anonymous account ID,
   for nothing but counting) and the values through Overfin's apps API, so

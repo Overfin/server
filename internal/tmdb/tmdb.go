@@ -59,6 +59,9 @@ type Title struct {
 	// OriginalName is its name in its own language, and Language that
 	// language (ISO 639-1); "" when TMDB doesn't say (Seerr's lists).
 	OriginalName, Language string
+	// ListGenres are its genres by TMDB's numbers, as lists and searches
+	// carry them; nil from a title's page (Details names them).
+	ListGenres []int
 }
 
 // Details is a title's page: the title, and what lists don't carry.
