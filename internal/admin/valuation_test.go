@@ -140,15 +140,21 @@ func TestValuationIMDbSwitch(t *testing.T) {
 	}
 }
 
-// The valued titles get IMDb's ratings: a film its own, a season its
-// episodes', and its series' when IMDb has no such season.
+// The valued titles get IMDb's ratings by the IDs TMDB gives, never by
+// numbers: a film its own; a season its episodes', once at least half are
+// matched; until then, its series'.
 func TestWithIMDb(t *testing.T) {
 	basics := "tconst\ttitleType\tisAdult\tstartYear\tendYear\truntimeMinutes\n" +
 		"tt0133093\tmovie\t0\t1999\t\\N\t136\n" +
 		"tt0903747\ttvSeries\t0\t2008\t2013\t49\n" +
-		"tt0959621\ttvEpisode\t0\t2008\t\\N\t58\n"
-	episodes := "tconst\tparentTconst\tseasonNumber\tepisodeNumber\ntt0959621\ttt0903747\t1\t1\n"
-	ratings := "tconst\taverageRating\tnumVotes\ntt0133093\t8.7\t2200000\ntt0903747\t9.5\t2300000\ntt0959621\t9.0\t300\n"
+		"tt0959621\ttvEpisode\t0\t2008\t\\N\t58\n" +
+		"tt1054724\ttvEpisode\t0\t2008\t\\N\t48\n" +
+		"tt1054725\ttvEpisode\t0\t2008\t\\N\t48\n"
+	// IMDb numbers them otherwise (season 9): numbers never count.
+	episodes := "tconst\tparentTconst\tseasonNumber\tepisodeNumber\n" +
+		"tt0959621\ttt0903747\t9\t1\ntt1054724\ttt0903747\t9\t2\ntt1054725\ttt0903747\t9\t3\n"
+	ratings := "tconst\taverageRating\tnumVotes\ntt0133093\t8.7\t2200000\ntt0903747\t9.5\t2300000\n" +
+		"tt0959621\t9.0\t300\ntt1054724\t8.0\t100\ntt1054725\t7.0\t100\n"
 	var out bytes.Buffer
 	if _, err := imdb.Build(&out, strings.NewReader(basics), strings.NewReader(episodes), strings.NewReader(ratings), time.Now()); err != nil {
 		t.Fatal(err)
@@ -161,16 +167,24 @@ func TestWithIMDb(t *testing.T) {
 	}
 	defer d.Close()
 	f := &store.ValuationFacts{Titles: map[string]*store.ValuedTitle{
-		"movie/tmdb/603":      {Key: "movie/tmdb/603", IMDb: "tt0133093"},
-		"series/tmdb/1396/s1": {Key: "series/tmdb/1396/s1", IMDb: "tt0903747", Season: 1},
-		"series/tmdb/1396/s7": {Key: "series/tmdb/1396/s7", IMDb: "tt0903747", Season: 7},
-		"movie/tmdb/1":        {Key: "movie/tmdb/1"},
-		"movie/tmdb/2":        {Key: "movie/tmdb/2", IMDb: "tt9999999"},
+		"movie/tmdb/603": {Key: "movie/tmdb/603", TitleIMDb: "tt0133093"},
+		// The libraries' IMDb ID doesn't count: TMDB's does.
+		"movie/tmdb/604": {Key: "movie/tmdb/604", IMDb: "tt0133093"},
+		// Two of three matched: (9.0×300 + 8.0×100) / 400.
+		"series/tmdb/1396/s1": {Key: "series/tmdb/1396/s1", Season: 1, TitleIMDb: "tt0903747",
+			EpisodesIMDb: []string{"tt0959621", "tt1054724", ""}},
+		// One of three: the series' rating.
+		"series/tmdb/1396/s2": {Key: "series/tmdb/1396/s2", Season: 2, TitleIMDb: "tt0903747",
+			EpisodesIMDb: []string{"tt1054725", "", ""}},
+		// None matched, no series ID: nothing.
+		"series/tmdb/1397/s1": {Key: "series/tmdb/1397/s1", Season: 1, EpisodesIMDb: []string{"", ""}},
+		"movie/tmdb/2":        {Key: "movie/tmdb/2", TitleIMDb: "tt9999999"},
 	}}
 	withIMDb(f, d)
 	for key, want := range map[string][2]float64{
-		"movie/tmdb/603": {8.7, 2200000}, "series/tmdb/1396/s1": {9, 300}, "series/tmdb/1396/s7": {9.5, 2300000},
-		"movie/tmdb/1": {0, 0}, "movie/tmdb/2": {0, 0},
+		"movie/tmdb/603": {8.7, 2200000}, "movie/tmdb/604": {0, 0},
+		"series/tmdb/1396/s1": {8.75, 400}, "series/tmdb/1396/s2": {9.5, 2300000},
+		"series/tmdb/1397/s1": {0, 0}, "movie/tmdb/2": {0, 0},
 	} {
 		if v := f.Titles[key]; v.IMDbRating != want[0] || float64(v.IMDbVotes) != want[1] {
 			t.Errorf("%s: %v from %d", key, v.IMDbRating, v.IMDbVotes)

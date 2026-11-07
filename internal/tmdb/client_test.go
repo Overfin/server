@@ -76,13 +76,13 @@ func fakeTMDB(t *testing.T) *Client {
 			io.WriteString(w, `{"id":1399,"name":"Thrones","first_air_date":"2011-04-17","seasons":[{"season_number":1,"name":"Season 1","episode_count":10,"air_date":"2011-04-17"}],
 				"content_ratings":{"results":[{"iso_3166_1":"US","rating":"TV-MA"}]}}`)
 		case "/3/movie/550":
-			if r.URL.Query().Get("append_to_response") != "credits,images,alternative_titles,translations,release_dates,recommendations,keywords" || r.URL.Query().Get("language") != "fr" ||
+			if r.URL.Query().Get("append_to_response") != "credits,images,alternative_titles,translations,release_dates,external_ids,recommendations,keywords" || r.URL.Query().Get("language") != "fr" ||
 				r.URL.Query().Get("include_image_language") != "fr,null,en" {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 			io.WriteString(w, `{"id":550,"title":"Fight Club","release_date":"1999-10-15","runtime":139,"tagline":"Mischief.","vote_average":8.4,"vote_count":31000,
-				"original_title":"Fight Club","original_language":"en",
+				"original_title":"Fight Club","original_language":"en","external_ids":{"imdb_id":"tt0137523","wikidata_id":"Q190050"},
 				"alternative_titles":{"titles":[{"title":"El club de la lucha"},{"title":"Fight Club"}]},
 				"translations":{"translations":[{"data":{"title":"Club <i>de</i> combat"}},{"data":{"title":""}}]},
 				"overview":"An insomniac.","genres":[{"name":"Drame"}],
@@ -121,7 +121,7 @@ func fakeTMDB(t *testing.T) *Client {
 			}
 			io.WriteString(w, `{"id":1400,"name":"Seinfeld","first_air_date":"1989-07-05","original_name":"Seinfeld","original_language":"english",
 				"alternative_titles":{"results":[{"title":"Les Seinfeld"}]},"translations":{"translations":[{"data":{"name":"Seinfeld"}}]},
-				"credits":{"cast":[]},"external_ids":{"tvdb_id":79169},"keywords":{"results":[{"name":"sitcom"}]},
+				"credits":{"cast":[]},"external_ids":{"tvdb_id":79169,"imdb_id":"tt0098904; DROP","wikidata_id":"Q23733"},"keywords":{"results":[{"name":"sitcom"}]},
 				"aggregate_credits":{"cast":[{"name":"Jerry Seinfeld","profile_path":"/jerry12345.jpg","roles":[{"character":"Jerry"}]},
 					{"name":"Guest","roles":[]}]}}`)
 		case "/3/tv/1399/season/1":
@@ -130,6 +130,10 @@ func fakeTMDB(t *testing.T) *Client {
 				{"episode_number":1,"name":"Winter <b>is</b> coming","air_date":"2011-04-17","runtime":62,"still_path":"/still1abcd.jpg"},
 				{"episode_number":2,"name":"The Kingsroad","air_date":"soon","still_path":null},
 				{"episode_number":3,"still_path":"../x.jpg"},{"episode_number":3,"name":"Twice"}]}`)
+		case "/3/tv/1399/season/2/episode/3/external_ids":
+			io.WriteString(w, `{"id":63058,"imdb_id":"tt1971833","tvdb_id":3436411}`)
+		case "/3/tv/1399/season/2/episode/4/external_ids":
+			io.WriteString(w, `{"id":63059,"imdb_id":null}`)
 		case "/3/certification/movie/list":
 			io.WriteString(w, `{"certifications":{"US":[{"certification":"G","meaning":"All ages","order":1},{"certification":"R","order":4}]}}`)
 		default:
@@ -215,6 +219,20 @@ func TestClient(t *testing.T) {
 	if !slices.Equal(full.Keywords, []string{"based on novel", "fight"}) {
 		t.Errorf("keywords: %q", full.Keywords)
 	}
+	// The other IDs come with the page.
+	if full.IMDb != "tt0137523" || full.Wikidata != "Q190050" || full.TVDB != 0 {
+		t.Errorf("other IDs: %q %q %d", full.IMDb, full.Wikidata, full.TVDB)
+	}
+	// An episode's IMDb ID: one request, by its numbers in TMDB's order.
+	if id, err := c.EpisodeIMDb(ctx, 1399, 2, 3); err != nil || id != "tt1971833" {
+		t.Errorf("episode: %q %v", id, err)
+	}
+	if id, err := c.EpisodeIMDb(ctx, 1399, 2, 4); err != nil || id != "" {
+		t.Errorf("episode without one: %q %v", id, err)
+	}
+	if _, err := c.EpisodeIMDb(ctx, 1399, 2, 5); !errors.Is(err, ErrNotFound) {
+		t.Errorf("an episode TMDB lacks: %v", err)
+	}
 	if full.Name != "Fight Club" || full.Year != 1999 || full.Runtime != 139 || full.Tagline != "Mischief." ||
 		full.ReleaseDate != "1999-10-15" || full.Rating != 8.4 || full.Votes != 31000 ||
 		full.Overview != "An insomniac." || len(full.Cast) != 1 || full.Cast[0].Profile != "/norton1234.jpg" || full.Cast[0].ID != 819 {
@@ -223,7 +241,8 @@ func TestClient(t *testing.T) {
 	// A series' cast is the one over all its seasons.
 	if s, err := c.Title(ctx, "series", 1400); err != nil || len(s.Cast) != 2 || s.Cast[0].Character != "Jerry" ||
 		s.Cast[0].Profile != "/jerry12345.jpg" || s.Cast[1].Character != "" || s.Language != "" ||
-		!slices.Equal(s.Names, []string{"Les Seinfeld"}) || s.TVDB != 79169 || !slices.Equal(s.Keywords, []string{"sitcom"}) {
+		!slices.Equal(s.Names, []string{"Les Seinfeld"}) || s.TVDB != 79169 || !slices.Equal(s.Keywords, []string{"sitcom"}) ||
+		s.IMDb != "" || s.Wikidata != "Q23733" {
 		t.Errorf("series cast: %+v %v", s, err)
 	}
 	person, err := c.Person(ctx, 1245)

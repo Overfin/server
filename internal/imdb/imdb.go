@@ -185,8 +185,10 @@ func (d *Data) Title(id string) (Title, bool) {
 	return Title{}, false
 }
 
-// Season returns the rating of a series' season, and whether any of its
-// episodes has one.
+// Season returns the rating of a series' season as IMDb numbers its
+// seasons, and whether any of its episodes has one. IMDb's numbers aren't
+// another site's (orders differ): to rate another site's season, match its
+// episodes by ID instead.
 func (d *Data) Season(series string, season int) (Season, bool) {
 	n, ok := number(series)
 	if !ok {

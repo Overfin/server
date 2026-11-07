@@ -587,10 +587,10 @@ comes from the internet, and media files can be written by anyone.
     them itself, once a day, from IMDb's own address only
     (datasets.imdbws.com): plain files, the same for everyone, so nothing
     about the server's titles or people is sent. It keeps what it uses of
-    them in one file beside the database, readable by Overfin alone, and
-    deletes the downloads once that file is made; a file that can't be
-    read whole is never used. Switched off, the file and its folder are
-    deleted. IMDb's data counts only in titles' values; it's never shown
+    them in its own folder beside the database, readable by Overfin alone:
+    one file, and each day's votes for 35 days; the downloads are deleted
+    once that file is made, and a file that can't be read whole is never
+    used. Switched off, the folder is deleted. IMDb's data counts only in titles' values; it's never shown
     or served. IMDb allows the datasets for personal and non-commercial
     use: the panel says so where they're switched on.
 

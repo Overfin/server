@@ -805,6 +805,17 @@ func (g *gateway) titleSource() catalog.TitleSource {
 	return nil
 }
 
+// episodeIMDbSource is TMDB, for episodes' IMDb IDs; nil without it
+// (Seerr can't say them).
+func (g *gateway) episodeIMDbSource() catalog.EpisodeIMDbSource {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.sh.tmdb != nil {
+		return g.sh.tmdb
+	}
+	return nil
+}
+
 // collectionSource is TMDB, for collections; nil without it (Seerr has
 // none).
 func (g *gateway) collectionSource() catalog.CollectionSource {
