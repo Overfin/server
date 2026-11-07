@@ -46,7 +46,13 @@ func fakeTMDB(t *testing.T) *Client {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			io.WriteString(w, `{"page":2,"total_pages":2,"results":[{"id":1399,"name":"Thrones"}]}`)
+			io.WriteString(w, `{"page":2,"total_pages":2,"results":[{"id":1399,"name":"Thrones","genre_ids":[18,-1,10765]}]}`)
+		case "/3/genre/tv/list":
+			if r.URL.Query().Get("language") != "en" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			io.WriteString(w, `{"genres":[{"id":10767,"name":"Talk"},{"id":18,"name":"Drama"},{"id":0,"name":"Bad"},{"id":5,"name":""}]}`)
 		case "/3/movie/949":
 			// Its page (with its cast), or its release alone.
 			if a := r.URL.Query().Get("append_to_response"); a != "credits,release_dates" && a != "release_dates" {
@@ -347,6 +353,16 @@ func TestRecommendationsAndByGenre(t *testing.T) {
 	p, err = c.ByGenre(ctx, "series", 18, 2)
 	if err != nil || len(p.Titles) != 1 || p.Titles[0].TMDBID != 1399 || p.Titles[0].Kind != "series" {
 		t.Fatalf("by genre: %+v %v", p, err)
+	}
+	if g := p.Titles[0].ListGenres; !slices.Equal(g, []int{18, 10765}) {
+		t.Errorf("its genres: %v", g)
+	}
+	genres, err := c.Genres(ctx, "series")
+	if err != nil || len(genres) != 2 || genres[0].Name != "Drama" || genres[1].ID != 10767 {
+		t.Errorf("genres: %+v %v", genres, err)
+	}
+	if _, err := c.Genres(ctx, "person"); err == nil {
+		t.Error("a person's genres asked for")
 	}
 	if _, err := c.ByGenre(ctx, "series", 0, 1); err == nil {
 		t.Error("genre 0 asked for")

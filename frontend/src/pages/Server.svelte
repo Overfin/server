@@ -14,6 +14,7 @@
   import SeerrCard from '../parts/server/SeerrCard.svelte';
   import LanguagesCard from '../parts/server/LanguagesCard.svelte';
   import TmdbCard from '../parts/server/TmdbCard.svelte';
+  import GenresCard from '../parts/server/GenresCard.svelte';
   import IntroSkipperCard from '../parts/server/IntroSkipperCard.svelte';
   import InFile from '../parts/server/InFile.svelte';
 
@@ -80,6 +81,7 @@
       {#if data.seerr}<SeerrCard sr={data.seerr} {reload} />{/if}
       {#if data.languages}<LanguagesCard l={data.languages} />{/if}
       {#if data.ratings}<TmdbCard rt={data.ratings} {reload} />{/if}
+      {#if data.ratings?.source}<GenresCard />{/if}
       {#if data.skipper}<IntroSkipperCard sk={data.skipper} {reload} />{/if}
     </div>
   {/key}

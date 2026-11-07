@@ -34,7 +34,7 @@ func (f *fakePicks) ByGenre(_ context.Context, kind string, genre, page int) (*t
 	f.asked = append(f.asked, "genre "+kind)
 	p := &tmdb.Page{Page: page, TotalPages: 1}
 	if kind == "series" && genre == 18 {
-		p.Titles = []tmdb.Title{{TMDBID: 1399, Kind: "series", Name: "Le Trône de fer"}}
+		p.Titles = []tmdb.Title{{TMDBID: 1399, Kind: "series", Name: "Le Trône de fer", ListGenres: []int{18, 10767}}}
 	}
 	return p, nil
 }
@@ -132,6 +132,23 @@ func TestPicks(t *testing.T) {
 	if film := f.Titles["movie/tmdb/7"]; film == nil || !film.InLibrary {
 		t.Errorf("the library's film: %+v", film)
 	}
+
+	// A genre left out (as its list gave it): the series isn't valued,
+	// nor described again; the library's film still is.
+	if err := st.SetGenresLeftOut(ctx, store.GenresLeftOut{Series: []int{10767}}); err != nil {
+		t.Fatal(err)
+	}
+	if f, err = st.ValuationFacts(ctx, now, nil, 60); err != nil {
+		t.Fatal(err)
+	}
+	if f.Titles["series/tmdb/1399/s1"] != nil || f.Titles["movie/tmdb/7"] == nil {
+		t.Errorf("left out: %v", f.Titles)
+	}
+	todo, err := st.PicksToDescribe(ctx, now.Add(time.Hour), 10)
+	if err != nil || slices.ContainsFunc(todo, func(x store.ArtworkTarget) bool { return x.TMDB == "1399" }) {
+		t.Errorf("to describe: %v %v", todo, err)
+	}
+	st.SetGenresLeftOut(ctx, store.GenresLeftOut{})
 
 	// Without asking people, nothing is liked any more.
 	if err := st.SetTastesAsked(ctx, false); err != nil {

@@ -360,6 +360,8 @@ type rawTitle struct {
 	// Popularity and VoteCount come with searches and lists.
 	Popularity float64 `json:"popularity"`
 	VoteCount  int     `json:"vote_count"`
+	// GenreIDs come with searches and lists too.
+	GenreIDs []int `json:"genre_ids"`
 }
 
 func (r rawTitle) title(kind string) (Title, bool) {
@@ -372,6 +374,11 @@ func (r rawTitle) title(kind string) (Title, bool) {
 	t.OriginalName = textclean.Plain(original, 300)
 	if isoLanguage.MatchString(r.OriginalLanguage) {
 		t.Language = r.OriginalLanguage
+	}
+	for _, g := range r.GenreIDs {
+		if g > 0 && g <= 1_000_000 && len(t.ListGenres) < 20 {
+			t.ListGenres = append(t.ListGenres, g)
+		}
 	}
 	return t, ok
 }
@@ -404,6 +411,31 @@ func (c *Client) Discover(ctx context.Context, list, kind string, page int) (*Pa
 		return nil, errors.New("tmdb: invalid discovery list")
 	}
 	return c.page(ctx, path, kind, q)
+}
+
+// Genres are TMDB's genres of a kind, in English (the panel's), by name.
+func (c *Client) Genres(ctx context.Context, kind string) ([]Genre, error) {
+	k := tv(kind)
+	if k == "" {
+		return nil, errors.New("tmdb: invalid kind")
+	}
+	var raw struct {
+		Genres []struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		} `json:"genres"`
+	}
+	if err := c.get(ctx, "/genre/"+k+"/list", url.Values{"language": {"en"}}, &raw); err != nil {
+		return nil, err
+	}
+	out := []Genre{}
+	for _, g := range raw.Genres {
+		if name := textclean.Plain(g.Name, 100); g.ID > 0 && g.ID <= 1_000_000 && name != "" {
+			out = append(out, Genre{ID: g.ID, Name: name})
+		}
+	}
+	slices.SortFunc(out, func(a, b Genre) int { return strings.Compare(a.Name, b.Name) })
+	return out, nil
 }
 
 // validCountry is what an ISO 3166-1 country code looks like ("CA").

@@ -156,8 +156,9 @@ func summaryOf(t *store.TitleInfo) library.TitleSummary {
 // visibleTitles says, for each title, whether the profile may see it: one
 // a library has, when it may see one of its copies (libraries, hidden
 // tags, kids limits); one no library has, never for a profile limited to
-// some libraries (rule 28), else when it's out as the panel asks (titles
-// shown) and, for a kids profile, rated within its limits. A file
+// some libraries (rule 28) or in a genre the panel leaves out, else when
+// it's out as the panel asks (titles shown) and, for a kids profile, rated
+// within its limits. A file
 // no one identified, only through its copies. Specials a library doesn't
 // have, and seasons without a single episode, never show.
 func (l Library) visibleTitles(ctx context.Context, p *store.Profile, titles []*store.TitleInfo) ([]bool, error) {
@@ -204,8 +205,16 @@ func (l Library) visibility(ctx context.Context, p *store.Profile, titles []*sto
 	shown := ""
 	releases := map[string]store.Release{}
 	rated := map[string]bool{}
+	left := map[string]bool{}
 	if len(bare) > 0 && !a.Limited() {
 		if shown, err = st.TitlesShown(ctx); err != nil {
+			return nil, nil, err
+		}
+		genres, err := st.GenresLeftOut(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		if left, err = st.TitlesLeftOut(ctx, genres, bare); err != nil {
 			return nil, nil, err
 		}
 		if shown != "all" {
@@ -238,6 +247,8 @@ func (l Library) visibility(ctx context.Context, p *store.Profile, titles []*sto
 			continue // specials: only those a library has, and their season
 		case t.Ref.Kind == "season" && t.Have == 0 && t.Listed == 0:
 			continue // a season without a single episode
+		case left[k]:
+			continue // in a genre the server leaves out
 		}
 		// Out yet, as the panel asks (titles shown): a season or an episode
 		// once aired, its series or a film once released, or once it can

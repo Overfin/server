@@ -568,6 +568,14 @@ func run(logger *slog.Logger) error {
 		}
 		p.ReadSeriesOrders = sh.titles.ReadOrders
 		p.ChooseSeriesOrder = sh.titles.ChooseOrder
+		// The genres left out are chosen among TMDB's own.
+		p.TMDBGenres = func(ctx context.Context, kind string) ([]tmdb.Genre, error) {
+			c, ok := gw.titleSource().(*tmdb.Client)
+			if !ok || c == nil {
+				return nil, admin.ErrNoTMDB
+			}
+			return c.Genres(ctx, kind)
+		}
 		// The metadata editor: TMDB's images of a title, from TMDB itself.
 		p.TitleImages = func(ctx context.Context, kind string, tmdbID int) (map[string][]tmdb.Image, error) {
 			c, ok := gw.titleSource().(*tmdb.Client)
