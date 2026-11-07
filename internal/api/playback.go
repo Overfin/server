@@ -591,6 +591,15 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// A file that marks no audio track as default: Jellyfin then checks no
+	// audio codec, and offers the file as it is even when the browser can't
+	// play its audio (The 100's season 2, French AC3: no sound). The track
+	// that plays is named, so Jellyfin checks it.
+	if req.AudioTrack == "" && pr.AudioStreamIndex == nil && !markedAudio(dec.Source) {
+		if i := defaultAudio(dec.Source); i >= 0 {
+			pr.AudioStreamIndex, again = &i, true
+		}
+	}
 	if req.SubtitleTrack == "" && wantSubtitles != "" {
 		if t, ok := tracks.Pick(subtitleTracks, wantSubtitles); ok {
 			shownSubtitle = "s" + strconv.Itoa(t.Index)
@@ -875,6 +884,17 @@ func defaultAudio(src jellyfin.MediaSource) int {
 		}
 	}
 	return first
+}
+
+// markedAudio tells whether a version marks one of its audio tracks as
+// the default.
+func markedAudio(src jellyfin.MediaSource) bool {
+	for _, ms := range src.MediaStreams {
+		if ms.Type == "Audio" && ms.IsDefault {
+			return true
+		}
+	}
+	return false
 }
 
 // setSubtitles sets the subtitles the active profile prefers: a language
