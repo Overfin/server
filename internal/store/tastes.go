@@ -144,6 +144,27 @@ func (s *Store) SetTastesAsked(ctx context.Context, on bool) error {
 	return err
 }
 
+// IMDbOn is whether the operator has IMDb's data on (rule 68).
+func (s *Store) IMDbOn(ctx context.Context) (bool, error) {
+	var v []byte
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'imdb'`).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return string(v) == "on", err
+}
+
+// SetIMDbOn switches IMDb's data on or off.
+func (s *Store) SetIMDbOn(ctx context.Context, on bool) error {
+	v := "off"
+	if on {
+		v = "on"
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO meta (name, value) VALUES ('imdb', ?)
+		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, []byte(v))
+	return err
+}
+
 // TasteGenre is a genre people may say they like.
 type TasteGenre struct {
 	ID   int

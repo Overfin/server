@@ -161,6 +161,15 @@ others are fetched when first shown. TMDB's free API is for non-commercial
 use: a site that charges for access needs TMDB's commercial terms. Seerr,
 when connected, is a second source.
 
+IMDb's ratings can count in titles' values instead of TMDB's (Valuation,
+"Ratings from IMDb", off by default): they come from far more votes, and
+each season gets its own, from its episodes'. Overfin then downloads
+IMDb's free datasets once a day (about 300 MB), keeps what it uses in one
+file of about 135 MB in `imdb/` next to the database, and deletes the
+downloads. Titles IMDb doesn't have keep TMDB's rating. IMDb allows its
+datasets for personal and non-commercial use only. Switched off, the file
+is deleted.
+
 Wishes go where you choose (Features, Wishes): to Overtide, which fetches
 them in Overfin's turns, or to Seerr, where Overfin requests them itself, a
 few a day, as one Seerr user of its own named "Overfin" (give it the Request

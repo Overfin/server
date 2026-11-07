@@ -17,7 +17,7 @@
     watchlist: ['Watchlist', 'How many accounts keep it to watch later.'],
     requested: ['Wished', 'How many accounts wished for it (or asked for it in Seerr); kept a while once it arrives, until they watched it.'],
     tastes: ['Tastes', 'How well it fits what people here like: what they watch (genres, series or films), and what they said when asked. What someone watches counts more and more over what they said.'],
-    rating: ['Rating', 'TMDB\'s rating. One from a few votes counts for little.'],
+    rating: ['Rating', 'IMDb\'s rating when IMDb\'s data is on and it has the title (a season\'s from its episodes), TMDB\'s otherwise. One from a few votes counts for little.'],
     newRelease: ['New release', 'How recent the film or the season is: its release, or its first air date.'],
     recentlyAdded: ['Recently added', 'How recently it arrived here (a season: its latest episode), for about two months: what just came isn\'t the least valuable for not being watched yet.'],
     popularity: ['Popularity', 'TMDB\'s popularity: how much people look it up these days.'],
@@ -33,6 +33,7 @@
   let weights = $state<Record<string, number>>({});
   let saved = $state<Record<string, number>>({});
   let askTastes = $state(false);
+  let imdb = $state<Valuation['imdb']>();
   let status = $state<{ text: string; kind: '' | 'ok' | 'error' }>({ text: '', kind: '' });
   let search = $state('');
   let most = $state<Valued[] | null>(null);
@@ -49,6 +50,7 @@
       weights = Object.fromEntries(d.criteria.map((c) => [c.name, c.weight]));
       saved = { ...weights };
       askTastes = d.askTastes;
+      imdb = d.imdb;
       preview();
     },
     (err) => (problem = message(err)),
@@ -100,6 +102,41 @@
     preview();
   }
 
+  // What IMDb's data is doing, under its switch.
+  const imdbState = $derived.by(() => {
+    if (!imdb?.on) return '';
+    if (imdb.working) return 'Downloading IMDb\'s data: a few minutes.';
+    if (imdb.problem) return `The last download failed: ${imdb.problem}. Overfin tries again in a few hours.`;
+    if (imdb.built) return `${imdb.titles.toLocaleString()} titles, downloaded ${new Date(imdb.built).toLocaleString()}.`;
+    return 'Downloading soon.';
+  });
+
+  // While it downloads, or until the first file is there, asked again
+  // every 10 s.
+  $effect(() => {
+    if (!imdb?.on || (imdb.built && !imdb.working)) return;
+    const timer = setInterval(async () => {
+      try {
+        imdb = (await api<Valuation>('GET', '/admin/api/valuation')).imdb;
+      } catch {
+        // asked again next time
+      }
+    }, 10_000);
+    return () => clearInterval(timer);
+  });
+
+  async function setIMDb() {
+    try {
+      const res = await api<Valuation>('PUT', '/admin/api/valuation', { imdb: imdb!.on });
+      imdb = res.imdb;
+      toast(imdb?.on ? 'IMDb\'s data will be downloaded in a moment.' : 'IMDb\'s data is removed; TMDB\'s ratings count again.');
+      preview();
+    } catch (err) {
+      imdb!.on = !imdb!.on;
+      toast(message(err), true);
+    }
+  }
+
   async function setAsk() {
     try {
       await api('PUT', '/admin/api/valuation', { askTastes });
@@ -131,7 +168,7 @@
   </div>
 {/snippet}
 
-<PageHead title="Valuation" description="How much each film and each season is worth to the people here, from 0 to 100: what they watch, mark, keep for later and ask for, and what TMDB says of it. Values never depend on files or their size, and say nothing of who did what. Apps you give a key, like Overtide, read them." />
+<PageHead title="Valuation" description="How much each film and each season is worth to the people here, from 0 to 100: what they watch, mark, keep for later and ask for, and what TMDB (or IMDb) says of it. Values never depend on files or their size, and say nothing of who did what. Apps you give a key, like Overtide, read them." />
 
 {#if problem}
   <Notice warn>{problem}</Notice>
@@ -153,6 +190,12 @@
               {/snippet}
             </Setting>
           {/each}
+          {#if imdb}
+            <Setting label="Ratings from IMDb" hint={'IMDb\'s ratings count instead of TMDB\'s: from far more votes, and for each season, from its episodes. Overfin downloads IMDb\'s free datasets once a day (about 300 MB, kept as a 135 MB file). IMDb allows them for personal and non-commercial use only.'}>
+              {#snippet children(ids)}<input type="checkbox" bind:checked={imdb!.on} onchange={setIMDb} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+            </Setting>
+            {#if imdbState}<p class="hint">{imdbState}</p>{/if}
+          {/if}
           <Setting label="Ask people what they like" hint={'When they set up their account, and on their account page: series or films, genres, kids\' content. Off, Tastes come from what they watch alone.'}>
             {#snippet children(ids)}<input type="checkbox" bind:checked={askTastes} onchange={setAsk} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
           </Setting>

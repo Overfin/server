@@ -77,8 +77,11 @@ const (
 	// to be following it.
 	followWindow = 90 * 24 * time.Hour
 	// ratingPrior is how many votes a rating needs to count for as much as
-	// the average of all titles.
+	// the average of all titles: TMDB's; imdbPrior, IMDb's, whose titles
+	// have far more votes (a film here has hundreds of thousands, most
+	// often; the least known, a few thousand).
 	ratingPrior = 50
+	imdbPrior   = 1000
 	// addedFor is how long a title counts as recently added, less and
 	// less.
 	addedFor = 60 * 24 * time.Hour
@@ -268,22 +271,27 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 	}
 	sum(raw[Requested], requested)
 
-	// What TMDB says: the rating weighted by its votes, so a few votes
-	// can't make or break a title; how recent; how popular.
-	var total, rated float64
+	// The rating weighted by its votes, so a few votes can't make or break
+	// a title: IMDb's when there is one (the operator has IMDb's data on),
+	// TMDB's otherwise, each pulled toward its own titles' average. Then
+	// what TMDB says: how recent, how popular.
+	var imdbMean, tmdbMean average
 	for _, t := range f.Titles {
-		if t.Votes > 0 {
-			total += t.Rating
-			rated++
+		switch {
+		case t.IMDbVotes > 0:
+			imdbMean.add(t.IMDbRating)
+		case t.Votes > 0:
+			tmdbMean.add(t.Rating)
 		}
 	}
-	mean := 6.5
-	if rated > 0 {
-		mean = total / rated
-	}
 	for _, t := range f.Titles {
-		v := float64(t.Votes)
-		raw[Rating][t.Key] = (v*t.Rating + ratingPrior*mean) / (v + ratingPrior)
+		if t.IMDbVotes > 0 {
+			v := float64(t.IMDbVotes)
+			raw[Rating][t.Key] = (v*t.IMDbRating + imdbPrior*imdbMean.of()) / (v + imdbPrior)
+		} else {
+			v := float64(t.Votes)
+			raw[Rating][t.Key] = (v*t.Rating + ratingPrior*tmdbMean.of()) / (v + ratingPrior)
+		}
 		if !t.Released.IsZero() {
 			raw[NewRelease][t.Key] = float64(t.Released.Unix())/86400 + 1e6 // in days, above 0 for any date
 		}
@@ -318,6 +326,18 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 	}
 	sort.Slice(out.Titles, func(i, j int) bool { return out.Titles[i].Key < out.Titles[j].Key })
 	return out
+}
+
+// average is the average of ratings, 6.5 until there's one.
+type average struct{ total, n float64 }
+
+func (a *average) add(rating float64) { a.total += rating; a.n++ }
+
+func (a *average) of() float64 {
+	if a.n == 0 {
+		return 6.5
+	}
+	return a.total / a.n
 }
 
 // TMDB's genres for children: Family (films and series), Kids (series).

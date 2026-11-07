@@ -163,6 +163,34 @@ func TestRatingWeightedByVotes(t *testing.T) {
 	}
 }
 
+// IMDb's rating, when a title has one, counts instead of TMDB's, weighted
+// by IMDb's own (larger) votes; titles without one keep TMDB's.
+func TestIMDbRatingFirst(t *testing.T) {
+	// TMDB likes the first, IMDb the second.
+	a, b := film("1"), film("2")
+	a.Rating, a.Votes, a.IMDbRating, a.IMDbVotes = 8.5, 900, 6.0, 200000
+	b.Rating, b.Votes, b.IMDbRating, b.IMDbVotes = 6.0, 900, 8.5, 200000
+	// IMDb's 9.5 from 40 votes is pulled toward its average (about 7.9
+	// here): an 8.2 from 300000 beats it.
+	few, solid := film("3"), film("4")
+	few.Rating, few.Votes, few.IMDbRating, few.IMDbVotes = 6, 900, 9.5, 40
+	solid.Rating, solid.Votes, solid.IMDbRating, solid.IMDbVotes = 6, 900, 8.2, 300000
+	// No IMDb rating: TMDB's, against TMDB's titles.
+	tmdbOnly := film("5")
+	tmdbOnly.Rating, tmdbOnly.Votes = 9, 5000
+	m := Measure(facts(1, a, b, few, solid, tmdbOnly), now)
+	rating := func(id string) float64 { return parts(t, m, "movie/tmdb/"+id)[Rating] }
+	if !(rating("2") > rating("1")) {
+		t.Errorf("IMDb's rating didn't count: %v %v", rating("1"), rating("2"))
+	}
+	if !(rating("4") > rating("3")) {
+		t.Errorf("a few IMDb votes counted too much: %v %v", rating("3"), rating("4"))
+	}
+	if rating("5") == 0 {
+		t.Error("a title without IMDb's rating has none")
+	}
+}
+
 // Ranks: equal measures share a rank, the highest is 1, none is 0.
 func TestRank(t *testing.T) {
 	r := rank(map[string]float64{"a": 1, "b": 2, "c": 2, "d": 3, "e": 0})

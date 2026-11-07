@@ -96,6 +96,10 @@ export interface Valuation {
   askTastes: boolean;
   accounts: number;
   titles: number;
+  // IMDb's data, when this Overfin can have it: switched on or not, and
+  // the file in use (titles, when it was made), being downloaded, or why
+  // the last download failed.
+  imdb?: { on: boolean; titles: number; built?: string; working: boolean; problem?: string };
 }
 
 // The metadata editor: a title's texts and artwork in each language.

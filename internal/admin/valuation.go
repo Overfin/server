@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/overfin/server/internal/imdb"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/textclean"
 	"github.com/overfin/server/internal/valuation"
@@ -53,8 +54,34 @@ func (p *Panel) measuredFacts(ctx context.Context) (*valuation.Measured, *store.
 	if err != nil {
 		return nil, nil, err
 	}
+	if p.IMDb != nil {
+		withIMDb(f, p.IMDb.Data())
+	}
 	p.valued.m, p.valued.f, p.valued.at = valuation.Measure(f, now), f, now
 	return p.valued.m, f, nil
+}
+
+// withIMDb gives the valued titles IMDb's ratings, from d (none when nil):
+// a film's own, a season's from its episodes, or its series' when IMDb
+// numbers the seasons otherwise.
+func withIMDb(f *store.ValuationFacts, d *imdb.Data) {
+	if d == nil {
+		return
+	}
+	for _, t := range f.Titles {
+		if t.IMDb == "" {
+			continue
+		}
+		if r, _ := store.ParseTitleKey(t.Key); r.Kind == "season" {
+			if s, ok := d.Season(t.IMDb, t.Season); ok {
+				t.IMDbRating, t.IMDbVotes = s.Rating, s.Votes
+				continue
+			}
+		}
+		if it, ok := d.Title(t.IMDb); ok {
+			t.IMDbRating, t.IMDbVotes = it.Rating, it.Votes
+		}
+	}
 }
 
 type criterionJSON struct {
@@ -73,6 +100,20 @@ type valuationJSON struct {
 	// AskTastes: accounts are asked what they like (Tastes then mixes
 	// what they said with what they watch; otherwise only the latter).
 	AskTastes bool `json:"askTastes"`
+	// IMDb is IMDb's data, when this Overfin can have it.
+	IMDb *imdbJSON `json:"imdb,omitempty"`
+}
+
+// imdbJSON is where IMDb's data is.
+type imdbJSON struct {
+	On bool `json:"on"`
+	// Titles and Built are the file in use's: how many titles, and when
+	// it was made (none yet: 0 and absent).
+	Titles int    `json:"titles"`
+	Built  string `json:"built,omitempty"`
+	// Working: being downloaded now. Problem: why the last try failed.
+	Working bool   `json:"working"`
+	Problem string `json:"problem,omitempty"`
 }
 
 // valuationSettings (GET /admin/api/valuation) answers the weights, the
@@ -100,6 +141,18 @@ func (p *Panel) writeValuation(w http.ResponseWriter, r *http.Request) {
 	}
 	weights, defaults := valuation.Weights(saved), valuation.Defaults()
 	out := valuationJSON{Max: valuation.MaxWeight, Accounts: m.Accounts, Titles: len(m.Titles), AskTastes: asked}
+	if p.IMDb != nil {
+		on, err := p.Store.IMDbOn(ctx)
+		if err != nil {
+			p.fail(w, "reading whether IMDb's data is on", err)
+			return
+		}
+		st := p.IMDb.Status()
+		out.IMDb = &imdbJSON{On: on, Titles: st.Titles, Working: st.Working, Problem: st.Problem}
+		if !st.Built.IsZero() {
+			out.IMDb.Built = st.Built.UTC().Format(time.RFC3339)
+		}
+	}
 	for _, c := range valuation.Criteria {
 		out.Criteria = append(out.Criteria, criterionJSON{Name: c, Weight: weights[c], Default: defaults[c]})
 	}
@@ -119,16 +172,33 @@ func weightsOf(w http.ResponseWriter, sent map[string]int) (map[string]int, bool
 }
 
 // setValuation (PUT /admin/api/valuation) keeps new weights, or with
-// reset, goes back to the defaults; with askTastes alone, it only switches
-// asking accounts what they like.
+// reset, goes back to the defaults; with askTastes or imdb alone, it only
+// switches asking accounts what they like, or IMDb's data.
 func (p *Panel) setValuation(w http.ResponseWriter, r *http.Request, s *session) {
 	var req struct {
 		Weights   map[string]int `json:"weights"`
 		Reset     bool           `json:"reset"`
 		AskTastes *bool          `json:"askTastes"`
+		IMDb      *bool          `json:"imdb"`
 	}
 	if !decode(w, r, &req) {
 		return
+	}
+	if req.IMDb != nil {
+		if p.IMDb == nil {
+			invalid(w, "IMDb's data isn't available here")
+			return
+		}
+		if err := p.Store.SetIMDbOn(r.Context(), *req.IMDb); err != nil {
+			p.fail(w, "switching IMDb's data", err)
+			return
+		}
+		p.IMDb.Wake()
+		p.Logger.Info("IMDb's data switched in the control panel", "on", *req.IMDb, "by", s.logID)
+		if req.Weights == nil && !req.Reset && req.AskTastes == nil {
+			p.writeValuation(w, r)
+			return
+		}
 	}
 	if req.AskTastes != nil {
 		if err := p.Store.SetTastesAsked(r.Context(), *req.AskTastes); err != nil {
