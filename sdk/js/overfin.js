@@ -677,13 +677,16 @@ export class Player {
 
   // gone handles a playback the server no longer has.
   gone(pb, err) {
-    if (pb !== this.playback || this.closed || err.status !== 410) return;
-    if (err.type === 'playback-expired') {
-      // Freed after a pause or a lost connection: carry on, unnoticed.
+    if (pb !== this.playback || this.closed) return;
+    // Freed after a pause or a lost connection, or no longer known at all
+    // (the server forgets why after an hour, and everything when it
+    // restarts): carry on, unnoticed.
+    if ((err.status === 410 && err.type === 'playback-expired') || err.status === 404) {
       this.video.autoplay = !this.video.paused;
       this.restart();
       return;
     }
+    if (err.status !== 410) return;
     this.teardown();
     this.playback = null;
     this.video.pause();

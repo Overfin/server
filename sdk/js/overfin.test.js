@@ -200,6 +200,30 @@ test('the player restarts a freed stream at the same place, quietly', async () =
   await player.close();
 });
 
+test('after a night on pause, a playback the server forgot restarts too', async () => {
+  const { calls, state } = playbackServer();
+  const video = fakeVideo();
+  const errors = [];
+  const player = await new Overfin().play(video, 'title_movie_tmdb_1', {
+    startMs: 0, capabilities: {}, onError: (e) => errors.push(e),
+  });
+  video.currentTime = 1200;
+  video.emit('pause');
+  await settle();
+  player.pausedAt = Date.now() - 8 * 3600_000;
+  state.gone = [404, { type: 'not-found', status: 404 }];
+  video.paused = false;
+  video.emit('play'); // a long pause: checks the playback, which is unknown
+  await settle();
+
+  assert.equal(player.playback.id, 'pb2');
+  const restart = calls.filter((c) => c.method === 'POST' && c.url === '/api/v1/playback')[1];
+  assert.equal(restart.body.startPositionMs, 1200000);
+  assert.equal(video.autoplay, true);
+  assert.deepEqual(errors, []);
+  await player.close();
+});
+
 test('a takeover is reported, and continueHere takes it back', async () => {
   const { state } = playbackServer();
   const video = fakeVideo();
