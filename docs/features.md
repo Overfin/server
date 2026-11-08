@@ -151,13 +151,15 @@ internet: it reads the files, and Overfin does the rest.
 Overfin asks TMDB by itself, by title, never saying who's asking; browsers
 never contact TMDB. It keeps TMDB's data as its terms allow (five months at
 most), and overfin-web shows TMDB's attribution. The pictures of the
-titles your libraries have are kept on disk ahead of time, in `artwork/`
+titles your libraries have, and of those in Discover's lists while
+they're in them, are kept on disk ahead of time, in `artwork/`
 next to the database, at every size the apps are served, so browsing the
 library never waits for TMDB or for a picture to be resized. They're made
 in the background, one at a time: with a large library, the first start
 takes hours to make them all, and the sizes take room on disk besides the
 originals (they can always be made again, so backups can skip them). The
-others are fetched when first shown. TMDB's free API is for non-commercial
+others (a person's, a title found by search) are fetched when first
+shown. TMDB's free API is for non-commercial
 use: a site that charges for access needs TMDB's commercial terms. Seerr,
 when connected, is a second source.
 
@@ -175,6 +177,15 @@ IMDb doesn't have keep TMDB's rating, and a season most of whose
 episodes aren't matched yet takes its series'. IMDb allows its datasets
 for personal and non-commercial use only. Switched off, the folder is
 deleted.
+
+With IMDb's data on, its daily votes also make the trending and popular
+lists (Home, Discover) instead of TMDB's, once two days of votes are
+kept: popular is the titles that gained the most votes in 30 days,
+trending those gaining fastest for their size in 7, adult titles left
+out. Only their order shows; IMDb's numbers never do. A title in them
+Overfin doesn't know yet is found on TMDB by its IMDb ID, once (a first
+day asks a few hundred, then a handful a day). Upcoming stays TMDB's.
+With Seerr as the only source, TMDB's lists stay.
 
 Wishes go where you choose (Features, Wishes): to Overtide, which fetches
 them in Overfin's turns, or to Seerr, where Overfin requests them itself, a

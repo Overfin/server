@@ -54,9 +54,14 @@ type Keeper struct {
 	failed  time.Time // the last failed refresh, zero after one works
 	problem string    // why it failed
 	working bool
-	wake    chan struct{}
-	now     func() time.Time
-	least   int // minTitles, but for tests
+	// ranked are the lists made of the votes, by list, as of the latest
+	// day kept (rankedDay); ranking is held while they're made.
+	ranked    map[string]Ranked
+	rankedDay string
+	ranking   sync.Mutex
+	wake      chan struct{}
+	now       func() time.Time
+	least     int // minTitles, but for tests
 }
 
 // NewKeeper returns a keeper of the folder dir.
@@ -100,6 +105,41 @@ func (k *Keeper) Status() Status {
 		s.Titles, s.Built = k.data.Titles, time.Unix(k.data.Built, 0)
 	}
 	return s
+}
+
+// Lists returns IMDb's trending ("trending") or popular ("popular") films
+// and series (Rank), made once per day of votes; ok is false while there's
+// no IMDb data in use or fewer than two days of votes.
+func (k *Keeper) Lists(list string) (Ranked, bool) {
+	fast := list == "trending"
+	if !fast && list != "popular" {
+		return Ranked{}, false
+	}
+	d := k.Data()
+	if d == nil {
+		return Ranked{}, false
+	}
+	days, err := VoteDays(k.Dir)
+	if err != nil || len(days) < 2 {
+		return Ranked{}, false
+	}
+	k.ranking.Lock()
+	defer k.ranking.Unlock()
+	if k.rankedDay != days[len(days)-1] {
+		k.ranked, k.rankedDay = map[string]Ranked{}, days[len(days)-1]
+	}
+	if r, ok := k.ranked[list]; ok {
+		return r, true
+	}
+	r, ok, err := Rank(k.Dir, d, fast)
+	if err != nil {
+		k.Logger.Warn("imdb: the lists couldn't be made of IMDb's votes; TMDB's are used", "err", err)
+		return Ranked{}, false
+	}
+	if ok {
+		k.ranked[list] = r
+	}
+	return r, ok
 }
 
 // Wake asks for a check now, for example right after the operator
