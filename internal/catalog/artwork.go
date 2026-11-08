@@ -12,8 +12,9 @@ import (
 // LibraryArtwork keeps the library titles' artwork on disk, ahead of time
 // (images.Pipeline.Keep), in the background, at every size served: the
 // pictures their pages and cards show, at once, without waiting for TMDB
-// or for a size to be made; their collections' too.
-// Titles no library has get theirs when first shown.
+// or for a size to be made; their collections' too, and Discover's: the
+// titles in TMDB's lists, while they're in them. Other titles no library
+// has get theirs when first shown.
 type LibraryArtwork struct {
 	Store  *store.Store
 	Images *images.Pipeline
@@ -51,13 +52,19 @@ func (k *LibraryArtwork) Once(ctx context.Context) error {
 	return err
 }
 
-// wanted is the artwork to keep: the library titles', their
-// collections', and the images admins chose for titles.
+// wanted is the artwork to keep: the library titles', the lists' (what
+// Discover shows), their collections', and the images admins chose for
+// titles.
 func (k *LibraryArtwork) wanted(ctx context.Context) ([]images.TMDBRef, error) {
 	keys, err := k.Store.LibraryTitleKeys(ctx)
 	if err != nil {
 		return nil, err
 	}
+	listed, err := k.Store.ListTitleKeys(ctx)
+	if err != nil {
+		return nil, err
+	}
+	keys = append(keys, listed...)
 	var wanted []images.TMDBRef
 	for start := 0; start < len(keys); start += 500 {
 		infos, err := k.Store.TitleInfos(ctx, keys[start:min(start+500, len(keys))], time.Now().Format(time.DateOnly), "")

@@ -21,10 +21,11 @@ import (
 // served narrower than it, as <type>/<width>/<file> (Keep, in the
 // background; TMDB makes one asked for before Keep got to it). The
 // original, no wider than the largest size served, is itself every size
-// it's no wider than: those have no file of their own. The rest (titles
-// no library has, people) is fetched when first shown, and kept in memory
-// only. Kept files are served like the others: the access check runs
-// first, every time.
+// it's no wider than: those have no file of their own. Which images are
+// kept is the caller's (catalog.LibraryArtwork: the library's, and what
+// Discover shows); the rest (other titles no library has, people) is
+// fetched when first shown, and kept in memory only. Kept files are
+// served like the others: the access check runs first, every time.
 
 // keptFile is where an image is kept at a size ("original", or a width),
 // "" when nothing is kept here.
