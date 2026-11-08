@@ -497,21 +497,33 @@ func (c *Client) FindTitle(ctx context.Context, kind, imdbID string) (Title, err
 	if !IMDbID.MatchString(imdbID) || tv(kind) == "" {
 		return Title{}, ErrNotFound
 	}
-	var raw struct {
-		MovieResults []rawTitle `json:"movie_results"`
-		TVResults    []rawTitle `json:"tv_results"`
+	// TMDB's answer, its films' or its series'.
+	find := func(q url.Values) ([]rawTitle, error) {
+		var raw struct {
+			MovieResults []rawTitle `json:"movie_results"`
+			TVResults    []rawTitle `json:"tv_results"`
+		}
+		if err := c.get(ctx, "/find/"+imdbID, q, &raw); err != nil {
+			return nil, err
+		}
+		if kind == "series" {
+			return raw.TVResults, nil
+		}
+		return raw.MovieResults, nil
 	}
 	q := c.withLanguage(url.Values{"external_source": {"imdb_id"}})
-	if err := c.get(ctx, "/find/"+imdbID, q, &raw); err != nil {
+	results, err := find(q)
+	if err != nil {
 		return Title{}, err
-	}
-	results := raw.MovieResults
-	if kind == "series" {
-		results = raw.TVResults
 	}
 	if len(results) == 0 {
 		return Title{}, ErrNotFound
 	}
+	// Named as TMDB's lists name their titles (fillTitles).
+	c.fillWith(q, []*rawTitle{&results[0]}, func(q url.Values) ([]rawTitle, bool) {
+		r, err := find(q)
+		return r, err == nil
+	})
 	t, ok := results[0].title(kind)
 	if !ok {
 		return Title{}, ErrNotFound

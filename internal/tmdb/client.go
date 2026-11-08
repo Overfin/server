@@ -181,20 +181,18 @@ func (c *Client) inEnglish(q url.Values) url.Values {
 }
 
 // fillEnglish gives a list's unreadable titles their English names, from
-// the same list in English. Failing that, they stay as they are.
-func (c *Client) fillEnglish(ctx context.Context, path string, q url.Values, titles []*rawTitle) {
+// the same list in English (again). Failing that, they stay as they are.
+func (c *Client) fillEnglish(q url.Values, titles []*rawTitle, again refetch) {
 	en := c.inEnglish(q)
 	if en == nil || !slices.ContainsFunc(titles, func(r *rawTitle) bool { return r.unreadable() }) {
 		return
 	}
-	var raw struct {
-		Results []rawTitle `json:"results"`
-	}
-	if c.get(ctx, path, en, &raw) != nil {
+	results, ok := again(en)
+	if !ok {
 		return
 	}
 	byID := map[int]rawTitle{}
-	for _, e := range raw.Results {
+	for _, e := range results {
 		byID[e.ID] = e
 	}
 	for _, r := range titles {
@@ -204,23 +202,40 @@ func (c *Client) fillEnglish(ctx context.Context, path string, q url.Values, tit
 	}
 }
 
+// refetch asks again for the titles a list gave, in other words (q),
+// for filling them; false when that failed.
+type refetch func(q url.Values) ([]rawTitle, bool)
+
+// listAgain asks for the list at path again.
+func (c *Client) listAgain(ctx context.Context, path string) refetch {
+	return func(q url.Values) ([]rawTitle, bool) {
+		var raw struct {
+			Results []rawTitle `json:"results"`
+		}
+		return raw.Results, c.get(ctx, path, q, &raw) == nil
+	}
+}
+
 // fillTitles fills a list's titles that lack the region's translation
 // from the same list in the language alone, then gives unreadable ones
 // their English names (fillEnglish). Failing that, they stay as they are.
 func (c *Client) fillTitles(ctx context.Context, path string, q url.Values, titles []*rawTitle) {
-	defer c.fillEnglish(ctx, path, q, titles)
+	c.fillWith(q, titles, c.listAgain(ctx, path))
+}
+
+// fillWith is fillTitles for titles that again asks for once more.
+func (c *Client) fillWith(q url.Values, titles []*rawTitle, again refetch) {
+	defer c.fillEnglish(q, titles, again)
 	base := c.baseLanguage()
 	if base == "" || !slices.ContainsFunc(titles, func(r *rawTitle) bool { return r.lacks(base) }) {
 		return
 	}
-	var raw struct {
-		Results []rawTitle `json:"results"`
-	}
-	if c.get(ctx, path, c.inBase(q), &raw) != nil {
+	results, ok := again(c.inBase(q))
+	if !ok {
 		return
 	}
 	byID := map[int]rawTitle{}
-	for _, b := range raw.Results {
+	for _, b := range results {
 		byID[b.ID] = b
 	}
 	for _, r := range titles {
