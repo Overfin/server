@@ -490,6 +490,35 @@ func (c *Client) Find(ctx context.Context, kind, source, id string) (int, error)
 	return results[0].ID, nil
 }
 
+// FindTitle returns the film ("movie") or the series ("series") an IMDb ID
+// names, with what TMDB's lists give of a title; ErrNotFound when TMDB
+// knows none. The IMDb ID is all it sends (rule 68).
+func (c *Client) FindTitle(ctx context.Context, kind, imdbID string) (Title, error) {
+	if !IMDbID.MatchString(imdbID) || tv(kind) == "" {
+		return Title{}, ErrNotFound
+	}
+	var raw struct {
+		MovieResults []rawTitle `json:"movie_results"`
+		TVResults    []rawTitle `json:"tv_results"`
+	}
+	q := c.withLanguage(url.Values{"external_source": {"imdb_id"}})
+	if err := c.get(ctx, "/find/"+imdbID, q, &raw); err != nil {
+		return Title{}, err
+	}
+	results := raw.MovieResults
+	if kind == "series" {
+		results = raw.TVResults
+	}
+	if len(results) == 0 {
+		return Title{}, ErrNotFound
+	}
+	t, ok := results[0].title(kind)
+	if !ok {
+		return Title{}, ErrNotFound
+	}
+	return t, nil
+}
+
 // externalID is what an IMDb or a TVDB ID looks like.
 var externalID = regexp.MustCompile(`^(tt)?[0-9]{1,12}$`)
 

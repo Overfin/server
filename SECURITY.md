@@ -590,9 +590,13 @@ comes from the internet, and media files can be written by anyone.
     them in its own folder beside the database, readable by Overfin alone:
     one file, and each day's votes for 35 days; the downloads are deleted
     once that file is made, and a file that can't be read whole is never
-    used. Switched off, the folder is deleted. IMDb's data counts only in titles' values; it's never shown
-    or served. IMDb allows the datasets for personal and non-commercial
-    use: the panel says so where they're switched on.
+    used. Switched off, the folder is deleted. IMDb's data counts in
+    titles' values, and its daily votes make the trending and popular
+    lists in place of TMDB's: only their order shows, IMDb's own numbers
+    are never shown or served. A listed title the server doesn't know yet
+    is found on TMDB by its IMDb ID, which is all that's sent. IMDb allows
+    the datasets for personal and non-commercial use: the panel says so
+    where they're switched on.
 
 ## Deployment
 
