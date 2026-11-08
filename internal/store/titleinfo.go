@@ -749,6 +749,12 @@ func (s *Store) titleAge(ctx context.Context, kind, tmdb string) (*int, error) {
 	return &age, nil
 }
 
+// ListTitleKeys lists the titles in TMDB's lists Overfin keeps (trending,
+// popular, upcoming), by key, whether a library has them or not.
+func (s *Store) ListTitleKeys(ctx context.Context) ([]string, error) {
+	return s.ids(ctx, `SELECT DISTINCT kind || '/tmdb/' || tmdb FROM catalog_lists`)
+}
+
 // LibraryTitleKeys lists the titles the libraries have, by key: films,
 // series, and the seasons and episodes they have of each. Files no one
 // identified aren't in it.

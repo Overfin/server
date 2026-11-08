@@ -14,7 +14,8 @@ import (
 )
 
 // The artwork kept on disk includes the library's collections' poster and
-// backdrop.
+// backdrop, and the pictures of what's in TMDB's lists (Discover), though
+// no library has it.
 func TestArtworkWanted(t *testing.T) {
 	ctx := context.Background()
 	box, _ := seal.New(bytes.Repeat([]byte{9}, 32))
@@ -31,11 +32,18 @@ func TestArtworkWanted(t *testing.T) {
 		[]store.Title{{Kind: "movie", TMDB: "1", Name: "One"}}, now); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.PutTitles(ctx, []store.Title{{Kind: "movie", TMDB: "2", Name: "Two", Poster: "/twoposter12.jpg", Backdrop: "/twoback1234.jpg"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetList(ctx, "trending", "movie", []string{"2"}); err != nil {
+		t.Fatal(err)
+	}
 	wanted, err := (&LibraryArtwork{Store: st}).wanted(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, ref := range []images.TMDBRef{{Type: "poster", Path: "/sagaposter1.jpg"}, {Type: "backdrop", Path: "/sagaback123.jpg"}} {
+	for _, ref := range []images.TMDBRef{{Type: "poster", Path: "/sagaposter1.jpg"}, {Type: "backdrop", Path: "/sagaback123.jpg"},
+		{Type: "poster", Path: "/twoposter12.jpg"}, {Type: "backdrop", Path: "/twoback1234.jpg"}} {
 		if !slices.Contains(wanted, ref) {
 			t.Errorf("not kept: %v (%v)", ref, wanted)
 		}
