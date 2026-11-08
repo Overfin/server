@@ -550,14 +550,19 @@ func (s *Store) InLibrary(ctx context.Context, kind, tmdb string) (bool, error) 
 func (s *Store) ImageTitles(ctx context.Context, typ, path string, limit int) ([]string, error) {
 	var q string
 	switch typ {
-	case "poster", "backdrop":
-		q = `SELECT key FROM artwork WHERE (type = ?1 OR (?1 = 'poster' AND type = 'textless')) AND path = ?2
-			UNION SELECT kind || '/tmdb/' || tmdb FROM catalog_titles WHERE (?1 = 'poster' AND poster = ?2) OR (?1 = 'backdrop' AND backdrop = ?2)
-			UNION SELECT 'series/tmdb/' || series || '/s' || season FROM catalog_seasons WHERE ?1 = 'poster' AND poster = ?2
+	case "poster":
+		// Each column asked on its own, so its index serves (migration 086).
+		q = `SELECT key FROM artwork WHERE (type = ?1 OR type = 'textless') AND path = ?2
+			UNION SELECT kind || '/tmdb/' || tmdb FROM catalog_titles WHERE poster = ?2
+			UNION SELECT 'series/tmdb/' || series || '/s' || season FROM catalog_seasons WHERE poster = ?2
+			UNION SELECT kind || '/tmdb/' || tmdb FROM title_edits WHERE field = ?1 AND value = ?2`
+	case "backdrop":
+		q = `SELECT key FROM artwork WHERE type = ?1 AND path = ?2
+			UNION SELECT kind || '/tmdb/' || tmdb FROM catalog_titles WHERE backdrop = ?2
 			UNION SELECT kind || '/tmdb/' || tmdb FROM title_edits WHERE field = ?1 AND value = ?2`
 	case "logo":
 		q = `SELECT key FROM artwork WHERE type = ?1 AND path = ?2
-			UNION SELECT kind || '/tmdb/' || tmdb FROM catalog_title_texts WHERE ?1 = 'logo' AND logo = ?2
+			UNION SELECT kind || '/tmdb/' || tmdb FROM catalog_title_texts WHERE logo = ?2 AND logo != ''
 			UNION SELECT kind || '/tmdb/' || tmdb FROM title_edits WHERE field = ?1 AND value = ?2`
 	case "profile":
 		// A film's or a series' cast member.
