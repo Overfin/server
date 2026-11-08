@@ -2198,7 +2198,10 @@ paths:
         title no library has is hidden from a profile limited to some
         libraries; to others, it shows only once it's out, as the operator
         sets (released, or watchable at home); specials no library has, and
-        seasons without a single episode, never show.
+        seasons without a single episode, never show. An episode can also be
+        asked for by TMDB's ID of it alone, which is unique across series
+        (title_episode_tmdb_1158146, for addresses that leave the series
+        out): the answer carries its whole ID, which the other routes take.
       tags: [titles]
       responses:
         "200":
