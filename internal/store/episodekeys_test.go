@@ -435,3 +435,21 @@ func TestLibraryTitleKeysKeepSeasonsOfEpisodesByID(t *testing.T) {
 		t.Errorf("a season no file is in: %v", keys)
 	}
 }
+
+// An episode is found by TMDB's ID of it alone: where its series shows it,
+// else in TMDB's own order, when the order chosen leaves it out.
+func TestEpisodeSeries(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	if err := s.SetSeason(ctx, "48866", Season{Number: 3, Episodes: []Episode{{ID: 1158146, Number: 3, Name: "Le treizième clan"}}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO own_episodes (series, season, episode, tmdb_id) VALUES ('48866', 3, 4, 1158147)`); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[int]string{1158146: "48866", 1158147: "48866", 999: ""} {
+		if got, err := s.EpisodeSeries(ctx, id); err != nil || got != want {
+			t.Errorf("%d: %q, %v", id, got, err)
+		}
+	}
+}

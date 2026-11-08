@@ -511,7 +511,7 @@ export class Overfin {
   endOtherSessions(): Promise<null>;
 
   libraries(): Promise<Library[]>;
-  /** A title's page, in a library or not. */
+  /** A title's page, in a library or not. An episode also by TMDB's ID of it alone (title_episode_tmdb_1158146): the answer carries its whole ID, for the rest. */
   title(id: string): Promise<Title>;
   /** The titles that fit the profile best, among all or the newest (since 0.6). */
   recommended(scope?: 'all' | 'recent', limit?: number): Promise<TitleSummary[]>;

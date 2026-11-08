@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,10 @@ func titleID(key string) string { return library.TitlePrefix + strings.ReplaceAl
 // titleRef checks a title's ID. Only a title's one ID is taken: not
 // "_s01" for "_s1", nor "_0949" for TMDB's 949, which would be kept, and
 // fetched from TMDB again, as another title.
+// episodeAlone is an episode's ID by TMDB's ID of it alone, which only
+// GET /titles/{id} takes: title_episode_tmdb_1158146.
+var episodeAlone = regexp.MustCompile(`^title_episode_tmdb_([1-9][0-9]{0,9})$`)
+
 func titleRef(id string) (store.TitleRef, bool) {
 	rest, ok := strings.CutPrefix(id, library.TitlePrefix)
 	if !ok || len(rest) > 120 {
@@ -385,16 +390,28 @@ func (l Library) title(w http.ResponseWriter, r *http.Request) {
 	if !onlyParams(w, r) {
 		return
 	}
-	ref, ok := titleRef(r.PathValue("id"))
-	if !ok {
-		problem.Send(w, problem.NotFound, "")
-		return
-	}
 	p := l.active(w, r)
 	if p == nil {
 		return
 	}
 	ctx := r.Context()
+	id := r.PathValue("id")
+	// An episode by TMDB's ID of it alone (the player's address), answered
+	// with its whole ID.
+	if m := episodeAlone.FindStringSubmatch(id); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		series, err := l.Provisioner.Store.EpisodeSeries(ctx, n)
+		if err != nil {
+			l.storeError(w, err)
+			return
+		}
+		id = library.TitlePrefix + "series_tmdb_" + series + "_e" + m[1]
+	}
+	ref, ok := titleRef(id)
+	if !ok {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
 	l.describe(ctx, ref)
 	l.textless(ctx, ref)
 	st := l.Provisioner.Store

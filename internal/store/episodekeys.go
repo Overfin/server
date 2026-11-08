@@ -251,3 +251,18 @@ func (s *Store) ownEpisodeKey(ctx context.Context, r TitleRef) (string, error) {
 	r.EpisodeID = id
 	return r.Key(), nil
 }
+
+// EpisodeSeries is the TMDB ID of the series an episode is in, by TMDB's ID
+// of the episode alone (unique across series): where its series shows it,
+// else where TMDB's own order has it (an order an admin chose may leave
+// out an episode a file is); "" when no series kept has it.
+func (s *Store) EpisodeSeries(ctx context.Context, episode int) (string, error) {
+	var series string
+	err := s.read.QueryRowContext(ctx, `SELECT series FROM (
+		SELECT series FROM catalog_episodes WHERE tmdb_id = ?1
+		UNION ALL SELECT series FROM own_episodes WHERE tmdb_id = ?1) LIMIT 1`, episode).Scan(&series)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return series, err
+}
