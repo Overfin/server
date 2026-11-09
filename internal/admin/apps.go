@@ -20,8 +20,10 @@ import (
 
 // appScopes are what a key may be for: watch-stats (the older endpoint),
 // on /apps/v1/titles, score, stats and availability, history, on
-// /apps/v1/history, and wishes, on /apps/v1/wishes (the fetcher's).
-var appScopes = map[string]bool{"watch-stats": true, "score": true, "stats": true, "availability": true, "history": true, "wishes": true}
+// /apps/v1/history, wishes, on /apps/v1/wishes (the fetcher's), and
+// catalog, on /apps/v1/categories and /apps/v1/episode-orders.
+var appScopes = map[string]bool{"watch-stats": true, "score": true, "stats": true, "availability": true, "history": true, "wishes": true,
+	"catalog": true}
 
 // allows reports whether a key's scopes include scope. Watch statistics
 // are the same on either endpoint, so watch-stats and stats go together.

@@ -450,7 +450,8 @@ comes from the internet, and media files can be written by anyone.
     /apps/, behind the same address limits (private addresses only when
     the panel is): not with an admin's sign-in but each with a key an admin
     made for it in the panel, for what the admin ticked (values, watch
-    statistics, in the libraries or not), shown once, kept only as a hash,
+    statistics, in the libraries or not, what came and went, wishes to
+    fetch, categories and episode orders), shown once, kept only as a hash,
     revocable.
     What they read are totals per title, counts below 2 given as 0, and
     plays and favorites given as 0 when fewer than two people (accounts)

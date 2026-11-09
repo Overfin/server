@@ -8,11 +8,11 @@ import (
 	"github.com/overfin/server/internal/tmdb"
 )
 
-// appEpisodeOrders (GET /apps/v1/episode-orders?tmdbId=N, any key) says what
+// appEpisodeOrders (GET /apps/v1/episode-orders?tmdbId=N, catalog scope) says what
 // TMDB says of a series' episodes: an app that imports them (Overtide) has
 // no TMDB token of its own.
 func (p *Panel) appEpisodeOrders(w http.ResponseWriter, r *http.Request) {
-	if p.appKey(w, r, "") == nil {
+	if p.appKey(w, r, "catalog") == nil {
 		return
 	}
 	id, err := strconv.Atoi(r.URL.Query().Get("tmdbId"))

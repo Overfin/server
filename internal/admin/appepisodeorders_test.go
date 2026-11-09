@@ -10,12 +10,20 @@ import (
 
 func TestAppEpisodeOrders(t *testing.T) {
 	p, b, _, _ := signedInPanel(t)
-	rec := b.do("POST", "/admin/api/apps", `{"name":"Overtide","scopes":["score"]}`, nil)
+	app := &browser{h: b.h, cookies: map[string]string{}}
+	// A key without the catalog scope is refused: episode orders spend
+	// TMDB requests, and the operator ticks who may.
+	rec := b.do("POST", "/admin/api/apps", `{"name":"Other","scopes":["score"]}`, nil)
+	var other struct{ Key string }
+	json.Unmarshal(rec.Body.Bytes(), &other)
+	if rec := app.do("GET", "/apps/v1/episode-orders?tmdbId=615", "", map[string]string{"Authorization": "Bearer " + other.Key}); rec.Code != 401 {
+		t.Errorf("without the catalog scope: %d", rec.Code)
+	}
+	rec = b.do("POST", "/admin/api/apps", `{"name":"Overtide","scopes":["score","catalog"]}`, nil)
 	var made struct{ Key string }
 	if json.Unmarshal(rec.Body.Bytes(), &made); rec.Code != 201 {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body)
 	}
-	app := &browser{h: b.h, cookies: map[string]string{}}
 	auth := map[string]string{"Authorization": "Bearer " + made.Key}
 
 	if rec := app.do("GET", "/apps/v1/episode-orders?tmdbId=615", "", nil); rec.Code != 401 {
