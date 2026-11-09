@@ -34,6 +34,9 @@ type Stream struct {
 	// Trickplay is the set of seek-bar previews offered with it, if any.
 	Trickplay *jellyfin.Trickplay
 
+	// over: see Over; made when the playback starts.
+	over chan struct{}
+
 	// Guarded by the registry's lock.
 	// reencodes: a remux found to re-encode its video (Reencodes).
 	reencodes     bool
@@ -52,6 +55,10 @@ type Stream struct {
 	// Checked runs once: whether a remux really copies the video.
 	Checked sync.Once
 }
+
+// Over is closed when the playback ends, however it ends (stopped,
+// replaced, idle), so a response still flowing ends with it (rule 30).
+func (s *Stream) Over() <-chan struct{} { return s.over }
 
 // AddFiles records the real URLs behind a rewritten playlist's names.
 func (s *Stream) AddFiles(files map[string]Upstream) {
@@ -153,6 +160,7 @@ func (t *Tickets) add(s *Stream, startTicks int64, now time.Time) {
 	s.ID = ids.New("play")
 	s.Ticket = random(24)
 	s.started, s.lastSeen, s.positionTicks = now, now, startTicks
+	s.over = make(chan struct{})
 	t.byTicket[s.Ticket] = s
 	t.byID[s.ID] = s
 }
@@ -283,6 +291,7 @@ func (t *Tickets) remove(s *Stream, reason, by string, now time.Time) bool {
 	delete(t.byID, s.ID)
 	delete(t.byTicket, s.Ticket)
 	delete(t.devices, s.Auth.DeviceID)
+	close(s.over)
 	t.ended[s.ID+"/"+s.ProfileID] = Ended{Reason: reason, By: by, at: now}
 	for k, e := range t.ended {
 		if now.Sub(e.at) >= endedFor {
