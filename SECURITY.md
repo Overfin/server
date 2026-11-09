@@ -56,8 +56,10 @@ Every rule not named here is a hard rule.
    over with a Jellyfin user of its own, from before Overfin's one account:
    its token only reads that profile's history, once when it's brought over
    and again for its data download (rule 52). The Jellyfin admin key is used
-   only by setup, provisioning code and the control panel (rule 58), never
-   by the public API's user routes. Seerr has no per-user tokens, so Seerr
+   only by setup, provisioning code and the control panel (rule 58), and
+   by one user route only: deleting a profile or an account, to delete the
+   Jellyfin users from before Overfin's one account as rule 45 requires.
+   Seerr has no per-user tokens, so Seerr
    calls use its API key with the acting user named in the request; that user
    is always Overfin's own (rule 47), never one a client names.
 4. Upstream tokens never reach the browser, including inside stream URLs and
@@ -360,7 +362,10 @@ comes from the internet, and media files can be written by anyone.
     only, until they're deleted there.
 48. Search terms and other personal input travel in request bodies, never in
     URLs, so they stay out of access logs and browser history.
-49. Users never learn who else wished for a title, nor that anyone did.
+49. Users never learn who else wished for a title. A wish's state says
+    what's happening to the title (waiting, downloading, not found), not
+    whose turn brought it: someone wishing for a title already on its way
+    sees that at once, and so may guess that someone did.
 50. Profiles are private from each other; kids profiles are visible to their
     account owner. Another profile's limits and preferences are served only
     to the owner; the others get what choosing who's watching takes: its
