@@ -269,8 +269,9 @@ comes from the internet, and media files can be written by anyone.
     forgotten-password pages with their script, style, logo and check
     against scripts, the sign-in, registration and forgotten-password calls,
     the login's start, the identity provider's return and the login's
-    finish, the gate, logout, `theme.css`, the operator's branding, and
-    `/api/v1/info`)
+    finish, the gate, logout, `theme.css`, the operator's branding,
+    `/api/v1/info`, and signing a screen in with a code: the page to
+    confirm a code (`/link`) and the screen's start and check, rule 69)
     never reveal software versions, upstream servers or anything about
     users. This list is the whole set: a test fails on any other route
     that needs no session.
@@ -597,6 +598,23 @@ comes from the internet, and media files can be written by anyone.
     is found on TMDB by its IMDb ID, which is all that's sent. IMDb allows
     the datasets for personal and non-commercial use: the panel says so
     where they're switched on.
+
+### Signing a screen in with a code
+69. A screen that's hard to type on (a TV) can be signed in from another
+    device. It asks Overfin for a code: 8 letters, without letters that
+    look alike, valid 10 minutes and usable once. Only the code's SHA-256
+    is kept, together with a random secret that only that screen holds (in
+    an `HttpOnly` cookie), so only the screen that asked can collect the
+    sign-in. A person who is signed in enters the code at `/link`, or scans
+    the screen's QR code (the same address with the code in its fragment,
+    which never reaches a server's logs), sees what confirming will do,
+    and confirms. `/link` sends anyone not signed in to sign in first;
+    looking at a code and confirming it need a signed-in person. The screen
+    then gets a login of its own on that person's account, not a fresh one
+    (rule 21), which lasts like any other (rule 16) and starts without a
+    profile when the owner's profile has a PIN. Wrong codes are counted per
+    person and per address, and new codes per address. For now, codes are
+    offered only with Overfin's own sign-in.
 
 ## Deployment
 

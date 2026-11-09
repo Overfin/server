@@ -56,3 +56,12 @@ p { margin: 0; }
 .brand .name { font-size: 1.4rem; }
 .powered { display: flex; align-items: center; justify-content: center; gap: .45rem; margin-top: 1.6rem; font-size: .8rem; color: var(--muted); }
 .powered svg { height: 1.15rem; width: auto; color: var(--text); }
+/* Signing a screen in from another device: its code, large, and its QR
+   code, dark on white whatever the theme, so phones read it. */
+.device { display: grid; gap: .8rem; margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border); }
+#device { display: grid; gap: .8rem; justify-items: center; text-align: center; }
+#device strong { white-space: nowrap; }
+.code { font-size: 2rem; font-weight: 800; letter-spacing: .12em; }
+.qr { width: 12rem; height: 12rem; background: #fff; border-radius: 6px; }
+.qr path { fill: #000; }
+#link-confirm button { width: 100%; }

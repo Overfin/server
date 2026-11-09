@@ -100,8 +100,12 @@ type Managed struct {
 	byEmail  *windowLimiter
 	tries    *windowLimiter
 	triesAll *windowLimiter
-	hashing  chan struct{}
-	sendings sync.WaitGroup
+	// Codes for screens (devicelink.go): new ones per address, screens
+	// asking per address, wrong ones per person and per address.
+	deviceStarts, deviceChecks    *windowLimiter
+	codesBySubject, codesByClient *windowLimiter
+	hashing                       chan struct{}
+	sendings                      sync.WaitGroup
 }
 
 func (*Managed) Name() string { return "signin" }
@@ -112,6 +116,11 @@ func (m *Managed) init() {
 		m.byEmail = &windowLimiter{max: passwordTries, window: 15 * time.Minute}
 		m.tries = &windowLimiter{max: passwordTries, window: 15 * time.Minute}
 		m.triesAll = &windowLimiter{max: passwordTriesAll, window: 15 * time.Minute}
+		m.deviceStarts = &windowLimiter{max: 10, window: 10 * time.Minute}
+		// A screen asks every 3 seconds: room for a few at once.
+		m.deviceChecks = &windowLimiter{max: 60, window: time.Minute}
+		m.codesBySubject = &windowLimiter{max: wrongCodes, window: 15 * time.Minute}
+		m.codesByClient = &windowLimiter{max: wrongCodes, window: 15 * time.Minute}
 		// Password checks are slow on purpose: a few at a time.
 		m.hashing = make(chan struct{}, 2)
 	})
@@ -127,6 +136,9 @@ func (m *Managed) Register(r *plugin.Registrar) error {
 	if err := r.HandlePage("GET "+resetPagePath, http.HandlerFunc(m.resetPage)); err != nil {
 		return err
 	}
+	if err := r.HandlePage("GET "+linkPagePath, http.HandlerFunc(m.linkPage)); err != nil {
+		return err
+	}
 	for pattern, h := range map[string]http.HandlerFunc{
 		"POST /api/v1/signin":          m.signIn,
 		"POST /api/v1/signin/password": m.changePassword,
@@ -135,6 +147,8 @@ func (m *Managed) Register(r *plugin.Registrar) error {
 		"POST /api/v1/register":        m.register,
 		"POST /api/v1/reset":           m.askReset,
 		"POST /api/v1/reset/password":  m.reset,
+		"POST /api/v1/device/start":    m.deviceStart,
+		"POST /api/v1/device/check":    m.deviceCheck,
 	} {
 		if err := r.HandlePublic(pattern, h); err != nil {
 			return err
@@ -150,8 +164,10 @@ func (m *Managed) Register(r *plugin.Registrar) error {
 		return err
 	}
 	for pattern, h := range map[string]http.HandlerFunc{
-		"GET /api/v1/me/signin":   m.signinInfo,
-		"PUT /api/v1/me/password": m.setPassword,
+		"GET /api/v1/me/signin":       m.signinInfo,
+		"PUT /api/v1/me/password":     m.setPassword,
+		"POST /api/v1/device/look":    m.deviceLook,
+		"POST /api/v1/device/confirm": m.deviceConfirm,
 	} {
 		if err := r.HandleFunc(pattern, h); err != nil {
 			return err
@@ -1171,4 +1187,22 @@ func (l *windowLimiter) allow(key string, now time.Time) bool {
 	k.events = append(kept, now)
 	l.order.MoveToBack(e)
 	return true
+}
+
+// allows says whether key has room for one more event, without counting
+// one: for limits that count only failures.
+func (l *windowLimiter) allows(key string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	e, ok := l.keys[key]
+	if !ok {
+		return true
+	}
+	n := 0
+	for _, t := range e.Value.(*limited).events {
+		if now.Sub(t) < l.window {
+			n++
+		}
+	}
+	return n < l.max
 }

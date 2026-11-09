@@ -79,8 +79,9 @@ info:
     (503).
 
     **Pages and the control panel.** Overfin also serves a few pages of its
-    own at the site's root, outside this API: `/signin` and `/reset` (with
-    its own sign-in) and `/invite/{code}` (an invitation's link). The
+    own at the site's root, outside this API: `/signin`, `/reset` and
+    `/link` (where a screen's code is confirmed; with its own sign-in) and
+    `/invite/{code}` (an invitation's link). The
     operator's control panel (`/admin/`) is not part of this API. The
     pages' own files (`/api/v1/pages/page.js`, `page.css`, `logo.svg`) are
     public, for those pages only. Other apps read what Overfin shares with
@@ -1248,6 +1249,179 @@ paths:
                     type: string
                   bits:
                     type: integer
+
+  /device/start:
+    post:
+      operationId: startDeviceCode
+      summary: Get a code to sign this screen in from another device
+      description: |
+        With managed sign-in only (rule 69). For a screen that's hard to
+        type on, from the sign-in page: a code (8 letters), the address
+        to confirm it at (without its scheme) and a QR code of that
+        address with the code in its fragment, as an SVG path in a square
+        `size` units a side, margin included. The screen gets a secret in
+        an `HttpOnly` cookie, to ask about its code with
+        (`POST /device/check`). The code lasts `expiresIn` seconds.
+      tags: [account]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                return: { type: string, description: The pages send it with every call; unused. }
+      responses:
+        "200":
+          description: The code.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, address, qr, expiresIn]
+                properties:
+                  code: { type: string, example: KDRT-WXPM }
+                  address: { type: string, example: example.org/link }
+                  qr:
+                    type: object
+                    required: [size, path]
+                    properties:
+                      size: { type: integer }
+                      path: { type: string }
+                  expiresIn: { type: integer }
+        "429":
+          description: Too many codes asked from this address (`rate-limited`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /device/check:
+    post:
+      operationId: checkDeviceCode
+      summary: Ask whether this screen's code was confirmed
+      description: |
+        By the screen holding the code's secret (its cookie), every few
+        seconds. Once someone confirmed the code, the screen is signed in
+        (a login cookie of its own) and told where to go (`return`, as
+        the sign-in's); until then, `waiting`.
+      tags: [account]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                return: { type: string }
+      responses:
+        "200":
+          description: Signed in (`next`), or still waiting (`waiting`).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  next: { type: string }
+                  waiting: { type: boolean }
+        "404":
+          description: No such code for this screen, or it expired (`not-found`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: Asked too often (`rate-limited`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /device/look:
+    post:
+      operationId: lookAtDeviceCode
+      summary: See what a screen's code would sign in
+      description: |
+        For the person signed in, from `/link`, before confirming: the
+        screen's kind ("Browser · System") and how many minutes ago it
+        asked. Wrong codes count against the person and the address.
+      tags: [account]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceCode"
+      responses:
+        "200":
+          description: The screen.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device, minutes]
+                properties:
+                  device: { type: string }
+                  minutes: { type: integer }
+        "401":
+          description: Nobody is signed in (`not-authenticated`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No such code waiting (`not-found`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: Too many wrong codes (`rate-limited`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+
+  /device/confirm:
+    post:
+      operationId: confirmDeviceCode
+      summary: Sign a screen in with one's account
+      description: |
+        For the person signed in, from `/link`: the screen showing the
+        code gets a login of its own on their account, once it asks
+        (`POST /device/check`). A code is confirmed once.
+      tags: [account]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceCode"
+      responses:
+        "204":
+          description: Confirmed.
+        "401":
+          description: Nobody is signed in (`not-authenticated`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No such code waiting (`not-found`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: Too many wrong codes (`rate-limited`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 
   /me/signin:
     get:
@@ -3562,6 +3736,13 @@ components:
           type: boolean
           description: The right password, but the address is still to
             confirm.
+    DeviceCode:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: { type: string, description: The 8 letters a screen shows; spaces, dashes and case don't matter. }
+        return: { type: string, description: The pages send it with every call; unused. }
     Problem:
       description: An error, as RFC 9457 problem details.
       type: object
