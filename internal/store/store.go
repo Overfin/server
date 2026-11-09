@@ -981,15 +981,19 @@ func (s *Store) DeleteLogin(ctx context.Context, id string) error {
 }
 
 // DeleteOtherLogins ends someone's logins but one: after a new password,
-// other browsers sign in again.
+// other browsers sign in again, and a code they confirmed that no screen
+// collected yet goes too (it would be a login to come).
 func (s *Store) DeleteOtherLogins(ctx context.Context, subject, keepID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM logins WHERE subject = ? AND id != ?`, subject, keepID)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM logins WHERE subject = ? AND id != ?;
+		DELETE FROM device_codes WHERE subject = ?`, subject, keepID, subject)
 	return err
 }
 
-// DeleteLogins ends every login of a person.
+// DeleteLogins ends every login of a person, and those to come by a code
+// they confirmed.
 func (s *Store) DeleteLogins(ctx context.Context, subject string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM logins WHERE subject = ?`, subject)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM logins WHERE subject = ?;
+		DELETE FROM device_codes WHERE subject = ?`, subject, subject)
 	return err
 }
 

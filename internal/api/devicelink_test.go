@@ -31,7 +31,7 @@ func TestDeviceCode(t *testing.T) {
 	if _, body := openPage(t, tv, srv, "/signin"); !strings.Contains(body, `id="device-start"`) {
 		t.Fatal("no code on the sign-in page")
 	}
-	c, got := signinPost(t, tv, srv, "/api/v1/device/start", map[string]any{"return": "/"})
+	c, got := signinPost(t, tv, srv, "/api/v1/device/start", checked(t, srv, map[string]any{"return": "/"}))
 	code, _ := got["code"].(string)
 	qr, _ := got["qr"].(map[string]any)
 	if c != 200 || len(code) != 9 || code[4] != '-' || !strings.HasSuffix(got["address"].(string), "/link") || qr["path"] == "" {
@@ -98,7 +98,7 @@ func TestDeviceCodeGuessing(t *testing.T) {
 	signinPost(t, phone, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "ann@example.org", "password": "a long password 1"}))
 
 	tv := newBrowser(srv)
-	_, got := signinPost(t, tv, srv, "/api/v1/device/start", map[string]any{})
+	_, got := signinPost(t, tv, srv, "/api/v1/device/start", checked(t, srv, map[string]any{}))
 	for i := range 10 {
 		if c, _ := signinPost(t, phone, srv, "/api/v1/device/confirm", map[string]any{"code": "BBBBBBB" + string(rune('B'+i))}); c != 404 {
 			t.Fatalf("wrong code %d: %d", i, c)
@@ -106,5 +106,52 @@ func TestDeviceCodeGuessing(t *testing.T) {
 	}
 	if c, _ := signinPost(t, phone, srv, "/api/v1/device/confirm", map[string]any{"code": got["code"]}); c != 429 {
 		t.Errorf("after 10 wrong codes, the right one: %d", c)
+	}
+}
+
+// A code asks for the check against scripts: each one is a row.
+func TestDeviceCodeStartNeedsCheck(t *testing.T) {
+	srv, _ := newServerWith(t, options{managed: true, site: true})
+	if c, _ := signinPost(t, newBrowser(srv), srv, "/api/v1/device/start", map[string]any{}); c != 400 {
+		t.Errorf("start without the check: %d", c)
+	}
+}
+
+// A confirmed code nobody collected yet is a login to come: what ends the
+// person's logins ends it; and someone told to choose a new password since
+// doesn't get a login on the screen (that choice takes no old password).
+func TestDeviceCodeEndsWithLogins(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{managed: true, store: &st, site: true})
+	ctx := context.Background()
+	ann, _ := st.CreateUser(ctx, "ann@example.org", false)
+	hash, _ := password.Hash("a long password 1")
+	st.SetPassword(ctx, ann.Subject, hash)
+	phone := newBrowser(srv)
+	signinPost(t, phone, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "ann@example.org", "password": "a long password 1"}))
+
+	confirmedCode := func() *http.Client {
+		tv := newBrowser(srv)
+		_, got := signinPost(t, tv, srv, "/api/v1/device/start", checked(t, srv, map[string]any{}))
+		if c, _ := signinPost(t, phone, srv, "/api/v1/device/confirm", map[string]any{"code": got["code"]}); c != 204 {
+			t.Fatalf("confirm: %d", c)
+		}
+		return tv
+	}
+	tv := confirmedCode()
+	if err := st.DeleteOtherLogins(ctx, ann.Subject, "none"); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := signinPost(t, tv, srv, "/api/v1/device/check", map[string]any{}); c != 404 {
+		t.Errorf("collected after her logins ended: %d", c)
+	}
+
+	signinPost(t, phone, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "ann@example.org", "password": "a long password 1"}))
+	tv = confirmedCode()
+	if err := st.SetMustChange(ctx, ann.Subject, true); err != nil {
+		t.Fatal(err)
+	}
+	if c, out := signinPost(t, tv, srv, "/api/v1/device/check", map[string]any{}); c != 404 {
+		t.Errorf("collected while she must choose a password: %d %v", c, out)
 	}
 }

@@ -601,8 +601,9 @@ comes from the internet, and media files can be written by anyone.
 
 ### Signing a screen in with a code
 69. A screen that's hard to type on (a TV) can be signed in from another
-    device. It asks Overfin for a code: 8 letters, without letters that
-    look alike, valid 10 minutes and usable once. Only the code's SHA-256
+    device. It asks Overfin for a code, solving the check against scripts
+    first: 8 letters, without letters that look alike, valid 10 minutes and
+    usable once. Only the code's SHA-256
     is kept, together with a random secret that only that screen holds (in
     an `HttpOnly` cookie), so only the screen that asked can collect the
     sign-in. A person who is signed in enters the code at `/link`, or scans
@@ -613,8 +614,11 @@ comes from the internet, and media files can be written by anyone.
     then gets a login of its own on that person's account, not a fresh one
     (rule 21), which lasts like any other (rule 16) and starts without a
     profile when the owner's profile has a PIN. Wrong codes are counted per
-    person and per address, and new codes per address. For now, codes are
-    offered only with Overfin's own sign-in.
+    person and per address, and new codes per address. Whatever ends a
+    person's logins (a new password, signing out everywhere) also ends the
+    codes they confirmed that no screen collected yet; someone told to
+    choose a new password can neither confirm a code nor collect one. For
+    now, codes are offered only with Overfin's own sign-in.
 
 ## Deployment
 

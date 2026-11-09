@@ -109,9 +109,20 @@ func (s *Store) IMDbTMDB(ctx context.Context, kind, imdb string, fresh, noneSinc
 }
 
 // PutFound records what TMDB said an IMDb ID names (tmdb "": nothing), for
-// a title no library has: unlike SetFound, the index stays as it is.
+// a title no library has: unlike SetFound, the index stays as it is, and
+// its costly refresh is spared. A library's item waiting for that very ID
+// goes through SetFound: this record would keep TitlesToFind from it.
 func (s *Store) PutFound(ctx context.Context, kind, imdb, tmdb string, at time.Time) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO tmdb_found (kind, source, external, tmdb, fetched_at) VALUES (?, 'imdb', ?, ?, ?)
+	var waiting bool
+	err := s.read.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM catalog_items WHERE kind = ? AND imdb = ? AND tmdb IS NULL)`,
+		kind, imdb).Scan(&waiting)
+	if err != nil {
+		return err
+	}
+	if waiting {
+		return s.SetFound(ctx, FindTarget{Kind: kind, Source: "imdb", External: imdb}, tmdb, at)
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO tmdb_found (kind, source, external, tmdb, fetched_at) VALUES (?, 'imdb', ?, ?, ?)
 		ON CONFLICT (kind, source, external) DO UPDATE SET tmdb = excluded.tmdb, fetched_at = excluded.fetched_at`,
 		kind, imdb, nullString(tmdb), at.Unix())
 	return err

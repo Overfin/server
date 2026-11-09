@@ -1261,7 +1261,8 @@ paths:
         address with the code in its fragment, as an SVG path in a square
         `size` units a side, margin included. The screen gets a secret in
         an `HttpOnly` cookie, to ask about its code with
-        (`POST /device/check`). The code lasts `expiresIn` seconds.
+        (`POST /device/check`). The code lasts `expiresIn` seconds. Solves
+        the check against scripts first (`GET /pages/challenge`).
       tags: [account]
       security: []
       requestBody:
@@ -1271,7 +1272,10 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [challenge, answer]
               properties:
+                challenge: { type: string }
+                answer: { type: string }
                 return: { type: string, description: The pages send it with every call; unused. }
       responses:
         "200":
@@ -1291,6 +1295,12 @@ paths:
                       size: { type: integer }
                       path: { type: string }
                   expiresIn: { type: integer }
+        "400":
+          description: The check against scripts failed (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "429":
           description: Too many codes asked from this address (`rate-limited`).
           content:
