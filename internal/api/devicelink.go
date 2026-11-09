@@ -194,6 +194,11 @@ func (m *Managed) deviceSigner(w http.ResponseWriter, r *http.Request) (subject,
 		problem.Send(w, problem.NotAuthenticated, "")
 		return "", ""
 	}
+	// A code makes a lasting login for the whole account: only the owner's
+	// profile may confirm one, not a kid's on a shared browser.
+	if !m.ownerHere(w, r) {
+		return "", ""
+	}
 	var req deviceRequest
 	if !decode(r, &req) || len(req.Code) > 32 {
 		m.refuse(w, r, problem.InvalidRequest, "")
