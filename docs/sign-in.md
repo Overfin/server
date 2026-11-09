@@ -40,6 +40,19 @@ choose one with "Forgot your password?", or you set one in the panel.
 password and ends that account's other logins (with Docker: `docker exec
 -it overfin /overfin -set-password you@example.org`).
 
+## Signing a TV in with a code
+
+With Overfin's own sign-in, a screen that's hard to type on signs in from
+another device. On the sign-in page, "Sign in with another device" shows an
+address (`/link` on your site), a code of 8 letters and a QR code of that
+address with the code in it. Someone signed in on a phone or a computer opens
+it, sees what it will do, and confirms; the screen is then signed in with
+their account, with a login of its own. A code lasts 10 minutes and works
+once, and only the screen that asked for it can use it. There's nothing to
+set up, and it's in [SECURITY.md](../SECURITY.md) as rule 69.
+
+With an identity provider or forward auth, there are no codes for now.
+
 ## The control panel
 
 With Overfin's own sign-in, it's at `/admin/` on the site, for admins, who
