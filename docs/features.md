@@ -15,7 +15,7 @@
   from it.
 - **A catalog that looks the part**: posters, logos and backdrops from
   TMDB, cast pages, users' scores, search, trending and upcoming titles. A
-  title your libraries don't have can be requested (with Seerr).
+  title your libraries don't have can be wished for (Wishlists, below).
 - **Watching in the browser**: played as is whenever the browser can,
   subtitles, audio tracks, quality choice, seek previews, skipping intros
   and credits (with Intro Skipper, which the setup offers to install), the
@@ -28,9 +28,18 @@
   each title's page. Children's content shows in a profile's
   recommendations only when it's a kids profile or chose it ("Content for
   children").
-- **Continue watching, a list (with a page of its own), favorites and
-  watched marks** per profile; and the right to download what's kept about
-  them, or delete it.
+- **Continue watching, a list and favorites (each with a page of its
+  own), and watched marks** per profile; and the right to download what's
+  kept about them, or delete it.
+- **Their account's limits**, spelled out with their profiles: how many
+  profiles, how many streams at once, and how profiles share them.
+- **Moving with the keyboard or a remote**: once something has the focus,
+  the arrows go from item to item. On a TV, the player takes a remote's
+  keys and the site drops its costly effects, and a screen that's hard to
+  type on signs in with a code confirmed from a phone
+  ([Sign-in](sign-in.md#signing-a-tv-in-with-a-code)). There's no TV app
+  yet: this is for a TV's browser, when it passes its remote's keys to the
+  page (not all do).
 
 **For you, running it**
 
@@ -73,13 +82,17 @@ browser ──▶ the site (overfin-web, or your own)
 Every app, official or not, talks to Overfin through the same public,
 documented API, so a site or an app of your own can do everything the
 official ones do, with total freedom on looks and feel. This repository is
-the server; [overfin-web](https://github.com/overfin/web) is its web app.
+the server; [overfin-web](https://github.com/overfin/web) is its web app,
+and [Overfin for Android](https://github.com/overfin/android) shows it in an
+app.
 
 ## What's missing
 
 The main gaps (details in [ROADMAP.md](../ROADMAP.md)):
 
-- TV and phone apps, and a sign-in for native apps.
+- A TV app and an iPhone app, and a sign-in for native apps. On Android,
+  [Overfin for Android](https://github.com/overfin/android) shows a server's
+  site in an app.
 - Emails beyond accounts (confirming an address, a new password,
   invitations and notices about accounts are there).
 - SDKs other than JavaScript.

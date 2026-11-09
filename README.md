@@ -68,8 +68,9 @@ folders and a Jellyfin you run yourself.
 Overfin started in October 2026. It runs one real server every day, and
 that's its only real-world use so far:
 
-- **Browser only** for now: no TV or phone apps yet, and Jellyfin's own apps
-  don't go through Overfin.
+- **The browser first**: [Overfin for Android](https://github.com/overfin/android)
+  shows a server's site in an app; there's no TV or iPhone app yet, and
+  Jellyfin's own apps don't go through Overfin.
 - **Jellyfin 12 only.**
 - **Pre-releases (0.x)**: the API and settings can still change; the
   database migrates itself.

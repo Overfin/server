@@ -140,6 +140,15 @@ subtitles and attachments) from anywhere.
   email can choose a new password with a "forgot password" email, which
   ends the person's other logins. Without an email server, there is no
   such way in [66].
+- **Being talked into confirming someone's code:** a stranger who sends
+  someone their screen's code, or its QR code, gets that person's account
+  on their screen if the person confirms. This is the known weakness of
+  signing in by code, and rules can't remove it: the confirmation says what
+  it does and to confirm only for a screen in front of you, codes last 10
+  minutes, and the screen shows in the account's devices, where the owner
+  can end it. Seeing a code isn't enough: only the screen that asked can
+  collect the sign-in, and guessing one is limited per person and address
+  [69].
 - **Taking someone else's history:** copying it from another server
   requires that account's password, attempts are limited, and an account
   there can be copied into only one Overfin account. The token that sign-in
