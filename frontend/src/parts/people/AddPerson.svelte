@@ -1,29 +1,26 @@
-<!-- The form to make someone's account here, in a window: their email and a
-     first password, which they choose again at their first sign-in unless
-     told otherwise. -->
+<!-- The form to make someone's account here, in a window: their email.
+     Nobody types a password: they choose theirs from a setup link, which
+     opens next. -->
 <script lang="ts">
   import { FormModal, Field, toast } from '@overfin/ui';
   import { api } from '../../lib/api';
+  import type { Person } from '../../lib/types-people';
 
-  let { saved, close }: { saved: () => void; close: () => void } = $props();
+  let { saved, close }: { saved: (p: Person) => void; close: () => void } = $props();
 
   let email = $state('');
-  let password = $state('');
-  let mustChange = $state(true);
   let admin = $state(false);
 
   async function save() {
-    await api('POST', '/admin/api/people', { email, password, mustChange, admin });
-    toast(`${email} can sign in now.`);
-    saved();
+    const p = await api<Person>('POST', '/admin/api/people', { email, admin });
+    toast(`${email} added: they choose their password from a setup link.`);
+    saved(p);
   }
 </script>
 
-<FormModal title="Add a person" description="Their account is ready at once: hand them their email and this password, privately." saveLabel="Add" {save} {close}>
+<FormModal title="Add a person" description="Next, send them a setup link: they choose their own password with it." saveLabel="Add" {save} {close}>
   <div class="fields">
-    <Field label="Email" wide><input type="email" bind:value={email} placeholder="name@example.org" autocomplete="off" required /></Field>
-    <Field label="Password" hint="The rules are on People → Registration." wide><input type="password" bind:value={password} autocomplete="new-password" required /></Field>
-    <label class="inline full"><input type="checkbox" bind:checked={mustChange} /> Ask for a new password at the first sign-in</label>
+    <Field label="Email" hint="Check it: it's how they sign in, and where emails go." wide><input type="email" bind:value={email} placeholder="name@example.org" autocomplete="off" required /></Field>
     <label class="inline full"><input type="checkbox" bind:checked={admin} /> Admin</label>
   </div>
 </FormModal>

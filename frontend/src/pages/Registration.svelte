@@ -16,6 +16,8 @@
 
   // The password rules' fields.
   let minLength = $state<number | string>(10);
+  let copiedSetup = $state<'reminder' | 'hold'>('reminder');
+  let setupStatus = $state<{ text: string; kind: '' | 'ok' | 'error' }>({ text: '', kind: '' });
   let digit = $state(false);
   let special = $state(false);
   // With an identity provider: accounts only by invitation.
@@ -25,6 +27,7 @@
     reg = await api<Registration>('GET', '/admin/api/registration').catch(() => null);
     if (reg) {
       ({ minLength, digit, special } = reg.rules);
+      copiedSetup = reg.copiedSetup;
     } else {
       features = await api<FeaturesState>('GET', '/admin/api/features');
       only = features.features.modules?.invites?.required === 'on';
@@ -35,6 +38,12 @@
   async function saveRules() {
     const out = await api<Registration>('PUT', '/admin/api/registration', { rules: { minLength: numberIn(minLength, 'Minimum length'), digit, special } });
     status = { text: 'Saved: every new password follows them.', kind: 'ok' };
+    Object.assign(reg!, out);
+  }
+
+  async function saveSetup() {
+    const out = await api<Registration>('PUT', '/admin/api/registration', { rules: reg!.rules, copiedSetup });
+    setupStatus = { text: 'Saved.', kind: 'ok' };
     Object.assign(reg!, out);
   }
 
@@ -59,7 +68,7 @@
   <Loading />
 {:else}
   {#if reg}
-    <Card title="Passwords" description="What every new password must have: registering, a forgotten one, the account page, and those you set.">
+    <Card title="Passwords" description="What every new password must have: registering, a forgotten one, the account page, and a setup link's.">
       <Setting label="Minimum length" hint="From 10 to 64 characters.">
         {#snippet children(ids)}<input type="number" min="10" max="64" bind:value={minLength} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
       </Setting>
@@ -74,6 +83,22 @@
         <Busy kind="primary" action={saveRules} {fail}>Save</Busy>
       {/snippet}
     </Card>
+    {#if reg.mail}
+      <Card title="Setup links you copy" description="Someone you add chooses their password from a setup link. Emailed by Overfin, opening it proves their address; copied and handed over by you, it doesn't, so they confirm it by email.">
+        <Setting label="Until their address is confirmed" hint="Reminder: they sign in at once and the site asks them to confirm it. Wait: they confirm it before signing in, so a mistyped address keeps them out until you correct it.">
+          {#snippet children(ids)}
+            <select bind:value={copiedSetup} aria-labelledby={ids.label} aria-describedby={ids.hint}>
+              <option value="reminder">They use the site, with a reminder</option>
+              <option value="hold">They wait until it's confirmed</option>
+            </select>
+          {/snippet}
+        </Setting>
+        {#snippet foot()}
+          <Status text={setupStatus.text} kind={setupStatus.kind} />
+          <Busy kind="primary" action={saveSetup} fail={(err: Error) => (setupStatus = { text: message(err), kind: 'error' })}>Save</Busy>
+        {/snippet}
+      </Card>
+    {/if}
     {#if !reg.mail}
       <p class="notice">Invitations need email (Server → Email) and the site's address (site.url): the person confirms their address by a link sent there. Until then, accounts are made by you, on People.</p>
     {/if}
