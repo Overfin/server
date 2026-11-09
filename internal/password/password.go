@@ -120,3 +120,11 @@ func (r Rules) Lacks(pw string) string {
 	}
 	return ""
 }
+
+// Random is a password nobody knows: 256 random bits, for an account
+// whose person chooses their own from a setup link. Hash it at once.
+func Random() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
+}

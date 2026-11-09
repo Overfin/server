@@ -139,6 +139,9 @@ func (m *Managed) Register(r *plugin.Registrar) error {
 	if err := r.HandlePage("GET "+linkPagePath, http.HandlerFunc(m.linkPage)); err != nil {
 		return err
 	}
+	if err := r.HandlePage("GET "+setupPagePath, http.HandlerFunc(m.setupPage)); err != nil {
+		return err
+	}
 	for pattern, h := range map[string]http.HandlerFunc{
 		"POST /api/v1/signin":          m.signIn,
 		"POST /api/v1/signin/password": m.changePassword,
@@ -147,6 +150,8 @@ func (m *Managed) Register(r *plugin.Registrar) error {
 		"POST /api/v1/register":        m.register,
 		"POST /api/v1/reset":           m.askReset,
 		"POST /api/v1/reset/password":  m.reset,
+		"POST /api/v1/setup/look":      m.setupLook,
+		"POST /api/v1/setup/password":  m.setupPassword,
 		"POST /api/v1/device/start":    m.deviceStart,
 		"POST /api/v1/device/check":    m.deviceCheck,
 	} {
@@ -168,6 +173,8 @@ func (m *Managed) Register(r *plugin.Registrar) error {
 		"PUT /api/v1/me/password":     m.setPassword,
 		"POST /api/v1/device/look":    m.deviceLook,
 		"POST /api/v1/device/confirm": m.deviceConfirm,
+		"GET /api/v1/me/address":      m.addressInfo,
+		"POST /api/v1/me/address":     m.confirmAddress,
 	} {
 		if err := r.HandleFunc(pattern, h); err != nil {
 			return err
@@ -295,7 +302,7 @@ func (m *Managed) signinPage(w http.ResponseWriter, r *http.Request) {
 		p.Mode = "change"
 	case u != nil && u.Confirmed && q.Get("fresh") == "1":
 		p.Mode, p.Email = "fresh", u.Email
-	case u != nil && u.Confirmed:
+	case u != nil && u.Confirmed && q.Get("confirm") != "1":
 		http.Redirect(w, r, p.Return, http.StatusSeeOther) // already signed in
 		return
 	}
@@ -952,7 +959,9 @@ func (m *Managed) takeLink(w http.ResponseWriter, r *http.Request, purpose, link
 // when there's someone to send it to (rule 66).
 func (m *Managed) sendLink(u *store.User, purpose string, validFor time.Duration, lang string) {
 	token := randomToken()
-	where := signinPagePath + "#verify="
+	// ?confirm=1: someone signed in already (a copied setup link, the
+	// reminder) isn't sent on before the page reads the link.
+	where := signinPagePath + "?confirm=1#verify="
 	if purpose == "reset" {
 		where = resetPagePath + "#reset="
 	}

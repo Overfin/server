@@ -79,7 +79,8 @@ info:
     (503).
 
     **Pages and the control panel.** Overfin also serves a few pages of its
-    own at the site's root, outside this API: `/signin`, `/reset` and
+    own at the site's root, outside this API: `/signin`, `/reset`,
+    `/setup` (an account's first password, from an admin's setup link) and
     `/link` (where a screen's code is confirmed; with its own sign-in) and
     `/invite/{code}` (an invitation's link). The
     operator's control panel (`/admin/`) is not part of this API. The
@@ -1227,6 +1228,90 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /setup/look:
+    post:
+      operationId: lookAtSetupLink
+      summary: The address a setup link is for
+      description: An account an admin made has a link to choose its first
+        password (`/setup#setup=…`, valid 7 days). This says which address
+        it's for, so the person can tell it's theirs, without using it up.
+        Only `link` is read.
+      tags: [account]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Signin"
+      responses:
+        "200":
+          description: The account's address.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [email]
+                properties:
+                  email:
+                    type: string
+        "401":
+          description: Expired, used or cancelled link (`signin-failed`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /setup/password:
+    post:
+      operationId: chooseFirstPassword
+      summary: Choose an account's first password, from its setup link
+      description: The link, once, and a password following the rules. It
+        ends every other login and signs the person in; or, when the link
+        was copied by the admin, emails are on and the operator holds such
+        accounts until their address is confirmed, it emails the link that
+        confirms it and answers `held`.
+      tags: [account]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Signin"
+      responses:
+        "200":
+          description: Chosen and signed in (`next`), or held (`held`, with
+            the address the email went to).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  next:
+                    type: string
+                  held:
+                    type: boolean
+                  email:
+                    type: string
+        "400":
+          description: The password doesn't follow the rules
+            (`invalid-request`; the detail says what it lacks).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Expired, used or cancelled link (`signin-failed`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /pages/challenge:
     get:
       operationId: pagesChallenge
@@ -1475,6 +1560,56 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/OwnerOnly"
+
+  /me/address:
+    get:
+      operationId: addressInfo
+      summary: Whether the person's address still needs confirming
+      description: With managed sign-in only, for the account owner's
+        profile. `unconfirmed` is true for someone who chose their password
+        from a setup link the admin copied, while emails are on and their
+        address isn't confirmed yet; the site then asks them to confirm it.
+      tags: [account]
+      responses:
+        "200":
+          description: Their address.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [email, unconfirmed]
+                properties:
+                  email:
+                    type: string
+                  unconfirmed:
+                    type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/OwnerOnly"
+    post:
+      operationId: confirmAddress
+      summary: Email the link that confirms the person's address
+      description: Only while it needs confirming (`sent` is false
+        otherwise). The link (`/signin?confirm=1#verify=…`) works 24 hours.
+      tags: [account]
+      responses:
+        "200":
+          description: Whether an email went.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sent]
+                properties:
+                  sent:
+                    type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/OwnerOnly"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /me/password:
     put:

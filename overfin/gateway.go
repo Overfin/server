@@ -490,6 +490,15 @@ func (g *gateway) ReleaseInvitation(ctx context.Context, subject string) error {
 	return nil
 }
 
+// SetupLink makes someone a new setup link (managed sign-in only).
+func (g *gateway) SetupLink(ctx context.Context, subject string, send bool) (string, time.Time, error) {
+	m := g.current.Load().managed
+	if m == nil {
+		return "", time.Time{}, problem("Overfin's own sign-in is off.")
+	}
+	return m.SetupLink(ctx, subject, send)
+}
+
 // AdminRoutes serves the switched-on modules' control panel routes.
 func (g *gateway) AdminRoutes() http.Handler { return g.current.Load().admin }
 
@@ -1167,7 +1176,7 @@ func (g *gateway) SendSample(ctx context.Context, name, to string) error {
 	// A link that leads where the real one would, but works for nobody.
 	site := strings.TrimSuffix(siteURL(g.cfg), "/")
 	v := emails.Vars{Link: map[string]string{
-		"verify": site + "/signin#verify=sample", "reset": site + "/reset#reset=sample",
+		"verify": site + "/signin#verify=sample", "reset": site + "/reset#reset=sample", "setup": site + "/setup#setup=sample",
 		"exists": site + "/signin", "invite": site + "/invite/sample", "ending": site + "/",
 	}[name], Name: "Alex", Date: time.Now().AddDate(0, 0, 7)}
 	msg, err := g.sh.emails.Write(ctx, name, lang, v)
