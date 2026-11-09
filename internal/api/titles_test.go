@@ -102,6 +102,14 @@ func TestTitles(t *testing.T) {
 		alone.Name != "Le Nord" || alone.Kind != "episode" {
 		t.Errorf("episode alone: %d %+v", code, alone)
 	}
+	// Favorites are films and series: an episode is refused, though taking
+	// one off still works.
+	if code, _ := put(t, srv, "PUT", "/api/v1/titles/title_series_tmdb_1399_e63058/favorite", ""); code != 400 {
+		t.Errorf("an episode made a favorite: %d", code)
+	}
+	if code, _ := put(t, srv, "DELETE", "/api/v1/titles/title_series_tmdb_1399_e63058/favorite", ""); code != 200 {
+		t.Errorf("an episode's favorite taken off: %d", code)
+	}
 	if code := get(t, srv, "/api/v1/titles/title_episode_tmdb_999", &alone); code != 404 {
 		t.Errorf("an episode no series has: %d", code)
 	}

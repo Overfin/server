@@ -580,6 +580,12 @@ func (l Library) markTitle(w http.ResponseWriter, r *http.Request, on, favorite 
 	if !ok {
 		return
 	}
+	// Favorites are films and series: the Favorites page lists nothing
+	// else. Taking one off an episode still works, for those made before.
+	if favorite && on && t.Ref.Kind == "episode" {
+		problem.Send(w, problem.InvalidRequest, "an episode can't be a favorite")
+		return
+	}
 	ctx := r.Context()
 	st := l.Provisioner.Store
 	key := t.Ref.Key()
