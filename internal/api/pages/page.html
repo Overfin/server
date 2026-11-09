@@ -25,7 +25,7 @@
   <p class="muted"><a id="again" href="{{.P.Return}}">{{.T.continue}}</a></p>
 
   {{else if eq .P.Mode "signin"}}
-  <h1>{{.T.title}}</h1>
+  <h1 id="signin-title" data-device="{{.T.deviceButton}}">{{.T.title}}</h1>
   <form id="signin" novalidate>
     <label>{{.T.email}}<input id="email" type="email" autocomplete="username" required autofocus></label>
     <label>{{.T.password}}<input id="password" type="password" autocomplete="current-password" required></label>
@@ -51,6 +51,7 @@
       <p class="muted">{{.T.deviceScan}}</p>
       <p class="muted" id="device-status" role="status">{{.T.deviceWaiting}}</p>
       <button type="button" id="device-again" hidden>{{.T.deviceAgain}}</button>
+      <button type="button" id="device-back">{{.T.deviceBack}}</button>
     </div>
   </div>
 

@@ -245,9 +245,21 @@ async function showCode() {
     const qr = $('device-qr');
     qr.setAttribute('viewBox', `0 0 ${got.qr.size} ${got.qr.size}`);
     qr.firstElementChild.setAttribute('d', got.qr.path);
+    // The code takes the password form's place, not a place below it.
+    const title = $('signin-title');
+    title.dataset.title ??= title.textContent;
+    title.textContent = title.dataset.device;
+    title.classList.add('centered');
+    $('signin').hidden = true;
+    $('unconfirmed').hidden = true;
     $('device-start').hidden = true;
     $('device-again').hidden = true;
+    // A new code waits again, whatever the last one ended with.
+    const status = $('device-status');
+    status.dataset.waiting ??= status.textContent;
+    status.textContent = status.dataset.waiting;
     $('device').hidden = false;
+    $('device').closest('.device').classList.add('alone');
     asking = setInterval(async () => {
       try {
         const res = await fetch('/api/v1/device/check', {
@@ -277,6 +289,18 @@ async function showCode() {
 }
 $('device-start')?.addEventListener('click', showCode);
 $('device-again')?.addEventListener('click', showCode);
+// Back to the password: the code stops being asked about.
+$('device-back')?.addEventListener('click', () => {
+  clearInterval(asking);
+  const title = $('signin-title');
+  title.textContent = title.dataset.title ?? title.textContent;
+  title.classList.remove('centered');
+  $('device').hidden = true;
+  $('device').closest('.device').classList.remove('alone');
+  $('device-start').hidden = false;
+  $('signin').hidden = false;
+  $('email').focus();
+});
 
 // Elsewhere, signed in: the code, typed or brought by the QR code's
 // address, then what confirming does, then confirming.
