@@ -172,8 +172,10 @@ func (s *Sessions) CurrentAccount(w http.ResponseWriter, r *http.Request) *Calle
 		}
 		sess = created
 		s.setCookie(w, r, token)
+		s.noteLogin(r, sess)
 	} else if time.Since(sess.LastActive) > touchEvery {
 		_ = s.Store.TouchSession(ctx, sess.ID, s.Lifetime)
+		s.noteLogin(r, sess) // sessions older than this know their login so
 	}
 
 	var prof *store.Profile
@@ -189,6 +191,20 @@ func (s *Sessions) CurrentAccount(w http.ResponseWriter, r *http.Request) *Calle
 		prof = owner // nothing to protect: the owner profile is the default
 	}
 	return &Caller{Account: acct, Session: sess, Profile: prof, Owner: owner}
+}
+
+// noteLogin keeps which login a session came from, so that ending it ends
+// the login too (Store.DeleteSession); none with forward auth.
+func (s *Sessions) noteLogin(r *http.Request, sess *store.Session) {
+	c, err := cookie.Get(r, LoginCookie)
+	if err != nil || len(c.Value) > 64 {
+		return
+	}
+	if l, err := s.Store.LoginByToken(r.Context(), c.Value); err == nil {
+		if err := s.Store.SetSessionLogin(r.Context(), sess.ID, l.ID); err != nil {
+			s.Logger.Warn("could not note a session's login", "err", err)
+		}
+	}
 }
 
 // setupRequired answers that there's no account yet, with the other ways
