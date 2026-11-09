@@ -188,6 +188,10 @@ func (p *Panel) changeAccount(w http.ResponseWriter, r *http.Request, s *session
 		invalid(w, "You can't disable your own account: you'd lose the control panel. Another admin can.")
 		return
 	}
+	if c.ExpiresAt != nil && *c.ExpiresAt != "" && p.own(ctx, a, s) {
+		invalid(w, "You can't put an end to your own account's access: you'd lose the control panel. Another admin can.")
+		return
+	}
 	// The template checked before anything is saved: a refusal changes
 	// nothing.
 	if c.TemplateID != nil {

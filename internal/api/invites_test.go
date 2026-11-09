@@ -14,6 +14,7 @@ import (
 
 	"github.com/overfin/server/internal/feature"
 	"github.com/overfin/server/internal/invites"
+	"github.com/overfin/server/internal/store"
 )
 
 // The invites module: a link from the panel opens the way to an account,
@@ -217,4 +218,62 @@ func continueTo(page string) string {
 	}
 	to, _, _ := strings.Cut(after, `"`)
 	return strings.ReplaceAll(to, "&amp;", "&")
+}
+
+// An invitation whose account template was deleted since gives no account,
+// even with invitations optional: on Default, it would have none of the limits
+// or the end of access it was made with. And no new link is made from it.
+func TestInviteOfADeletedTemplate(t *testing.T) {
+	var st *store.Store
+	panel := http.NewServeMux()
+	srv, _ := newServerWith(t, options{modules: []feature.Feature{invites.Feature{}}, store: &st, admin: panel})
+	ctx := context.Background()
+	admin := func(method, path string, body any) (int, map[string]any) {
+		b, _ := json.Marshal(body)
+		rec := httptest.NewRecorder()
+		panel.ServeHTTP(rec, httptest.NewRequest(method, "/admin/api/modules/invites"+path, bytes.NewReader(b)))
+		var out map[string]any
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	limited, err := st.CreateTemplate(ctx, "Limited", 1, 1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, it := admin("POST", "/templates", map[string]any{"name": "Short", "accountTemplate": limited.ID, "accessDays": 7, "validDays": 7, "maxUses": 5})
+	if code != 200 {
+		t.Fatalf("invite template: %d %v", code, it)
+	}
+	code, made := admin("POST", "/invites", map[string]any{"template": it["id"], "label": "Bob"})
+	if code != 200 {
+		t.Fatalf("invitation: %d %v", code, made)
+	}
+	res, _ := openInvitation(t, srv, strings.TrimPrefix(made["link"].(string), "https://media.example.org"))
+	var cookie *http.Cookie
+	for _, c := range res.Cookies() {
+		if c.Name == "__Host-overfin-invite" {
+			cookie = c
+		}
+	}
+	if cookie == nil {
+		t.Fatal("no invitation cookie")
+	}
+	if err := st.DeleteTemplate(ctx, limited.ID); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := admin("POST", "/invites", map[string]any{"template": it["id"], "label": "Ann"}); code != 400 {
+		t.Errorf("a new link from it: %d %v", code, out)
+	}
+	req, _ := http.NewRequest("POST", srv.URL+"/api/v1/me", strings.NewReader("{}"))
+	req.Header.Set("Remote-User", "bob")
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	got, err := client(srv, "bob").Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer got.Body.Close()
+	if b, _ := io.ReadAll(got.Body); got.StatusCode != 403 || !strings.Contains(string(b), "invitation-required") {
+		t.Errorf("an account from it: %d %s", got.StatusCode, b)
+	}
 }

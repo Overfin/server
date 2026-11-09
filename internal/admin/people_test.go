@@ -129,6 +129,9 @@ func TestPeople(t *testing.T) {
 	// Nor through their account, in Users: disabled or deleted, they'd lose
 	// the panel.
 	mine, _, _ := db.CreateAccount(context.Background(), me.Subject, store.NewOwner{Name: "Me"})
+	if code, _ := do("PATCH", "/admin/api/accounts/"+mine.ID, map[string]any{"expiresAt": "2000-01-01T00:00:00Z"}); code != 400 {
+		t.Errorf("ending one's own access: %d", code)
+	}
 	if code, _ := do("PATCH", "/admin/api/accounts/"+mine.ID, map[string]any{"disabled": true}); code != 400 {
 		t.Errorf("disabling my account: %d", code)
 	}
