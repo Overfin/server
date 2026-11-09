@@ -55,14 +55,15 @@ for you, its first admin.
 folders under `/media`, where the compose file puts your media folder.
 
 That's all. People sign in with their email and a password. In the
-control panel: add people (People: an email and a first password, which
-they change at their first sign-in), connect an email server (Server,
+control panel: add people (People: their email; Overfin emails them a
+setup link to choose their password, or you copy it and hand it over),
+connect an email server (Server,
 Email), make invitations (People, Registration: links anyone can register
 with, confirming their email; they need the site's address too: `OVERFIN_DOMAIN`,
 or `site.url` in the file below), choose your GPU (Server, Transcoding; the
 compose file says how to give Jellyfin one). Without an email server,
 there are no invitations or forgotten-password emails: you add people
-yourself.
+yourself, and copy their setup links (also for a forgotten password).
 
 Overfin keeps its secret key in `overfin-secrets` and everything else in
 `overfin-data`: back both up, apart. Jellyfin's data is in
