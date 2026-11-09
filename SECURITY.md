@@ -354,7 +354,9 @@ comes from the internet, and media files can be written by anyone.
     URLs, so they stay out of access logs and browser history.
 49. Users never learn who else wished for a title, nor that anyone did.
 50. Profiles are private from each other; kids profiles are visible to their
-    account owner.
+    account owner. Another profile's limits and preferences are served only
+    to the owner; the others get what choosing who's watching takes: its
+    name, kind, and whether it has a PIN.
 51. The owner profile can list and end all of the account's sessions; other
     profiles only see and end the sessions currently using them. Ending one
     ends the device's login too, so it signs in again; a session not used

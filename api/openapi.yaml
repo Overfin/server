@@ -1582,6 +1582,9 @@ paths:
     get:
       operationId: listProfiles
       summary: List the account's profiles
+      description: Another profile's limits and preferences are served only
+        to the owner profile (rule 50); others get its `id`, `name`, `kind`,
+        `owner` and `hasPin`.
       tags: [profiles]
       responses:
         "200":
@@ -1793,6 +1796,8 @@ paths:
     get:
       operationId: getProfile
       summary: Get one profile
+      description: Another profile's limits and preferences are served only
+        to the owner profile, as in `GET /profiles`.
       tags: [profiles]
       responses:
         "200":

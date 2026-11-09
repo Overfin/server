@@ -409,3 +409,37 @@ func TestProfileNameInCharacters(t *testing.T) {
 		t.Errorf("only spaces: %d", code)
 	}
 }
+
+// Another profile's limits and preferences are the owner's to see; choosing
+// who's watching takes its name, kind and PIN's presence (rule 50).
+func TestSiblingProfilesPrivate(t *testing.T) {
+	srv, _ := newServer(t)
+	code, body := post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","maxAge":12,"theme":"dark"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("kid: %d %s", code, body)
+	}
+	var kid struct{ ID string }
+	json.Unmarshal([]byte(body), &kid)
+	code, body = post(t, srv, "/api/v1/profiles", `{"name":"Partner"}`)
+	if code != http.StatusCreated {
+		t.Fatalf("partner: %d %s", code, body)
+	}
+	var partner struct{ ID string }
+	json.Unmarshal([]byte(body), &partner)
+
+	if _, list := getAs(t, srv, subject, "/api/v1/profiles"); !strings.Contains(list, `"maxAge":12`) {
+		t.Errorf("the owner doesn't see it: %s", list)
+	}
+	if code, body := post(t, srv, "/api/v1/profiles/"+partner.ID+"/activate", `{}`); code != 200 {
+		t.Fatalf("activate: %d %s", code, body)
+	}
+	for _, path := range []string{"/api/v1/profiles", "/api/v1/profiles/" + kid.ID} {
+		code, seen := getAs(t, srv, subject, path)
+		if code != 200 || !strings.Contains(seen, `"name":"Kid"`) || !strings.Contains(seen, `"kind":"kids"`) {
+			t.Errorf("%s: %d %s", path, code, seen)
+		}
+		if strings.Contains(seen, "maxAge") || strings.Contains(seen, `"theme":"dark"`) {
+			t.Errorf("%s shows a sibling's limits: %s", path, seen)
+		}
+	}
+}
