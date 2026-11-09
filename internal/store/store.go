@@ -493,16 +493,34 @@ func (s *Store) SessionByToken(ctx context.Context, token string) (*Session, err
 	return sess, err
 }
 
-// DeleteSession ends a session, only if it belongs to accountID.
+// DeleteSession ends a session, only if it belongs to accountID, and the
+// login it came from, or the device would start a new session at its next
+// request; unless another session uses that login (the same browser, which
+// lost its session's cookie): that one's listed, and ended by itself.
 func (s *Store) DeleteSession(ctx context.Context, accountID, sessionID string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id = ? AND account_id = ?`, sessionID, accountID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM logins WHERE id = (SELECT login_id FROM sessions WHERE id = ?1 AND account_id = ?2)
+		AND NOT EXISTS (SELECT 1 FROM sessions o WHERE o.login_id = logins.id AND o.id != ?1)`, sessionID, accountID); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE id = ? AND account_id = ?`, sessionID, accountID)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit()
+}
+
+// SetSessionLogin says which login a session came from.
+func (s *Store) SetSessionLogin(ctx context.Context, sessionID, loginID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET login_id = ? WHERE id = ? AND login_id IS NOT ?`, loginID, sessionID, loginID)
+	return err
 }
 
 // DeleteExpiredSessions removes sessions past their expiry and returns how

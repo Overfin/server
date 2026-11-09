@@ -879,6 +879,54 @@ func TestSignOutOtherDevices(t *testing.T) {
 	}
 }
 
+// Ending one device signs it out for real: its login ends with its session,
+// or its next request would start a new one, on the owner's profile. Other
+// devices stay.
+func TestEndOneDevice(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{managed: true, store: &st})
+	ctx := context.Background()
+	ann, _ := st.CreateUser(ctx, "ann@example.org", false)
+	hash, _ := password.Hash("a long password 1")
+	st.SetPassword(ctx, ann.Subject, hash)
+	st.CreateAccount(ctx, ann.Subject, store.NewOwner{Name: "Ann"})
+	here, there := newBrowser(srv), newBrowser(srv)
+	for _, b := range []*http.Client{here, there} {
+		if c, out := signinPost(t, b, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "ann@example.org", "password": "a long password 1"})); c != 200 {
+			t.Fatalf("signing in: %d %v", c, out)
+		}
+		if res, _ := visit(t, b, srv, "/api/v1/me", nil); res.StatusCode != 200 {
+			t.Fatalf("me: %d", res.StatusCode)
+		}
+	}
+	_, body := visit(t, here, srv, "/api/v1/sessions", nil)
+	var list struct {
+		Items []struct {
+			ID      string `json:"id"`
+			Current bool   `json:"current"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(body), &list); err != nil || len(list.Items) != 2 {
+		t.Fatalf("sessions: %s, %v", body, err)
+	}
+	other := list.Items[0].ID
+	if list.Items[0].Current {
+		other = list.Items[1].ID
+	}
+	req, _ := http.NewRequest("DELETE", srv.URL+"/api/v1/sessions/"+other, nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	res, err := here.Do(req)
+	if err != nil || res.StatusCode != 204 {
+		t.Fatalf("ending the other: %v %v", res, err)
+	}
+	if res, _ := visit(t, there, srv, "/api/v1/me", nil); res.StatusCode != 401 {
+		t.Errorf("the ended device: %d", res.StatusCode)
+	}
+	if res, _ := visit(t, here, srv, "/api/v1/me", nil); res.StatusCode != 200 {
+		t.Errorf("this device: %d", res.StatusCode)
+	}
+}
+
 // Only wrong passwords count towards an email's limit: someone signing in
 // often isn't locked out, and the right password starts the count over.
 // (Each server allows 20 tries a minute from one address.)

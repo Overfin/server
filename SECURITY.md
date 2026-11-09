@@ -356,7 +356,9 @@ comes from the internet, and media files can be written by anyone.
 50. Profiles are private from each other; kids profiles are visible to their
     account owner.
 51. The owner profile can list and end all of the account's sessions; other
-    profiles only see and end the sessions currently using them.
+    profiles only see and end the sessions currently using them. Ending one
+    ends the device's login too, so it signs in again; a session not used
+    since this began has no login known to end, until its next use.
 52. Users can download what Overfin holds about them, except secrets: tokens,
     PIN hashes and keys are never exported. The owner profile's export covers
     the account; any other profile's export covers only that profile. A kids
