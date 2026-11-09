@@ -80,8 +80,9 @@ done.
 ## Updating
 
 Back up first (below): Overfin migrates its database by itself when it
-starts, and a migrated database doesn't go back to an older Overfin. The
-backup is the way back.
+starts, and a migrated database doesn't go back to an older Overfin: an
+older one refuses to start on it, saying so in its log. The backup is the
+way back.
 
 Then take the release's `compose.yaml` (keep your `.env`, and copy over
 any lines you added, such as more media folders or a GPU), and

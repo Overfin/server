@@ -112,6 +112,13 @@ func (s *Store) migrate(ctx context.Context) error {
 		return err
 	}
 	sort.Strings(names)
+	// A database a newer Overfin migrated: this one doesn't know its
+	// tables, and running on them could lose or break data. Going back to
+	// an older Overfin means restoring the database copied before the
+	// newer one first ran.
+	if current > len(names) {
+		return fmt.Errorf("store: the database is at schema %d, newer than this Overfin knows (%d): run the Overfin that migrated it, or restore the database copied before it ran", current, len(names))
+	}
 	for i, name := range names {
 		version := i + 1 // 001_… is version 1, and so on
 		if version <= current {
