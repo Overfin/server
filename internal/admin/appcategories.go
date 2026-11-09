@@ -9,11 +9,11 @@ type appCategoryJSON struct {
 	Names map[string]string `json:"names"`
 }
 
-// appCategories (GET /apps/v1/categories, any key) lists the operator's
+// appCategories (GET /apps/v1/categories, catalog scope) lists the operator's
 // categories, in their order: an app that adds titles (Overtide) lets the
 // operator say where each category's titles go.
 func (p *Panel) appCategories(w http.ResponseWriter, r *http.Request) {
-	if p.appKey(w, r, "") == nil {
+	if p.appKey(w, r, "catalog") == nil {
 		return
 	}
 	categories, err := p.Store.Categories(r.Context())

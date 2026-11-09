@@ -434,7 +434,8 @@ paths:
         another order on TMDB (DVD, production, digital…) puts other
         episodes in that season's places. For an app that imports episodes
         (Overtide), to tell what a file's number means. Story arcs and
-        absolute numbering don't count as other orders. Any valid key.
+        absolute numbering don't count as other orders. Needs the
+        `catalog` scope; a key without it answers `not-authenticated`.
       tags: [apps]
       security:
         - appKey: []
@@ -514,7 +515,8 @@ paths:
         order: their IDs, as `categories` on `list=suggestions` titles
         gives them, and their names in each language. For an app that adds
         titles (Overtide), to let the operator say where each category's
-        titles go. Any valid key.
+        titles go. Needs the `catalog` scope; a key without it answers
+        `not-authenticated`.
       tags: [apps]
       security:
         - appKey: []

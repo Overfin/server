@@ -10,7 +10,8 @@ import (
 	"github.com/overfin/server/internal/store"
 )
 
-// /apps/v1/categories lists the operator's categories for any key, and a
+// /apps/v1/categories lists the operator's categories for a key with the
+// catalog scope, and a
 // suggestion carries the categories it fits by what TMDB says of it.
 func TestAppCategories(t *testing.T) {
 	ctx := context.Background()
@@ -36,7 +37,7 @@ func TestAppCategories(t *testing.T) {
 		}
 	}
 
-	rec := b.do("POST", "/admin/api/apps", `{"name":"Overtide","scopes":["score"]}`, nil)
+	rec := b.do("POST", "/admin/api/apps", `{"name":"Overtide","scopes":["score","catalog"]}`, nil)
 	var made struct{ Key string }
 	if json.Unmarshal(rec.Body.Bytes(), &made); rec.Code != 201 {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body)
