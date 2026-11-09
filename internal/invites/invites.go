@@ -192,8 +192,11 @@ func (Feature) NewAccount(ctx context.Context, h feature.Host, r *http.Request) 
 			return nil, err
 		}
 		if !ok {
+			// Refused, even when invitations aren't required: an account on
+			// Default would have none of the limits or the end of access
+			// this invitation was made with.
 			h.Logger().Warn("an invitation's account template no longer exists; make a new invitation", "invite", inv.ID)
-			inv = nil
+			return nil, &feature.Refusal{Type: feature.InvitationRequired}
 		}
 	}
 	if inv == nil {
@@ -540,6 +543,14 @@ func (a admin) createInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		a.fail(w, err)
+		return
+	}
+	// A link that could never work isn't made.
+	if exists, err := templateExists(r.Context(), a.h, t.AccountTemplate); err != nil {
+		a.fail(w, err)
+		return
+	} else if !exists {
+		feature.Problem(w, feature.InvalidRequest, "this invite template's account template no longer exists")
 		return
 	}
 	code := newCode()
