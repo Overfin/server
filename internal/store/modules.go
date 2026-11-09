@@ -55,6 +55,9 @@ func migrateModule(ctx context.Context, db *sql.DB, module string, migrations fs
 		}
 	}
 	sort.Strings(names)
+	if current > len(names) {
+		return fmt.Errorf("store: module %s's database is at schema %d, newer than this Overfin knows (%d): run the Overfin that migrated it, or restore the database copied before it ran", module, current, len(names))
+	}
 	for i, name := range names {
 		version := i + 1
 		m := moduleMigrationName.FindStringSubmatch(name)

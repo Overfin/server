@@ -182,6 +182,29 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	}
 }
 
+// An older Overfin refuses a database a newer one migrated: it doesn't
+// know its tables. Going back means restoring the copy taken before.
+func TestNewerDatabaseRefused(t *testing.T) {
+	box, _ := seal.New(bytes.Repeat([]byte{9}, 32))
+	path := filepath.Join(t.TempDir(), "test.db")
+	s, err := Open(context.Background(), path, box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v int
+	s.db.QueryRow("PRAGMA user_version").Scan(&v)
+	if _, err := s.db.Exec(fmt.Sprintf("PRAGMA user_version = %d", v+1)); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if s, err := Open(context.Background(), path, box); err == nil || !strings.Contains(err.Error(), "newer than this Overfin knows") {
+		if s != nil {
+			s.Close()
+		}
+		t.Fatalf("a newer database opened: %v", err)
+	}
+}
+
 func newProfile(name, n string) NewProfile {
 	return NewProfile{Name: name, Kind: "standard", JellyfinUserID: "jf-" + n, JellyfinUsername: "of-" + n, JellyfinToken: "t-" + n}
 }
@@ -313,6 +336,12 @@ func TestModuleMigrations(t *testing.T) {
 	defer db.Close()
 	if _, err := db.Exec(`INSERT INTO demo_things (id, note) VALUES ('a', 'b')`); err != nil {
 		t.Errorf("table not migrated: %v", err)
+	}
+	// An older Overfin, knowing only the first migration, refuses the
+	// database the newer one migrated.
+	older := fstest.MapFS{"001_first.sql": m["001_first.sql"]}
+	if _, err := OpenModule(ctx, "demo", path, older); err == nil || !strings.Contains(err.Error(), "newer") {
+		t.Errorf("an older Overfin on a newer module database: %v", err)
 	}
 	bad := fstest.MapFS{"002_skip.sql": {Data: []byte(`SELECT 1;`)}}
 	if _, err := OpenModule(ctx, "other", filepath.Join(t.TempDir(), "other.db"), bad); err == nil {
