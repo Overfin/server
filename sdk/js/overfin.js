@@ -446,13 +446,17 @@ export class Player {
         if (this.pausedAt && Date.now() - this.pausedAt > LONG_PAUSE) this.check();
         this.pausedAt = 0;
       },
-      seeked: () => this.report(),
+      timeupdate: () => this.settled(),
+      seeked: () => { this.settled(); this.report(); },
       ended: () => { this.report({ ended: true }); this.close(); this.options.onEnded?.(); },
     };
   }
 
   /** The position, in ms. */
-  get positionMs() { return Math.round(this.video.currentTime * 1000); }
+  // While a stream is being replaced, the video says 0 (hls.js resets it when
+  // it goes): the position from before it (held), so nothing restarts from
+  // the beginning or reports it.
+  get positionMs() { return this.held ?? Math.round(this.video.currentTime * 1000); }
 
   /**
    * Starts, or restarts at the current position. Resolves with the
@@ -519,7 +523,7 @@ export class Player {
     const Hls = this.options.Hls || globalThis.Hls;
     if (pb.stream.protocol === 'hls' && Hls && Hls.isSupported()) {
       this.hls = new Hls({ startPosition: startAt });
-      this.hls.on(Hls.Events.ERROR, (_, data) => { if (data.fatal) this.check(); });
+      this.hls.on(Hls.Events.ERROR, (_, data) => { if (data.fatal) this.fatal(data); });
       this.hls.loadSource(pb.stream.url);
       this.hls.attachMedia(video);
     } else if (pb.stream.protocol === 'hls' && !video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -648,6 +652,7 @@ export class Player {
   restart() {
     const wasPlaying = !this.video.paused;
     const at = this.positionMs;
+    this.held = at;
     const old = this.playback;
     this.teardown();
     if (old) this.client.stopPlayback(old.id, at).catch(() => {});
@@ -669,10 +674,34 @@ export class Player {
       .catch((err) => this.gone(pb, err));
   }
 
+  // settled: the new stream has its place, so the video says it again.
+  settled() {
+    if (this.video.currentTime > 0) this.held = null;
+  }
+
   async check() {
     const pb = this.playback;
     if (!pb) return;
     try { await this.client.playback(pb.id); } catch (err) { this.gone(pb, err); }
+  }
+
+  // fatal handles a stream hls.js gave up on: with the playback gone, as
+  // for any report; still there, or the server out of reach, it starts over
+  // at the same place, a few times a minute at most, then says so, rather
+  // than stay frozen on a playback that holds the account's stream.
+  async fatal(data) {
+    const pb = this.playback;
+    await this.check();
+    if (pb !== this.playback || this.closed) return; // gone() took it from here
+    const now = Date.now();
+    this.fatals = (this.fatals || []).filter((at) => now - at < 60_000);
+    this.fatals.push(now);
+    if (this.fatals.length <= 3) {
+      this.restart();
+      return;
+    }
+    this.video.pause();
+    this.options.onError?.(new Error(`the stream failed: ${data?.details || 'unknown'}`));
   }
 
   // gone handles a playback the server no longer has.
@@ -687,6 +716,7 @@ export class Player {
       return;
     }
     if (err.status !== 410) return;
+    this.held = this.positionMs;
     this.teardown();
     this.playback = null;
     this.video.pause();

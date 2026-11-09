@@ -528,3 +528,98 @@ test('subtitles: forced ones whenever none are chosen; a choice shows at once, n
   await player.close();
   globalThis.document = realDocument;
 });
+
+// hls.js, as far as the player sees it: destroying it resets the video.
+function fakeHls(video, seen) {
+  return class {
+    static Events = { ERROR: 'hlsError' };
+    static isSupported() { return true; }
+    constructor(config) { seen.push(config); seen.current = this; }
+    on(event, fn) { this.fail = fn; }
+    loadSource() {}
+    attachMedia() {}
+    destroy() { video.currentTime = 0; }
+  };
+}
+
+function hlsServer(state) {
+  let n = 0;
+  return fakeServer({
+    'POST /api/v1/playback': (_, body) => {
+      state.started.push(body.startPositionMs);
+      return [201, { id: `pb${++n}`, title: { id: body.titleId, name: 'Film' }, method: 'transcode',
+        stream: { url: `/api/v1/stream/t${n}/master.m3u8`, protocol: 'hls' }, positionMs: body.startPositionMs }];
+    },
+    'POST /api/v1/playback/pb1/progress': () => state.gone || [204, null],
+    'POST /api/v1/playback/pb1/stop': () => [204, null],
+    'POST /api/v1/playback/pb2/stop': () => [204, null],
+    'POST /api/v1/playback/pb3/stop': () => [204, null],
+    'POST /api/v1/playback/pb4/stop': () => [204, null],
+    'POST /api/v1/playback/pb5/stop': () => [204, null],
+    'GET /api/v1/playback/pb1': () => [200, {}],
+    'GET /api/v1/playback/pb2': () => [200, {}],
+    'GET /api/v1/playback/pb3': () => [200, {}],
+    'GET /api/v1/playback/pb4': () => [200, {}],
+  });
+}
+
+test('continueHere takes back at the same place, though hls.js reset the video', async () => {
+  const state = { started: [], gone: null };
+  hlsServer(state);
+  const video = fakeVideo();
+  const seen = [];
+  const player = await new Overfin().play(video, 'title_movie_tmdb_1', {
+    startMs: 0, capabilities: {}, Hls: fakeHls(video, seen), onTakenOver: () => {},
+  });
+  video.currentTime = 30;
+  state.gone = [410, { type: 'playback-taken-over', takenOverBy: 'Firefox', status: 410 }];
+  video.emit('pause');
+  await settle();
+  assert.equal(video.currentTime, 0, 'the video was reset');
+  await player.continueHere();
+  assert.deepEqual(state.started, [0, 30000]);
+  assert.equal(player.positionMs, 30000, 'held until the stream has its place');
+  video.currentTime = 30.5;
+  video.emit('timeupdate');
+  assert.equal(player.positionMs, 30500);
+  await player.close();
+});
+
+test('two track changes in a row keep the place', async () => {
+  const state = { started: [], gone: null };
+  hlsServer(state);
+  const video = fakeVideo();
+  const player = await new Overfin().play(video, 'title_movie_tmdb_1', {
+    startMs: 0, capabilities: {}, Hls: fakeHls(video, []),
+  });
+  video.currentTime = 40;
+  const first = player.restart();
+  const second = player.restart();
+  await Promise.all([first, second]);
+  assert.deepEqual(state.started.slice(1), [40000, 40000]);
+  await player.close();
+});
+
+test('a stream hls.js gives up on starts over at the same place, then says so', async () => {
+  const state = { started: [], gone: null };
+  hlsServer(state);
+  const video = fakeVideo();
+  const seen = [];
+  const errors = [];
+  const player = await new Overfin().play(video, 'title_movie_tmdb_1', {
+    startMs: 0, capabilities: {}, Hls: fakeHls(video, seen), onError: (e) => errors.push(e),
+  });
+  video.currentTime = 50;
+  for (let i = 0; i < 3; i++) {
+    seen.current.fail(null, { fatal: true, details: 'bufferStalledError' });
+    await settle();
+  }
+  assert.deepEqual(state.started, [0, 50000, 50000, 50000]);
+  assert.deepEqual(errors, []);
+  seen.current.fail(null, { fatal: true, details: 'bufferStalledError' });
+  await settle();
+  assert.equal(state.started.length, 4, 'no more restarts');
+  assert.equal(errors.length, 1);
+  assert.ok(video.paused);
+  await player.close();
+});
