@@ -155,3 +155,45 @@ func TestDeviceCodeEndsWithLogins(t *testing.T) {
 		t.Errorf("collected while she must choose a password: %d %v", c, out)
 	}
 }
+
+// A code makes a lasting login for the account: only the owner's profile
+// may confirm one, not another profile on a browser signed in.
+func TestDeviceCodeOwnerOnly(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{managed: true, store: &st, site: true})
+	ctx := context.Background()
+	ann, _ := st.CreateUser(ctx, "ann@example.org", false)
+	hash, _ := password.Hash("a long password 1")
+	st.SetPassword(ctx, ann.Subject, hash)
+	acct, owner, _ := st.CreateAccount(ctx, ann.Subject, store.NewOwner{Name: "Ann"})
+	kid, err := st.AddProfile(ctx, acct.ID, store.NewProfile{Name: "Kid", Kind: "kids", MaxAge: new(int)}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := newBrowser(srv)
+	if c, out := signinPost(t, b, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "ann@example.org", "password": "a long password 1"})); c != 200 {
+		t.Fatalf("signing in: %d %v", c, out)
+	}
+	tv := newBrowser(srv)
+	_, got := signinPost(t, tv, srv, "/api/v1/device/start", checked(t, srv, map[string]any{"return": "/"}))
+	code, _ := got["code"].(string)
+
+	if c, out := signinPost(t, b, srv, "/api/v1/profiles/"+kid.ID+"/activate", map[string]any{}); c != 200 {
+		t.Fatalf("switching to the kid: %d %v", c, out)
+	}
+	for _, path := range []string{"/api/v1/device/look", "/api/v1/device/confirm"} {
+		if c, _ := signinPost(t, b, srv, path, map[string]any{"code": code}); c != 403 {
+			t.Errorf("%s from the kid's profile: %d", path, c)
+		}
+	}
+	if c, out := signinPost(t, tv, srv, "/api/v1/device/check", map[string]any{"return": "/"}); c != 200 || out["waiting"] != true {
+		t.Fatalf("the screen after the kid tried: %d %v", c, out)
+	}
+
+	if c, out := signinPost(t, b, srv, "/api/v1/profiles/"+owner.ID+"/activate", map[string]any{}); c != 200 {
+		t.Fatalf("back to the owner: %d %v", c, out)
+	}
+	if c, _ := signinPost(t, b, srv, "/api/v1/device/confirm", map[string]any{"code": code}); c != 204 {
+		t.Errorf("the owner confirming: %d", c)
+	}
+}

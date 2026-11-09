@@ -786,7 +786,7 @@ func (m *Managed) ownerHere(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	if !c.IsOwner() {
-		problem.Send(w, problem.OwnerOnly, "")
+		m.refuse(w, r, problem.OwnerOnly, "ownerOnly")
 		return false
 	}
 	return true
