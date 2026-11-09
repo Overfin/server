@@ -55,10 +55,25 @@ func TestValuation(t *testing.T) {
 	}
 
 	var preview map[string][]valuedJSON
-	rec = b.do("POST", "/admin/api/valuation/preview", `{"weights":{"watchTime":10,"audience":0,"followed":0,"favorites":0,"watchlist":0,"requested":0,"rating":0,"newRelease":0,"popularity":0},"query":"watch"}`, nil)
-	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &preview) != nil {
-		t.Fatalf("preview: %d %s", rec.Code, rec.Body)
+	ask := func() {
+		t.Helper()
+		preview = nil
+		rec = b.do("POST", "/admin/api/valuation/preview", `{"weights":{"watchTime":10,"audience":0,"followed":0,"favorites":0,"watchlist":0,"requested":0,"rating":0,"newRelease":0,"popularity":0},"query":"watch"}`, nil)
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &preview) != nil {
+			t.Fatalf("preview: %d %s", rec.Code, rec.Body)
+		}
 	}
+	// One account's viewing can't be read from the preview (rule 40): the
+	// film it watched scores as the one nobody watched.
+	ask()
+	if len(preview["most"]) != 2 || preview["most"][0].Score != preview["least"][0].Score {
+		t.Errorf("one account: most %+v, least %+v", preview["most"], preview["least"])
+	}
+	// With a second account watching it, it counts.
+	_, prof2, _ := db.CreateAccount(ctx, "person-2", store.NewOwner{Name: "Other", JellyfinUserID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", JellyfinUsername: "of-2", JellyfinToken: "t"})
+	db.RecordPlay(ctx, prof2.ID, "movie/tmdb/1", id(0), 0, true, time.Now())
+	p.valued.m = nil // measured again, not from a few seconds ago
+	ask()
 	if len(preview["most"]) != 2 || preview["most"][0].ID != "title_movie_tmdb_1" || preview["least"][0].ID != "title_movie_tmdb_2" ||
 		!(preview["most"][0].Score > preview["least"][0].Score) {
 		t.Errorf("most %+v, least %+v", preview["most"], preview["least"])

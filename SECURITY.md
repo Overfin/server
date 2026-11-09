@@ -317,7 +317,11 @@ comes from the internet, and media files can be written by anyone.
     film and series (plays to the end, viewers counted by account,
     favorites counted by profile, the day it was last played), never
     anything per person. On a small server, a total can still point to
-    someone; the operator decides which apps get them.
+    someone; the operator decides which apps get them. The panel's
+    valuation preview shows scores, never their parts from what people
+    do, and in it a title's watching, favorites, watchlist, follows and
+    wishes count only when at least two accounts are behind them, so no
+    weight setting shows what one person did with a title.
 41. No analytics, no telemetry, no calls home. Metrics are aggregate counts
     with no user labels.
 42. Client IPs are used in memory (rate limiting) and never stored by Overfin.

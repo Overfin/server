@@ -104,6 +104,10 @@ type Title struct {
 	// Parts are its rank on each criterion that applies to it, from 0 (no
 	// sign of it, or the lowest) to 1 (the highest).
 	Parts map[string]float64
+	// Behind is, for each criterion from what people do on this title (not
+	// tastes, which come from what they like overall), how many accounts
+	// it comes from.
+	Behind map[string]int
 }
 
 // Measured is every title ranked, as of one moment.
@@ -251,8 +255,10 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 			}
 		}
 	}
+	marked := map[string]map[string]map[string]float64{}
 	for c, list := range map[string][]store.ProfileTitle{Favorites: f.Favorites, Watchlist: f.Interests} {
 		m := counted()
+		marked[c] = m
 		for _, pt := range list {
 			p, ok := f.Profiles[pt.ProfileID]
 			if !ok || !p.Active {
@@ -270,6 +276,25 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 		each(a.Title, func(t *store.ValuedTitle) { add(requested, t.Key, a.AccountID, 1) })
 	}
 	sum(raw[Requested], requested)
+
+	// How many accounts each title's part comes from, per criterion.
+	behind := map[string]map[string]int{}
+	for c, m := range map[string]map[string]map[string]float64{Audience: audience, Followed: followed, Requested: requested} {
+		behind[c] = map[string]int{}
+		for key, byAccount := range m {
+			behind[c][key] = len(byAccount)
+		}
+	}
+	behind[WatchTime] = map[string]int{}
+	for key, byAccount := range views {
+		behind[WatchTime][key] = len(byAccount)
+	}
+	for c, m := range marked {
+		behind[c] = map[string]int{}
+		for key, byAccount := range m {
+			behind[c][key] = len(byAccount)
+		}
+	}
 
 	// The rating weighted by its votes, so a few votes can't make or break
 	// a title: IMDb's when there is one (the operator has IMDb's data on),
@@ -312,7 +337,12 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 		ranks[c] = rank(raw[c])
 	}
 	for _, t := range f.Titles {
-		v := Title{Key: t.Key, Name: t.Name, Season: t.Season, InLibrary: t.InLibrary, Parts: map[string]float64{}}
+		v := Title{Key: t.Key, Name: t.Name, Season: t.Season, InLibrary: t.InLibrary, Parts: map[string]float64{}, Behind: map[string]int{}}
+		for c, byKey := range behind {
+			if n := byKey[t.Key]; n > 0 {
+				v.Behind[c] = n
+			}
+		}
 		for _, c := range Criteria {
 			if c == Followed && t.Episodes == nil {
 				continue // films aren't followed
@@ -557,5 +587,25 @@ func (m *Measured) Scored(w map[string]int) []Value {
 		out[i] = Value{Title: &m.Titles[i], Score: Score(&m.Titles[i], w, m.Accounts)}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Score > out[j].Score })
+	return out
+}
+
+// Shared is m as an admin may look at it: what people did with a title
+// counts only when at least two accounts did it, so no score points at
+// what one person watched, kept or asked for (SECURITY.md rule 40). The
+// rest is as measured.
+func (m *Measured) Shared() *Measured {
+	out := &Measured{Titles: make([]Title, len(m.Titles)), Accounts: m.Accounts}
+	for i, t := range m.Titles {
+		parts := make(map[string]float64, len(t.Parts))
+		for c, part := range t.Parts {
+			if people[c] && c != Tastes && t.Behind[c] < 2 {
+				part = 0
+			}
+			parts[c] = part
+		}
+		t.Parts = parts
+		out.Titles[i] = t
+	}
 	return out
 }
