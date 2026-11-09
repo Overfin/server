@@ -232,3 +232,38 @@ func scanList(v *string) []string {
 	_ = json.Unmarshal([]byte(*v), &out)
 	return out
 }
+
+// TitlesTagFree says, of titles no library has, by "kind/tmdb"
+// ("movie/550"), which may be shown to a profile with tags hidden: those
+// whose TMDB keywords Overfin already has (it fetched their details) and
+// carry none of the hidden tags. Overfin asks TMDB nothing for it: a title
+// whose keywords aren't known yet stays hidden.
+func (s *Store) TitlesTagFree(ctx context.Context, hidden []string, keys []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if keys = plainKeys(keys); len(keys) == 0 {
+		return out, nil
+	}
+	args := []any{jsonList(keys)}
+	blocked := "0 = 1"
+	if len(hidden) > 0 {
+		blocked = "k.folded IN (" + marks(len(hidden)) + ")"
+		for _, t := range hidden {
+			args = append(args, FoldTag(t))
+		}
+	}
+	rows, err := s.read.QueryContext(ctx, `SELECT j.value FROM json_each(?) j
+		JOIN catalog_titles t ON t.kind = `+keyKind+` AND t.tmdb = `+keyTMDB+` AND t.details_at IS NOT NULL
+		WHERE NOT EXISTS (SELECT 1 FROM catalog_title_keywords k WHERE k.kind = t.kind AND k.tmdb = t.tmdb AND `+blocked+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out[k] = true
+	}
+	return out, rows.Err()
+}

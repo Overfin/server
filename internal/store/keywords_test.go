@@ -38,3 +38,25 @@ func TestTitleKeywords(t *testing.T) {
 		t.Errorf("after the title went: %v", tags)
 	}
 }
+
+// Titles no library has, for a profile with tags hidden: shown only when
+// Overfin already has their keywords and none is hidden; a title only
+// listed (no details fetched) or unknown stays hidden.
+func TestTitlesTagFree(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	now := time.Now()
+	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "1", Name: "Clean", Keywords: []string{"friendship"}}, []byte(`{}`), now)
+	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "2", Name: "Gory", Keywords: []string{"Zombie", "friendship"}}, []byte(`{}`), now)
+	s.SetTitleDetails(ctx, Title{Kind: "series", TMDB: "3", Name: "No keywords"}, []byte(`{}`), now)
+	if err := s.PutTitles(ctx, []Title{{Kind: "movie", TMDB: "4", Name: "Only listed"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.TitlesTagFree(ctx, []string{"zombie"}, []string{"movie/1", "movie/2", "series/3", "movie/4", "movie/5", "series/1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || !got["movie/1"] || !got["series/3"] {
+		t.Errorf("tag free: %v", got)
+	}
+}

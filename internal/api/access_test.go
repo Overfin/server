@@ -93,6 +93,29 @@ func TestLibrariesAndHiddenTags(t *testing.T) {
 		}
 	}
 
+	// Tags hidden, every library: films no library has show only when
+	// their keywords are known and none is hidden (store's TestTitlesTagFree:
+	// one only listed stays hidden too).
+	post(t, srv, "/api/v1/profiles/"+ownerID(t, srv)+"/activate", `{}`)
+	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+partner.ID, `{"libraries":null,"blockedTags":["horror"]}`); code != 200 {
+		t.Fatalf("tags only: %d %s", code, body)
+	}
+	now := time.Now()
+	st.SetTitlesShown(ctx, "all")
+	st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "100", Name: "Clean"}, []byte(`{}`), now)
+	st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "101", Name: "Scary", Keywords: []string{"HORROR"}}, []byte(`{}`), now)
+	for _, id := range []string{"100", "101"} {
+		if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_"+id, nil); code != 200 {
+			t.Fatalf("film %s, as the owner: %d", id, code)
+		}
+	}
+	post(t, srv, "/api/v1/profiles/"+partner.ID+"/activate", `{}`)
+	for id, want := range map[string]int{"100": 200, "101": 404} {
+		if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_"+id, nil); code != want {
+			t.Errorf("film %s no library has, tags hidden: %d, want %d", id, code, want)
+		}
+	}
+
 	// Every library again, and no tag: everything.
 	post(t, srv, "/api/v1/profiles/"+ownerID(t, srv)+"/activate", `{}`)
 	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+partner.ID, `{"libraries":null,"blockedTags":null}`); code != 200 ||
