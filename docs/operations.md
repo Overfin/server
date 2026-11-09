@@ -1,15 +1,19 @@
 # Useful to know when running Overfin
 
-- **`overfin -check`** tests the configuration and what it points to (the
+- **`overfin -check`** (with Docker: `docker exec overfin /overfin -check`) tests the configuration and what it points to (the
   secret key, Jellyfin, the identity provider) and says in plain words
   what's wrong, changing nothing.
-- **`SIGHUP`** reloads the configuration without dropping playbacks.
+- **`SIGHUP`** reloads the configuration without dropping playbacks. Changing
+  a setting that needs a restart refuses the whole reload: what's running
+  stays.
 - **Slow requests**: API requests that take over 300 ms (streams aside) are
-  logged (`a slow request`, with the route's pattern and the time only,
-  never who asked or for what), to see where speed is lost.
-- **`-recover-tokens`** gets you going again if the secret key is lost
+  logged (`a slow request`, with the route's pattern, the time and, for
+  images, how each was made, never who asked or for what), to see where speed is lost.
+- **`-recover-tokens`** (with Docker the container won't start without its
+  key: `docker compose run --rm -it overfin -recover-tokens`) gets you going again if the secret key is lost
   (PINs and logins are reset, history is kept; TMDB's token, Seerr's key
-  and the SMTP password set in the panel are given again there, and
+  and the SMTP password set in the panel are given again there, a new webhook
+  key is made in Notices, and
   pending registrations start over). It asks you to hand Overfin's Jellyfin
   over again, with an administrator's login, which nobody has once Overfin
   took it: Jellyfin's own "forgot password" gives one back, from its

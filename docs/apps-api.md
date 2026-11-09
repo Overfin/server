@@ -4,8 +4,10 @@ Other apps can read some of what Overfin knows, with a key you make for
 each in the control panel's **Apps** tab (shown once, revocable), for what
 you tick: each title's **value** (the Valuation tab's score, 0 to 100),
 its **watch statistics**, whether the libraries have it (**in the
-libraries**), and **what came and went** (when each film and season arrived
-in the libraries and left them). Totals per title only, never anything per person; counts
+libraries**), **what came and went** (when each film and season arrived
+in the libraries and left them), and **wishes to fetch** (what people wished
+for, in Overfin's turns, for the app that fetches them: `/apps/v1/wishes` in
+[api/apps.yaml](../api/apps.yaml)). Totals per title only, never anything per person; counts
 below 2 are given as 0, and so are plays and favorites when fewer than two
 people account for them, so none points at one person. Apps ask the control
 panel's address (the site's, or its own private listener when you gave it
@@ -80,7 +82,7 @@ Authorization: Bearer ofapp_…
 
 ```json
 {"titles": [{"kind": "series", "tmdbId": "1399", "tvdbId": "121361", "imdbId": "tt0944947",
-  "plays": 12, "viewers": 3, "favorites": 1, "lastPlayed": "2026-10-20", "changedAt": "…"}],
+  "plays": 12, "viewers": 3, "favorites": 2, "lastPlayed": "2026-10-20", "changedAt": "…"}],
  "generatedAt": "…"}
 ```
 

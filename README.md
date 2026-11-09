@@ -121,11 +121,11 @@ browser ──▶ the site (overfin-web, or your own)
 
 ```sh
 go test ./...
-go run ./cmd/overfin -config overfin.toml
 ```
 
 Go, with three dependencies besides overfin-web; the control panel is a
-Svelte app in `frontend/`. More in [Development](docs/development.md).
+Svelte app in `frontend/`. How to run it from the sources, and more, is in
+[Development](docs/development.md).
 
 ## How it's made
 
