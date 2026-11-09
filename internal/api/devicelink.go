@@ -171,9 +171,13 @@ func (m *Managed) deviceCheck(w http.ResponseWriter, r *http.Request) {
 // linkPage is where a code is confirmed; anyone not signed in signs in
 // first, and comes back (the code, in the fragment, comes along).
 func (m *Managed) linkPage(w http.ResponseWriter, r *http.Request) {
+	if againWithCookie(w, r, m.Store, m.Logger) {
+		return
+	}
 	_, u := m.current(r)
 	if u == nil || !u.Confirmed || u.MustChange {
-		q := url.Values{"return": {linkPagePath}}
+		// Tried again already (or same-origin): the sign-in needn't.
+		q := url.Values{"return": {linkPagePath}, againParam: {"1"}}
 		http.Redirect(w, r, signinPagePath+"?"+q.Encode(), http.StatusSeeOther)
 		return
 	}

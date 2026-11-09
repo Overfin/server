@@ -9,6 +9,11 @@
 const page = document.body.dataset;
 const $ = (id) => document.getElementById(id);
 
+// Opened from another site, the login cookie (SameSite=Strict) didn't
+// come: the same page again, from here, brings it, with the fragment (a
+// screen's code) kept.
+if (page.mode === 'again') location.replace($('again').getAttribute('href') + location.hash);
+
 async function post(path, data) {
   const res = await fetch(path, {
     method: 'POST',

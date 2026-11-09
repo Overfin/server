@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/overfin/server/internal/cookie"
 	"github.com/overfin/server/internal/password"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/proof"
@@ -79,7 +80,9 @@ func (p Pages) challenge(w http.ResponseWriter, r *http.Request) {
 type page struct {
 	// Mode is "signin", "fresh", "change", "verify", "reset", "reset-new",
 	// "invite" (registering), "invited" (with an identity provider), "link"
-	// (signing a screen in) or "setup" (an account's first password).
+	// (signing a screen in), "setup" (an account's first password) or
+	// "again" (opening the same page again, to carry the login cookie: its
+	// Return is where).
 	Mode string
 	// Return is where the person goes once signed in.
 	Return string
@@ -93,6 +96,36 @@ type page struct {
 	Continue string
 	// Rules are what a new password must have.
 	Rules password.Rules
+}
+
+// againParam marks a page asked again by itself, to carry the login
+// cookie (againWithCookie).
+const againParam = "again"
+
+// againWithCookie answers a page opened from elsewhere without the login
+// cookie with a page that opens it again, from here. The cookie is
+// SameSite=Strict: a link from another site (a QR code scanned, a chat, an
+// app) doesn't carry it, so someone signed in would look signed out. Asked
+// again from the page itself, the same address (the fragment kept, with
+// its code) carries it. Only once: the second time is marked, so it never
+// loops; and a request from this site itself, with no cookie, has none to
+// carry.
+func againWithCookie(w http.ResponseWriter, r *http.Request, st *store.Store, logger *slog.Logger) bool {
+	if _, err := cookie.Get(r, LoginCookie); err == nil {
+		return false
+	}
+	// Only when the browser says it came from elsewhere ("cross-site"), or
+	// from outside any page ("none": an app, a scanned code; some browsers
+	// treat those as cross-site for cookies). A browser that says nothing
+	// is left as it was.
+	from := r.Header.Get("Sec-Fetch-Site")
+	if r.URL.Query().Get(againParam) != "" || (from != "cross-site" && from != "none") {
+		return false
+	}
+	q := r.URL.Query()
+	q.Set(againParam, "1")
+	renderPage(w, r, st, logger, page{Mode: "again", Return: r.URL.Path + "?" + q.Encode()})
+	return true
 }
 
 // renderPage shows one of the pages, in the visitor's language and the

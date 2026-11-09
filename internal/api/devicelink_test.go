@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -43,7 +44,7 @@ func TestDeviceCode(t *testing.T) {
 
 	// Someone signed out is sent to sign in, coming back to /link.
 	stranger := newBrowser(srv)
-	if res, _ := openPage(t, stranger, srv, "/link"); res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/signin?return=%2Flink" {
+	if res, _ := openPage(t, stranger, srv, "/link"); res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/signin?again=1&return=%2Flink" {
 		t.Errorf("/link signed out: %d %s", res.StatusCode, res.Header.Get("Location"))
 	}
 	if c, _ := signinPost(t, stranger, srv, "/api/v1/device/confirm", map[string]any{"code": code}); c != 401 {
@@ -195,5 +196,76 @@ func TestDeviceCodeOwnerOnly(t *testing.T) {
 	}
 	if c, _ := signinPost(t, b, srv, "/api/v1/device/confirm", map[string]any{"code": code}); c != 204 {
 		t.Errorf("the owner confirming: %d", c)
+	}
+}
+
+// Opened from another site (a scanned code), the Strict login cookie
+// doesn't come: the page opens itself again, the fragment kept, and that
+// time it's there. Signed out, the second time goes to the sign-in, which
+// doesn't ask again; it never loops.
+func TestLinkPageAgainWithCookie(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{managed: true, store: &st, site: true})
+	ctx := context.Background()
+	ann, _ := st.CreateUser(ctx, "ann@example.org", false)
+	hash, _ := password.Hash("a long password 1")
+	st.SetPassword(ctx, ann.Subject, hash)
+	stranger := newBrowser(srv)
+	open := func(path, from string) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest("GET", srv.URL+path, nil)
+		req.Header.Set("Accept", "text/html")
+		if from != "" {
+			req.Header.Set("Sec-Fetch-Site", from)
+		}
+		res, err := stranger.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	body := func(res *http.Response) string {
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		return string(b)
+	}
+	for _, from := range []string{"cross-site", "none"} {
+		res := open("/link", from)
+		if b := body(res); res.StatusCode != 200 || !strings.Contains(b, `data-mode="again"`) || !strings.Contains(b, `href="/link?again=1"`) {
+			t.Errorf("%s, no cookie: %d %s", from, res.StatusCode, b)
+		}
+	}
+	// The second time, still signed out: the sign-in, marked, which then
+	// shows its form.
+	res := open("/link?again=1", "same-origin")
+	body(res)
+	if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/signin?again=1&return=%2Flink" {
+		t.Errorf("signed out, again: %d %s", res.StatusCode, res.Header.Get("Location"))
+	}
+	res = open("/signin?again=1&return=%2Flink", "cross-site")
+	if b := body(res); res.StatusCode != 200 || !strings.Contains(b, `id="signin"`) {
+		t.Errorf("the sign-in, marked: %d", res.StatusCode)
+	}
+	// From this site itself, or a browser that says nothing: as before.
+	for _, from := range []string{"same-origin", ""} {
+		res := open("/link", from)
+		body(res)
+		if res.StatusCode != http.StatusSeeOther {
+			t.Errorf("%q: %d", from, res.StatusCode)
+		}
+	}
+	// Signed in, the cookie there: the page itself, at once.
+	b := newBrowser(srv)
+	if c, out := signinPost(t, b, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "ann@example.org", "password": "a long password 1"})); c != 200 {
+		t.Fatalf("signing in: %d %v", c, out)
+	}
+	req, _ := http.NewRequest("GET", srv.URL+"/link", nil)
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	res, err := b.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := body(res); res.StatusCode != 200 || !strings.Contains(got, `id="link"`) {
+		t.Errorf("signed in: %d %s", res.StatusCode, got)
 	}
 }
