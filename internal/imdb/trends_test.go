@@ -100,3 +100,16 @@ func TestRank(t *testing.T) {
 		t.Errorf("a new day, made again: %+v (%s)", r, k.rankedDay)
 	}
 }
+
+// Nothing gained enough: no list, not an empty one in TMDB's place.
+func TestRankNothingGained(t *testing.T) {
+	const basics = "tconst\ttitleType\tprimaryTitle\toriginalTitle\tisAdult\tstartYear\tendYear\truntimeMinutes\tgenres\n" +
+		"tt0000010\tmovie\tA film\tA film\t0\t1999\t\\N\t120\tDrama\n"
+	d, _ := build(t, basics, "tconst\tparentTconst\tseasonNumber\tepisodeNumber\n", "tconst\taverageRating\tnumVotes\n")
+	dir := t.TempDir()
+	votesOn(t, dir, "2026-11-01", map[string]int{"tt0000010": 1000})
+	votesOn(t, dir, "2026-11-02", map[string]int{"tt0000010": 1000})
+	if r, ok, err := Rank(dir, d, false); ok || err != nil {
+		t.Errorf("same votes two days running: %+v, %v, %v", r, ok, err)
+	}
+}

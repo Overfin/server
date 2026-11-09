@@ -147,16 +147,20 @@ type titleFinder interface {
 // again: TMDB adds titles, and IDs to them.
 const noneFoundAgain = 30 * 24 * time.Hour
 
+// findFailures is how many titles in a row TMDB may fail on before a list
+// of IMDb's votes gives up for this pass.
+const findFailures = 5
+
 // readIMDb keeps a list made of IMDb's votes (imdbIDs, the first first):
 // each title's TMDB ID, known (store.IMDbTMDB) or found on TMDB now, its
 // data kept, until the list holds as many as TMDB's would (Depth pages).
 func (l *Lists) readIMDb(ctx context.Context, f titleFinder, list, kind string, imdbIDs []string) error {
 	var ids []string
 	seen := map[string]bool{}
-	found := 0
+	found, failed, failing := 0, 0, 0
 	defer func() {
-		if found > 0 {
-			l.Logger.Info("catalog: titles of IMDb's lists found on TMDB", "list", list, "kind", kind, "titles", found)
+		if found > 0 || failed > 0 {
+			l.Logger.Info("catalog: titles of IMDb's lists found on TMDB", "list", list, "kind", kind, "titles", found, "failed", failed)
 		}
 	}()
 	for _, id := range imdbIDs {
@@ -174,7 +178,14 @@ func (l *Lists) readIMDb(ctx context.Context, f titleFinder, list, kind string, 
 			case errors.Is(err, tmdb.ErrNotFound):
 				tmdbID = ""
 			case err != nil:
-				return err
+				// One title TMDB fails on is left for the next pass, and
+				// doesn't cost the lists after it; several in a row, TMDB
+				// is down: the list stays as it is.
+				if failing++; failing >= findFailures || ctx.Err() != nil {
+					return err
+				}
+				failed++
+				continue
 			default:
 				st := StoreTitle(t)
 				if err := l.Store.PutTitles(ctx, []store.Title{st}, at); err != nil {
@@ -183,6 +194,7 @@ func (l *Lists) readIMDb(ctx context.Context, f titleFinder, list, kind string, 
 				tmdbID = st.TMDB
 				found++
 			}
+			failing = 0
 			if err := l.Store.PutFound(ctx, kind, id, tmdbID, at); err != nil {
 				return err
 			}
@@ -196,6 +208,10 @@ func (l *Lists) readIMDb(ctx context.Context, f titleFinder, list, kind string, 
 			seen[tmdbID] = true
 			ids = append(ids, tmdbID)
 		}
+	}
+	// None of them known or found: the list stays as it is.
+	if len(ids) == 0 {
+		return nil
 	}
 	return l.Store.SetList(ctx, list, kind, ids)
 }

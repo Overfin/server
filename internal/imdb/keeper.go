@@ -115,16 +115,18 @@ func (k *Keeper) Lists(list string) (Ranked, bool) {
 	if !fast && list != "popular" {
 		return Ranked{}, false
 	}
-	d := k.Data()
-	if d == nil {
-		return Ranked{}, false
-	}
 	days, err := VoteDays(k.Dir)
 	if err != nil || len(days) < 2 {
 		return Ranked{}, false
 	}
+	// The data taken under the lock: swap closes the old under it, so a
+	// ranking never reads a closed file.
 	k.ranking.Lock()
 	defer k.ranking.Unlock()
+	d := k.Data()
+	if d == nil {
+		return Ranked{}, false
+	}
 	if k.rankedDay != days[len(days)-1] {
 		k.ranked, k.rankedDay = map[string]Ranked{}, days[len(days)-1]
 	}
@@ -241,9 +243,17 @@ func (k *Keeper) refresh(ctx context.Context, path string) (int, error) {
 			return 0, err
 		}
 	}
-	// The day's votes first: they're kept whatever comes of the rest.
-	if _, err := WriteVotes(k.Dir, local[2], k.clock()); err != nil {
+	// The day's votes first: they're kept whatever comes of the rest, unless
+	// they're too few to be IMDb's whole list (half of what the titles need:
+	// fewer titles are rated than exist): a day like that would rank nothing,
+	// or count all of a title's votes as gained.
+	votes, err := WriteVotes(k.Dir, local[2], k.clock())
+	if err != nil {
 		return 0, err
+	}
+	if votes < k.least/2 {
+		os.Remove(filepath.Join(k.Dir, votesPrefix+k.clock().UTC().Format(time.DateOnly)))
+		return 0, fmt.Errorf("imdb: only %d ratings in IMDb's datasets", votes)
 	}
 	tmp := path + ".new"
 	n, err := BuildFiles(tmp, local[0], local[1], local[2], k.clock())
@@ -346,9 +356,13 @@ func (k *Keeper) swap(d *Data) {
 	old := k.data
 	k.data = d
 	k.mu.Unlock()
+	k.ranking.Lock()
+	defer k.ranking.Unlock()
 	if old != nil {
 		old.Close()
 	}
+	// Rankings made with the old data knew fewer titles.
+	k.ranked, k.rankedDay = nil, ""
 }
 
 func (k *Keeper) close() { k.swap(nil) }

@@ -111,6 +111,11 @@ func Rank(dir string, d *Data, fast bool) (r Ranked, ok bool, err error) {
 			r.Series = append(r.Series, t.ID)
 		}
 	}
+	// Nothing gained enough (the same votes two days running, or a latest
+	// day nearly empty): no list, rather than an empty one in TMDB's place.
+	if len(r.Movies) == 0 && len(r.Series) == 0 {
+		return Ranked{}, false, nil
+	}
 	return r, true, nil
 }
 
