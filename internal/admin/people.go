@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -198,33 +197,6 @@ func (p *Panel) cancelSetupLink(w http.ResponseWriter, r *http.Request, _ *sessi
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// newPassword checks a password against the rules and hashes it,
-// answering what it lacks.
-func (p *Panel) newPassword(w http.ResponseWriter, r *http.Request, pw string) (string, bool) {
-	rules, err := p.Store.PasswordRules(r.Context())
-	if err != nil {
-		p.fail(w, "reading the password rules", err)
-		return "", false
-	}
-	switch rules.Lacks(pw) {
-	case "length":
-		invalid(w, fmt.Sprintf("The password needs at least %d characters.", rules.MinLength))
-		return "", false
-	case "digit":
-		invalid(w, "The password needs a digit.")
-		return "", false
-	case "special":
-		invalid(w, "The password needs a special character.")
-		return "", false
-	}
-	hash, err := password.Hash(pw)
-	if err != nil {
-		p.fail(w, "hashing a password", err)
-		return "", false
-	}
-	return hash, true
 }
 
 // changePerson makes someone an admin or not. Admins can't take it from
