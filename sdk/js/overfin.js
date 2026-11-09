@@ -768,6 +768,8 @@ export function decodePGS(bytes) {
         if (size < 11) bad();
         // Width, height, rate, number, state (0x80: a new epoch), palette
         // update, palette, then each picture shown.
+        const screenW = u16(s), screenH = u16(s + 2);
+        if (!screenW || !screenH || screenW > PGS_MAX_SIDE || screenH > PGS_MAX_SIDE) bad();
         if (b[s + 7] & 0x80) { palettes = new Map(); objects = new Map(); }
         const show = { ms, width: u16(s), height: u16(s + 2), palette: b[s + 9], forced: false, refs: [] };
         let o = s + 11;

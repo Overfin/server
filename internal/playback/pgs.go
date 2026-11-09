@@ -13,7 +13,7 @@ import (
 // The limits of a PGS track Overfin serves.
 const (
 	MaxPGS        = 64 << 20 // bytes, a whole track
-	maxPGSSide    = 4096     // a picture's width or height, as rule 10
+	maxPGSSide    = 4096     // a picture's or the screen's width or height, as rule 10
 	maxPGSObjects = 20_000   // pictures in a track
 )
 
@@ -59,6 +59,10 @@ func CheckPGS(raw []byte) error {
 			// Width, height, rate, number, state, palette update, palette,
 			// then each object shown: 8 bytes, 16 when cropped.
 			if len(seg) < 11 {
+				return ErrPGS
+			}
+			// The screen the player makes a canvas of.
+			if w, h := int(binary.BigEndian.Uint16(seg)), int(binary.BigEndian.Uint16(seg[2:])); w == 0 || h == 0 || w > maxPGSSide || h > maxPGSSide {
 				return ErrPGS
 			}
 			o := 11
