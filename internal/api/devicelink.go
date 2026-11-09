@@ -93,12 +93,10 @@ func (m *Managed) deviceStart(w http.ResponseWriter, r *http.Request) {
 		m.refuse(w, r, problem.RateLimited, "tooManyTries")
 		return
 	}
-	// The pages send where they return to with every call.
-	var body struct {
-		Return string `json:"return"`
-	}
-	if !decode(r, &body) {
-		m.refuse(w, r, problem.InvalidRequest, "")
+	// A form anyone can send: with its check against scripts, as the others
+	// (rule 66), as each code is a row.
+	req, ok := m.read(w, r)
+	if !ok || !m.checked(w, r, req) {
 		return
 	}
 	code, secret := newDeviceCode(), randomToken()
@@ -154,7 +152,10 @@ func (m *Managed) deviceCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	cookie.Clear(w, r, DeviceCookie)
 	u, err := m.Store.UserBySubject(ctx, subject)
-	if err != nil || u.Disabled || !u.Confirmed {
+	// One who must choose a new password can't confirm a code, but may have
+	// been told to since: that choice takes no old password, so a login
+	// from here could make it.
+	if err != nil || u.Disabled || !u.Confirmed || u.MustChange {
 		m.refuse(w, r, problem.NotFound, "codeExpired")
 		return
 	}

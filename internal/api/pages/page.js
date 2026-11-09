@@ -114,7 +114,7 @@ function run(form, action) {
 // go leaves for next; back on /link, with the code the address brought
 // (in its fragment, kept through signing in).
 function go(next) {
-  location.assign(next.startsWith('/link') ? next + location.hash : next);
+  location.assign(next.includes('link') ? next + location.hash : next);
 }
 
 // checked sends a form anyone can send, with its check solved.
@@ -211,7 +211,7 @@ async function showCode() {
   clearInterval(asking);
   $('error').textContent = '';
   try {
-    const got = await post('/api/v1/device/start', {});
+    const got = await checked('/api/v1/device/start', {});
     $('device-address').textContent = got.address;
     $('device-code').textContent = got.code;
     const qr = $('device-qr');
@@ -220,20 +220,27 @@ async function showCode() {
     $('device-start').hidden = true;
     $('device-again').hidden = true;
     $('device').hidden = false;
-    const until = Date.now() + got.expiresIn * 1000;
     asking = setInterval(async () => {
       try {
-        if (Date.now() > until) throw new Error('');
-        const answer = await post('/api/v1/device/check', {});
+        const res = await fetch('/api/v1/device/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ return: page.return }),
+        });
+        const answer = await res.json();
         if (answer.next) {
           clearInterval(asking);
           go(answer.next);
+        } else if (res.status === 404) {
+          // The code is over; anything else (the network, too many asks)
+          // passes, and it asks again.
+          clearInterval(asking);
+          $('device-status').textContent = answer.detail || page.failed;
+          $('device-again').hidden = false;
+          $('device-again').focus();
         }
-      } catch (err) {
-        clearInterval(asking);
-        $('device-status').textContent = err.message;
-        $('device-again').hidden = false;
-        $('device-again').focus();
+      } catch {
+        // The network: next time.
       }
     }, 3000);
   } catch (err) {
