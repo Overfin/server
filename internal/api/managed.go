@@ -294,6 +294,9 @@ func (m *Managed) stepUp(w http.ResponseWriter, r *http.Request) {
 // them (?fresh=1) or to choose a new password first; or, from an email's
 // link, confirms an address (#verify=…, read by the page).
 func (m *Managed) signinPage(w http.ResponseWriter, r *http.Request) {
+	if againWithCookie(w, r, m.Store, m.Logger) {
+		return
+	}
 	q := r.URL.Query()
 	p := page{Mode: "signin", Return: safeReturn(q.Get("return")), Mail: m.canMail()}
 	_, u := m.current(r)

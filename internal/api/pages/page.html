@@ -21,7 +21,10 @@
     {{- else}}<span class="name">{{.Name}}</span>{{end -}}
   </div>
 
-  {{if eq .P.Mode "signin"}}
+  {{if eq .P.Mode "again"}}
+  <p class="muted"><a id="again" href="{{.P.Return}}">{{.T.continue}}</a></p>
+
+  {{else if eq .P.Mode "signin"}}
   <h1>{{.T.title}}</h1>
   <form id="signin" novalidate>
     <label>{{.T.email}}<input id="email" type="email" autocomplete="username" required autofocus></label>
