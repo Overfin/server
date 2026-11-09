@@ -454,6 +454,10 @@ test('a malformed PGS track or picture throws', async () => {
   }
   const [cue] = decodePGS(new Uint8Array(displaySet(0, [0, 0x84, 1])));
   assert.throws(() => pgsPixels(cue.pictures[0]), 'a line too long');
+  // A huge screen: a canvas of a gigabyte.
+  const huge = displaySet(0, null);
+  huge[13] = 0x40; huge[14] = 0; huge[15] = 0x40; huge[16] = 0;
+  assert.throws(() => decodePGS(new Uint8Array(huge)), 'a huge screen');
 });
 
 // Real tracks read and draw, when there are some to try (PGS_SAMPLES).

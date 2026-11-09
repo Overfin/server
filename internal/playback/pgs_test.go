@@ -57,6 +57,8 @@ func TestCheckPGS(t *testing.T) {
 		"cut short":        ok[:len(ok)-3],
 		"not PGS":          append([]byte("PX"), ok[2:]...),
 		"unknown segment":  append(ok, segment(0x42, nil)...),
+		"a huge screen":    append(segment(pgsPresentation, []byte{0x40, 0, 0x40, 0, 16, 0, 0, 0x80, 0, 0, 0}), segment(pgsEnd, nil)...),
+		"no screen":        append(segment(pgsPresentation, []byte{0, 0, 0, 0, 16, 0, 0, 0x80, 0, 0, 0}), segment(pgsEnd, nil)...),
 		"a line too long":  track(object(3, 2, []byte{0, 0x84, 1})),
 		"too many lines":   track(object(3, 1, []byte{1, 0, 0, 1, 0, 0, 1, 0, 0})),
 		"a run cut":        track(object(3, 2, []byte{0, 0x83})),
