@@ -98,6 +98,15 @@ func movie(i int) map[string]any {
 }
 
 func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// A file played as it is: a first part, then it flows until the reader
+	// goes away, as a film would.
+	if strings.HasSuffix(r.URL.Path, "/stream") {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Write(make([]byte, 64*1024))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+		return
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	authz := r.Header.Get("Authorization")

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"regexp"
@@ -84,7 +85,7 @@ func (s Stream) serve(w http.ResponseWriter, r *http.Request) {
 	dec := st.Decision
 	switch {
 	case name == "file" && dec.Protocol == "file":
-		s.proxy(w, r, *a, dec.Upstream, true, "")
+		s.proxy(w, r, st, *a, dec.Upstream, true, "")
 	case name == "master.m3u8" && dec.Protocol == "hls":
 		s.playlist(w, r, st, *a, dec.Upstream, playback.RewriteMaster)
 	case strings.HasSuffix(name, ".m3u8"):
@@ -109,7 +110,7 @@ func (s Stream) serve(w http.ResponseWriter, r *http.Request) {
 		case strings.HasSuffix(name, ".mp3"):
 			contentType = "audio/mpeg"
 		}
-		s.proxy(w, r, *a, up, false, contentType)
+		s.proxy(w, r, st, *a, up, false, contentType)
 	}
 }
 
@@ -139,7 +140,7 @@ func (s Stream) playlist(w http.ResponseWriter, r *http.Request, st *playback.St
 // proxy streams bytes from upstream without buffering. Only the headers
 // streaming needs are passed on (rule 12); for direct play the client's
 // Range header is forwarded so seeking works.
-func (s Stream) proxy(w http.ResponseWriter, r *http.Request, a jellyfin.Auth, up playback.Upstream,
+func (s Stream) proxy(w http.ResponseWriter, r *http.Request, st *playback.Stream, a jellyfin.Auth, up playback.Upstream,
 	allowRange bool, forceType string) {
 
 	rangeHeader := ""
@@ -152,8 +153,20 @@ func (s Stream) proxy(w http.ResponseWriter, r *http.Request, a jellyfin.Auth, u
 			rangeHeader = rh
 		}
 	}
+	// A playback that ends takes its response along: stopped by an admin,
+	// taken over or idle, a file already flowing mustn't go on, past the
+	// limits (rules 30 and 32).
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	go func() {
+		select {
+		case <-st.Over():
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 	l := s.Playback.Library
-	res, err := l.Jellyfin.Open(r.Context(), a, up.Path, up.Query, rangeHeader)
+	res, err := l.Jellyfin.Open(ctx, a, up.Path, up.Query, rangeHeader)
 	if err != nil {
 		l.upstreamError(w, err)
 		return
@@ -173,8 +186,8 @@ func (s Stream) proxy(w http.ResponseWriter, r *http.Request, a jellyfin.Auth, u
 	}
 	w.WriteHeader(res.StatusCode)
 	// io.Copy streams in small chunks: memory stays flat however long the
-	// film. If the client goes away, the request context ends the upstream
-	// read too.
+	// film. If the client goes away, or the playback ends, the context ends
+	// the upstream read too.
 	_, _ = io.Copy(w, res.Body)
 }
 
