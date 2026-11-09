@@ -310,3 +310,36 @@ func TestTastes(t *testing.T) {
 		t.Errorf("said films and comedies, watches drama series: %v", m.Titles)
 	}
 }
+
+// What an admin sees counts what people did with a title only when two
+// accounts or more did it: one person's favorite, watchlist or viewing
+// can't be read from a score (rule 40). Two profiles of one account are
+// one account.
+func TestSharedNeedsTwoAccounts(t *testing.T) {
+	f := facts(3, film("1"), film("2"), film("3"))
+	f.Profiles["p1b"] = store.ValuationProfile{AccountID: "a1", Active: true}
+	f.Favorites = []store.ProfileTitle{{ProfileID: "p1", Title: "movie/tmdb/1"}, {ProfileID: "p1b", Title: "movie/tmdb/1"},
+		{ProfileID: "p1", Title: "movie/tmdb/2"}, {ProfileID: "p2", Title: "movie/tmdb/2"}}
+	f.Interests = []store.ProfileTitle{{ProfileID: "p3", Title: "movie/tmdb/3"}}
+	watched(f, "p2", "movie/tmdb/3", 1, 0)
+	m := Measure(f, now)
+	if parts(t, m, "movie/tmdb/1")[Favorites] == 0 || parts(t, m, "movie/tmdb/3")[Watchlist] == 0 {
+		t.Fatal("measured without the marks")
+	}
+	s := m.Shared()
+	if p := parts(t, s, "movie/tmdb/1"); p[Favorites] != 0 {
+		t.Errorf("one account's two profiles: %v", p)
+	}
+	if p := parts(t, s, "movie/tmdb/2"); p[Favorites] != parts(t, m, "movie/tmdb/2")[Favorites] || p[Favorites] == 0 {
+		t.Errorf("two accounts' favorite: %v", p)
+	}
+	if p := parts(t, s, "movie/tmdb/3"); p[Watchlist] != 0 || p[WatchTime] != 0 || p[Audience] != 0 {
+		t.Errorf("one account's watchlist and viewing: %v", p)
+	}
+	if parts(t, m, "movie/tmdb/1")[Favorites] == 0 {
+		t.Error("Shared changed what was measured")
+	}
+	if a, b := s.Scored(map[string]int{Favorites: 10}), m.Scored(map[string]int{Favorites: 10}); a[0].Key != "movie/tmdb/2" || b[0].Score == a[len(a)-1].Score {
+		t.Errorf("scores: shared %v, measured %v", a, b)
+	}
+}

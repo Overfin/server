@@ -292,7 +292,8 @@ func (p *Panel) valuationPreview(w http.ResponseWriter, r *http.Request, _ *sess
 		p.fail(w, "measuring the titles", err)
 		return
 	}
-	scored := m.Scored(weights)
+	// Shared: a preview can't tell who did what with a title (rule 40).
+	scored := m.Shared().Scored(weights)
 	var library []valuation.Value
 	for _, v := range scored {
 		if v.InLibrary {
