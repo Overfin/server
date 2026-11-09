@@ -733,6 +733,9 @@ func purgeExpired(ctx context.Context, db *store.Store, logger *slog.Logger) {
 		if err := db.DeleteOldEmailLinks(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("purging old links failed", "err", err)
 		}
+		if err := db.DeleteExpiredDeviceCodes(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("purging expired device codes failed", "err", err)
+		}
 		// Those who registered and never confirmed their address go.
 		if n, err := db.DeleteUnconfirmed(ctx, time.Now().Add(-api.UnconfirmedFor)); err != nil && ctx.Err() == nil {
 			logger.Error("removing unconfirmed registrations failed", "err", err)

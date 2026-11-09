@@ -102,13 +102,19 @@ function run(form, action) {
     $('error').textContent = '';
     try {
       const answer = await action();
-      if (answer?.next) location.assign(answer.next);
+      if (answer?.next) go(answer.next);
     } catch (err) {
       $('error').textContent = err.message;
     } finally {
       for (const b of buttons) b.disabled = false;
     }
   });
+}
+
+// go leaves for next; back on /link, with the code the address brought
+// (in its fragment, kept through signing in).
+function go(next) {
+  location.assign(next.startsWith('/link') ? next + location.hash : next);
 }
 
 // checked sends a form anyone can send, with its check solved.
@@ -194,4 +200,75 @@ if (reset && $('reset-new')) {
   $('reset-new').hidden = false;
   $('new-password').focus();
   run($('reset-new'), () => post('/api/v1/reset/password', { link: reset, password: same('new-password', 'new-password2') }));
+}
+
+// ---- Signing a screen in by a code (rule 69) -------------------------------------
+
+// On the screen: a code and its QR code, then asking every few seconds
+// whether someone confirmed it.
+let asking;
+async function showCode() {
+  clearInterval(asking);
+  $('error').textContent = '';
+  try {
+    const got = await post('/api/v1/device/start', {});
+    $('device-address').textContent = got.address;
+    $('device-code').textContent = got.code;
+    const qr = $('device-qr');
+    qr.setAttribute('viewBox', `0 0 ${got.qr.size} ${got.qr.size}`);
+    qr.firstElementChild.setAttribute('d', got.qr.path);
+    $('device-start').hidden = true;
+    $('device-again').hidden = true;
+    $('device').hidden = false;
+    const until = Date.now() + got.expiresIn * 1000;
+    asking = setInterval(async () => {
+      try {
+        if (Date.now() > until) throw new Error('');
+        const answer = await post('/api/v1/device/check', {});
+        if (answer.next) {
+          clearInterval(asking);
+          go(answer.next);
+        }
+      } catch (err) {
+        clearInterval(asking);
+        $('device-status').textContent = err.message;
+        $('device-again').hidden = false;
+        $('device-again').focus();
+      }
+    }, 3000);
+  } catch (err) {
+    $('error').textContent = err.message;
+  }
+}
+$('device-start')?.addEventListener('click', showCode);
+$('device-again')?.addEventListener('click', showCode);
+
+// Elsewhere, signed in: the code, typed or brought by the QR code's
+// address, then what confirming does, then confirming.
+let code = '';
+run($('link'), async () => {
+  code = $('code').value;
+  const screen = await post('/api/v1/device/look', { code });
+  const when = screen.minutes < 1 ? page.now : page.ago.replace('{n}', screen.minutes);
+  $('link-ask').textContent = page.ask.replace('{device}', screen.device || '?')
+    .replace('{when}', when).replace('{email}', page.email);
+  $('link').hidden = true;
+  $('link-confirm').hidden = false;
+  $('link-confirm').querySelector('button').focus();
+  return null;
+});
+run($('link-confirm'), async () => {
+  await post('/api/v1/device/confirm', { code });
+  done(page.linked);
+  return null;
+});
+$('link-cancel')?.addEventListener('click', () => {
+  $('link-confirm').hidden = true;
+  $('link').hidden = false;
+  $('code').focus();
+});
+if ($('link') && /^#[A-Za-z-]{8,9}$/.test(location.hash)) {
+  $('code').value = location.hash.slice(1);
+  history.replaceState(null, '', location.pathname);
+  $('link').requestSubmit();
 }
