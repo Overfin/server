@@ -149,13 +149,17 @@ comes from the internet, and media files can be written by anyone.
     other way round, and a site whose address is `https://` always gets
     HTTPS cookies. The one cookie that isn't `SameSite=Strict` is the
     invitation's with an identity provider: it's `Lax`, so it survives the
-    trip there, and holds only the invitation.
+    trip there, and holds only the invitation. A Strict cookie doesn't come
+    with a link from elsewhere (a QR code scanned, a chat): `/signin` and
+    `/link`, asked that way without the login cookie, answer a page that
+    opens the same address again from the site (marked `again=1`, its
+    fragment kept), which brings it; only once, so it never loops.
 18. Only same-origin requests are accepted (`Sec-Fetch-Site: same-origin`, or
     `none` for plain navigation); cross-site and same-site requests are
     rejected, so sibling subdomains can't act for the user. The only
     exceptions are top-level GET navigations to the pages people arrive at
-    from elsewhere (sign-in, an invitation, a forgotten password, an
-    identity provider's return), which act on nothing but their own code
+    from elsewhere (sign-in, an invitation, a forgotten password, a setup
+    link, a screen's code, an identity provider's return), which act on nothing but their own code
     and query, the gate a reverse proxy asks (rule 13), and the site's own
     pages and files (any GET or HEAD outside `/api/`, which change nothing;
     rule 64). A request
@@ -302,8 +306,10 @@ comes from the internet, and media files can be written by anyone.
     what the fetcher said of each title and when each account last had its
     turn; with
     Overfin's own sign-in, each person's email, a hash of their password
-    (PBKDF2-SHA256, 600,000 rounds) and keyed hashes of the links it emails
-    them, deleted with their account (and, until a registration is
+    (PBKDF2-SHA256, 600,000 rounds), keyed hashes of the links it emails
+    them or an admin copies for them (setup links), whether their account
+    waits for setup and whether their address still needs confirming,
+    deleted with their account (and, until a registration is
     confirmed, its invitation, sealed); what each account said it likes,
     when the operator asks (seen by its owner profile, deleted with the
     account); and what each profile did with each title (where it
@@ -570,9 +576,22 @@ comes from the internet, and media files can be written by anyone.
     Only keyed hashes of them are kept. Passwords are 10 to 256 characters
     and, by default, need a digit and a special character; the operator can
     ask for a longer minimum (up to 64) or drop the digit or the special
-    character, never fewer than 10 characters. Someone an admin adds is asked, by default, for
-    a new password at their first sign-in, and gets nothing before choosing
-    one. A new password ends the person's other logins.
+    character, never fewer than 10 characters. Admins never type anyone's
+    password: someone an admin adds gets a random one nobody knows (256
+    bits, hashed at once, never shown, logged or sent) and a setup link to
+    choose their own, which an admin also gives someone who forgot theirs.
+    A setup link carries 256 random bits, works once within 7 days, voids
+    the one before, can be cancelled, keeps its token in the fragment, and
+    is kept only as a keyed hash; its page shows the address it's for
+    without using it up, and looking is limited per client address.
+    Emailed by Overfin, opening it confirms the address. Copied by the
+    admin, it doesn't: with an email server, the operator chooses whether
+    the person signs in at once and is asked to confirm their address by
+    an emailed link, or confirms it first; without one, there's nothing to
+    confirm. Someone an admin added is never removed as an unconfirmed
+    registration. Accounts made earlier with a password an admin typed
+    keep it until they choose their own at their first sign-in. A new
+    password ends the person's other logins.
 
 ### Overfin's Jellyfin
 67. Overfin's Jellyfin is dedicated to it, and Overfin never changes
@@ -664,7 +683,7 @@ travels in clear: keep that to a LAN or a test.
 
 With Overfin's own sign-in or login, the simplest is for the proxy to
 forward everything to Overfin, which serves the site, its own pages
-(`/signin`, `/invite/…`, `/reset`) and the API; a proxy serving the site's
+(`/signin`, `/invite/…`, `/reset`, `/setup`, `/link`) and the API; a proxy serving the site's
 pages itself can protect them by asking `/api/v1/gate` first (forward auth
 to Overfin). With forward-auth from another provider instead, every route
 to Overfin except the public ones (rule 37) must pass
