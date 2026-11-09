@@ -16,6 +16,13 @@ button = "Choose a password"
 expires = "This link is valid for an hour."
 why = "You got this email because someone asked for a new password for this address on {site}. If it wasn't you, ignore it: your password doesn't change."
 
+[setup]
+subject = "Choose your password"
+intro = "An account was made for you on {site}. To sign in, choose your password:"
+button = "Choose my password"
+expires = "This link is valid for 7 days, and only once."
+why = "You got this email because an admin of {site} made an account with this address. If you didn't expect it, ignore it: nobody can sign in without this link."
+
 [exists]
 subject = "You already have an account"
 intro = "Someone tried to create an account on {site} with this address, but you already have one. Sign in with your password; forgot it? The sign-in page lets you choose a new one."

@@ -46,7 +46,7 @@ var overfinLight []byte
 var overfinDark []byte
 
 // Names are the emails Overfin sends.
-var Names = []string{"verify", "reset", "exists", "invite", "test", "joined", "expiring", "expired", "ending"}
+var Names = []string{"verify", "reset", "setup", "exists", "invite", "test", "joined", "expiring", "expired", "ending"}
 
 // texts are the built-in sentences, by language ("en", "fr") then key
 // ("poweredBy", "signin.subject"…).

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/overfin/server/internal/password"
 )
@@ -38,5 +39,28 @@ func (s *Store) SetPasswordRules(ctx context.Context, r password.Rules) error {
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO meta (name, value) VALUES ('password-rules', ?)
 		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, raw)
+	return err
+}
+
+// CopiedSetup is what happens to someone who chose their password from a
+// setup link the admin copied, when Overfin can send emails (their
+// address isn't proven by it): "reminder" (the default), they sign in and
+// are asked to confirm their address; "hold", they confirm it first.
+func (s *Store) CopiedSetup(ctx context.Context) (string, error) {
+	var v string
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'copied-setup'`).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && v != "hold") {
+		return "reminder", nil
+	}
+	return v, err
+}
+
+// SetCopiedSetup changes CopiedSetup: "reminder" or "hold".
+func (s *Store) SetCopiedSetup(ctx context.Context, v string) error {
+	if v != "reminder" && v != "hold" {
+		return fmt.Errorf("store: copied setup: %q", v)
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO meta (name, value) VALUES ('copied-setup', ?)
+		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, []byte(v))
 	return err
 }

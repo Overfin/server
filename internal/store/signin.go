@@ -31,18 +31,24 @@ type User struct {
 	// Registered is true for someone who registered themselves with an
 	// invitation, false for someone an admin added.
 	Registered bool
+	// SetupPending: an admin made the account and nobody chose its
+	// password yet (it has a random one nobody knows). Unverified: they
+	// sign in, but their address isn't proven yet.
+	SetupPending bool
+	Unverified   bool
 }
 
 // ErrEmailTaken: another person has that email.
 var ErrEmailTaken = errors.New("store: email already used")
 
 const userColumns = `subject, email, coalesce(password_hash, ''), admin, disabled_at IS NOT NULL, created_at,
-	confirmed, must_change, registered`
+	confirmed, must_change, registered, setup_pending, unverified`
 
 func scanUser(sc interface{ Scan(...any) error }) (*User, error) {
 	var p User
 	var created int64
-	err := sc.Scan(&p.Subject, &p.Email, &p.PasswordHash, &p.Admin, &p.Disabled, &created, &p.Confirmed, &p.MustChange, &p.Registered)
+	err := sc.Scan(&p.Subject, &p.Email, &p.PasswordHash, &p.Admin, &p.Disabled, &created, &p.Confirmed, &p.MustChange, &p.Registered,
+		&p.SetupPending, &p.Unverified)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -236,9 +242,24 @@ func (s *Store) RegisterUser(ctx context.Context, email, passwordHash, inviteCod
 	return p, nil
 }
 
-// ConfirmUser marks a person's email confirmed.
+// ConfirmUser marks a person's email confirmed (proven, too).
 func (s *Store) ConfirmUser(ctx context.Context, subject string) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE users SET confirmed = 1 WHERE subject = ?`, subject)
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET confirmed = 1, unverified = 0 WHERE subject = ?`, subject)
+	return oneRow(res, err)
+}
+
+// SetupDone records how someone an admin made chose their password: no
+// longer waiting for setup; confirmed, unless held until their address is
+// (hold); unverified, when they may sign in before it's proven.
+func (s *Store) SetupDone(ctx context.Context, subject string, hold, unverified bool) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET setup_pending = 0, must_change = 0, confirmed = ?, unverified = ?
+		WHERE subject = ?`, boolInt(!hold), boolInt(unverified && !hold), subject)
+	return oneRow(res, err)
+}
+
+// SetSetupPending marks someone an admin made as waiting for setup.
+func (s *Store) SetSetupPending(ctx context.Context, subject string, pending bool) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET setup_pending = ? WHERE subject = ?`, boolInt(pending), subject)
 	return oneRow(res, err)
 }
 
@@ -269,9 +290,10 @@ func (s *Store) SetMustChange(ctx context.Context, subject string, must bool) er
 }
 
 // DeleteUnconfirmed removes the people who registered before a time and
-// never confirmed their email.
+// never confirmed their email. Someone an admin made stays, even held
+// until their address is confirmed: the admin removes them.
 func (s *Store) DeleteUnconfirmed(ctx context.Context, before time.Time) (int, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE confirmed = 0 AND created_at < ?`, before.Unix())
+	res, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE confirmed = 0 AND registered = 1 AND created_at < ?`, before.Unix())
 	if err != nil {
 		return 0, err
 	}
@@ -280,7 +302,10 @@ func (s *Store) DeleteUnconfirmed(ctx context.Context, before time.Time) (int, e
 }
 
 // EmailLink is a link sent by email: to confirm the address ("verify"),
-// or to choose a new password ("reset"). Only a keyed hash is kept.
+// or to choose a new password ("reset"); or a setup link, to choose the
+// first password of an account an admin made: copied by the admin
+// ("setup") or emailed by Overfin ("setup-sent"). Only a keyed hash is
+// kept.
 type EmailLink struct {
 	Subject  string
 	LinkHash []byte
@@ -327,6 +352,50 @@ func (s *Store) TakeEmailLink(ctx context.Context, purpose string, linkHash []by
 		return "", err
 	}
 	return subject, tx.Commit()
+}
+
+// SetupPurposes are a setup link's purposes: one person has one setup
+// link at most, whichever way it went.
+var SetupPurposes = []string{"setup", "setup-sent"}
+
+// AddSetupLink records a setup link; the person's earlier one, either
+// way, stops working.
+func (s *Store) AddSetupLink(ctx context.Context, l EmailLink) error {
+	if !slices.Contains(SetupPurposes, l.Purpose) {
+		return fmt.Errorf("store: %q isn't a setup link", l.Purpose)
+	}
+	if err := s.CancelSetupLink(ctx, l.Subject); err != nil {
+		return err
+	}
+	return s.AddEmailLink(ctx, l)
+}
+
+// CancelSetupLink stops a person's setup link working, if they have one.
+func (s *Store) CancelSetupLink(ctx context.Context, subject string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM email_links WHERE subject = ? AND purpose IN ('setup', 'setup-sent')`, subject)
+	return err
+}
+
+// SetupLinkExpires says when a person's setup link stops working; zero
+// when they have none.
+func (s *Store) SetupLinkExpires(ctx context.Context, subject string) (time.Time, error) {
+	var at sql.NullInt64
+	err := s.read.QueryRowContext(ctx, `SELECT max(expires_at) FROM email_links WHERE subject = ? AND purpose IN ('setup', 'setup-sent')
+		AND expires_at > ?`, subject, s.now().Unix()).Scan(&at)
+	if err != nil || !at.Valid {
+		return time.Time{}, err
+	}
+	return time.Unix(at.Int64, 0).UTC(), nil
+}
+
+// PeekEmailLink says whose a link of a purpose is, without using it up.
+func (s *Store) PeekEmailLink(ctx context.Context, purpose string, linkHash []byte) (subject string, err error) {
+	err = s.read.QueryRowContext(ctx, `SELECT subject FROM email_links WHERE link_hash = ? AND purpose = ? AND expires_at > ?`,
+		linkHash, purpose, s.now().Unix()).Scan(&subject)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return subject, err
 }
 
 // DeleteOldEmailLinks removes the links past their expiry.
