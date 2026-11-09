@@ -271,9 +271,10 @@ comes from the internet, and media files can be written by anyone.
     errors. Upstream errors are mapped to generic responses; internal details stay in
     the server log.
 36. Logs never contain tokens, cookies, passwords or PINs.
-37. Public endpoints (`/api/v1/health`, the sign-in, invitation and
-    forgotten-password pages with their script, style, logo and check
-    against scripts, the sign-in, registration and forgotten-password calls,
+37. Public endpoints (`/api/v1/health`, the sign-in, invitation,
+    forgotten-password and setup pages with their script, style, logo and
+    check against scripts, the sign-in, registration, forgotten-password and
+    setup calls,
     the login's start, the identity provider's return and the login's
     finish, the gate, logout, `theme.css`, the operator's branding,
     `/api/v1/info`, and signing a screen in with a code: the page to

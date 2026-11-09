@@ -19,11 +19,20 @@ type registrationJSON struct {
 	Rules password.Rules `json:"rules"`
 	// Mail says whether emails with links can be sent.
 	Mail bool `json:"mail"`
+	// CopiedSetup is what happens to someone who chose their password from
+	// a setup link the admin copied, when emails can be sent: "reminder",
+	// they sign in and are asked to confirm their address; "hold", they
+	// confirm it first.
+	CopiedSetup string `json:"copiedSetup"`
 }
 
 func (p *Panel) registrationState(r *http.Request) (registrationJSON, error) {
 	rules, err := p.Store.PasswordRules(r.Context())
-	return registrationJSON{Rules: rules, Mail: p.People.CanMail()}, err
+	if err != nil {
+		return registrationJSON{}, err
+	}
+	copied, err := p.Store.CopiedSetup(r.Context())
+	return registrationJSON{Rules: rules, Mail: p.People.CanMail(), CopiedSetup: copied}, err
 }
 
 func (p *Panel) registration(w http.ResponseWriter, r *http.Request, _ *session) {
@@ -35,11 +44,12 @@ func (p *Panel) registration(w http.ResponseWriter, r *http.Request, _ *session)
 	writeJSON(w, http.StatusOK, out)
 }
 
-// setRegistration changes the password rules: they apply to every new
-// password from then on.
+// setRegistration changes the password rules (they apply to every new
+// password from then on) and, when given, what a copied setup link does.
 func (p *Panel) setRegistration(w http.ResponseWriter, r *http.Request, s *session) {
 	var req struct {
-		Rules password.Rules `json:"rules"`
+		Rules       password.Rules `json:"rules"`
+		CopiedSetup *string        `json:"copiedSetup"`
 	}
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
@@ -51,9 +61,20 @@ func (p *Panel) setRegistration(w http.ResponseWriter, r *http.Request, s *sessi
 		invalid(w, "The minimum length must be from 10 to 64 characters.")
 		return
 	}
+	if req.CopiedSetup != nil && *req.CopiedSetup != "reminder" && *req.CopiedSetup != "hold" {
+		invalid(w, "A copied setup link: reminder or hold.")
+		return
+	}
 	if err := p.Store.SetPasswordRules(r.Context(), req.Rules); err != nil {
 		p.fail(w, "saving the password rules", err)
 		return
+	}
+	if req.CopiedSetup != nil {
+		if err := p.Store.SetCopiedSetup(r.Context(), *req.CopiedSetup); err != nil {
+			p.fail(w, "saving what a copied setup link does", err)
+			return
+		}
+		p.Logger.Info("copied setup links changed in the control panel", "to", *req.CopiedSetup, "by", s.logID)
 	}
 	p.Logger.Info("password rules changed in the control panel", "min", req.Rules.MinLength,
 		"digit", req.Rules.Digit, "special", req.Rules.Special, "by", s.logID)

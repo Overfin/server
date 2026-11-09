@@ -75,6 +75,10 @@ var signinTexts = map[string]map[string]string{
 		"linkWarning":     "Only confirm for a screen in front of you: whoever uses it will be in your account.",
 		"linkCancel":      "Cancel",
 		"linkDone":        "The screen is signed in.",
+		"setupTitle":      "Choose your password",
+		"setupIntro":      "An account was made for you with this address:",
+		"setupNotYours":   "Not your address? Don't go on: ask the administrator who made the account.",
+		"setupHeld":       "Your password is saved. To finish, confirm your address: an email with a link is on its way to {email}.",
 	},
 	"fr": {
 		"title":           "Connexion",
@@ -146,5 +150,9 @@ var signinTexts = map[string]map[string]string{
 		"linkWarning":     "Ne confirmez que pour un écran devant vous : qui l’utilisera sera dans votre compte.",
 		"linkCancel":      "Annuler",
 		"linkDone":        "L’écran est connecté.",
+		"setupTitle":      "Choisissez votre mot de passe",
+		"setupIntro":      "Un compte a été créé pour vous avec cette adresse :",
+		"setupNotYours":   "Ce n’est pas votre adresse ? N’allez pas plus loin : demandez à l’administrateur qui a créé le compte.",
+		"setupHeld":       "Votre mot de passe est enregistré. Pour terminer, confirmez votre adresse : un courriel avec un lien est en route vers {email}.",
 	},
 }

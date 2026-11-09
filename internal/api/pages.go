@@ -28,6 +28,7 @@ const (
 	invitePage     = "/invite/"
 	signinPagePath = "/signin"
 	resetPagePath  = "/reset"
+	setupPagePath  = "/setup"
 )
 
 //go:embed pages
@@ -77,7 +78,8 @@ func (p Pages) challenge(w http.ResponseWriter, r *http.Request) {
 // page is one of the pages to show: which (Mode), and its own values.
 type page struct {
 	// Mode is "signin", "fresh", "change", "verify", "reset", "reset-new",
-	// "invite" (registering) or "invited" (with an identity provider).
+	// "invite" (registering), "invited" (with an identity provider), "link"
+	// (signing a screen in) or "setup" (an account's first password).
 	Mode string
 	// Return is where the person goes once signed in.
 	Return string

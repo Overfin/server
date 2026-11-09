@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<title>{{if eq .P.Mode "invite" "invited"}}{{.InviteTitle}}{{else if eq .P.Mode "fresh"}}{{.T.freshTitle}}{{else if eq .P.Mode "change" "reset-new"}}{{.T.changeTitle}}{{else if eq .P.Mode "reset"}}{{.T.resetTitle}}{{else if eq .P.Mode "link"}}{{.T.linkTitle}}{{else}}{{.T.title}}{{end}} · {{.Name}}</title>
+<title>{{if eq .P.Mode "invite" "invited"}}{{.InviteTitle}}{{else if eq .P.Mode "fresh"}}{{.T.freshTitle}}{{else if eq .P.Mode "change" "reset-new"}}{{.T.changeTitle}}{{else if eq .P.Mode "reset"}}{{.T.resetTitle}}{{else if eq .P.Mode "link"}}{{.T.linkTitle}}{{else if eq .P.Mode "setup"}}{{.T.setupTitle}}{{else}}{{.T.title}}{{end}} · {{.Name}}</title>
 <link rel="icon" href="{{.Icon}}">
 <link rel="stylesheet" href="/api/v1/theme.css">
 <link rel="stylesheet" href="{{.CSS}}">
@@ -12,7 +12,7 @@
 </head>
 <body data-mode="{{.P.Mode}}" data-return="{{.P.Return}}" data-failed="{{.T.failed}}" data-checking="{{.T.checking}}"
       data-differ="{{.T.passwordsDiffer}}" data-registered="{{.T.registered}}" data-reset-sent="{{.T.resetSent}}" data-resent="{{.T.resent}}"
-      data-ask="{{.T.linkAsk}}" data-now="{{.T.linkNow}}" data-ago="{{.T.linkAgo}}" data-email="{{.P.Email}}" data-linked="{{.T.linkDone}}">
+      data-ask="{{.T.linkAsk}}" data-now="{{.T.linkNow}}" data-ago="{{.T.linkAgo}}" data-email="{{.P.Email}}" data-linked="{{.T.linkDone}}" data-held="{{.T.setupHeld}}">
 <main>
   <div class="brand">
     {{- if not .Custom}}{{.Banner}}
@@ -124,6 +124,19 @@
     <button class="primary" type="submit">{{.T.save}}</button>
   </form>
   <p class="links"><a href="/signin">{{.T.backToSignin}}</a></p>
+
+  {{else if eq .P.Mode "setup"}}
+  <h1>{{.T.setupTitle}}</h1>
+  <form id="setup" hidden novalidate>
+    <p class="muted">{{.T.setupIntro}}</p>
+    <p><strong id="setup-email"></strong></p>
+    <p class="hint muted">{{.T.setupNotYours}}</p>
+    <label>{{.T.password}}<input id="new-password" type="password" autocomplete="new-password" required></label>
+    <label>{{.T.passwordAgain}}<input id="new-password2" type="password" autocomplete="new-password" required></label>
+    <p class="hint muted">{{.Rules}}</p>
+    <button class="primary" type="submit">{{.T.save}}</button>
+  </form>
+  <p id="done" hidden></p>
   {{end}}
 
   <p id="error" class="error" role="alert"></p>

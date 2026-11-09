@@ -202,6 +202,29 @@ if (reset && $('reset-new')) {
   run($('reset-new'), () => post('/api/v1/reset/password', { link: reset, password: same('new-password', 'new-password2') }));
 }
 
+// A setup link, for an account an admin made: the address it's for
+// (looking uses nothing up), then its first password. Held until the
+// address is confirmed, the page says an email is on its way.
+const setup = hash.get('setup');
+if (setup && $('setup')) {
+  history.replaceState(null, '', location.pathname + location.search);
+  post('/api/v1/setup/look', { link: setup }).then((got) => {
+    $('setup-email').textContent = got.email;
+    $('setup').hidden = false;
+    $('new-password').focus();
+  }, (err) => {
+    $('error').textContent = err.message;
+  });
+  run($('setup'), async () => {
+    const answer = await post('/api/v1/setup/password', { link: setup, password: same('new-password', 'new-password2') });
+    if (answer.held) {
+      done(page.held.replace('{email}', answer.email));
+      return null;
+    }
+    return answer;
+  });
+}
+
 // ---- Signing a screen in by a code (rule 69) -------------------------------------
 
 // On the screen: a code and its QR code, then asking every few seconds

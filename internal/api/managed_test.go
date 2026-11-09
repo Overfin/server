@@ -206,7 +206,7 @@ func TestManagedRegistration(t *testing.T) {
 		t.Fatalf("emails: %+v", mails)
 	}
 	token := linkIn(mails[0].body, "verify")
-	if token == "" || !strings.Contains(mails[0].body, "https://media.example.org/signin#verify=") {
+	if token == "" || !strings.Contains(mails[0].body, "https://media.example.org/signin?confirm=1#verify=") {
 		t.Fatalf("the link: %s", mails[0].body)
 	}
 	// Before confirming, the right password only says so.

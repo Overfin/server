@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -24,9 +25,20 @@ type sent struct {
 	links []string
 	// released are the people whose invitation's use was given back.
 	released []string
+	// setups are the setup links made, "subject send".
+	setups []string
+	noMail bool
 }
 
-func (l *sent) CanMail() bool { return true }
+func (l *sent) CanMail() bool { return !l.noMail }
+
+func (l *sent) SetupLink(_ context.Context, subject string, send bool) (string, time.Time, error) {
+	l.setups = append(l.setups, fmt.Sprint(subject, " ", send))
+	if send {
+		return "", time.Now().Add(7 * 24 * time.Hour), nil
+	}
+	return "https://media.example.org/setup#setup=x", time.Now().Add(7 * 24 * time.Hour), nil
+}
 
 func (l *sent) ReleaseInvitation(_ context.Context, subject string) error {
 	l.released = append(l.released, subject)
@@ -70,38 +82,78 @@ func TestPeople(t *testing.T) {
 		return rec.Code, out
 	}
 
-	const pw = "first password 1"
-	if code, out := do("POST", "/admin/api/people", map[string]any{"email": "Bob <bob@example.org>", "password": pw}); code != 400 {
+	if code, out := do("POST", "/admin/api/people", map[string]any{"email": "Bob <bob@example.org>"}); code != 400 {
 		t.Errorf("not a plain email: %d %v", code, out)
 	}
-	// The password rules: 10 characters, a digit, a special one.
-	for bad, want := range map[string]string{"short 1": "10 characters", "no digits here": "digit", "nospecial123": "special"} {
-		if code, out := do("POST", "/admin/api/people", map[string]any{"email": "bob@example.org", "password": bad}); code != 400 ||
-			!strings.Contains(out["detail"].(string), want) {
-			t.Errorf("%q: %d %v", bad, code, out)
-		}
+	// Nobody types a password any more.
+	if code, _ := do("POST", "/admin/api/people", map[string]any{"email": "bob@example.org", "password": "first password 1"}); code != 400 {
+		t.Errorf("a typed password: %d", code)
 	}
-	code, bob := do("POST", "/admin/api/people", map[string]any{"email": "bob@example.org", "password": pw, "mustChange": true})
-	if code != 200 || bob["admin"] != false || bob["mustChange"] != true {
+	code, bob := do("POST", "/admin/api/people", map[string]any{"email": "bob@example.org"})
+	if code != 200 || bob["admin"] != false || bob["waitingSetup"] != true || bob["hasPassword"] != false || bob["mustChange"] != false {
 		t.Fatalf("adding Bob: %d %v", code, bob)
 	}
-	if u, _ := db.UserByEmail(context.Background(), "bob@example.org"); u.PasswordHash == "" || !u.MustChange || !u.Confirmed {
+	// A random password nobody knows, hashed.
+	if u, _ := db.UserByEmail(context.Background(), "bob@example.org"); u.PasswordHash == "" || !u.SetupPending || !u.Confirmed || u.MustChange {
 		t.Errorf("Bob: %+v", u)
 	}
-	if code, _ := do("POST", "/admin/api/people", map[string]any{"email": "BOB@example.org", "password": pw}); code != 409 {
+	if code, _ := do("POST", "/admin/api/people", map[string]any{"email": "BOB@example.org"}); code != 409 {
 		t.Errorf("the same email twice: %d", code)
 	}
 	id := bob["id"].(string)
 	if code, out := do("PATCH", "/admin/api/people/"+id, map[string]any{"admin": true}); code != 200 || out["admin"] != true {
 		t.Errorf("making Bob an admin: %d %v", code, out)
 	}
-	// A new password from an admin ends Bob's logins.
-	db.CreateLogin(context.Background(), id, nil, "", time.Hour)
-	if code, out := do("PUT", "/admin/api/people/"+id+"/password", map[string]any{"password": "second password 2", "mustChange": false}); code != 200 {
-		t.Errorf("Bob's new password: %d %v", code, out)
+	// The setup link: copied, or emailed; not emailed without email.
+	if code, out := do("POST", "/admin/api/people/"+id+"/setup-link", map[string]any{}); code != 200 || out["link"] != "https://media.example.org/setup#setup=x" ||
+		out["sent"] != false || out["expires"] == nil {
+		t.Errorf("copying the link: %d %v", code, out)
 	}
-	if u, _ := db.UserByEmail(context.Background(), "bob@example.org"); u.MustChange {
-		t.Error("Bob must still change it")
+	if code, out := do("POST", "/admin/api/people/"+id+"/setup-link", map[string]any{"send": true}); code != 200 || out["link"] != nil || out["sent"] != true {
+		t.Errorf("emailing the link: %d %v", code, out)
+	}
+	made.noMail = true
+	if code, _ := do("POST", "/admin/api/people/"+id+"/setup-link", map[string]any{"send": true}); code != 400 {
+		t.Errorf("emailing without email: %d", code)
+	}
+	made.noMail = false
+	if len(made.setups) != 2 || made.setups[0] != id+" false" || made.setups[1] != id+" true" {
+		t.Errorf("setup links: %v", made.setups)
+	}
+	if code, _ := do("POST", "/admin/api/people/nobody/setup-link", map[string]any{}); code != 404 {
+		t.Errorf("nobody's link: %d", code)
+	}
+	// The list says when the link ends; cancelling it ends it.
+	db.AddSetupLink(context.Background(), store.EmailLink{Subject: id, LinkHash: []byte("L"), Purpose: "setup", Expires: time.Now().Add(time.Hour)})
+	_, list := do("GET", "/admin/api/people", nil)
+	var listed map[string]any
+	for _, it := range list["items"].([]any) {
+		if it.(map[string]any)["id"] == id {
+			listed = it.(map[string]any)
+		}
+	}
+	if listed["setupExpires"] == nil || listed["waitingSetup"] != true {
+		t.Errorf("Bob listed: %v", listed)
+	}
+	if code, _ := do("DELETE", "/admin/api/people/"+id+"/setup-link", nil); code != 204 {
+		t.Errorf("cancelling: %d", code)
+	}
+	if at, _ := db.SetupLinkExpires(context.Background(), id); !at.IsZero() {
+		t.Errorf("still a link: %v", at)
+	}
+	// The old way to set a password is gone.
+	if code, _ := do("PUT", "/admin/api/people/"+id+"/password", map[string]any{"password": "second password 2"}); code != 404 && code != 405 {
+		t.Errorf("an admin typing a password: %d", code)
+	}
+	// What a copied link does: reminder by default, or hold.
+	if code, out := do("GET", "/admin/api/registration", nil); code != 200 || out["copiedSetup"] != "reminder" {
+		t.Errorf("default: %d %v", code, out)
+	}
+	if code, _ := do("PUT", "/admin/api/registration", map[string]any{"rules": map[string]any{"minLength": 10, "digit": true, "special": true}, "copiedSetup": "other"}); code != 400 {
+		t.Errorf("an unknown choice: %d", code)
+	}
+	if code, out := do("PUT", "/admin/api/registration", map[string]any{"rules": map[string]any{"minLength": 10, "digit": true, "special": true}, "copiedSetup": "hold"}); code != 200 || out["copiedSetup"] != "hold" {
+		t.Errorf("hold: %d %v", code, out)
 	}
 	// Invitations by email, and the rules, on the registration page.
 	if code, out := do("POST", "/admin/api/registration/send", map[string]any{"email": "ann@example.org", "link": "https://media.example.org/invite/abc"}); code != 200 ||
@@ -141,7 +193,7 @@ func TestPeople(t *testing.T) {
 	if a, _ := db.AccountByID(context.Background(), mine.ID); a == nil || a.Disabled {
 		t.Errorf("my account: %+v", a)
 	}
-	code, list := do("GET", "/admin/api/people", nil)
+	code, list = do("GET", "/admin/api/people", nil)
 	if items := list["items"].([]any); code != 200 || len(items) != 2 || items[1].(map[string]any)["you"] != true {
 		t.Errorf("people: %d %v", code, list)
 	}
