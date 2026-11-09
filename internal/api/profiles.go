@@ -80,9 +80,19 @@ func (p Profiles) list(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []profileJSON{}
 	for _, pr := range all {
-		out = append(out, toProfileJSON(pr))
+		out = append(out, shownProfile(c, pr))
 	}
 	writeOK(w, map[string]any{"items": out})
+}
+
+// shownProfile is a profile as the caller may see it: another's limits and
+// preferences are for the owner only (rule 50); choosing who's watching takes
+// no more than its name, its kind, and whether it has a PIN.
+func shownProfile(c *Caller, pr *store.Profile) profileJSON {
+	if c.IsOwner() || (c.Profile != nil && c.Profile.ID == pr.ID) {
+		return toProfileJSON(pr)
+	}
+	return profileJSON{ID: pr.ID, Name: pr.Name, Kind: pr.Kind, Owner: pr.Owner, HasPIN: pr.HasPIN}
 }
 
 func (p Profiles) get(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +105,7 @@ func (p Profiles) get(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	writeOK(w, toProfileJSON(pr))
+	writeOK(w, shownProfile(c, pr))
 }
 
 type profileRequest struct {
