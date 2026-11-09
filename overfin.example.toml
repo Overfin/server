@@ -2,9 +2,10 @@
 #
 # Overfin runs without any file: everything has a default, and the setup page
 # in the browser asks for the rest. Copy to /etc/overfin/overfin.toml only to
-# change them. Changes apply on restart, or live on SIGHUP (docker kill -s
+# change them (with compose, mount it there: see the install guide). Changes apply on restart, or live on SIGHUP (docker kill -s
 # HUP overfin) except listen, storage.path, jellyfin.url, [https], [admin],
-# site.url, [connector] and the secret key. Secrets never go in this file;
+# site.url, [connector] and the secret key: changing one of those refuses the
+# reload, and what's running stays. Secrets never go in this file;
 # set them as environment variables (or NAME_FILE pointing to a file, for
 # Docker secrets):
 #

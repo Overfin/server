@@ -3,7 +3,9 @@
 ```sh
 go test ./...
 node --test sdk/js/overfin.test.js
-go run ./cmd/overfin -config overfin.toml
+mkdir -p dev && printf '[storage]\npath = "dev/overfin.db"\n' > dev/overfin.toml
+# keep this key: the database can't be read without it
+OVERFIN_SECRET_KEY=$(openssl rand -hex 32) go run ./cmd/overfin -config dev/overfin.toml
 ```
 
 Your own build in the compose stack: `docker build -t overfin:dev .` in the

@@ -31,10 +31,10 @@ paths:
         whether a library has it; each needs the key scope of the same name.
         Never anything per person.
 
-        Served where the control panel is (its own listener, or `/apps/` on
-        the site when the panel is at `/admin/` there), and like the panel
-        only to private addresses unless the operator opened it on the site;
-        elsewhere a plain-text 404. Errors are plain JSON (`AppError`), not
+        Served where the control panel is: its own listener, private
+        addresses only; or `/apps/` on the site when the panel is at `/admin/`
+        there, private addresses only with `admin.private`. Elsewhere a
+        plain-text 404. Errors are plain JSON (`AppError`), not
         problem details.
       tags: [apps]
       security:

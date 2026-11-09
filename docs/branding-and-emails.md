@@ -8,7 +8,7 @@ a banner 1200); a banner for light pages is optional, for the sign-in page on
 light screens (the site's header is dark on every page). With your brand, the
 site and emails say "Powered by Overfin", discreetly. The control panel
 stays Overfin's. The same page's **Home page** card chooses whether the
-site's home page also shows titles no library has, to be requested (off by
+site's home page also shows titles no library has, to be wished for (off by
 default).
 
 **Emails** are Overfin's own, in each person's language (confirming an
@@ -31,8 +31,9 @@ Overfin's are the place to start, at the release you run:
   templates' languages are yours to cover.
 - Templates are Go templates, with `.Site`, `.Lang`, `.Subject`, `.Link`,
   `.Name` and `.Date` (a notice's account, and when its access ends),
-  `.Custom` (your brand is on), `.Banner` (`cid:banner`), `.Overfin`
-  (Overfin's small logo, `cid:overfin`, with your brand on), `.Light` and
+  `.Custom` (your brand is on), `.Banner` and `.Overfin` (the sizes, `.Width`
+  and `.Height`, of the pictures `cid:banner` and `cid:overfin`; `.Banner` is
+  empty for a brand without a banner), `.Light` and
   `.Dark` (the theme's colors, such as `index .Light "accent"`), and `t`
   for Overfin's sentences in the reader's language (`{{t "reset.intro"}}`).
 - They're read for every email: no restart. One that fails is reported in

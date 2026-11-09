@@ -4,8 +4,8 @@ Run it on the machine that has your films and series, or can reach them through 
 Overfin needs a **Jellyfin of its own** (Jellyfin 12): the compose file
 runs one, which Overfin sets up by itself on its first start, and manages
 from then on. A Jellyfin you already use stays yours and untouched: see
-[Your own Jellyfin](#your-own-jellyfin). Each release comes as a signed
-image for x86 and ARM (`ghcr.io/overfin/overfin`).
+[Your own Jellyfin](#your-own-jellyfin). Each release comes as an image
+with a signed attestation of how it was built, for x86 and ARM (`ghcr.io/overfin/overfin`).
 
 **1. Start it:**
 
@@ -58,7 +58,8 @@ That's all. People sign in with their email and a password. In the
 control panel: add people (People: an email and a first password, which
 they change at their first sign-in), connect an email server (Server,
 Email), make invitations (People, Registration: links anyone can register
-with, confirming their email), choose your GPU (Server, Transcoding; the
+with, confirming their email; they need the site's address too: `OVERFIN_DOMAIN`,
+or `site.url` in the file below), choose your GPU (Server, Transcoding; the
 compose file says how to give Jellyfin one). Without an email server,
 there are no invitations or forgotten-password emails: you add people
 yourself.
@@ -69,7 +70,7 @@ Overfin keeps its secret key in `overfin-secrets` and everything else in
 
 **Jellyfin itself** is closed: nobody signs in to it, and the compose file
 publishes no port for it. To look inside, open access in the control panel
-(Server, Jellyfin), and uncomment its `ports:` line, which publishes it on
+(Server, Jellyfin), and uncomment its `ports:` lines, which publishes it on
 the machine itself only (reach it through an SSH tunnel), or on your LAN
 address. Changes made there may break Overfin, or be undone by it.
 
@@ -115,7 +116,9 @@ away.
 everything to Overfin on port 8080. Tell Overfin the site's address and the
 proxy's (with an `https://` address, Overfin's cookies are HTTPS ones, and
 it tells browsers to come back over HTTPS only), in `/etc/overfin/overfin.toml`
-([overfin.example.toml](../overfin.example.toml) has every setting):
+([overfin.example.toml](../overfin.example.toml) has every setting; with
+compose, add `- ./overfin.toml:/etc/overfin/overfin.toml:ro` to Overfin's
+`volumes`):
 
 ```toml
 [site]
@@ -137,6 +140,7 @@ nginx (inside your `server { listen 443 ssl; ... }` block):
 
 ```nginx
 location / {
+    client_max_body_size 10m;         # the panel's pictures
     proxy_pass http://overfin:8080;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $remote_addr;
@@ -158,8 +162,9 @@ labels:
 **Your own client instead?** Set `[site] serve` to its folder: Overfin
 serves it the same way, with the Content-Security-Policy you give it
 (`csp`), and `spa_fallback = true` for single-page apps. With
-`serve = "none"`, Overfin only answers `/api/`, and your proxy serves the
-site, asking Overfin's gate first (`forward_auth` to `/api/v1/gate`) to keep
+`serve = "none"`, Overfin only answers `/api/` (and, with its own sign-in,
+`/admin/`, `/apps/` and its sign-in pages, which your proxy passes on too),
+and your proxy serves the site, asking Overfin's gate first (`forward_auth` to `/api/v1/gate`) to keep
 its pages private.
 
 

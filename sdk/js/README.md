@@ -11,8 +11,9 @@ carries the behavior every client needs, so your site only handles screens:
   with the browser's own error instead: never an empty answer.
 - **Paging:** `pages()` follows cursors for you, and keeps a shuffle's seed.
 - **Playback:** `play()` tells Overfin what the browser can play, attaches the
-  stream (with [hls.js](https://github.com/video-dev/hls.js) where the browser
-  lacks native HLS) and subtitles, reports progress, restarts a stream the
+  stream (with [hls.js](https://github.com/video-dev/hls.js), which your page
+  provides, as a global `Hls` or the `Hls` option, where the browser lacks
+  native HLS) and subtitles, reports progress, restarts a stream the
   server freed at the same place without a word, switches audio and
   subtitles, and reports a takeover by another device.
 - **Picture subtitles (PGS):** `decodePGS()` reads a track Overfin serves,
