@@ -53,11 +53,14 @@ func TestDeviceProfile(t *testing.T) {
 	for _, cp := range hdr.CodecProfiles {
 		// Dolby Vision profile 8 plays as its HDR10 base; profile 5 ("DOVI")
 		// and anything the client names otherwise don't count.
+		if cp.Codec == "h264" {
+			if cp.Conditions[0].Property != "VideoProfile" || cp.Conditions[1].Property != "VideoBitDepth" || cp.Conditions[1].Value != "8" {
+				t.Errorf("H.264's conditions: %+v", cp.Conditions)
+			}
+			continue
+		}
 		if cp.Codec != "" && cp.Conditions[0].Value != "SDR|DOVIWithSDR|HDR10|HDR10Plus|DOVIWithHDR10|DOVIWithHDR10Plus|DOVIWithEL|DOVIWithELHDR10Plus" {
 			t.Errorf("%s with an HDR10 screen: %q", cp.Codec, cp.Conditions[0].Value)
-		}
-		if cp.Codec == "h264" {
-			t.Error("H.264 got a range condition")
 		}
 	}
 

@@ -130,6 +130,18 @@ func DeviceProfile(c Capabilities, maxBitrate int) jellyfin.DeviceProfile {
 			})
 		}
 	}
+	// H.264 is all one name to the client's list, but browsers only decode
+	// its 8-bit 4:2:0 profiles: High 10 (common in anime releases) or 4:4:4,
+	// sent as is, fails. Those are converted.
+	if slices.Contains(video, "h264") {
+		p.CodecProfiles = append(p.CodecProfiles, jellyfin.CodecProfile{
+			Type: "Video", Codec: "h264",
+			Conditions: []jellyfin.ProfileCondition{
+				{Condition: "EqualsAny", Property: "VideoProfile", Value: "high|main|baseline|constrained baseline"},
+				{Condition: "LessThanEqual", Property: "VideoBitDepth", Value: "8"},
+			},
+		})
+	}
 	if c.MaxHeight >= 144 && c.MaxHeight <= 4320 {
 		p.CodecProfiles = append(p.CodecProfiles, jellyfin.CodecProfile{
 			Type: "Video",
