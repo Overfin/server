@@ -630,9 +630,11 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 	// playback is never touched. With a stream reserved for each profile,
 	// only the profile's own are ever replaced, never another profile's.
 	// When every transcode is taken, refused before anything stops.
+	// Unnamed by the client, from its browser; if that says nothing either,
+	// the one told says "another device" in their own language.
 	device := req.Device
 	if device == "" {
-		device = "another device"
+		device = deviceName(r.UserAgent())
 	}
 	lim := playback.Limits{MaxStreams: caller.Account.Template.MaxStreams, RefuseOverLimit: pb.RefuseOverLimit,
 		MaxTranscodes: pb.MaxTranscodes}
