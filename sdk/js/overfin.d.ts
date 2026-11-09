@@ -486,6 +486,10 @@ export class Overfin {
   logout(): Promise<{ logoutUrl?: string }>;
   /** With Overfin's own sign-in: the email, and whether a forgotten password can be reset by email. */
   signinInfo(): Promise<{ email: string; hasPassword: boolean; reset: boolean; rules: { minLength: number; digit: boolean; special: boolean } }>;
+  /** With Overfin's own sign-in: the email, and whether it still needs confirming. */
+  addressInfo(): Promise<{ email: string; unconfirmed: boolean }>;
+  /** Emails the link that confirms the address. */
+  confirmAddress(): Promise<{ sent: boolean }>;
   /** Whose brand to show: Overfin's (without `custom`), or the operator's own, with "Powered by" Overfin. No sign-in needed. */
   branding(): Promise<Branding>;
   setPassword(password: string): Promise<{ hasPassword: boolean }>;

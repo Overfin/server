@@ -152,6 +152,14 @@ export class Overfin {
    * owner's profile only.
    */
   signinInfo() { return this.request('GET', '/me/signin'); }
+  /**
+   * With Overfin's own sign-in: { email, unconfirmed }, unconfirmed telling
+   * whether the person's address still needs confirming (they chose their
+   * password from a link an admin copied). The account owner's profile only.
+   */
+  addressInfo() { return this.request('GET', '/me/address'); }
+  /** Emails the link that confirms the address; resolves with { sent }. */
+  confirmAddress() { return this.request('POST', '/me/address', {}); }
 
   /** Whose brand to show: Overfin's, or the operator's own. No sign-in needed. */
   branding() { return this.request('GET', '/branding'); }
