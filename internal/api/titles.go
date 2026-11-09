@@ -210,6 +210,7 @@ func (l Library) visibility(ctx context.Context, p *store.Profile, titles []*sto
 	shown := ""
 	releases := map[string]store.Release{}
 	rated := map[string]bool{}
+	tagFree := map[string]bool{}
 	left := map[string]bool{}
 	if len(bare) > 0 && !a.Limited() {
 		if shown, err = st.TitlesShown(ctx); err != nil {
@@ -229,6 +230,11 @@ func (l Library) visibility(ctx context.Context, p *store.Profile, titles []*sto
 		}
 		if a != nil && a.Ceiling != nil {
 			if rated, err = st.TitlesAllowed(ctx, *a.Ceiling, bare); err != nil {
+				return nil, nil, err
+			}
+		}
+		if a != nil && len(a.BlockedTags) > 0 {
+			if tagFree, err = st.TitlesTagFree(ctx, a.BlockedTags, bare); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -274,6 +280,10 @@ func (l Library) visibility(ctx context.Context, p *store.Profile, titles []*sto
 		}
 		// A kids profile: only what's rated within its limits.
 		if a != nil && a.Ceiling != nil && !rated[k] {
+			continue
+		}
+		// Tags hidden: only what's known to carry none of them (rule 28).
+		if a != nil && len(a.BlockedTags) > 0 && !tagFree[k] {
 			continue
 		}
 		out[i] = true

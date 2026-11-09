@@ -228,8 +228,12 @@ comes from the internet, and media files can be written by anyone.
     account template's) and the tags hidden from it, for any profile:
     Overfin applies them, not Jellyfin, and what it can't place in a
     library or a category, like every title no library has, is hidden from
-    a profile limited to some (so it can't wish for them either). A category
-    deleted counts for nothing: a profile limited to it alone sees nothing.
+    a profile limited to some (so it can't wish for them either). A title no
+    library has shows to a profile with tags hidden only when Overfin
+    already has its TMDB keywords (it fetched its details, asking TMDB
+    nothing more for it) and none of them is hidden; otherwise it's hidden,
+    and can't be wished for. A category deleted counts for nothing: a
+    profile limited to it alone sees nothing.
 29. Play queues aren't accepted yet; when they are, every entry is checked
     against the active profile, when the queue is set and again when it
     advances.
