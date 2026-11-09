@@ -516,7 +516,8 @@ func (c *Client) FindTitle(ctx context.Context, kind, imdbID string) (Title, err
 	if err != nil {
 		return Title{}, err
 	}
-	if len(results) == 0 {
+	// TMDB's lists leave out what it marks adult; finding by ID doesn't.
+	if len(results) == 0 || results[0].Adult {
 		return Title{}, ErrNotFound
 	}
 	// Named as TMDB's lists name their titles (fillTitles).

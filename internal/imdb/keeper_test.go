@@ -152,3 +152,19 @@ func TestKeeperRefusesTooFewTitles(t *testing.T) {
 		t.Errorf("7 titles taken: %v", err)
 	}
 }
+
+// Too few ratings: no day of votes is kept, which would rank nothing, or
+// count a title's whole votes as gained.
+func TestKeeperRefusesTooFewRatings(t *testing.T) {
+	srv := httptest.NewServer(&fakeIMDb{ratings: ratings})
+	defer srv.Close()
+	dir := t.TempDir()
+	k := NewKeeper(dir, func(context.Context) (bool, error) { return true, nil }, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	k.BaseURL, k.Client = srv.URL+"/", srv.Client()
+	if err := k.Once(context.Background()); err == nil {
+		t.Fatal("taken")
+	}
+	if days, err := VoteDays(dir); err != nil || len(days) != 0 {
+		t.Errorf("days kept: %v, %v", days, err)
+	}
+}

@@ -360,6 +360,7 @@ func (c *Client) getOnce(ctx context.Context, path string, q url.Values, out any
 // rawTitle is a title as TMDB sends it, films and series alike.
 type rawTitle struct {
 	ID           int    `json:"id"`
+	Adult        bool   `json:"adult"`
 	MediaType    string `json:"media_type"`
 	Title        string `json:"title"` // films
 	Name         string `json:"name"`  // series
