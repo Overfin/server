@@ -8,7 +8,7 @@
 
   let { t, m }: { t: MailTemplates; m: Mail | null } = $props();
 
-  const emailNames: Record<string, string> = { verify: 'Confirming an address', reset: 'A new password', exists: 'Already an account', invite: 'Invitation',
+  const emailNames: Record<string, string> = { verify: 'Confirming an address', reset: 'A new password', setup: 'A new account\'s password', exists: 'Already an account', invite: 'Invitation',
     test: 'Test', joined: 'Notice: a new account', expiring: 'Notice: access ends soon', expired: 'Notice: access ended',
     ending: 'To the person: their access ends soon' };
   const on = $derived(Boolean(m && m.host));

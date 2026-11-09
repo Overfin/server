@@ -12,6 +12,7 @@
   import AccountDetail from '../parts/people/AccountDetail.svelte';
   import PersonControls from '../parts/people/PersonControls.svelte';
   import AddPerson from '../parts/people/AddPerson.svelte';
+  import SetupLink from '../parts/people/SetupLink.svelte';
 
   $effect(() => {
     route.wide = true;
@@ -26,6 +27,8 @@
   let search = $state('');
   let filter = $state('');
   let adding = $state(false);
+  // Just added: their setup link's window opens next.
+  let justAdded = $state<Person | null>(null);
 
   async function load(id = selected) {
     try {
@@ -143,5 +146,8 @@
 {/if}
 
 {#if adding}
-  <AddPerson saved={() => load()} close={() => (adding = false)} />
+  <AddPerson saved={(p) => { adding = false; justAdded = p; load(); }} close={() => (adding = false)} />
+{/if}
+{#if justAdded}
+  <SetupLink person={justAdded} done={() => load()} close={() => (justAdded = null)} />
 {/if}

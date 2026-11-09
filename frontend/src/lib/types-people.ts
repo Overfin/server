@@ -41,11 +41,19 @@ export interface Person {
   disabled?: boolean;
   confirmed?: boolean;
   mustChange?: boolean;
+  /** waitingSetup: nobody chose their password yet; setupExpires, when
+   * their setup link ends; unverified: they sign in, address unproven. */
+  waitingSetup?: boolean;
+  setupExpires?: string;
+  unverified?: boolean;
+  registered?: boolean;
 }
 
 export interface Registration {
   rules: { minLength: number; digit: boolean; special: boolean };
   mail: boolean;
+  /** A copied setup link, emails on: 'reminder' or 'hold'. */
+  copiedSetup: 'reminder' | 'hold';
 }
 
 export interface PluginSetting {
