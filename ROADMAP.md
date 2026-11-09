@@ -935,11 +935,21 @@ nothing beyond what that needs.
 - **Native-app login.** Today's login works in browsers (and webview apps).
   Native apps, including third-party ones, need:
   - signing in through the system browser (OAuth with PKCE), and on TVs a
-    short code approved from a phone;
+    short code approved from a phone (done for a browser or a web view, with
+    Overfin's own sign-in, rule 69; with an identity provider, a TV goes
+    straight to the provider and never sees where a code would show: still
+    to design);
   - an Overfin-issued token sent in an `Authorization` header, revocable and
     listed among the account's devices, never a Jellyfin token;
   - a way through the reverse proxy for token requests, which Overfin then
     checks itself.
+- **TV apps.** The site is ready for them: arrows between items, the player
+  on a remote's keys, a light look and nothing read ahead on TVs, signing in
+  with a code. The apps themselves wait for a capable TV to test them on. A
+  web view around the site should do (as
+  [Overfin for Android](https://github.com/overfin/android) does on phones):
+  Android TV from that app; webOS and Tizen as apps of their own, since
+  webOS's browser, at least, keeps the remote's arrows for its cursor.
 - **More SDKs** beyond JavaScript (done: [sdk/js](sdk/js), hand-written,
   with TypeScript types), for native apps.
 - **Jellyfin 10.11 adapter**, so servers that haven't upgraded aren't left
