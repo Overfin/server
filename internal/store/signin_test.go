@@ -106,3 +106,92 @@ func TestRegistration(t *testing.T) {
 		t.Errorf("default rules: %+v", r)
 	}
 }
+
+// Setup links: one per person whichever way it went, looked at without
+// using it up, cancelled; setting up records how; someone an admin made
+// and held isn't removed with those who never confirmed.
+func TestSetupLinks(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	u, _ := s.CreateUser(ctx, "made@example.org", false)
+	if err := s.SetSetupPending(ctx, u.Subject, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.UserBySubject(ctx, u.Subject); !got.SetupPending || got.Unverified || !got.Confirmed {
+		t.Errorf("made: %+v", got)
+	}
+	week := time.Now().Add(7 * 24 * time.Hour)
+	if err := s.AddEmailLink(ctx, EmailLink{Subject: u.Subject, LinkHash: []byte("R"), Purpose: "reset", Expires: week}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddSetupLink(ctx, EmailLink{Subject: u.Subject, LinkHash: []byte("S1"), Purpose: "setup-sent", Expires: week}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddSetupLink(ctx, EmailLink{Subject: u.Subject, LinkHash: []byte("S2"), Purpose: "setup", Expires: week}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddSetupLink(ctx, EmailLink{Subject: u.Subject, LinkHash: []byte("X"), Purpose: "reset", Expires: week}); err == nil {
+		t.Error("a reset link taken for a setup link")
+	}
+	if _, err := s.PeekEmailLink(ctx, "setup-sent", []byte("S1")); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the emailed link after a copied one: %v", err)
+	}
+	if at, err := s.SetupLinkExpires(ctx, u.Subject); err != nil || at.Unix() != week.Unix() {
+		t.Errorf("expires: %v %v", at, err)
+	}
+	for i := 0; i < 2; i++ {
+		if sub, err := s.PeekEmailLink(ctx, "setup", []byte("S2")); err != nil || sub != u.Subject {
+			t.Errorf("look %d: %q %v", i, sub, err)
+		}
+	}
+	if err := s.CancelSetupLink(ctx, u.Subject); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TakeEmailLink(ctx, "setup", []byte("S2")); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a cancelled link: %v", err)
+	}
+	if at, _ := s.SetupLinkExpires(ctx, u.Subject); !at.IsZero() {
+		t.Errorf("expires after cancelling: %v", at)
+	}
+	if _, err := s.TakeEmailLink(ctx, "reset", []byte("R")); err != nil {
+		t.Errorf("the reset link went with the setup link: %v", err)
+	}
+	s.AddSetupLink(ctx, EmailLink{Subject: u.Subject, LinkHash: []byte("OLD"), Purpose: "setup", Expires: time.Now().Add(-time.Second)})
+	if _, err := s.PeekEmailLink(ctx, "setup", []byte("OLD")); !errors.Is(err, ErrNotFound) {
+		t.Errorf("an expired link: %v", err)
+	}
+
+	// Reminder: signs in, address not proven; confirming proves it.
+	if err := s.SetupDone(ctx, u.Subject, false, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.UserBySubject(ctx, u.Subject); got.SetupPending || !got.Unverified || !got.Confirmed || got.MustChange {
+		t.Errorf("reminder: %+v", got)
+	}
+	s.ConfirmUser(ctx, u.Subject)
+	if got, _ := s.UserBySubject(ctx, u.Subject); got.Unverified || !got.Confirmed {
+		t.Errorf("confirmed: %+v", got)
+	}
+	// Hold: not confirmed, and not removed as a registration never confirmed.
+	held, _ := s.CreateUser(ctx, "held@example.org", false)
+	s.SetupDone(ctx, held.Subject, true, true)
+	if got, _ := s.UserBySubject(ctx, held.Subject); got.Confirmed || got.Unverified {
+		t.Errorf("held: %+v", got)
+	}
+	if n, err := s.DeleteUnconfirmed(ctx, time.Now().Add(time.Hour)); err != nil || n != 0 {
+		t.Errorf("someone made, held: %d removed, %v", n, err)
+	}
+
+	if v, _ := s.CopiedSetup(ctx); v != "reminder" {
+		t.Errorf("default: %q", v)
+	}
+	if err := s.SetCopiedSetup(ctx, "hold"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := s.CopiedSetup(ctx); v != "hold" {
+		t.Errorf("hold: %q", v)
+	}
+	if err := s.SetCopiedSetup(ctx, "other"); err == nil {
+		t.Error("an unknown choice was kept")
+	}
+}

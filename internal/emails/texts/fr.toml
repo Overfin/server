@@ -16,6 +16,13 @@ button = "Choisir un mot de passe"
 expires = "Ce lien est valide pendant une heure."
 why = "Vous recevez ce courriel parce que quelqu’un a demandé un nouveau mot de passe pour cette adresse sur {site}. Si ce n’est pas vous, ignorez-le : votre mot de passe ne change pas."
 
+[setup]
+subject = "Choisissez votre mot de passe"
+intro = "Un compte a été créé pour vous sur {site}. Pour vous connecter, choisissez votre mot de passe :"
+button = "Choisir mon mot de passe"
+expires = "Ce lien est valide pendant 7 jours, une seule fois."
+why = "Vous recevez ce courriel parce qu’un administrateur de {site} a créé un compte avec cette adresse. Si vous ne l’attendiez pas, ignorez-le : personne ne peut se connecter sans ce lien."
+
 [exists]
 subject = "Vous avez déjà un compte"
 intro = "Quelqu’un a voulu créer un compte sur {site} avec cette adresse, mais vous en avez déjà un. Connectez-vous avec votre mot de passe ; oublié ? La page de connexion permet d’en choisir un nouveau."

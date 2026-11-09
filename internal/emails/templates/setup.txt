@@ -1,0 +1,11 @@
+{{define "subject"}}{{t "setup.subject"}}{{end}}
+{{define "content" -}}
+{{t "setup.intro"}}
+
+{{.Link}}
+{{- with t "setup.expires"}}
+
+{{.}}
+{{- end}}
+{{- end}}
+{{define "why"}}{{t "setup.why"}}{{end}}
