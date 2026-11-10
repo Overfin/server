@@ -711,36 +711,6 @@ func first(s []string) string {
 	return ""
 }
 
-// copyOf picks the copy of a title to play: the first one the profile may
-// see, by Jellyfin ID; "" when there's none (or it isn't a title that
-// plays).
-func (l Library) copyOf(ctx context.Context, p *store.Profile, id string) (string, error) {
-	ref, ok := titleRef(id)
-	if !ok || (ref.Kind != "movie" && ref.Kind != "episode" && ref.Kind != "item") {
-		return "", nil
-	}
-	st := l.Provisioner.Store
-	infos, err := st.TitleInfos(ctx, []string{ref.Key()}, today(), "")
-	t := infos[ref.Key()]
-	if err != nil || t == nil || len(t.Items) == 0 {
-		return "", err
-	}
-	a, err := l.access(ctx, p)
-	if err != nil || a == nil {
-		return first(t.Items), err
-	}
-	allowed, _, err := st.AllowedItems(ctx, *a, t.Items)
-	if err != nil {
-		return "", err
-	}
-	for _, item := range t.Items {
-		if allowed[item] {
-			return item, nil
-		}
-	}
-	return "", nil
-}
-
 // nextEpisode is the episode after ep that the profile may see: the next
 // ones of its season, else the first ones of the seasons after it
 // (specials only after a special); nil when there's none.

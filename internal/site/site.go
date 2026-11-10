@@ -35,6 +35,27 @@ type Handler struct {
 	// gzipped are the embedded text files, compressed once at start, for
 	// browsers that take gzip.
 	gzipped map[string][]byte
+	// MediaFrom, when set, lists the other sites the player may stream
+	// from (paired servers', rule 65): added to the policy's media-src and
+	// connect-src.
+	MediaFrom func() []string
+}
+
+// WithOrigins adds origins to a Content-Security-Policy's media-src and
+// connect-src, where it has them (the others fall back to default-src,
+// left as the operator wrote it).
+func WithOrigins(csp string, origins []string) string {
+	if len(origins) == 0 {
+		return csp
+	}
+	parts := strings.Split(csp, ";")
+	for i, p := range parts {
+		name, _, _ := strings.Cut(strings.TrimSpace(p), " ")
+		if name == "media-src" || name == "connect-src" {
+			parts[i] = strings.TrimRight(p, " ") + " " + strings.Join(origins, " ")
+		}
+	}
+	return strings.Join(parts, ";")
 }
 
 // compressible are the kinds of files worth compressing.
@@ -119,7 +140,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hd := w.Header()
-	hd.Set("Content-Security-Policy", h.csp)
+	csp := h.csp
+	if h.MediaFrom != nil {
+		csp = WithOrigins(csp, h.MediaFrom())
+	}
+	hd.Set("Content-Security-Policy", csp)
 	if _, ok := h.etags[name]; ok && immutable(name) {
 		hd.Set("Cache-Control", "private, max-age=31536000, immutable")
 	} else {

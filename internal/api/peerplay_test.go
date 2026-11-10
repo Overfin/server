@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -116,5 +117,68 @@ func TestPeerPlayback(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if got, _ := st.ContinueWatching(ctx, "peer:"+aOnB.ID, 0, 10); len(got) != 0 {
 		t.Fatalf("B kept a position: %v", got)
+	}
+}
+
+// Someone on A plays a film only B has: A asks B, the stream comes
+// straight from B, A keeps where they are, and stopping on A ends it on
+// B.
+func TestPlayFromPeer(t *testing.T) {
+	ctx := context.Background()
+	var stB, stA *store.Store
+	var b, a *federation.Service
+	srvB, fakeB := newServerWith(t, options{store: &stB, federation: &b})
+	fakeB.setDirect(true)
+	stB.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "Heat", SortName: "heat",
+		TMDB: "949", LibraryID: "films", AudioTags: []string{"fr"}}}, 1)
+	stB.RefreshTitleKeys(ctx)
+	stB.SetLibraries(ctx, []store.Library{{ID: "films", Item: []byte(`{"Name":"Films"}`)}})
+	srvA, _ := newServerWith(t, options{store: &stA, federation: &a})
+	a.HTTP = srvB.Client() // A trusts B's test certificate
+
+	code, _, _ := b.NewCode(ctx, "")
+	bOnA, err := a.UseCode(ctx, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ := stB.Peers(ctx)
+	aOnB, _ := b.Accept(ctx, list[0].ID) // A can't be reached from B here
+	stA.SetPeerState(ctx, bOnA.ID, store.PeerTheirs, store.PeerPaired)
+	bOnA, _ = stA.PeerByID(ctx, bOnA.ID)
+	b.SetOffers(ctx, aOnB, []string{"films"})
+	if err := a.SetWants(ctx, bOnA, []string{"films"}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := a.SyncTitles(ctx, bOnA); err != nil || n != 1 {
+		t.Fatalf("sync: %d %v", n, err)
+	}
+
+	status, body := post(t, srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{},"audioLanguage":"fr"}`)
+	var s peerSession
+	json.Unmarshal([]byte(body), &s)
+	if status != 201 || !strings.HasPrefix(s.Stream.URL, srvB.URL+"/api/v1/stream/") || !strings.HasPrefix(s.ID, "play_") {
+		t.Fatalf("play on A: %d %s", status, body)
+	}
+	if status, body := post(t, srvA, "/api/v1/playback/"+s.ID+"/progress", `{"positionMs":600000}`); status != 204 {
+		t.Fatalf("progress: %d %s", status, body)
+	}
+	if status, _ := post(t, srvA, "/api/v1/playback/"+s.ID+"/stop", `{"positionMs":600000}`); status != 204 {
+		t.Fatalf("stop: %d", status)
+	}
+	// B hears of it in the background.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		res, err := srvB.Client().Get(s.Stream.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode == http.StatusNotFound {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("B's stream after A stopped: %d", res.StatusCode)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }

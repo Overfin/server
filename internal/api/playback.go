@@ -106,6 +106,18 @@ func (pb Playback) end(s *playback.Stream, reason, by string) {
 // profile stopped, and its transcode stopped.
 func (pb Playback) stopped(s *playback.Stream) {
 	snap := pb.Tickets.Snapshot(s)
+	if rm := s.Remote; rm != nil {
+		// Where the profile is, kept here; the playback ends there.
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			pb.record(ctx, s, snap.PositionTicks/10_000, true)
+			if peer, err := pb.Library.Provisioner.Store.PeerByID(ctx, rm.PeerID); err == nil {
+				pb.stopRemote(peer, rm.ID, snap.PositionTicks/10_000)
+			}
+		}()
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -224,6 +236,11 @@ func (pb Playback) progress(w http.ResponseWriter, r *http.Request) {
 	}
 	pb.Tickets.Progress(s, req.PositionMs*10_000, req.Paused, time.Now())
 	pb.record(r.Context(), s, req.PositionMs, false)
+	if s.Remote != nil {
+		// Played on a paired server, kept alive there by its stream's use.
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if pb.Tickets.Method(s) == "remux" {
 		s.Checked.Do(func() { go pb.checkRemux(s) })
 	}
@@ -499,12 +516,25 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 	p := caller.Profile
 	ctx := r.Context()
 	if req.TitleID != "" {
-		var err error
-		if jfItem, err = l.copyOf(ctx, p, req.TitleID); err != nil {
+		// Where it plays from: a copy here, or a paired server's, by the
+		// language it would start in (Overfin never picks by itself one
+		// without it when another has it).
+		ref, _ := titleRef(req.TitleID)
+		tracksKey := ref.Key()
+		if ref.Kind == "episode" {
+			tracksKey = ref.Series().Key()
+		}
+		language, _ := l.wishesFor(ctx, p, tracksKey, req.AudioLanguage)
+		src, err := l.sourceOf(ctx, p, req.TitleID, language)
+		if err != nil {
 			l.storeError(w, err)
 			return
 		}
-		if jfItem == "" {
+		if src.peer != nil {
+			pb.startRemote(w, r, caller, req, kbps, src.peer, ref.Key())
+			return
+		}
+		if jfItem = src.item; jfItem == "" {
 			problem.Send(w, problem.NotFound, "")
 			return
 		}
@@ -742,12 +772,18 @@ func (pb Playback) setSubtitles(w http.ResponseWriter, r *http.Request) {
 // "" is the site's language (siteLanguage), "original" the title's own.
 // "" for either: the file's default audio, no subtitles.
 func (l Library) trackWishes(ctx context.Context, p *store.Profile, item, siteLanguage string) (audio, subtitles string) {
-	audio, subtitles = p.AudioLanguage, p.SubtitleLanguage
-	st := l.Provisioner.Store
 	key, err := l.trackKey(ctx, item)
 	if err != nil {
 		l.Logger.Warn("finding a title's tracks chosen failed", "err", err) // the preferences do
 	}
+	return l.wishesFor(ctx, p, key, siteLanguage)
+}
+
+// wishesFor is trackWishes by the title's key (a film's or a series'; ""
+// when unknown).
+func (l Library) wishesFor(ctx context.Context, p *store.Profile, key, siteLanguage string) (audio, subtitles string) {
+	audio, subtitles = p.AudioLanguage, p.SubtitleLanguage
+	st := l.Provisioner.Store
 	if key != "" {
 		chosen, err := st.TitleTracks(ctx, p.ID, key)
 		if err != nil {
@@ -827,6 +863,10 @@ func (pb Playback) chooseTracks(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	l := pb.Library
+	if s.Remote != nil {
+		pb.chooseRemoteTracks(w, r, s, req.AudioTrack, req.SubtitleTrack)
+		return
+	}
 	key, err := l.trackKey(ctx, s.ItemID)
 	if err != nil {
 		l.storeError(w, err)

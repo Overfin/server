@@ -307,6 +307,10 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The player streams paired servers' titles straight from them.
+	if h, ok := siteHandler.(*site.Handler); ok && fedNow != nil {
+		h.MediaFrom = fedNow.MediaOrigins
+	}
 	h, err := server.New(logger, identityMiddleware, siteHandler, plugins...)
 	if err != nil {
 		return nil, err

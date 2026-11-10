@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/overfin/server/internal/federation"
@@ -198,4 +200,285 @@ func origin(address string) string {
 		return ""
 	}
 	return u.Scheme + "://" + u.Host
+}
+
+// A title this server's people play from a paired server: no copy here
+// they may play has their language, and a paired server's has (or there's
+// no copy here at all). Overfin never picks by itself a source without
+// the person's language when another has it (ROADMAP.md milestone 6).
+
+// source is where a title plays from: one of our copies, or a paired
+// server.
+type source struct {
+	item string // a Jellyfin item here
+	peer *store.Peer
+}
+
+// sourceOf picks where a film or an episode plays for p, in language (a
+// tag; "" for no preference): our copy with it, a paired server's with
+// it, our copy, a paired server's. Ours are those p may see; paired
+// servers' only for a profile not limited to some libraries, within its
+// ceiling and hidden tags.
+func (l Library) sourceOf(ctx context.Context, p *store.Profile, id, language string) (source, error) {
+	ref, ok := titleRef(id)
+	if !ok || (ref.Kind != "movie" && ref.Kind != "episode" && ref.Kind != "item") {
+		return source{}, nil
+	}
+	st := l.Provisioner.Store
+	infos, err := st.TitleInfos(ctx, []string{ref.Key()}, today(), "")
+	if err != nil {
+		return source{}, err
+	}
+	a, err := l.access(ctx, p)
+	if err != nil {
+		return source{}, err
+	}
+	var ours []string
+	if t := infos[ref.Key()]; t != nil && len(t.Items) > 0 {
+		if a == nil {
+			ours = t.Items
+		} else {
+			allowed, _, err := st.AllowedItems(ctx, *a, t.Items)
+			if err != nil {
+				return source{}, err
+			}
+			for _, item := range t.Items {
+				if allowed[item] {
+					ours = append(ours, item)
+				}
+			}
+		}
+	}
+	var peers []store.PeerSource
+	if ref.Kind != "item" {
+		if peers, err = l.peerSources(ctx, a, ref); err != nil {
+			return source{}, err
+		}
+	}
+	if language != "" {
+		audio, err := st.ItemAudio(ctx, ours)
+		if err != nil {
+			return source{}, err
+		}
+		for _, item := range ours {
+			if speaks(audio[item], language) {
+				return source{item: item}, nil
+			}
+		}
+		for _, ps := range peers {
+			if speaks(ps.Audio, language) {
+				return source{peer: ps.Peer}, nil
+			}
+		}
+	}
+	if len(ours) > 0 {
+		return source{item: ours[0]}, nil
+	}
+	if len(peers) > 0 {
+		return source{peer: peers[0].Peer}, nil
+	}
+	return source{}, nil
+}
+
+// speaks says whether audio has language: its region, or the language
+// alone.
+func speaks(audio []string, language string) bool {
+	for _, a := range audio {
+		if a == language || lang.Base(a) == lang.Base(language) {
+			return true
+		}
+	}
+	return false
+}
+
+// peerSources are the paired servers holding a film or an episode that a
+// profile with access a may play: none when it's limited to some
+// libraries or categories (paired servers' aren't among them); within its
+// ceiling and its hidden tags, by the title's (or its series') TMDB ID.
+func (l Library) peerSources(ctx context.Context, a *store.Access, ref store.TitleRef) ([]store.PeerSource, error) {
+	if a.Limited() || ref.TMDB() == "" {
+		return nil, nil
+	}
+	st := l.Provisioner.Store
+	key := "movie/" + ref.TMDB()
+	if ref.Kind != "movie" {
+		key = "series/" + ref.TMDB()
+	}
+	if a != nil && a.Ceiling != nil {
+		rated, err := st.TitlesAllowed(ctx, *a.Ceiling, []string{key})
+		if err != nil || !rated[key] {
+			return nil, err
+		}
+	}
+	if a != nil && len(a.BlockedTags) > 0 {
+		free, err := st.TitlesTagFree(ctx, a.BlockedTags, []string{key})
+		if err != nil || !free[key] {
+			return nil, err
+		}
+	}
+	return st.PeerSources(ctx, ref.Key())
+}
+
+// startRemote starts a playback on a paired server for the caller, and
+// keeps its profile's side here.
+func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *Caller, req startRequest, kbps int, peer *store.Peer, key string) {
+	l, ctx, p := pb.Library, r.Context(), caller.Profile
+	fed := pb.fed()
+	if fed == nil {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	ref, _ := store.ParseTitleKey(key)
+	tracksKey := ref.Key()
+	if ref.Kind == "episode" {
+		tracksKey = ref.Series().Key()
+	}
+	wantAudio, wantSubtitles := l.wishesFor(ctx, p, tracksKey, req.AudioLanguage)
+	var out sessionJSON
+	status, err := fed.Call(ctx, peer, "/api/v1/federation/play", peerPlayRequest{Title: key, Capabilities: req.Capabilities,
+		StartPositionMs: req.StartPositionMs, MaxBitrateKbps: kbps, AudioLanguage: wantAudio, SubtitleLanguage: wantSubtitles,
+		AudioTrack: req.AudioTrack, SubtitleTrack: req.SubtitleTrack}, &out)
+	switch {
+	case err != nil:
+		pb.Logger.Warn("a paired server couldn't start a playback", "peer", peer.Name, "err", err)
+		problem.Send(w, problem.NotPlayable, "")
+		return
+	case status == http.StatusConflict:
+		problem.Send(w, problem.ServerBusy, "")
+		return
+	case status != http.StatusOK:
+		problem.Send(w, problem.NotPlayable, "")
+		return
+	}
+	// Its URLs are its stream's, on its address, nothing else.
+	if !keepPeerURLs(&out, peer.Address) {
+		pb.Logger.Warn("a paired server answered a playback with other addresses", "peer", peer.Name)
+		pb.stopRemote(peer, out.ID, 0)
+		problem.Send(w, problem.NotPlayable, "")
+		return
+	}
+	titles, err := l.titleSummaries(ctx, p, []string{key})
+	if err != nil {
+		pb.stopRemote(peer, out.ID, 0)
+		l.storeError(w, err)
+		return
+	}
+	device := req.Device
+	if device == "" {
+		device = deviceName(r.UserAgent())
+	}
+	lim := playback.Limits{MaxStreams: caller.Account.Template.MaxStreams, RefuseOverLimit: pb.RefuseOverLimit}
+	if lim.MaxStreams > 0 && caller.Account.Template.ReserveStreams {
+		profiles, err := l.Provisioner.Store.Profiles(ctx, p.AccountID)
+		if err != nil {
+			pb.stopRemote(peer, out.ID, 0)
+			problem.Send(w, problem.Internal, "")
+			return
+		}
+		lim.Reserve, lim.Profiles = true, len(profiles)
+	}
+	s := &playback.Stream{AccountID: p.AccountID, ProfileID: p.ID, SessionID: caller.Session.ID, Device: device,
+		Decision: playback.Decision{Method: "remote", Source: jellyfin.MediaSource{RunTimeTicks: out.DurationMs * 10_000}},
+		Remote:   &playback.Remote{PeerID: peer.ID, ID: out.ID, Key: key}}
+	replaced, err := pb.Tickets.Admit(s, req.StartPositionMs*10_000, time.Now(), lim, device)
+	if err != nil {
+		pb.stopRemote(peer, out.ID, 0)
+		problem.Send(w, problem.StreamLimitReached, "")
+		return
+	}
+	for _, old := range replaced {
+		pb.stopped(old)
+	}
+	out.ID, out.Trickplay, out.Title, out.Next = s.ID, nil, nil, nil
+	if len(titles) == 1 {
+		out.Title = &titles[0]
+		if ref.Kind == "episode" {
+			if next, err := l.nextEpisode(ctx, p, ref); err == nil {
+				out.Next = next
+			}
+		}
+	}
+	pb.Logger.Info("playback started on a paired server", "playback", s.ID, "peer", peer.Name, "method", out.Method)
+	s.View = out
+	pb.Tickets.Describe(s, describe(out.Title))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	writeOK(w, out)
+}
+
+// keepPeerURLs checks a paired server's playback: its stream's and
+// subtitles' URLs must be its own stream's, at its address; segments and
+// previews it may not give.
+func keepPeerURLs(out *sessionJSON, address string) bool {
+	prefix := strings.TrimSuffix(address, "/") + "/api/v1/stream/"
+	ok := func(u string) bool { return strings.HasPrefix(u, prefix) && !strings.ContainsAny(u, " \"'<>\\") }
+	if !ok(out.Stream.URL) || (out.Stream.Protocol != "hls" && out.Stream.Protocol != "file") || !playIDRe.MatchString(out.ID) {
+		return false
+	}
+	for _, list := range [][]trackJSON{out.SubtitleTracks, out.ForcedTracks} {
+		for _, t := range list {
+			if t.URL != "" && !ok(t.URL) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// stopRemote tells a paired server a playback there is over, in the
+// background.
+func (pb Playback) stopRemote(peer *store.Peer, id string, positionMs int64) {
+	fed := pb.fed()
+	if fed == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if _, err := fed.Call(ctx, peer, "/api/v1/federation/stop", peerStopRequest{ID: id, PositionMs: positionMs}, &struct{}{}); err != nil {
+			pb.Logger.Info("a paired server couldn't be told a playback stopped", "peer", peer.Name, "err", err)
+		}
+	}()
+}
+
+// chooseRemoteTracks keeps the tracks chosen while watching a paired
+// server's copy, for the title, by their languages as it listed them.
+func (pb Playback) chooseRemoteTracks(w http.ResponseWriter, r *http.Request, s *playback.Stream, audio, subtitles *string) {
+	ctx, st := r.Context(), pb.Library.Provisioner.Store
+	view, _ := s.View.(sessionJSON)
+	ref, ok := store.ParseTitleKey(s.Remote.Key)
+	if !ok {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	key := ref.Key()
+	if ref.Kind == "episode" {
+		key = ref.Series().Key()
+	}
+	find := func(list []trackJSON, id string) (trackJSON, bool) {
+		for _, t := range list {
+			if t.ID == id {
+				return t, true
+			}
+		}
+		return trackJSON{}, false
+	}
+	var err error
+	if audio != nil {
+		if t, ok := find(view.AudioTracks, *audio); ok && t.Language != "" && t.Role == "" {
+			err = st.SetTitleAudio(ctx, s.ProfileID, key, t.Language)
+		}
+	}
+	if err == nil && subtitles != nil {
+		if *subtitles == "" {
+			err = st.SetTitleSubtitles(ctx, s.ProfileID, key, "")
+		} else if t, ok := find(view.SubtitleTracks, *subtitles); ok && t.Language != "" {
+			err = st.SetTitleSubtitles(ctx, s.ProfileID, key, t.Language)
+		}
+	}
+	if err != nil {
+		pb.Library.storeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

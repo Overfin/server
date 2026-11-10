@@ -611,3 +611,61 @@ func (s *Store) PeerCopies(ctx context.Context, peerID, key string) ([]PeerCopy,
 	}
 	return out, rows.Err()
 }
+
+// PeerSource is a paired server holding a title for us, with its copies'
+// languages.
+type PeerSource struct {
+	Peer      *Peer
+	Audio     []string
+	Subtitles []string
+}
+
+// PeerSources lists the paired servers holding a film or an episode for
+// us, in the order they were paired.
+func (s *Store) PeerSources(ctx context.Context, key string) ([]PeerSource, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT t.peer_id, t.audio, t.subtitles FROM peer_titles t
+		JOIN peers p ON p.id = t.peer_id AND p.state = 'paired'
+		WHERE t.title_key = ? AND t.kind IN ('movie', 'episode') ORDER BY p.paired_at, p.id`, key)
+	if err != nil {
+		return nil, err
+	}
+	type row struct{ peer, audio, subs string }
+	var found []row
+	for rows.Next() {
+		var r row
+		var audio, subs sql.NullString
+		if err := rows.Scan(&r.peer, &audio, &subs); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		r.audio, r.subs = audio.String, subs.String
+		found = append(found, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var out []PeerSource
+	for _, r := range found {
+		p, err := s.PeerByID(ctx, r.peer)
+		if err != nil {
+			continue
+		}
+		out = append(out, PeerSource{Peer: p, Audio: mergeTags(nil, r.audio), Subtitles: mergeTags(nil, r.subs)})
+	}
+	return out, nil
+}
+
+// ItemAudio is each item's audio languages, as tags.
+func (s *Store) ItemAudio(ctx context.Context, items []string) (map[string][]string, error) {
+	out := map[string][]string{}
+	for _, id := range items {
+		var audio sql.NullString
+		err := s.read.QueryRowContext(ctx, `SELECT audio_tags FROM catalog_items WHERE id = ?`, id).Scan(&audio)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		out[id] = mergeTags(nil, audio.String)
+	}
+	return out, nil
+}

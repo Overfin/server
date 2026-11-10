@@ -34,6 +34,10 @@ type Stream struct {
 	View          any // the session as last sent to the client, for restoring
 	// Trickplay is the set of seek-bar previews offered with it, if any.
 	Trickplay *jellyfin.Trickplay
+	// Remote, for a title a paired server holds: the playback is there,
+	// its stream fetched from there; this one keeps the profile's side
+	// (where it is, its limits).
+	Remote *Remote
 	// Origin is the site allowed to fetch it from another address: a
 	// paired server's (its viewers play straight from here); "" for this
 	// server's own.
@@ -279,6 +283,13 @@ func (t *Tickets) ByPeerTicket(ticket string, now time.Time) (*Stream, bool) {
 	}
 	s.lastSeen = now
 	return s, true
+}
+
+// Remote is a playback on a paired server.
+type Remote struct {
+	PeerID string // our pairing's
+	ID     string // the playback's there
+	Key    string // the title's key
 }
 
 // PeerPrefix starts the account, profile and session IDs of a paired

@@ -511,6 +511,13 @@ export class Player {
   attach(pb) {
     const video = this.video;
     for (const t of video.querySelectorAll('track[data-overfin]')) t.remove();
+    // A paired server's title streams from its own address: the video
+    // fetches it in CORS mode (no cookies), as subtitles from there load
+    // only that way.
+    const here = globalThis.location?.href;
+    const remote = here ? new URL(pb.stream.url, here).origin !== new URL(here).origin : false;
+    if (remote) video.crossOrigin = 'anonymous';
+    else video.removeAttribute('crossorigin');
     // A track shown holds the video back until it's loaded, and a title's
     // first subtitles can take long (the server reads the whole file for
     // them): each track joins the video once it's here, playback never

@@ -51,9 +51,16 @@ func (pb Playback) record(ctx context.Context, s *playback.Stream, positionMs in
 		finished = true
 	}
 	st := pb.Library.Provisioner.Store
-	keys, err := st.TitleKeys(ctx, []string{s.ItemID})
-	if err == nil {
-		err = st.RecordPlay(ctx, s.ProfileID, keys[s.ItemID], s.ItemID, positionMs, finished, time.Now())
+	var err error
+	if s.Remote != nil {
+		// A paired server's copy: the title, without a copy here.
+		err = st.RecordPlay(ctx, s.ProfileID, s.Remote.Key, "", positionMs, finished, time.Now())
+	} else {
+		var keys map[string]string
+		keys, err = st.TitleKeys(ctx, []string{s.ItemID})
+		if err == nil {
+			err = st.RecordPlay(ctx, s.ProfileID, keys[s.ItemID], s.ItemID, positionMs, finished, time.Now())
+		}
 	}
 	if err != nil {
 		pb.Logger.Error("recording where a profile is in a title failed", "playback", s.ID, "err", err)

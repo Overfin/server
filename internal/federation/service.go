@@ -61,6 +61,9 @@ type Service struct {
 	verifier *Verifier
 	mu       sync.Mutex
 	asked    map[string]time.Time // CheckSoon's, by peer ID
+	// origins: MediaOrigins', read at originsAt.
+	origins   []string
+	originsAt time.Time
 }
 
 // NewHTTPClient is the client for talking to peers: short timeouts, and
@@ -870,4 +873,35 @@ func (s *Service) Answer(w http.ResponseWriter, nonce string, v any) { s.answer(
 // the status, and out filled when it's 200.
 func (s *Service) Call(ctx context.Context, p *store.Peer, path string, in, out any) (int, error) {
 	return s.call(ctx, p.Address, p.PublicKey, path, in, out)
+}
+
+// originsFor is how long the paired servers' origins are kept before
+// being read again.
+const originsFor = 30 * time.Second
+
+// MediaOrigins lists the paired servers' sites, as origins
+// (scheme://host): the site's player may stream from them.
+func (s *Service) MediaOrigins() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	if s.origins != nil && now.Sub(s.originsAt) < originsFor {
+		return s.origins
+	}
+	peers, err := s.Store.Peers(context.Background())
+	if err != nil {
+		return s.origins
+	}
+	out := []string{}
+	for _, p := range peers {
+		u, err := url.Parse(p.Address)
+		if p.State != store.PeerPaired || err != nil || checkAddress(p.Address) != nil {
+			continue
+		}
+		if o := u.Scheme + "://" + u.Host; !slices.Contains(out, o) {
+			out = append(out, o)
+		}
+	}
+	s.origins, s.originsAt = out, now
+	return out
 }
