@@ -24,3 +24,16 @@
 .artwork-thumb { width: 3.4rem; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 6px; background: var(--panel-3); flex: none; }
 .artwork-thumb.backdrop, .artwork-thumb.logo { width: 7rem; aspect-ratio: 16 / 9; }
 .artwork-thumb.logo { object-fit: contain; }
+
+/* Layout fixes the kit (overfin-ui 0.4.6) doesn't have yet: here until a
+   version of the kit has them, then they go. */
+/* A setting whose control is a row (a field and its buttons): the row goes
+   under the text when both don't fit, instead of squeezing the text to a
+   word per line. */
+.setting:has(> .row) { flex-wrap: wrap; }
+.setting:has(> .row) > div:first-child { flex: 1 1 10rem; }
+.setting > .row { display: flex; flex-wrap: wrap; gap: .5rem; flex: 1 1 auto; justify-content: flex-end; align-items: center; }
+.setting > .row input { flex: 1 1 12rem; width: auto; min-width: 0; }
+@media (max-width: 600px) { .setting > .row { justify-content: flex-start; } }
+/* A field among settings: the same line above it and the same room. */
+.setting + label.field { padding: .85rem 0; border-top: 1px solid var(--border); }
