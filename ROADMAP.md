@@ -628,14 +628,36 @@ carries to judge, not necessarily everything. Before trusting a key, a member ca
 with the peer directly, at the address its streams come from, and
 operators who know each other can compare fingerprints.
 
+How the rest works, decided 2026-11-10:
+
+- **probation**: a newcomer starts with a low score. It can make few
+  requests and reaches only members whose threshold accepts newcomers; its
+  score rises with time and normal behaviour;
+- **vouching**, optional: a member in good standing can vouch for a
+  newcomer, which shortens its wait and probation. If the newcomer
+  misbehaves, the member who vouched loses some of its own score;
+- **the wait** is the host's setting (default: 3 days of passing tests),
+  and so are the caps on admissions per day, network-wide and per address
+  range, so one operator can't bring many servers in at once;
+- **what the host reads**: each message has an envelope the host reads
+  (who asks whom, the kind of request, its size, when) and a content it
+  can't (which titles, which search, what a listing holds), encrypted from
+  member to member. The envelope is enough to limit and to score;
+- **what a score is made of**: behaviour seen in envelopes (rates and
+  patterns a normal Overfin never has), owners' reports of what only they
+  see (a ticket used from many addresses, streams pulled with nobody
+  watching, requests their limits refused), members' blocks, and hygiene
+  (version, uptime, time as a member). A report weighs more from a member
+  with a high score, and more when several unrelated members agree, so a
+  few can't gang up on one;
+- **what a low score does**, in steps, by itself: the member is slowed
+  down, then reaches fewer members, then is blocked. Each member also sets
+  its own threshold ("share only with servers above X"), and the host's
+  admin can ban or restore anyone.
+
 Basic federation only, out of scope: swarms of servers or of browsers (as
 PeerTube does), copying a peer's files to one's own server, and watching
-together across servers (a social feature). Open questions for hosted
-networks: whether newcomers start on probation and members can vouch for
-them; how long the wait and which address ranges limit it; what the host
-reads of members' messages and what stays
-end to end encrypted; what a trust score is made of and what a low one
-does.
+together across servers (a social feature).
 
 ## Beyond Jellyfin
 
