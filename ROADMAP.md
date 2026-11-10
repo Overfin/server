@@ -606,7 +606,9 @@ the panel says so in plain words; a host that can't be trusted is a
 separate concern. A trusted host doesn't make its members trusted: the
 host evaluates each member and gives it a **trust score**, and blocks a
 member whose score falls too low. Every member sees every member's score,
-its own included. The host needs to know some things about the messages it
+its own included, but only a member sees its own score's reasons: others
+see at most broad categories ("reported by members", "unstable"), never
+one that would point an attacker at it, such as a vulnerable version. The host needs to know some things about the messages it
 carries to judge, not necessarily everything. Before trusting a key, a member can still confirm it
 with the peer directly, at the address its streams come from, and
 operators who know each other can compare fingerprints.
