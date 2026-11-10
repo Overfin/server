@@ -119,9 +119,13 @@ func (l Library) collectionFilms(ctx context.Context, p *store.Profile, cs []sto
 	if len(keys) == 0 {
 		return out, nil
 	}
-	// Only what visibility looks at: a film's copies (its page reads the
-	// rest).
+	// Only what visibility looks at: a film's copies, here and on paired
+	// servers (its page reads the rest).
 	copies, err := l.Provisioner.Store.TitleCopies(ctx, keys)
+	if err != nil {
+		return nil, err
+	}
+	peers, err := l.Provisioner.Store.TitlePeers(ctx, keys)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +137,7 @@ func (l Library) collectionFilms(ctx context.Context, p *store.Profile, cs []sto
 			continue
 		}
 		index[k] = len(list)
-		list = append(list, &store.TitleInfo{Ref: r, Items: copies[k]})
+		list = append(list, &store.TitleInfo{Ref: r, Items: copies[k], Peers: peers[k]})
 	}
 	visible, _, err := l.visibility(ctx, p, list, true)
 	if err != nil {

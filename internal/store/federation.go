@@ -669,3 +669,27 @@ func (s *Store) ItemAudio(ctx context.Context, items []string) (map[string][]str
 	}
 	return out, nil
 }
+
+// TitlePeers are the paired servers holding titles for us, by key, as
+// TitleInfos gives them (Peers), for what needs nothing else of them.
+func (s *Store) TitlePeers(ctx context.Context, keys []string) (map[string][]string, error) {
+	out := map[string][]string{}
+	if keys = plainKeys(keys); len(keys) == 0 {
+		return out, nil
+	}
+	rows, err := s.read.QueryContext(ctx, `SELECT t.title_key, t.peer_id FROM peer_titles t
+		JOIN (SELECT DISTINCT value FROM json_each(?)) j ON j.value = t.title_key
+		JOIN peers p ON p.id = t.peer_id AND p.state = 'paired' ORDER BY t.title_key, p.paired_at, p.id`, jsonList(keys))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key, id string
+		if err := rows.Scan(&key, &id); err != nil {
+			return nil, err
+		}
+		out[key] = append(out[key], id)
+	}
+	return out, rows.Err()
+}

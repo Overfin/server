@@ -100,7 +100,7 @@ func availability(t *store.TitleInfo) string {
 		}
 		return "partiallyAvailable"
 	}
-	if len(t.Items) > 0 {
+	if len(t.Items) > 0 || len(t.Peers) > 0 {
 		return "available"
 	}
 	return "missing"
@@ -115,7 +115,8 @@ func summaryOf(t *store.TitleInfo) library.TitleSummary {
 			s.Kind = t.ItemKind
 		}
 	}
-	s.Playable = (t.Ref.Kind == "movie" || t.Ref.Kind == "episode" || t.Ref.Kind == "item") && len(t.Items) > 0
+	s.Playable = ((t.Ref.Kind == "movie" || t.Ref.Kind == "episode") && len(t.Items)+len(t.Peers) > 0) ||
+		(t.Ref.Kind == "item" && len(t.Items) > 0)
 	if t.Ref.Kind == "season" || t.Ref.Kind == "episode" {
 		s.Series = &library.TitleParent{ID: titleID(t.Ref.Series().Key()), Name: t.SeriesName}
 		n := t.Ref.Season
@@ -163,9 +164,10 @@ func summaryOf(t *store.TitleInfo) library.TitleSummary {
 // tags, kids limits); one no library has, never for a profile limited to
 // some libraries (rule 28) or in a genre the panel leaves out, else when
 // it's out as the panel asks (titles shown) and, for a kids profile, rated
-// within its limits. A file
-// no one identified, only through its copies. Specials a library doesn't
-// have, and seasons without a single episode, never show.
+// within its limits. One a paired server holds for us is judged as one no
+// library has, but counts as out. A file no one identified, only through
+// its copies. Specials neither a library nor a paired server has, and
+// seasons without a single episode, never show.
 func (l Library) visibleTitles(ctx context.Context, p *store.Profile, titles []*store.TitleInfo) ([]bool, error) {
 	visible, _, err := l.visibility(ctx, p, titles, false)
 	return visible, err
@@ -203,7 +205,7 @@ func (l Library) visibility(ctx context.Context, p *store.Profile, titles []*sto
 	}
 	var bare []string
 	for _, t := range titles {
-		if len(t.Items) == 0 && t.Ref.TMDB() != "" {
+		if (len(t.Items) == 0 || len(t.Peers) > 0) && t.Ref.TMDB() != "" {
 			bare = append(bare, key(t))
 		}
 	}
@@ -243,18 +245,24 @@ func (l Library) visibility(ctx context.Context, p *store.Profile, titles []*sto
 	for i, t := range titles {
 		k := key(t)
 		part := t.Ref.Kind == "season" || t.Ref.Kind == "episode"
-		switch {
-		case len(t.Items) > 0:
+		// Held for us by a paired server (ROADMAP.md milestone 6): judged
+		// as a title no library has, but out already.
+		held := len(t.Peers) > 0
+		if len(t.Items) > 0 {
 			out[i] = a == nil
 			for _, id := range t.Items {
 				out[i] = out[i] || allowed[id]
 			}
-			continue
+			if out[i] || !held {
+				continue
+			}
+		}
+		switch {
 		case a.Limited():
 			continue // limited to some libraries or categories: only what they have
 		case t.Ref.Kind == "item" || t.Ref.TMDB() == "":
 			continue // nothing to show but its copies, and it has none
-		case part && t.Ref.Season == 0 && (t.Ref.Kind == "episode" || t.Have == 0):
+		case !held && part && t.Ref.Season == 0 && (t.Ref.Kind == "episode" || t.Have == 0):
 			continue // specials: only those a library has, and their season
 		case t.Ref.Kind == "season" && t.Have == 0 && t.Listed == 0:
 			continue // a season without a single episode
@@ -265,7 +273,7 @@ func (l Library) visibility(ctx context.Context, p *store.Profile, titles []*sto
 		// once aired, its series or a film once released, or once it can
 		// be watched at home. Not known yet means not out.
 		notOut := false
-		if shown != "all" {
+		if shown != "all" && !held {
 			if part && (t.AirDate == "" || t.AirDate > day) {
 				continue
 			}

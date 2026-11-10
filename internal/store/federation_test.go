@@ -226,3 +226,51 @@ func TestHeldTitles(t *testing.T) {
 		t.Fatalf("ratings: %+v", got)
 	}
 }
+
+// What a paired server holds for us counts as held: its copies are Peers,
+// its episodes count in its series' and seasons' (once each, with ours),
+// a specials season's in its own only; a server not paired counts none.
+func TestHeldByPeers(t *testing.T) {
+	s, ctx := openTest(t), context.Background()
+	one := 1
+	s.PutCatalog(ctx, []CatalogItem{
+		{ID: "00000000000000000000000000000001", Kind: "series", Name: "S", SortName: "s", TMDB: "2", LibraryID: "tv"},
+		{ID: "00000000000000000000000000000002", Kind: "episode", Name: "E1", SortName: "e1", LibraryID: "tv",
+			SeriesID: "00000000000000000000000000000001", SeasonNumber: &one, EpisodeNumber: &one},
+	}, 1)
+	if err := s.RefreshTitleKeys(ctx); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A")
+	s.SetPeerTitles(ctx, p.ID, []PeerTitle{{Key: "movie/tmdb/1", Kind: "movie", Library: "x"},
+		{Key: "series/tmdb/2", Kind: "series", Library: "x"}, {Key: "series/tmdb/2/s1", Kind: "season", Library: "x"},
+		{Key: "series/tmdb/2/s1/e1", Kind: "episode", Library: "x"}, {Key: "series/tmdb/2/s1/e2", Kind: "episode", Library: "x"},
+		{Key: "series/tmdb/2/s0/e1", Kind: "episode", Library: "x"}, {Key: "series/tmdb/2/e777", Kind: "episode", Library: "x"}})
+	keys := []string{"movie/tmdb/1", "series/tmdb/2", "series/tmdb/2/s1", "series/tmdb/2/s0"}
+	read := func() map[string]*TitleInfo {
+		t.Helper()
+		got, err := s.TitleInfos(ctx, keys, "2030-01-01", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := read(); len(got["movie/tmdb/1"].Peers) != 0 || got["series/tmdb/2"].Have != 1 {
+		t.Fatalf("a peer not paired yet: %+v %+v", got["movie/tmdb/1"], got["series/tmdb/2"])
+	}
+	s.SetPeerState(ctx, p.ID, PeerTheirs, PeerPaired)
+	got := read()
+	if f := got["movie/tmdb/1"]; len(f.Peers) != 1 || f.Peers[0] != p.ID || len(f.Items) != 0 {
+		t.Fatalf("film: %+v", f)
+	}
+	// The series: e1 (both), e2, and the one by its ID; not the special.
+	if se := got["series/tmdb/2"]; se.Have != 3 || len(se.Peers) != 1 {
+		t.Fatalf("series: have %d, peers %v", se.Have, se.Peers)
+	}
+	if got["series/tmdb/2/s1"].Have != 2 || got["series/tmdb/2/s0"].Have != 1 {
+		t.Fatalf("seasons: %d, specials %d", got["series/tmdb/2/s1"].Have, got["series/tmdb/2/s0"].Have)
+	}
+	if m, _ := s.TitlePeers(ctx, keys); len(m["movie/tmdb/1"]) != 1 || len(m["series/tmdb/2/s0"]) != 0 {
+		t.Fatalf("TitlePeers: %v", m)
+	}
+}

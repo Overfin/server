@@ -153,6 +153,17 @@ func TestPlayFromPeer(t *testing.T) {
 		t.Fatalf("sync: %d %v", n, err)
 	}
 
+	// On A (which keeps TMDB's page of it), the film is there to play,
+	// though no library of A's has it.
+	stA.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "949", Name: "Heat", Year: 1995}, []byte(`{}`), time.Now())
+	var title struct {
+		Availability string
+		Playable     bool
+	}
+	if status := get(t, srvA, "/api/v1/titles/title_movie_tmdb_949", &title); status != 200 || title.Availability != "available" || !title.Playable {
+		t.Fatalf("A's title page: %d %+v", status, title)
+	}
+
 	status, body := post(t, srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{},"audioLanguage":"fr"}`)
 	var s peerSession
 	json.Unmarshal([]byte(body), &s)

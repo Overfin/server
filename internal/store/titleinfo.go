@@ -164,6 +164,10 @@ type TitleInfo struct {
 	// Items are the library's copies, by Jellyfin ID: for a series or a
 	// season, its own items (to check access), not its episodes.
 	Items []string
+	// Peers are the paired servers holding it for us (ROADMAP.md
+	// milestone 6), by ID: a film's or an episode's copies, a series' or a
+	// season's own entry (its episodes count in Have).
+	Peers []string
 	// Have and Aired count a series' or a season's episodes (specials
 	// aside, but a specials season's own): those the library has, and
 	// those TMDB says have aired; Listed, all those TMDB lists.
@@ -319,6 +323,10 @@ func (s *Store) titleInfo(ctx context.Context, r TitleRef, today string, b *info
 	} else if t.Items, err = s.ids(ctx, `SELECT id FROM catalog_items WHERE title_key = ? ORDER BY id`, key); err != nil {
 		return nil, err
 	}
+	if t.Peers, err = s.ids(ctx, `SELECT t.peer_id FROM peer_titles t JOIN peers p ON p.id = t.peer_id AND p.state = 'paired'
+		WHERE t.title_key = ? ORDER BY p.paired_at, p.id`, key); err != nil {
+		return nil, err
+	}
 	tmdb := r.TMDB()
 	switch {
 	case tmdb != "" && (r.Kind == "movie" || r.Kind == "series"):
@@ -435,9 +443,19 @@ func (s *Store) countEpisodes(ctx context.Context, t *TitleInfo, today string) e
 	if t.Ref.Kind == "season" {
 		season = t.Ref.Season
 	}
-	err := s.read.QueryRowContext(ctx, `SELECT count(DISTINCT title_key) FROM catalog_items
-		WHERE kind = 'episode' AND title_key >= ? AND title_key < ? AND (coalesce(shown_season, season_number, 0) > 0 OR ?)
-		AND (? < 0 OR coalesce(shown_season, season_number) = ?)`, lo, hi, specials, season, season).Scan(&t.Have)
+	// The library's episodes, and those paired servers hold for us: a
+	// peer's by the season its key names (one named by its TMDB ID alone
+	// counts for its series only).
+	peerSeason := `CASE WHEN t.title_key GLOB '*/s[0-9]*/e[0-9]*' THEN CAST(substr(t.title_key, length(?) + 3) AS INTEGER) END`
+	err := s.read.QueryRowContext(ctx, `SELECT count(DISTINCT k) FROM (
+			SELECT title_key AS k FROM catalog_items
+			WHERE kind = 'episode' AND title_key >= ? AND title_key < ? AND (coalesce(shown_season, season_number, 0) > 0 OR ?)
+				AND (? < 0 OR coalesce(shown_season, season_number) = ?)
+			UNION ALL SELECT t.title_key FROM peer_titles t JOIN peers p ON p.id = t.peer_id AND p.state = 'paired'
+			WHERE t.kind = 'episode' AND t.title_key >= ? AND t.title_key < ?
+				AND (coalesce(`+peerSeason+`, 1) > 0 OR ?) AND (? < 0 OR `+peerSeason+` = ?))`,
+		lo, hi, specials, season, season,
+		lo, hi, t.Ref.Series().Key(), specials, season, t.Ref.Series().Key(), season).Scan(&t.Have)
 	if err != nil {
 		return err
 	}
