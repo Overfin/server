@@ -603,7 +603,11 @@ member offers libraries to the network as a whole and lends it one pool of
 streams and transcodes, with exceptions for members of its choosing;
 blocks always win over the directory. Joining means trusting the host, and
 the panel says so in plain words; a host that can't be trusted is a
-separate concern. Before trusting a key, a member can still confirm it
+separate concern. A trusted host doesn't make its members trusted: the
+host evaluates each member and gives it a **trust score**, and blocks a
+member whose score falls too low. Every member sees every member's score,
+its own included. The host needs to know some things about the messages it
+carries to judge, not necessarily everything. Before trusting a key, a member can still confirm it
 with the peer directly, at the address its streams come from, and
 operators who know each other can compare fingerprints.
 
@@ -611,9 +615,9 @@ Basic federation only, out of scope: swarms of servers or of browsers (as
 PeerTube does), copying a peer's files to one's own server, and watching
 together across servers (a social feature). Open questions for hosted
 networks: how a server joins (an invitation, or a request to a host it
-knows) and who decides; whether members' messages are end to end encrypted
-(hidden from the host) or readable by it (so it can refuse abusive
-requests).
+knows) and who decides; what the host reads of members' messages and what stays
+end to end encrypted; what a trust score is made of and what a low one
+does.
 
 ## Beyond Jellyfin
 
