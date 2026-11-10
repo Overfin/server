@@ -603,7 +603,22 @@ member offers libraries to the network as a whole and lends it one pool of
 streams and transcodes, with exceptions for members of its choosing;
 blocks always win over the directory. Joining means trusting the host, and
 the panel says so in plain words; a host that can't be trusted is a
-separate concern. A trusted host doesn't make its members trusted: the
+separate concern.
+
+The host runs **mostly by itself**: nobody has to manage it day to day,
+and its admin can step in for whatever is needed (members, scores,
+bans, settings). **Joining** is by request: anyone who knows a host's
+address can ask from their panel, at the host's one public door. Entry is
+not instant: requests wait in a queue that admits few at a time, and the
+host tests each applicant meanwhile: that it holds its key, that its
+gateway and streaming address answer, that it follows the protocol, that
+its version has no known hole, that it stays stable over the wait, and,
+from outside, that it doesn't expose what it shouldn't (its admin panel,
+its Jellyfin, plain HTTP). The request says up front that these checks
+happen, and a failed test is shown to the applicant so its operator can
+fix it.
+
+A trusted host doesn't make its members trusted: the
 host evaluates each member and gives it a **trust score**, and blocks a
 member whose score falls too low. Every member sees every member's score,
 its own included, but only a member sees its own score's reasons: others
@@ -616,8 +631,9 @@ operators who know each other can compare fingerprints.
 Basic federation only, out of scope: swarms of servers or of browsers (as
 PeerTube does), copying a peer's files to one's own server, and watching
 together across servers (a social feature). Open questions for hosted
-networks: how a server joins (an invitation, or a request to a host it
-knows) and who decides; what the host reads of members' messages and what stays
+networks: whether newcomers start on probation and members can vouch for
+them; how long the wait and which address ranges limit it; what the host
+reads of members' messages and what stays
 end to end encrypted; what a trust score is made of and what a low one
 does.
 
