@@ -152,3 +152,22 @@ func TestUpgradeListsFilmsToFind(t *testing.T) {
 		t.Errorf("after its page: %v", got)
 	}
 }
+
+// Upgrading to the languages of sources (096) reads the library again
+// whole, but keeps what the index has listed meanwhile: its passes are
+// kept, its last full read made long ago.
+func TestUpgradeKeepsListingWhileReread(t *testing.T) {
+	ctx := context.Background()
+	s := openAt(t, 95)
+	read := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	if err := s.SetCatalogState(ctx, CatalogState{Pass: 7, FullAt: read, ChangesAt: read}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.CatalogState(ctx)
+	if err != nil || st.Pass != 7 || !st.FullAt.IsZero() || !st.ChangesAt.Equal(read) {
+		t.Fatalf("after: %+v %v", st, err)
+	}
+}
