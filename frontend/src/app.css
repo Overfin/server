@@ -37,3 +37,19 @@
 @media (max-width: 600px) { .setting > .row { justify-content: flex-start; } }
 /* A field among settings: the same line above it and the same room. */
 .setting + label.field { padding: .85rem 0; border-top: 1px solid var(--border); }
+/* A card's foot with nothing to say yet isn't shown; an empty status takes
+   no room, so a window's buttons stay on one line on a phone. */
+.card-foot:has(> .status:only-child:empty) { display: none; }
+.card-foot .status:empty { min-width: 0; }
+@media (max-width: 600px) {
+  /* A status gets its own line, the buttons go under it, on the right. */
+  .card-foot:has(> .status:not(:empty)) { justify-content: flex-end; }
+  .card-foot .status:not(:empty) { flex-basis: 100%; }
+  /* A card's badge (or a window's ×) stays beside its title only: the
+     description takes the card's whole width. */
+  .card-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 .75rem; }
+  .card-head > div:first-child { display: contents; }
+  .card-head h2 { grid-column: 1; }
+  .card-head > :not(div):last-child { grid-column: 2; grid-row: 1; }
+  .card-head p { grid-column: 1 / -1; }
+}
