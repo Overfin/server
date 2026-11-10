@@ -68,3 +68,10 @@
 /* Apps: a key's few permissions, all shown (no list scrolling inside the
    window). */
 .setting.stack .checks.all { max-height: none; }
+
+/* The keyboard's place, plainly: a ring in the accent color around links,
+   buttons and switches (the kit's soft glow was hard to see, on the light
+   theme most). Inside the menu, drawn inward, so its scrolling on a phone
+   doesn't cut it. */
+a:focus-visible, button:focus-visible, input[type=checkbox]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; box-shadow: none; }
+nav a:focus-visible { outline-offset: -2px; }
