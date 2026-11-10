@@ -249,3 +249,36 @@ func TestSetupLinkRefused(t *testing.T) {
 		t.Error("never limited")
 	}
 }
+
+// Someone whose address is proven already (they registered and confirmed
+// it), given a copied setup link for a new password: the address stays
+// proven, and the site asks nothing.
+func TestSetupLinkKeepsProvenAddress(t *testing.T) {
+	box := &mailbox{}
+	var st *store.Store
+	var m *api.Managed
+	srv, _ := newServerWith(t, options{managed: true, mailbox: box, store: &st, signIn: &m})
+	ctx := context.Background()
+	// Ann registered and confirmed her address: no setup waiting.
+	ann, err := st.CreateUser(ctx, "ann@example.org", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ConfirmUser(ctx, ann.Subject); err != nil {
+		t.Fatal(err)
+	}
+	link, _, err := m.SetupLink(ctx, ann.Subject, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := newBrowser(srv)
+	if c, out := signinPost(t, b, srv, "/api/v1/setup/password", map[string]any{"link": tokenOf(t, link), "password": "ann's new one, 2026"}); c != 200 || out["held"] == true {
+		t.Fatalf("choosing: %d %v", c, out)
+	}
+	if u, _ := st.UserBySubject(ctx, ann.Subject); !u.Confirmed || u.Unverified {
+		t.Errorf("Ann: %+v", u)
+	}
+	if res, body := visit(t, b, srv, "/api/v1/me/address", nil); res.StatusCode != 200 || !strings.Contains(body, `"unconfirmed":false`) {
+		t.Errorf("address: %d %s", res.StatusCode, body)
+	}
+}
