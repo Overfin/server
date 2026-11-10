@@ -161,6 +161,13 @@ func (n *Notifier) send(ctx context.Context, set store.NoticeSettings, ev Event)
 		return
 	}
 	v := emails.Vars{Name: n.name(ctx, ev.Account), Date: ev.Account.Expires}
+	// A new account's label can only be its invitation's name (nothing
+	// else labels an account before it exists): the notice says which
+	// invitation it came from, and names the person otherwise.
+	if ev.Kind == "joined" && ev.Account.Label != "" {
+		v.Invitation = ev.Account.Label
+		v.Name = n.person(ctx, ev.Account)
+	}
 	msg, err := n.Emails.Write(ctx, ev.Kind, lang, v)
 	if err != nil {
 		n.Logger.Error("notices: writing a notice failed", "notice", ev.Kind, "err", err)
@@ -233,6 +240,12 @@ func (n *Notifier) name(ctx context.Context, a *store.Account) string {
 	if a.Label != "" {
 		return a.Label
 	}
+	return n.person(ctx, a)
+}
+
+// person names an account by its person: their email (with Overfin's own
+// sign-in), else its owner profile's name.
+func (n *Notifier) person(ctx context.Context, a *store.Account) string {
 	if n.Managed {
 		if u, err := n.Store.UserBySubject(ctx, a.Subject); err == nil && u.Email != "" {
 			return u.Email

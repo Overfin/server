@@ -1179,6 +1179,9 @@ func (g *gateway) SendSample(ctx context.Context, name, to string) error {
 		"verify": site + "/signin#verify=sample", "reset": site + "/reset#reset=sample", "setup": site + "/setup#setup=sample",
 		"exists": site + "/signin", "invite": site + "/invite/sample", "ending": site + "/",
 	}[name], Name: "Alex", Date: time.Now().AddDate(0, 0, 7)}
+	if name == "joined" {
+		v.Name, v.Invitation = "alex@example.org", "Alex" // as an invitation's account
+	}
 	msg, err := g.sh.emails.Write(ctx, name, lang, v)
 	if err != nil {
 		return err

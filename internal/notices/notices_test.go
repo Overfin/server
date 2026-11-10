@@ -225,3 +225,24 @@ func TestCheckWebhook(t *testing.T) {
 		}
 	}
 }
+
+// An account made from an invitation: the admins' notice names the
+// invitation it came from, and the person by their email.
+func TestJoinedFromInvitation(t *testing.T) {
+	ctx := context.Background()
+	n, db, m, _, _ := setup(t)
+	db.CreateUser(ctx, "admin@example.org", true)
+	person, _ := db.CreateUser(ctx, "bob@example.org", false)
+	acct, _, _ := db.CreateAccount(ctx, person.Subject, store.NewOwner{Name: "Bobby", JellyfinUserID: strings.Repeat("b", 32), JellyfinUsername: "of-2", JellyfinToken: "t"})
+	db.SetAccountLabel(ctx, acct.ID, "Bob")
+	acct, _ = db.AccountByID(ctx, acct.ID)
+	db.SetNoticeSettings(ctx, store.NoticeSettings{Joined: true, Days: 7, Admins: true})
+	n.Joined(acct)
+	deadline := time.Now().Add(5 * time.Second)
+	for len(m.all()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := m.all(); len(got) != 1 || got[0].to != "admin@example.org" || got[0].subject != "An account was created from invitation Bob" {
+		t.Errorf("joined from an invitation: %+v", got)
+	}
+}

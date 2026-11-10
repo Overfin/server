@@ -45,6 +45,8 @@ why = "Vous recevez ce courriel parce qu’un administrateur de {site} a configu
 [joined]
 subject = "{name} a un compte sur {site}"
 intro = "Un nouveau compte a été créé sur {site} : {name}."
+invitationSubject = "Un compte a été créé avec l’invitation {invitation}"
+invitation = "Un compte a été créé sur {site} avec l’invitation {invitation} : {name}."
 why = "Vous recevez ce courriel parce que vous administrez {site} et que ses avis sont activés (panneau de contrôle, Notices)."
 
 [expiring]

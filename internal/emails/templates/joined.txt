@@ -1,3 +1,3 @@
-{{define "subject"}}{{t "joined.subject"}}{{end}}
-{{define "content"}}{{t "joined.intro"}}{{end}}
+{{define "subject"}}{{if .Invitation}}{{t "joined.invitationSubject"}}{{else}}{{t "joined.subject"}}{{end}}{{end}}
+{{define "content"}}{{if .Invitation}}{{t "joined.invitation"}}{{else}}{{t "joined.intro"}}{{end}}{{end}}
 {{define "why"}}{{t "joined.why"}}{{end}}
