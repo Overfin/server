@@ -45,6 +45,8 @@ why = "You got this email because an admin of {site} set up its emails with this
 [joined]
 subject = "{name} has an account on {site}"
 intro = "A new account was made on {site}: {name}."
+invitationSubject = "An account was created from invitation {invitation}"
+invitation = "An account was created on {site} from invitation {invitation}: {name}."
 why = "You got this email because you're an admin of {site}, and its notices are on (control panel, Notices)."
 
 [expiring]

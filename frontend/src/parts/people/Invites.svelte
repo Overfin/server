@@ -6,6 +6,7 @@
 <script lang="ts">
   import { Card, Badge, Busy, Field, FormModal, Modal, Notice, Loading, Secret, ask, toast } from '@overfin/ui';
   import { api } from '../../lib/api';
+  import { news } from '../../lib/news.svelte';
   import { message, plural } from '../../lib/format';
   import type { Template } from '../../lib/types';
 
@@ -57,6 +58,15 @@
     }
   }
 
+  // Reloaded when the panel hears of an invitation used or an account made.
+  let heard = news.changed;
+  $effect(() => {
+    if (news.changed !== heard) {
+      heard = news.changed;
+      load();
+    }
+  });
+
   const accountName = (id: string) => accountTemplates.find((t) => t.id === id)?.name || 'a deleted template';
   const days = (n: number) => plural(n, 'day');
   const uses = (n: number) => (n ? plural(n, 'use') : 'any number of uses');
@@ -77,7 +87,7 @@
     // Once this window has closed: the link's, on top.
     setTimeout(() => {
       const relative = out.link.startsWith('/');
-      shown = { link: relative ? location.origin.replace(/:\d+$/, '') + out.link : out.link, label: out.invite.label || 'them', relative };
+      shown = { link: relative ? location.origin.replace(/:\d+$/, '') + out.link : out.link, label: out.invite.label ? `the person invited (${out.invite.label})` : 'the person invited', relative };
     }, 0);
   }
 
@@ -149,13 +159,13 @@
     {#if !templates.length}<p class="notice">Create an invite template first, below.</p>{/if}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>For</th><th>Status</th><th>Gives</th><th>Link works until</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+        <thead><tr><th>Invitation</th><th>Status</th><th>Gives</th><th>Link works until</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {#each invites as inv (inv.id)}
             {@const [text, kind] = status(inv)}
             <tr>
               <td>
-                <div class="name">{inv.label || 'Anyone with the link'}</div>
+                <div class="name">{inv.label || 'Unnamed invitation'}</div>
                 <div class="hint">{inv.maxUses ? `${inv.uses} of ${uses(inv.maxUses)}` : `${inv.uses} used, ${uses(0)}`}</div>
               </td>
               <td><Badge {kind}>{text}</Badge></td>
@@ -199,7 +209,7 @@
 {#if inviting && templates}
   <FormModal title="New invitation" description="A link that lets someone set up an account here, shaped by an invite template." saveLabel="Make the link" save={makeInvite} close={() => (inviting = false)}>
     <div class="fields">
-      <Field label="For" hint="Who it's for, to find it again in the list." wide><input bind:value={forWhom} maxlength="64" placeholder="e.g. Bob" /></Field>
+      <Field label="Invitation name" hint="To find it in the list; the admins' notice of a new account names it too." wide><input bind:value={forWhom} maxlength="64" placeholder="e.g. Bob" /></Field>
       <Field label="From" wide>
         <select bind:value={from}>{#each templates as t (t.id)}<option value={t.id}>{t.name}</option>{/each}</select>
       </Field>

@@ -105,6 +105,9 @@ type data struct {
 	// Name is the account a notice is about; Date, when its access ends,
 	// written in the reader's language.
 	Name, Date string
+	// Invitation is the name of the invitation a new account came from
+	// ("" for none).
+	Invitation string
 }
 
 // Vars are an email's own values.
@@ -114,6 +117,9 @@ type Vars struct {
 	// access ends.
 	Name string
 	Date time.Time
+	// Invitation is the name of the invitation a new account came from,
+	// for the "joined" notice ("" when it came from none).
+	Invitation string
 }
 
 // Write writes an email in a language (a regional tag such as "fr-CA").
@@ -134,7 +140,7 @@ func (w *Writer) write(ctx context.Context, name, lang string, v Vars) (mail.Mes
 		return mail.Message{}, err
 	}
 	d := data{Lang: lang, Site: brandName(br), Custom: br.On, Light: theme.Colors(true), Dark: theme.Colors(false),
-		Link: v.Link, Name: v.Name, Date: Day(v.Date, lang)}
+		Link: v.Link, Name: v.Name, Date: Day(v.Date, lang), Invitation: v.Invitation}
 	var images []mail.Image
 	// The banner on the dark header: the operator's, as a picture email
 	// apps show (not SVG), else their name as text; Overfin's otherwise.
@@ -200,7 +206,7 @@ func sizeOf(b []byte, height int) *picture {
 }
 
 // translator is the "t" function: a sentence in the language (else in
-// English), with {site}, {name} and {date} filled in.
+// English), with {site}, {name}, {date} and {invitation} filled in.
 func (w *Writer) translator(lang string, d data) func(string) string {
 	set := texts[strings.SplitN(lang, "-", 2)[0]]
 	return func(key string) string {
@@ -208,7 +214,7 @@ func (w *Writer) translator(lang string, d data) func(string) string {
 		if !ok {
 			s = texts["en"][key]
 		}
-		return strings.NewReplacer("{site}", d.Site, "{name}", d.Name, "{date}", d.Date).Replace(s)
+		return strings.NewReplacer("{site}", d.Site, "{name}", d.Name, "{date}", d.Date, "{invitation}", d.Invitation).Replace(s)
 	}
 }
 

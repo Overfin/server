@@ -108,3 +108,21 @@ func TestOperatorTemplates(t *testing.T) {
 		t.Errorf("a broken template: %v", err)
 	}
 }
+
+// The admins' notice of a new account says which invitation it came from,
+// when it came from one, and reads as before otherwise.
+func TestJoinedInvitation(t *testing.T) {
+	w := newWriter(t)
+	ctx := context.Background()
+	m, err := w.Write(ctx, "joined", "fr-CA", Vars{Name: "bob@example.org", Invitation: "Bob"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Subject != "Un compte a été créé avec l’invitation Bob" || !strings.Contains(m.Text, "avec l’invitation Bob : bob@example.org.") ||
+		!strings.Contains(m.HTML, "l’invitation Bob") {
+		t.Errorf("from an invitation: %q\n%s", m.Subject, m.Text)
+	}
+	if m, _ := w.Write(ctx, "joined", "en", Vars{Name: "sam@example.org"}); m.Subject != "sam@example.org has an account on Overfin" || strings.Contains(m.Text, "invitation") {
+		t.Errorf("without one: %q\n%s", m.Subject, m.Text)
+	}
+}
