@@ -157,6 +157,14 @@ function done(text) {
   for (const form of document.forms) form.hidden = true;
   $('done').textContent = text;
   $('done').hidden = false;
+  takeFocus($('done'));
+}
+
+// takeFocus gives the focus to what replaced the control that had it (now
+// hidden), so it's read out and the keyboard goes on from there.
+function takeFocus(el) {
+  el.tabIndex = -1;
+  el.focus();
 }
 
 // Signing in; a person still to confirm their address can get the email
@@ -222,6 +230,7 @@ if (page.mode === 'confirm') {
     $('verify').hidden = true;
     $('verify-failed').hidden = false;
     $('verify-signin').hidden = false;
+    takeFocus($('verify-failed'));
   };
   if (!verify) {
     $('verify').hidden = true;
@@ -307,6 +316,7 @@ async function showCode() {
     status.textContent = status.dataset.waiting;
     $('device').hidden = false;
     $('device').closest('.device').classList.add('alone');
+    takeFocus(title);
     asking = setInterval(async () => {
       try {
         const res = await fetch('/api/v1/device/check', {

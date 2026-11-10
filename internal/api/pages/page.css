@@ -19,6 +19,8 @@ a.button {
 }
 #unconfirmed { display: grid; gap: .8rem; margin-top: 1rem; }
 #done { line-height: 1.6; }
+/* Focused by the script only (takeFocus), never by the keyboard. */
+[tabindex="-1"]:focus { outline: none; }
 form { display: grid; gap: .9rem; }
 label { display: grid; gap: .35rem; font-weight: 500; }
 input {
