@@ -74,12 +74,12 @@
   <Card title="Keys">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>App</th><th>Made</th><th>Last used</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+        <thead><tr><th>App</th><th class="hide-narrow">Made</th><th>Last used</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {#each items as k (k.id)}
             <tr>
               <td><div class="name">{k.name}</div><div class="hint">{scopeText(k)}</div></td>
-              <td class="hint">{day(k.createdAt)}</td>
+              <td class="hint hide-narrow">{day(k.createdAt)}</td>
               <td class="hint">{k.lastUsedAt ? ago(k.lastUsedAt) : 'never'}</td>
               <td class="row-actions"><button type="button" class="small danger" onclick={() => revoke(k)}>Revoke</button></td>
             </tr>
@@ -97,7 +97,7 @@
     <Field label="For" wide><input type="text" bind:value={name} placeholder="e.g. Overtide" maxlength="64" required /></Field>
     <div class="setting stack">
       <div><div class="label">It may read</div></div>
-      <div class="checks">
+      <div class="checks all">
         {#each scopes as s (s)}<label class="inline"><input type="checkbox" value={s} bind:group={picked} /> {scopeNames[s]}</label>{/each}
       </div>
     </div>

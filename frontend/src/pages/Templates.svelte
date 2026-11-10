@@ -53,7 +53,7 @@
   <Card title="Templates">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Template</th><th>Streams</th><th>Profiles</th><th>Accounts</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+        <thead><tr><th>Template</th><th>Streams</th><th class="hide-narrow">Profiles</th><th class="hide-narrow">Accounts</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {#each items as t (t.id)}
             <tr>
@@ -62,8 +62,8 @@
                 <div class="hint">{only(t).length ? `Only ${only(t).join(', ')}` : 'Every category'}</div>
               </td>
               <td>{t.maxStreams}{#if t.reserveStreams}<div class="hint">one per profile</div>{/if}</td>
-              <td>{t.maxProfiles}</td>
-              <td>{t.accounts}</td>
+              <td class="hide-narrow">{t.maxProfiles}</td>
+              <td class="hide-narrow">{t.accounts}</td>
               <td class="row-actions">
                 <button type="button" class="small" onclick={() => (editing = t)}>Edit</button>
                 {#if !t.default}
