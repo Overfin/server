@@ -84,13 +84,13 @@
   <Card title="Categories" description={'In the site\'s menu in this order, each with its page; a category with a home row also shows on the home page.'}>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Category</th><th>Titles</th><th><span class="visually-hidden">Home row</span></th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+        <thead><tr><th>Category</th><th class="hide-narrow">Titles</th><th class="hide-narrow"><span class="visually-hidden">Home row</span></th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {#each data.items as c, i (c.id)}
             <tr>
               <td><div class="name">{nameOf(c)}</div><div class="hint">{summary(c.rules)}</div></td>
-              <td class="hint">{plural(c.count, 'title')}</td>
-              <td>{#if c.home}<Badge kind="info">Home row</Badge>{/if}</td>
+              <td class="hint hide-narrow">{plural(c.count, 'title')}</td>
+              <td class="hide-narrow">{#if c.home}<Badge kind="info">Home row</Badge>{/if}</td>
               <td class="row-actions">
                 <Busy small disabled={i === 0} label="Up" action={() => move(i, -1)}>↑</Busy>
                 <Busy small disabled={i === data.items.length - 1} label="Down" action={() => move(i, 1)}>↓</Busy>

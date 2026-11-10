@@ -58,3 +58,13 @@
 .sidebar { overflow-y: auto; }
 /* On a narrow screen the bar on top keeps its height on a short page. */
 @media (max-width: 860px) { .shell { grid-template-rows: auto 1fr; } }
+/* A table's row buttons go on two lines on a phone rather than past the
+   table's edge. */
+@media (max-width: 600px) {
+  td.row-actions { white-space: normal; }
+  td.row-actions button { margin: .15rem 0 .15rem .35rem; }
+}
+
+/* Apps: a key's few permissions, all shown (no list scrolling inside the
+   window). */
+.setting.stack .checks.all { max-height: none; }
