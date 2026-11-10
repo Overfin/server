@@ -233,7 +233,10 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	pb := api.Playback{Library: lib, Tickets: sh.tickets,
 		MaxBitrateKbps:  cfg.Limits.MaxBitrateKbps,
 		MaxTranscodes:   cfg.Limits.MaxTranscodesTotal,
-		RefuseOverLimit: cfg.Limits.OnLimit == "refuse", Logger: logger}
+		RefuseOverLimit: cfg.Limits.OnLimit == "refuse", PeerTranscodeReserve: cfg.Limits.PeerTranscodeReserve, Logger: logger}
+	// Federation, made further down: paired servers' viewers play too.
+	var fedNow *federation.Service
+	pb.Federation = func() *federation.Service { return fedNow }
 	// The modules the operator switched on, with their control panel routes
 	// and tabs.
 	b := &built{admin: http.NewServeMux(), playback: pb, on: map[string]bool{}}
@@ -279,7 +282,7 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	// Federation: its routes answer paired servers only, and a server using
 	// a live code; with neither, everything is a plain 404.
 	if fed := federationService(cfg, sh); fed != nil {
-		b.fed = fed
+		b.fed, fedNow = fed, fed
 		plugins = append(plugins, federation.Plugin{S: fed})
 	}
 	if cfg.Plugins.Enabled("library") {

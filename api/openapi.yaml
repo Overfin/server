@@ -3931,6 +3931,65 @@ paths:
                   next: {type: string, description: "Where the next page starts; absent after the last"}
         "404": {description: "Not signed, or not a paired server."}
 
+  /federation/play:
+    post:
+      operationId: federationPlay
+      summary: A paired server's viewer plays one of this server's titles
+      description: |
+        Server to server, signed both ways as for pair, for a paired server
+        only. The title (a film's or an episode's key) must be in a library
+        this server offers the caller. This server picks its copy (one with
+        the viewer's audio language when it has one) and the tracks, within
+        the pairing's limits (streams, transcodes, bitrate) and the
+        transcodes it keeps for its own people, and answers with the
+        playback as POST /playback does, its stream's URLs on this server:
+        the viewer's browser fetches them straight from here with the ticket
+        alone, from the caller's site only. Nothing about the viewer is
+        kept here.
+      tags: [federation]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: {type: string}
+                capabilities: {type: object}
+                startPositionMs: {type: integer}
+                maxBitrateKbps: {type: integer}
+                audioLanguage: {type: string}
+                subtitleLanguage: {type: string}
+                audioTrack: {type: string}
+                subtitleTrack: {type: string}
+      responses:
+        "200": {description: "The playback, as POST /playback answers it. Signed."}
+        "404": {description: "Not signed, not a paired server, or a title not offered it."}
+        "409": {description: "The pairing's limit, or every transcode it may take, is reached."}
+
+  /federation/stop:
+    post:
+      operationId: federationStop
+      summary: A paired server's viewer stops
+      description: Server to server, signed both ways. Ends the caller's own playback; another's, or one already over, is left alone.
+      tags: [federation]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: {type: string}
+                positionMs: {type: integer}
+      responses:
+        "200": {description: "Stopped, or already over. Signed."}
+        "404": {description: "Not signed, or not a paired server."}
+
 components:
   securitySchemes:
     session:

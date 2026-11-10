@@ -28,6 +28,7 @@ import (
 	"github.com/overfin/server/internal/config"
 	"github.com/overfin/server/internal/emails"
 	"github.com/overfin/server/internal/feature"
+	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/identity"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/jellyfin"
@@ -348,6 +349,9 @@ type options struct {
 	panel func(*http.Request) string
 	// log, when set, receives the server's log.
 	log io.Writer
+	// federation, when set, receives the server's federation (its address
+	// the test server's).
+	federation **federation.Service
 }
 
 func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
@@ -464,6 +468,19 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		*o.store = st
 	}
 	pb := api.Playback{Library: lib, Tickets: playback.NewTickets(time.Hour), MaxTranscodes: o.maxTranscodes, Logger: logger}
+	// The server listens first: federation needs its address.
+	srv := httptest.NewUnstartedServer(nil)
+	var fed *federation.Service
+	if o.federation != nil {
+		key, err := federation.LoadKey(context.Background(), st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fed = &federation.Service{Store: st, Key: key, Address: "https://" + srv.Listener.Addr().String(),
+			HTTP: federation.NewHTTPClient(), Name: func(context.Context) string { return "B" }, Logger: logger}
+		*o.federation = fed
+		pb.Federation = func() *federation.Service { return fed }
+	}
 	if o.playback != nil {
 		*o.playback = pb
 	}
@@ -522,12 +539,16 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 			t.Fatal(err)
 		}
 	}
+	if fed != nil {
+		plugins = append(plugins, federation.Plugin{S: fed})
+	}
 	h, err := server.New(logger, identify, siteHandler, plugins...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// HTTPS, so the Secure session cookie behaves as in a browser.
-	srv := httptest.NewTLSServer(h)
+	srv.Config.Handler = h
+	srv.StartTLS()
 	t.Cleanup(srv.Close)
 	return srv, fake
 }

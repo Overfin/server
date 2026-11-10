@@ -845,3 +845,29 @@ func ValidLimits(l store.PeerLimits) error {
 	}
 	return nil
 }
+
+// PeerRequest checks a request from a paired server, for routes other
+// packages serve (playback): its signature, and that its key is a paired
+// server's. Anyone else gets the plain 404 and ok is false.
+func (s *Service) PeerRequest(w http.ResponseWriter, r *http.Request) (p *store.Peer, body []byte, nonce string, ok bool) {
+	v, body, ok := s.verified(w, r)
+	if !ok {
+		return nil, nil, "", false
+	}
+	p, err := s.Store.PeerByKey(r.Context(), v.Key)
+	if err != nil || p.State != store.PeerPaired {
+		problem.Send(w, problem.NotFound, "")
+		return nil, nil, "", false
+	}
+	s.Store.PeerSeen(r.Context(), p.ID)
+	return p, body, v.Nonce, true
+}
+
+// Answer sends a paired server a signed JSON answer to its request.
+func (s *Service) Answer(w http.ResponseWriter, nonce string, v any) { s.answer(w, nonce, v) }
+
+// Call sends a paired server a signed request and checks its signed answer:
+// the status, and out filled when it's 200.
+func (s *Service) Call(ctx context.Context, p *store.Peer, path string, in, out any) (int, error) {
+	return s.call(ctx, p.Address, p.PublicKey, path, in, out)
+}

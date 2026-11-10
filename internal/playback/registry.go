@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +34,10 @@ type Stream struct {
 	View          any // the session as last sent to the client, for restoring
 	// Trickplay is the set of seek-bar previews offered with it, if any.
 	Trickplay *jellyfin.Trickplay
+	// Origin is the site allowed to fetch it from another address: a
+	// paired server's (its viewers play straight from here); "" for this
+	// server's own.
+	Origin string
 
 	// over: see Over; made when the playback starts.
 	over chan struct{}
@@ -174,6 +179,9 @@ type Limits struct {
 	// account's oldest.
 	RefuseOverLimit bool
 	MaxTranscodes   int // in total, 0 for none
+	// AccountTranscodes caps the account's own transcodes (a paired
+	// server's); nil: no cap of its own.
+	AccountTranscodes *int
 }
 
 var (
@@ -223,6 +231,17 @@ func (t *Tickets) Admit(s *Stream, startTicks int64, now time.Time, lim Limits, 
 			return nil, ErrServerBusy
 		}
 	}
+	if s.Decision.Method == "transcode" && lim.AccountTranscodes != nil {
+		mine := 0
+		for _, old := range t.forAccount(s.AccountID) {
+			if old.reencodes || old.Decision.Method == "transcode" {
+				mine++
+			}
+		}
+		if mine >= *lim.AccountTranscodes {
+			return nil, ErrServerBusy
+		}
+	}
 	for _, old := range replaced {
 		t.remove(old, "taken-over", by, now)
 	}
@@ -247,6 +266,24 @@ func (t *Tickets) ByTicket(ticket, sessionID, profileID string, now time.Time) (
 	s.lastSeen = now
 	return s, true
 }
+
+// ByPeerTicket finds a live stream a paired server's viewer plays, by its
+// ticket alone: such a playback has no session here (its viewer's is on
+// the other server). Its use counts as activity, as ByTicket's.
+func (t *Tickets) ByPeerTicket(ticket string, now time.Time) (*Stream, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s, ok := t.byTicket[ticket]
+	if !ok || !t.live(s, now) || s.Origin == "" || !strings.HasPrefix(s.SessionID, PeerPrefix) {
+		return nil, false
+	}
+	s.lastSeen = now
+	return s, true
+}
+
+// PeerPrefix starts the account, profile and session IDs of a paired
+// server's playbacks: "peer:" and the pairing's ID.
+const PeerPrefix = "peer:"
 
 // ByID finds a playback by its public ID, only for the profile that owns it
 // (rule 23). For a playback that ended, it returns why instead.

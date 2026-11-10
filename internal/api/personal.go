@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/overfin/server/internal/library"
@@ -29,6 +30,11 @@ const (
 // positionMs; ending says the playback is over (only then is a title
 // watched).
 func (pb Playback) record(ctx context.Context, s *playback.Stream, positionMs int64, ending bool) {
+	// A paired server's viewer: what they watch is kept on their own
+	// server, never here.
+	if strings.HasPrefix(s.ProfileID, playback.PeerPrefix) {
+		return
+	}
 	duration := s.Decision.Source.RunTimeTicks / 10_000
 	if duration <= 0 {
 		return

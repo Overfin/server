@@ -581,3 +581,33 @@ func (s *Store) SetTheirLimits(ctx context.Context, peerID string, l PeerLimits)
 		l.Streams, l.Transcodes, l.BitrateKbps, peerID)
 	return err
 }
+
+// PeerCopy is one of our copies of a title, offered to a peer: its
+// Jellyfin item and its audio languages.
+type PeerCopy struct {
+	Item  string
+	Audio []string
+}
+
+// PeerCopies lists our copies of a film or an episode in the libraries we
+// offer a peer; none when the title isn't offered it.
+func (s *Store) PeerCopies(ctx context.Context, peerID, key string) ([]PeerCopy, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT i.id, i.audio_tags FROM catalog_items i
+		JOIN peer_offers o ON o.peer_id = ? AND o.library_id = i.library_id
+		WHERE i.title_key = ? AND i.kind IN ('movie', 'episode') ORDER BY i.id`, peerID, key)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PeerCopy
+	for rows.Next() {
+		var c PeerCopy
+		var audio sql.NullString
+		if err := rows.Scan(&c.Item, &audio); err != nil {
+			return nil, err
+		}
+		c.Audio = mergeTags(nil, audio.String)
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}

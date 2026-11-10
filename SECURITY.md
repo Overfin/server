@@ -247,6 +247,10 @@ comes from the internet, and media files can be written by anyone.
     playback stops, after 2 minutes without progress reports or stream
     requests, or after 24 hours at most, and is never renewed. It works only
     in the session, and for the profile, that started it.
+    A ticket for a paired server's viewer (rule 65) has no session here,
+    their session being on their own server: it works with the ticket
+    alone, only for that pairing, and its answers allow only that server's
+    site to read them. It lasts as any other.
     Transfer codes (planned, for profile transfer) will be long, single-use,
     rate-limited and expire within minutes.
 
@@ -282,7 +286,11 @@ comes from the internet, and media files can be written by anyone.
     the login's start, the identity provider's return and the login's
     finish, the gate, logout, `theme.css`, the operator's branding,
     `/api/v1/info`, and signing a screen in with a code: the page to
-    confirm a code (`/link`) and the screen's start and check, rule 69)
+    confirm a code (`/link`) and the screen's start and check, rule 69,
+    the stream's media (`/api/v1/stream/…`, which checks its ticket itself,
+    rule 30), and federation's calls (`/api/v1/federation/…`, which answer
+    only a paired server's signed requests, or a server using a live
+    pairing code, rule 65)
     never reveal software versions, upstream servers or anything about
     users. This list is the whole set: a test fails on any other route
     that needs no session.

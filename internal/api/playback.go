@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/library"
@@ -33,7 +34,11 @@ type Playback struct {
 	// RefuseOverLimit refuses a stream over the account's limit instead of
 	// replacing its oldest.
 	RefuseOverLimit bool
-	Logger          *slog.Logger
+	// PeerTranscodeReserve is how many transcodes paired servers can never
+	// take; Federation, federation now (nil without it).
+	PeerTranscodeReserve int
+	Federation           func() *federation.Service
+	Logger               *slog.Logger
 }
 
 func (Playback) Name() string { return "playback" }
@@ -53,7 +58,12 @@ func (pb Playback) Register(r *plugin.Registrar) error {
 			return err
 		}
 	}
-	return nil
+	// A paired server's viewers: the caller is a server, proven by its
+	// signature (federation), never a person.
+	if err := r.HandlePublic("POST /api/v1/federation/play", http.HandlerFunc(pb.peerPlay)); err != nil {
+		return err
+	}
+	return r.HandlePublic("POST /api/v1/federation/stop", http.HandlerFunc(pb.peerStop))
 }
 
 // IdleTimeout ends a playback with neither progress reports nor stream
@@ -868,8 +878,9 @@ type openArgs struct {
 	// it counts for.
 	accountID, profileID, sessionID string
 	// urlBase goes before the stream's URLs: "" on this server's own site,
-	// its address for another server's viewers.
-	urlBase string
+	// its address for another server's viewers; origin, then, is the site
+	// those viewers fetch it from (Stream.Origin).
+	urlBase, origin string
 }
 
 // opened is a copy opened: its playback registered, and the session's
@@ -1005,7 +1016,7 @@ func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*op
 	s := &playback.Stream{
 		AccountID: o.accountID, ProfileID: o.profileID, SessionID: o.sessionID, Device: o.device,
 		ItemID: jfItem, SourceID: sourceID, PlaySessionID: info.PlaySessionId, Decision: *dec,
-		Auth: play, AudioIndex: pr.AudioStreamIndex, SubtitleIndex: pr.SubtitleStreamIndex,
+		Auth: play, AudioIndex: pr.AudioStreamIndex, SubtitleIndex: pr.SubtitleStreamIndex, Origin: o.origin,
 	}
 	// Checked and registered at once, so two starts can't both pass.
 	replaced, err := pb.Tickets.Admit(s, pr.StartTimeTicks, time.Now(), o.lim, o.device)

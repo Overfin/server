@@ -25,14 +25,19 @@ type Stream struct {
 
 func (Stream) Name() string { return "stream" }
 
+// Register declares the stream's routes as media routes: they check their
+// ticket themselves. A ticket of this server's own playbacks works only in
+// the session that started it (whose cookie never goes along from another
+// site); one a paired server's viewer plays works from that server's site
+// only (rule 65).
 func (s Stream) Register(r *plugin.Registrar) error {
-	if err := r.HandleFunc("GET /api/v1/stream/{ticket}/{name}", s.serve); err != nil {
+	if err := r.HandleMedia("GET /api/v1/stream/{ticket}/{name}", http.HandlerFunc(s.serve)); err != nil {
 		return err
 	}
-	if err := r.HandleFunc("GET /api/v1/stream/{ticket}/subtitles/{track}", s.subtitles); err != nil {
+	if err := r.HandleMedia("GET /api/v1/stream/{ticket}/subtitles/{track}", http.HandlerFunc(s.subtitles)); err != nil {
 		return err
 	}
-	return r.HandleFunc("GET /api/v1/stream/{ticket}/pictures/{track}", s.pictures)
+	return r.HandleMedia("GET /api/v1/stream/{ticket}/pictures/{track}", http.HandlerFunc(s.pictures))
 }
 
 const (
@@ -52,6 +57,15 @@ func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream
 	if !ticketRe.MatchString(ticket) {
 		problem.Send(w, problem.NotFound, "")
 		return nil, nil
+	}
+	// A paired server's viewer, from its site: no session here.
+	if st, ok := s.Playback.Tickets.ByPeerTicket(ticket, time.Now()); ok {
+		h := w.Header()
+		h.Set("Access-Control-Allow-Origin", st.Origin)
+		h.Set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges")
+		h.Add("Vary", "Origin")
+		a := st.Auth
+		return st, &a
 	}
 	l := s.Playback.Library
 	c := l.Sessions.Current(w, r)

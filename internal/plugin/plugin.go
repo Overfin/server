@@ -36,6 +36,7 @@ type Registrar struct {
 	nav     map[string]bool   // paths registered with HandleNavigation
 	codes   map[string]bool   // their prefixes, for those ending in a code
 	cross   map[string]bool   // paths registered with HandleCrossSite
+	media   []string          // path prefixes registered with HandleMedia
 	// Slow, when set, is told of every request a route took longer than
 	// SlowAfter to answer, by its pattern (streams aside: they last), with
 	// the request's note (Note).
@@ -142,8 +143,32 @@ func (r *Registrar) HandleCrossSite(pattern string, h http.Handler) error {
 	return nil
 }
 
-// IsCrossSite reports whether a request path belongs to a cross-site route.
+// HandleMedia adds a public GET route for media, which another site may
+// fetch: a paired server's site playing this server's streams. The handler
+// checks every request itself (its ticket says whose it is and which site
+// may fetch it); this server's own session cookies are SameSite=Strict, so
+// a request from another site never carries one.
+func (r *Registrar) HandleMedia(pattern string, h http.Handler) error {
+	method, path, _ := strings.Cut(pattern, " ")
+	prefix, _, _ := strings.Cut(path, "{")
+	if method != http.MethodGet || !strings.HasPrefix(prefix, "/api/v1/") || !strings.HasSuffix(prefix, "/") {
+		return fmt.Errorf("route %q: media routes must be GET, under /api/v1/", pattern)
+	}
+	if err := r.add(pattern, h, true); err != nil {
+		return err
+	}
+	r.media = append(r.media, prefix)
+	return nil
+}
+
+// IsCrossSite reports whether a request path belongs to a cross-site route
+// (the gate, or media).
 func (r *Registrar) IsCrossSite(path string) bool {
+	for _, p := range r.media {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
 	return r.cross[path]
 }
 
