@@ -114,6 +114,18 @@ type Peer struct {
 	Created   time.Time  `json:"created"`
 	Paired    *time.Time `json:"paired,omitempty"`
 	Seen      *time.Time `json:"seen,omitempty"`
+	// Limits is what it may use of this server at once; Theirs, what it
+	// says we may use of it (nil until it said).
+	Limits PeerLimits  `json:"limits"`
+	Theirs *PeerLimits `json:"theirs,omitempty"`
+}
+
+// PeerLimits is what a pairing may use of a server at once: streams,
+// transcodes among them, and a bitrate cap (0: none).
+type PeerLimits struct {
+	Streams     int `json:"streams"`
+	Transcodes  int `json:"transcodes"`
+	BitrateKbps int `json:"bitrateKbps"`
 }
 
 // Peer states.
@@ -202,14 +214,19 @@ func (s *Store) AddPeer(ctx context.Context, publicKey []byte, address, name str
 	return p, tx.Commit()
 }
 
-const peerSelect = `SELECT id, public_key, address, name, state, created_at, paired_at, seen_at FROM peers`
+const peerSelect = `SELECT id, public_key, address, name, state, created_at, paired_at, seen_at,
+	max_streams, max_transcodes, max_bitrate_kbps, their_streams, their_transcodes, their_bitrate_kbps FROM peers`
 
 func scanPeer(row interface{ Scan(...any) error }) (*Peer, error) {
 	var p Peer
 	var created int64
-	var paired, seen sql.NullInt64
-	if err := row.Scan(&p.ID, &p.PublicKey, &p.Address, &p.Name, &p.State, &created, &paired, &seen); err != nil {
+	var paired, seen, ts, tt, tb sql.NullInt64
+	if err := row.Scan(&p.ID, &p.PublicKey, &p.Address, &p.Name, &p.State, &created, &paired, &seen,
+		&p.Limits.Streams, &p.Limits.Transcodes, &p.Limits.BitrateKbps, &ts, &tt, &tb); err != nil {
 		return nil, err
+	}
+	if ts.Valid {
+		p.Theirs = &PeerLimits{Streams: int(ts.Int64), Transcodes: int(tt.Int64), BitrateKbps: int(tb.Int64)}
 	}
 	p.Created = time.Unix(created, 0).UTC()
 	if paired.Valid {
@@ -543,4 +560,24 @@ func (s *Store) TitlesOfPeer(ctx context.Context, peerID string) ([]PeerTitle, e
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// SetPeerLimits sets what a peer may use of this server at once.
+func (s *Store) SetPeerLimits(ctx context.Context, peerID string, l PeerLimits) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE peers SET max_streams = ?, max_transcodes = ?, max_bitrate_kbps = ? WHERE id = ?`,
+		l.Streams, l.Transcodes, l.BitrateKbps, peerID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetTheirLimits keeps what a peer says we may use of it.
+func (s *Store) SetTheirLimits(ctx context.Context, peerID string, l PeerLimits) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE peers SET their_streams = ?, their_transcodes = ?, their_bitrate_kbps = ? WHERE id = ?`,
+		l.Streams, l.Transcodes, l.BitrateKbps, peerID)
+	return err
 }

@@ -199,6 +199,9 @@ spa_fallback = false
 max_transcodes_total = 4
 # 0 means no cap.
 max_bitrate_kbps = 0
+# Of those transcodes, how many servers paired with this one (federation)
+# can never take, together: kept for this server's own people.
+peer_transcode_reserve = 1
 # Wrong PINs in a row before a profile's PIN locks (3 to 10). The lock lifts
 # when the account owner logs in again (with step-up); only where there's no
 # step-up (forwardauth without [oidc], anonymous), after 15 minutes instead.

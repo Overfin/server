@@ -511,6 +511,9 @@ func (s *Service) CheckSoon(peers []*store.Peer) {
 
 type librariesAnswer struct {
 	Libraries []store.PeerLibrary `json:"libraries"`
+	// Limits is what the caller may use of this server at once, so it never
+	// offers what this server would refuse.
+	Limits *store.PeerLimits `json:"limits,omitempty"`
 }
 
 // maxLibraries caps the libraries a peer's answer may list.
@@ -570,7 +573,7 @@ func (s *Service) libraries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Store.PeerSeen(ctx, p.ID)
-	s.answer(w, v.Nonce, librariesAnswer{Libraries: offered})
+	s.answer(w, v.Nonce, librariesAnswer{Libraries: offered, Limits: &p.Limits})
 }
 
 // ErrNotPaired is returned for sharing with a server not paired yet.
@@ -592,6 +595,11 @@ func (s *Service) TheirLibraries(ctx context.Context, p *store.Peer) ([]store.Pe
 		return nil, ErrUnreachable
 	}
 	s.Store.PeerSeen(ctx, p.ID)
+	if l := answer.Limits; l != nil && ValidLimits(*l) == nil {
+		if err := s.Store.SetTheirLimits(ctx, p.ID, *l); err != nil {
+			return nil, err
+		}
+	}
 	out := []store.PeerLibrary{}
 	for _, l := range answer.Libraries {
 		if len(out) == maxLibraries {
@@ -825,4 +833,15 @@ func cleanTags(tags []string) []string {
 		out = append(out, t)
 	}
 	return out
+}
+
+// ErrLimits is returned for limits out of range.
+var ErrLimits = errors.New("federation: streams and transcodes go from 0 to 50, transcodes no more than streams, and the bitrate cap from 0 to 1,000,000 kbps")
+
+// ValidLimits checks a pairing's limits.
+func ValidLimits(l store.PeerLimits) error {
+	if l.Streams < 0 || l.Streams > 50 || l.Transcodes < 0 || l.Transcodes > l.Streams || l.BitrateKbps < 0 || l.BitrateKbps > 1_000_000 {
+		return ErrLimits
+	}
+	return nil
 }

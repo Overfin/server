@@ -420,6 +420,10 @@ type Limits struct {
 	MaxTranscodesTotal int `toml:"max_transcodes_total" json:"maxTranscodesTotal"`
 	// MaxBitrateKbps caps every stream; 0 means no cap.
 	MaxBitrateKbps int `toml:"max_bitrate_kbps" json:"maxBitrateKbps"`
+	// PeerTranscodeReserve is how many of the server's transcodes paired
+	// servers can never take, together: kept for this server's own people
+	// (with MaxTranscodesTotal; 0 keeps none).
+	PeerTranscodeReserve int `toml:"peer_transcode_reserve" json:"peerTranscodeReserve"`
 	// PINAttempts is how many wrong PINs in a row lock a profile.
 	PINAttempts int `toml:"pin_attempts" json:"pinAttempts"`
 	// OnLimit is what happens when an account starts one stream too many:
@@ -472,9 +476,10 @@ func defaults() Config {
 		// them explicitly avoids trusting the wrong one by accident.
 		Identity: Identity{Mode: "managed", GroupsSeparator: "|"},
 		Limits: Limits{
-			MaxTranscodesTotal: 4,
-			PINAttempts:        5,
-			OnLimit:            "replace-oldest",
+			MaxTranscodesTotal:   4,
+			PeerTranscodeReserve: 1,
+			PINAttempts:          5,
+			OnLimit:              "replace-oldest",
 		},
 		OIDC:   OIDC{FreshForMinutes: 5, RecheckMinutes: 10, GroupsClaim: "groups"},
 		Wishes: Wishes{KeptDays: 60, PerDay: 10},
@@ -908,6 +913,9 @@ func (c *Config) validate() error {
 	}
 	if c.Limits.MaxTranscodesTotal < 0 {
 		add("limits.max_transcodes_total must not be negative")
+	}
+	if c.Limits.PeerTranscodeReserve < 0 {
+		add("limits.peer_transcode_reserve must not be negative")
 	}
 	if c.Limits.OnLimit != "replace-oldest" && c.Limits.OnLimit != "refuse" {
 		add("limits.on_limit must be \"replace-oldest\" or \"refuse\"")

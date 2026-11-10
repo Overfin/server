@@ -84,6 +84,7 @@
         { path: 'limits.onLimit', kind: 'choice', label: 'One stream too many' },
         { path: 'limits.maxTranscodesTotal', kind: 'number', label: 'Transcodes on the server', zero: '0: no limit' },
         { path: 'limits.maxBitrateKbps', kind: 'number', label: 'Bitrate cap (kbps)', zero: '0: no cap' },
+        { path: 'limits.peerTranscodeReserve', kind: 'number', label: 'Transcodes kept from other servers' },
         { path: 'limits.pinAttempts', kind: 'number', label: 'Wrong PINs before a lock' },
         { path: 'wishes.to', kind: 'choice', label: 'Wishes go to' },
         { path: 'wishes.keptDays', kind: 'number', label: 'Kept after arriving (days)' },
@@ -184,6 +185,9 @@
       </Setting>
       <Setting label="Bitrate cap (kbps)" hint="0: no cap.">
         {#snippet children(ids)}<input type="number" min="0" bind:value={values['limits.maxBitrateKbps']} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+      </Setting>
+      <Setting label="Transcodes kept from other servers" hint="Of the server's transcodes, how many servers paired with this one (Federation) can never take, together: kept for your own people. 0: none kept.">
+        {#snippet children(ids)}<input type="number" min="0" bind:value={values['limits.peerTranscodeReserve']} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
       </Setting>
     </Card>
     <Card title="Accounts">

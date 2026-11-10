@@ -159,8 +159,14 @@ func TestSharingPanel(t *testing.T) {
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"name":"Films","kind":"movies","picked":false`) {
 		t.Fatalf("A's sharing: %d %s", rec.Code, rec.Body)
 	}
-	if rec := a.do("PUT", "/admin/api/federation/peers/"+bOnA.ID+"/sharing", `{"offer":["films"],"want":[]}`, nil); rec.Code != 204 {
+	if rec := a.do("PUT", "/admin/api/federation/peers/"+bOnA.ID+"/sharing", `{"offer":["films"],"want":[],"limits":{"streams":1,"transcodes":2,"bitrateKbps":0}}`, nil); rec.Code != 400 {
+		t.Fatalf("more transcodes than streams: %d %s", rec.Code, rec.Body)
+	}
+	if rec := a.do("PUT", "/admin/api/federation/peers/"+bOnA.ID+"/sharing", `{"offer":["films"],"want":[],"limits":{"streams":4,"transcodes":2,"bitrateKbps":12000}}`, nil); rec.Code != 204 {
 		t.Fatalf("A offers: %d %s", rec.Code, rec.Body)
+	}
+	if rec := a.do("GET", "/admin/api/federation/peers/"+bOnA.ID+"/sharing", "", nil); !strings.Contains(rec.Body.String(), `"limits":{"streams":4,"transcodes":2,"bitrateKbps":12000}`) {
+		t.Fatalf("A's limits: %s", rec.Body)
 	}
 	rec = b.do("GET", "/admin/api/federation/peers/"+aOnB.ID+"/sharing", "", nil)
 	var sh struct {

@@ -343,7 +343,14 @@ func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
 			outTheirs = append(outTheirs, lib{ID: w.ID, Name: w.Name, Kind: w.Kind, Picked: true, Gone: reachable})
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ours": outOurs, "theirs": outTheirs, "reachable": reachable})
+	if reachable {
+		// What it says we may use of it, read again with its libraries.
+		if again, err := p.Store.PeerByID(ctx, peer.ID); err == nil {
+			peer = again
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ours": outOurs, "theirs": outTheirs, "reachable": reachable,
+		"limits": peer.Limits, "theirLimits": peer.Theirs})
 }
 
 func (p *Panel) setSharing(w http.ResponseWriter, r *http.Request, s *session) {
@@ -352,8 +359,9 @@ func (p *Panel) setSharing(w http.ResponseWriter, r *http.Request, s *session) {
 		return
 	}
 	var req struct {
-		Offer []string `json:"offer"`
-		Want  []string `json:"want"`
+		Offer  []string          `json:"offer"`
+		Want   []string          `json:"want"`
+		Limits *store.PeerLimits `json:"limits"`
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request"})
@@ -363,6 +371,17 @@ func (p *Panel) setSharing(w http.ResponseWriter, r *http.Request, s *session) {
 	peer := p.pairedPeer(w, r)
 	if peer == nil {
 		return
+	}
+	if req.Limits != nil {
+		if err := federation.ValidLimits(*req.Limits); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
+				"detail": "Streams and transcodes go from 0 to 50, with no more transcodes than streams; the bitrate cap from 0 (none) to 1,000,000 kbps."})
+			return
+		}
+		if err := p.Store.SetPeerLimits(ctx, peer.ID, *req.Limits); err != nil {
+			p.fail(w, "setting a peer's limits", err)
+			return
+		}
 	}
 	if err := fed.SetOffers(ctx, peer, req.Offer); err != nil {
 		p.fail(w, "setting offers", err)

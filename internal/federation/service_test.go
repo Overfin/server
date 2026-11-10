@@ -231,9 +231,14 @@ func TestSharing(t *testing.T) {
 	if err := a.s.SetOffers(ctx, bOnA, []string{"films", "series", "not-a-library"}); err != nil {
 		t.Fatal(err)
 	}
+	a.s.Store.SetPeerLimits(ctx, bOnA.ID, store.PeerLimits{Streams: 3, Transcodes: 1, BitrateKbps: 8000})
 	got, err := b.s.TheirLibraries(ctx, aOnB)
 	if err != nil || len(got) != 2 || got[0].Name != "Films" || got[1].Name != "Séries" || got[1].Kind != "tvshows" {
 		t.Fatalf("B sees: %+v, %v", got, err)
+	}
+	// B learns what A lets it use.
+	if again, _ := b.s.Store.PeerByID(ctx, aOnB.ID); again.Theirs == nil || *again.Theirs != (store.PeerLimits{Streams: 3, Transcodes: 1, BitrateKbps: 8000}) {
+		t.Fatalf("B's view of A's limits: %+v", again.Theirs)
 	}
 	if err := b.s.SetWants(ctx, aOnB, []string{"series", "home"}); err != nil {
 		t.Fatal(err)

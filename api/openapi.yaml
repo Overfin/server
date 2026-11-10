@@ -3874,6 +3874,13 @@ paths:
                         id: {type: string}
                         name: {type: string}
                         kind: {type: string, description: "Jellyfin's kind: movies, tvshows…; empty if other"}
+                  limits:
+                    type: object
+                    description: What the caller may use of this server at once, so it never offers what this server would refuse.
+                    properties:
+                      streams: {type: integer}
+                      transcodes: {type: integer}
+                      bitrateKbps: {type: integer, description: "0: no cap"}
         "404": {description: "Not signed, or not a paired server."}
 
   /federation/titles:

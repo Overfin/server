@@ -27,10 +27,17 @@
     picked: boolean;
     gone?: boolean;
   }
+  interface Limits {
+    streams: number;
+    transcodes: number;
+    bitrateKbps: number;
+  }
   interface Sharing {
     ours: Lib[];
     theirs: Lib[];
     reachable: boolean;
+    limits: Limits;
+    theirLimits?: Limits;
   }
   interface Code {
     id: string;
@@ -68,6 +75,7 @@
   let sharing = $state<Sharing | null>(null);
   let offer = $state<string[]>([]);
   let want = $state<string[]>([]);
+  let limits = $state<Limits>({ streams: 2, transcodes: 1, bitrateKbps: 0 });
 
   async function load() {
     try {
@@ -174,6 +182,7 @@
       const sh = await api<Sharing>('GET', `/admin/api/federation/peers/${p.id}/sharing`);
       offer = sh.ours.filter((l) => l.picked).map((l) => l.id);
       want = sh.theirs.filter((l) => l.picked).map((l) => l.id);
+      limits = { ...sh.limits };
       sharing = sh;
       sharingWith = p;
     } catch (err) {
@@ -183,12 +192,20 @@
 
   async function saveSharing() {
     if (!sharingWith) return;
-    await api('PUT', `/admin/api/federation/peers/${sharingWith.id}/sharing`, { offer, want });
+    const n = (v: unknown) => Number(v) || 0;
+    await api('PUT', `/admin/api/federation/peers/${sharingWith.id}/sharing`, {
+      offer,
+      want,
+      limits: { streams: n(limits.streams), transcodes: n(limits.transcodes), bitrateKbps: n(limits.bitrateKbps) },
+    });
     toast('Sharing saved.');
     await load();
   }
 
   const kinds: Record<string, string> = { movies: 'Films', tvshows: 'Series', music: 'Music', musicvideos: 'Music videos', homevideos: 'Home videos', boxsets: 'Collections', books: 'Books', photos: 'Photos', mixed: 'Mixed' };
+
+  const limitsText = (l: Limits) =>
+    `${plural(l.streams, 'stream')} at once, ${plural(l.transcodes, 'transcode')} among them, ${l.bitrateKbps ? `${l.bitrateKbps} kbps at most` : 'no bitrate cap'}`;
 
   const shareText = (p: Peer) => `Offers ${plural(p.offers, 'library', 'libraries')} · wants ${p.wants}${p.wants ? ` (${plural(p.titles, 'title')})` : ''}`;
   // The kind, unless the name already says it ("Films").
@@ -328,7 +345,17 @@
         {#each sharing.theirs as l (l.id)}<label class="inline"><input type="checkbox" value={l.id} bind:group={want} disabled={!sharing.reachable} /> {l.name}{#if kindOf(l)} <span class="hint">({kindOf(l)})</span>{/if}{#if l.gone} <span class="hint">· no longer offered</span>{/if}</label>
         {:else}<span class="hint">{sharing.reachable ? `${sharingWith.name} offers you nothing yet.` : ''}</span>{/each}
       </div>
+      {#if sharing.theirLimits}<div class="hint">{sharingWith.name} lets you use {limitsText(sharing.theirLimits)}.</div>{/if}
     </div>
+    <Setting label="Streams at once" hint={`What ${sharingWith.name}'s people may play from this server at the same time.`}>
+      {#snippet children(ids)}<input type="number" min="0" max="50" bind:value={limits.streams} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+    </Setting>
+    <Setting label="Transcodes among them" hint="Re-encoded video, which is what costs. Your server's own reserve (Features & limits) applies too.">
+      {#snippet children(ids)}<input type="number" min="0" max="50" bind:value={limits.transcodes} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+    </Setting>
+    <Setting label="Bitrate cap (kbps)" hint="0: no cap.">
+      {#snippet children(ids)}<input type="number" min="0" bind:value={limits.bitrateKbps} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+    </Setting>
   </FormModal>
 {/if}
 
