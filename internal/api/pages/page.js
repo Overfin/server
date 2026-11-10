@@ -179,6 +179,9 @@ run($('register'), async () => {
   const password = same('password', 'password2');
   const to = $('email').value.trim();
   await checked('/api/v1/register', { email: to, password });
+  // What to do next is the page's title now, not the invitation.
+  document.querySelector('h1').textContent = page.checkMail;
+  document.title = document.title.replace(/^[^·]*/, page.checkMail + ' ');
   done(page.registered.replace('{email}', to));
   return null;
 });
@@ -195,10 +198,33 @@ const hash = new URLSearchParams(location.hash.slice(1));
 const verify = hash.get('verify');
 const reset = hash.get('reset');
 if (verify || reset) history.replaceState(null, '', location.pathname + location.search);
-if (verify && $('verify')) {
-  $('signin').hidden = true;
-  $('verify').hidden = false;
-  run($('verify'), () => post('/api/v1/signin/verify', { link: verify }));
+// The confirming page: its link's token, used on a click; without one, or
+// when it no longer works, the way to sign in.
+if (page.mode === 'confirm') {
+  const failed = () => {
+    $('verify').hidden = true;
+    $('verify-failed').hidden = false;
+    $('verify-signin').hidden = false;
+  };
+  if (!verify) {
+    $('verify').hidden = true;
+    $('verify-none').hidden = false;
+    $('verify-signin').hidden = false;
+  } else {
+    $('verify').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const button = $('verify').querySelector('button');
+      button.disabled = true;
+      try {
+        const answer = await post('/api/v1/signin/verify', { link: verify });
+        if (answer?.next) go(answer.next);
+      } catch {
+        failed();
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
 }
 if (reset && $('reset-new')) {
   $('reset').hidden = true;

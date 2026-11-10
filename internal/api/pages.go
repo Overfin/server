@@ -80,7 +80,8 @@ func (p Pages) challenge(w http.ResponseWriter, r *http.Request) {
 type page struct {
 	// Mode is "signin", "fresh", "change", "verify", "reset", "reset-new",
 	// "invite" (registering), "invited" (with an identity provider), "link"
-	// (signing a screen in), "setup" (an account's first password) or
+	// (signing a screen in), "setup" (an account's first password),
+	// "confirm" (an email's link confirming an address) or
 	// "again" (opening the same page again, to carry the login cookie: its
 	// Return is where).
 	Mode string

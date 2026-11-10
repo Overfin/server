@@ -294,18 +294,24 @@ func (m *Managed) stepUp(w http.ResponseWriter, r *http.Request) {
 // them (?fresh=1) or to choose a new password first; or, from an email's
 // link, confirms an address (#verify=…, read by the page).
 func (m *Managed) signinPage(w http.ResponseWriter, r *http.Request) {
-	if againWithCookie(w, r, m.Store, m.Logger) {
+	q := r.URL.Query()
+	// An email's confirming link needs no login cookie (the link signs in):
+	// no trip through the page asking again for it.
+	if q.Get("confirm") != "1" && againWithCookie(w, r, m.Store, m.Logger) {
 		return
 	}
-	q := r.URL.Query()
 	p := page{Mode: "signin", Return: safeReturn(q.Get("return")), Mail: m.canMail()}
 	_, u := m.current(r)
 	switch {
+	case q.Get("confirm") == "1":
+		// An email's link confirming an address: a page of its own, signed
+		// in or not (someone signed in, reminded to confirm, opens it too).
+		p.Mode = "confirm"
 	case u != nil && u.Confirmed && u.MustChange:
 		p.Mode = "change"
 	case u != nil && u.Confirmed && q.Get("fresh") == "1":
 		p.Mode, p.Email = "fresh", u.Email
-	case u != nil && u.Confirmed && q.Get("confirm") != "1":
+	case u != nil && u.Confirmed:
 		http.Redirect(w, r, p.Return, http.StatusSeeOther) // already signed in
 		return
 	}
