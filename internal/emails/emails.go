@@ -29,6 +29,8 @@ import (
 	"strings"
 	texttemplate "text/template"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 	"github.com/overfin/server/internal/mail"
@@ -214,8 +216,23 @@ func (w *Writer) translator(lang string, d data) func(string) string {
 		if !ok {
 			s = texts["en"][key]
 		}
+		if strings.HasPrefix(lang, "fr") {
+			s = elide(s, "{site}", d.Site)
+			s = elide(s, "{name}", d.Name)
+		}
 		return strings.NewReplacer("{site}", d.Site, "{name}", d.Name, "{date}", d.Date, "{invitation}", d.Invitation).Replace(s)
 	}
+}
+
+// elide writes French's "de" as "d’" before a value starting with a vowel:
+// "un administrateur d’Overfin", not "de Overfin".
+func elide(s, key, value string) string {
+	first, _ := utf8.DecodeRuneInString(value)
+	if !strings.ContainsRune("aeiouyàâäéèêëîïôöùûüÿœæ", unicode.ToLower(first)) {
+		return s
+	}
+	s = strings.ReplaceAll(s, "de "+key, "d’"+key)
+	return strings.ReplaceAll(s, "De "+key, "D’"+key)
 }
 
 // file is a template's source: the operator's for the language, or for

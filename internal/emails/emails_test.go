@@ -126,3 +126,17 @@ func TestJoinedInvitation(t *testing.T) {
 		t.Errorf("without one: %q\n%s", m.Subject, m.Text)
 	}
 }
+
+// French writes "de" as "d’" before a vowel: d’Overfin, de Cinéclub.
+func TestElide(t *testing.T) {
+	for _, c := range []struct{ value, want string }{
+		{"Overfin", "un administrateur d’Overfin"},
+		{"Écran", "un administrateur d’Écran"},
+		{"Cinéclub", "un administrateur de Cinéclub"},
+		{"", "un administrateur de "},
+	} {
+		if got := strings.ReplaceAll(elide("un administrateur de {site}", "{site}", c.value), "{site}", c.value); got != c.want {
+			t.Errorf("%q: got %q, want %q", c.value, got, c.want)
+		}
+	}
+}
