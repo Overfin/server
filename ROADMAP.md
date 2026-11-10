@@ -565,7 +565,11 @@ Jellyfin account.
   on no server at all (requestable, with the TMDB catalog and requests). A
   title on both servers plays from the viewer's own by default, with the
   peer offered as another source. While a peer is offline, its titles are
-  hidden, or shown as requestable among the titles on no server;
+  hidden, or shown as requestable among the titles on no server. A source
+  from another server is always shown as such, never passed off as this
+  server's, and Overfin never suggests by itself a source that doesn't
+  have the person's language: each source carries its audio and subtitle
+  languages (decided 2026-11-10);
 - the peer serves its pairings through its one Jellyfin account
   (milestone 4) and counts each pairing's streams itself. It never knows
   who watches: requests come from the pairing, not from a person;
