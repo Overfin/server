@@ -606,11 +606,12 @@ caught; and operators who know each other can compare fingerprints.
 
 Basic federation only, out of scope: swarms of servers or of browsers (as
 PeerTube does), copying a peer's files to one's own server, and watching
-together across servers (a social feature). Open questions: whether the
-network host should also carry members' messages, hiding their addresses
-from each other (they'd still learn each other's streaming address), or
-only keep the directory, as assumed here; who may invite to a hosted
-network besides its host.
+together across servers (a social feature). The network host only keeps
+the directory and never carries members' messages: even encrypted, it would
+see who talks to whom and when, it would stop the whole network when down,
+and the addresses it would hide still show through each member's streams
+(an operator who wants theirs hidden relays their streams). Open question:
+who may invite to a hosted network besides its host.
 
 ## Beyond Jellyfin
 
