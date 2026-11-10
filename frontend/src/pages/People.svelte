@@ -4,6 +4,7 @@
 <script lang="ts">
   import { PageHead, Card, Avatar, Badge, Notice, Loading } from '@overfin/ui';
   import { api } from '../lib/api';
+  import { news } from '../lib/news.svelte';
   import { ago, message } from '../lib/format';
   import { route } from '../lib/router.svelte';
   import type { Template } from '../lib/types';
@@ -62,6 +63,15 @@
   const waiting = $derived(people ? people.filter((x) => !x.accountId) : []);
 
   load();
+  // Reloaded when the panel hears of an invitation used or an account made.
+  let heard = news.changed;
+  $effect(() => {
+    if (news.changed !== heard) {
+      heard = news.changed;
+      load();
+    }
+  });
+
 </script>
 
 <PageHead title="People" description={people

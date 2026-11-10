@@ -1396,6 +1396,24 @@ func (s *Store) AccountByID(ctx context.Context, id string) (*Account, error) {
 	return scanAccount(s.read.QueryRowContext(ctx, accountSelect+` WHERE a.id = ?`, id))
 }
 
+// AccountsSince lists the accounts made at or after a time, oldest first.
+func (s *Store) AccountsSince(ctx context.Context, since time.Time) ([]*Account, error) {
+	rows, err := s.read.QueryContext(ctx, accountSelect+` WHERE a.created_at >= ? ORDER BY a.created_at, a.id`, since.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Account
+	for rows.Next() {
+		a, err := scanAccount(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // Accounts lists every account, newest first.
 func (s *Store) Accounts(ctx context.Context) ([]*Account, error) {
 	rows, err := s.read.QueryContext(ctx, accountSelect+` ORDER BY a.created_at DESC`)

@@ -27,8 +27,10 @@ export function signInAgain(back = `/admin/${location.hash}`) {
   location.href = `/admin/login?return=${encodeURIComponent(back)}`;
 }
 
-function sessionLeft(res: Response) {
-  lastAsked = Date.now();
+function sessionLeft(res: Response, background = false) {
+  // Asking by itself (news) isn't someone here: the next keystroke still
+  // keeps the session alive.
+  if (!background) lastAsked = Date.now();
   const left = Number(res.headers.get('Overfin-Session-Left'));
   if (!res.headers.has('Overfin-Session-Left') || !Number.isFinite(left)) return;
   sessionEnds = Date.now() + left * 1000;
@@ -61,14 +63,16 @@ for (const kind of ['keydown', 'pointerdown', 'input', 'wheel']) {
 /** api asks the server. Signed out, it goes to the sign-in page and never
  * answers: nothing waiting on it goes on. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function api<T = any>(method: string, path: string, body?: unknown): Promise<T> {
+export async function api<T = any>(method: string, path: string, body?: unknown, background = false): Promise<T> {
   const init: RequestInit = { method, headers: {} };
   if (body !== undefined) {
     (init.headers as Record<string, string>)['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
+  // In the background, the server doesn't count it as someone here.
+  if (background) (init.headers as Record<string, string>)['Overfin-Background'] = '1';
   const res = await fetch(path, init);
-  sessionLeft(res);
+  sessionLeft(res, background);
   if (res.status === 204) return null as T;
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) {
