@@ -185,7 +185,7 @@
     <Setting label="Address" hint="Where other servers reach this one, as codes give it.">
       {#snippet children()}<code>{s?.address}</code>{/snippet}
     </Setting>
-    <Setting label="Fingerprint" hint="What the other operator compares, to be sure the code is really this server's.">
+    <Setting stack label="Fingerprint" hint="What the other operator compares, to be sure the code is really this server's.">
       {#snippet children()}<code class="fingerprint">{s?.fingerprint}</code>{/snippet}
     </Setting>
     {#if s.address?.startsWith('http://')}
@@ -196,12 +196,12 @@
   <Card title="Servers">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Server</th><th>Status</th><th class="hide-narrow">Fingerprint</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+        <thead><tr><th>Server</th><th class="hide-narrow">Status</th><th class="hide-narrow">Fingerprint</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {#each s.peers ?? [] as p (p.id)}
             <tr>
-              <td><div class="name">{p.name}</div><div class="hint">{p.address}</div></td>
-              <td><div>{stateText(p)}</div>{#if p.seenAt}<div class="hint">heard from {ago(p.seenAt)}</div>{/if}</td>
+              <td><div class="name">{p.name}</div><div class="hint">{p.address}</div><div class="only-narrow">{stateText(p)}</div></td>
+              <td class="hide-narrow"><div>{stateText(p)}</div>{#if p.seenAt}<div class="hint">heard from {ago(p.seenAt)}</div>{/if}</td>
               <td class="hide-narrow"><code class="fingerprint">{p.fingerprint}</code></td>
               <td class="row-actions">
                 {#if p.state === 'ours'}
@@ -271,7 +271,7 @@
     <Setting label="Address">
       {#snippet children()}<code>{preview?.address}</code>{/snippet}
     </Setting>
-    <Setting label="Fingerprint" hint="Compare it with the other operator, by phone or a message you trust: if it differs, the code was changed on the way.">
+    <Setting stack label="Fingerprint" hint="Compare it with the other operator, by phone or a message you trust: if it differs, the code was changed on the way.">
       {#snippet children()}<code class="fingerprint">{preview?.fingerprint}</code>{/snippet}
     </Setting>
     {#if preview.expired}
@@ -289,5 +289,13 @@
   .fingerprint {
     white-space: nowrap;
     letter-spacing: 0.02em;
+  }
+  .only-narrow {
+    display: none;
+  }
+  @media (max-width: 860px) {
+    .only-narrow {
+      display: block;
+    }
   }
 </style>
