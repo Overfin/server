@@ -31,6 +31,7 @@ import (
 	"github.com/overfin/server/internal/connector"
 	"github.com/overfin/server/internal/cookie"
 	"github.com/overfin/server/internal/emails"
+	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/imdb"
 	"github.com/overfin/server/internal/introskipper"
@@ -641,6 +642,12 @@ func newShared(cfg *config.Config, db *store.Store, moduleDBs map[string]*sql.DB
 		// Emails, with the operator's own templates next to the database.
 		emails: &emails.Writer{Dir: filepath.Join(filepath.Dir(cfg.Storage.Path), "mail-templates"), Store: db, Logger: logger},
 		proof:  &proof.Checker{Key: k.Proof}}
+	// This server's federation key, made on the first start.
+	fedKey, err := federation.LoadKey(context.Background(), db)
+	if err != nil {
+		return nil, err
+	}
+	sh.fed = fedShared{key: fedKey, seen: &federation.Nonces{}, http: federation.NewHTTPClient()}
 	// Notices: account events, by email and webhook, as the panel sets.
 	sh.notices = &notices.Notifier{Store: db, Emails: sh.emails, Managed: cfg.Identity.Mode == "managed",
 		Site: siteURL(cfg), Logger: logger, Mail: func() notices.Sender {
@@ -735,6 +742,9 @@ func purgeExpired(ctx context.Context, db *store.Store, logger *slog.Logger) {
 		}
 		if err := db.DeleteExpiredDeviceCodes(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("purging expired device codes failed", "err", err)
+		}
+		if err := db.DeleteExpiredPairingCodes(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("purging expired pairing codes failed", "err", err)
 		}
 		// Those who registered and never confirmed their address go.
 		if n, err := db.DeleteUnconfirmed(ctx, time.Now().Add(-api.UnconfirmedFor)); err != nil && ctx.Err() == nil {

@@ -23,6 +23,7 @@ import (
 	"github.com/overfin/server/internal/connector"
 	"github.com/overfin/server/internal/emails"
 	"github.com/overfin/server/internal/feature"
+	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/gpu"
 	"github.com/overfin/server/internal/identity"
 	"github.com/overfin/server/internal/images"
@@ -79,6 +80,9 @@ type shared struct {
 	// proof checks the sign-in pages' forms against scripts; one for the
 	// whole run, so a check is used once whatever reloads.
 	proof *proof.Checker
+	// fed is what federation keeps across rebuilds: this server's key,
+	// the nonces already accepted, and the client for peers.
+	fed fedShared
 	// tmdb is TMDB itself, with the operator's token: TMDB's data comes
 	// from it first, from Seerr otherwise.
 	tmdb *tmdb.Client
@@ -151,6 +155,8 @@ type built struct {
 	managed *api.Managed
 	// playback serves playbacks; its janitor ends the idle ones.
 	playback api.Playback
+	// fed is federation, nil when the site has no address for it.
+	fed *federation.Service
 }
 
 func build(cfg *config.Config, sh *shared) (*built, error) {
@@ -270,6 +276,12 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 		api.Invitations{Mounts: mounts, Managed: managed, Store: db, Logger: logger},
 	}
 	plugins = append(plugins, signIn...)
+	// Federation: its routes answer paired servers only, and a server using
+	// a live code; with neither, everything is a plain 404.
+	if fed := federationService(cfg, sh); fed != nil {
+		b.fed = fed
+		plugins = append(plugins, federation.Plugin{S: fed})
+	}
 	if cfg.Plugins.Enabled("library") {
 		plugins = append(plugins, lib)
 	}
@@ -298,6 +310,37 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	}
 	b.handler = h
 	return b, nil
+}
+
+// fedShared is what federation keeps across rebuilds.
+type fedShared struct {
+	key  federation.Key
+	seen *federation.Nonces
+	http *http.Client
+}
+
+// federationService is federation on this server, or nil when the site has
+// no address a code could give (no site.url, HTTPS domain or sign-in
+// return address), or one with a path: peers reach a server at its site's
+// root.
+func federationService(cfg *config.Config, sh *shared) *federation.Service {
+	address := siteURL(cfg)
+	if address == "" || sh.fed.http == nil {
+		return nil
+	}
+	if _, err := federation.NewCode(address, sh.fed.key.Public(), time.Now()); err != nil {
+		sh.logger.Info("federation: off, the site's address isn't http(s)://host alone", "address", address)
+		return nil
+	}
+	db := sh.db
+	return &federation.Service{Store: db, Key: sh.fed.key, Address: address, HTTP: sh.fed.http, Seen: sh.fed.seen,
+		Logger: sh.logger, Name: func(ctx context.Context) string {
+			if b, err := db.Branding(ctx); err == nil && b.On && b.Name != "" {
+				return b.Name
+			}
+			u, _ := url.Parse(address)
+			return u.Host
+		}}
 }
 
 // newSite is the website Overfin serves beside the API: the one this build

@@ -3770,6 +3770,75 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /federation/pair:
+    post:
+      operationId: federationPair
+      summary: Another server uses this server's pairing code
+      description: |
+        Server to server, never for apps (ROADMAP.md milestone 6, SECURITY.md
+        rule 65). The caller signs the request with its federation key
+        (headers `Overfin-Key`, `Overfin-Date`, `Overfin-Nonce`,
+        `Overfin-Signature`, over the method, this server's host, the path,
+        the date, the nonce and the body's SHA-256); the answer is signed by
+        this server's key, over the request's nonce, the status and the body.
+        `secretHash` is the SHA-256 of the code's secret, which finds the
+        code; `proof` is an HMAC-SHA256, with the secret, of the caller's key
+        and address, so the secret never travels. The code is used once. A
+        request that isn't signed, or names no live code, or fails its
+        proof, gets the same plain 404 as a missing route. The caller then
+        waits for this server's operator to accept it.
+      tags: [federation]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address, name, secretHash, proof]
+              properties:
+                address: {type: string, description: "The caller's site, http(s)://host"}
+                name: {type: string, description: What the caller calls itself}
+                secretHash: {type: string, description: URL-safe base64, no padding}
+                proof: {type: string, description: URL-safe base64, no padding}
+      responses:
+        "200":
+          description: Paired, waiting for this server's operator. Signed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name]
+                properties:
+                  name: {type: string, description: What this server calls itself}
+        "404": {description: "Not signed, no such live code, or a wrong proof."}
+        "409": {description: "The caller's key is known here already."}
+
+  /federation/hello:
+    post:
+      operationId: federationHello
+      summary: Two servers tell each other where their pairing stands
+      description: |
+        Server to server, signed both ways as for pair. The caller says
+        where it stands (`paired`: its operator accepted; `waiting`;
+        `ended`: it has just ended the pairing, which ends it here too), and
+        the answer says where this server stands. A key this server doesn't
+        know gets the same plain 404 as a missing route.
+      tags: [federation]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/FederationState"}
+      responses:
+        "200":
+          description: Where this server stands. Signed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/FederationState"}
+        "404": {description: "Not signed, or not a peer of this server."}
+
 components:
   securitySchemes:
     session:
@@ -3840,6 +3909,13 @@ components:
         examples: [prof_3kq9x2m8w7v1]
 
   schemas:
+    FederationState:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [paired, waiting, ended]
     Signin:
       description: What a step of the sign-in pages sends; each uses its own
         fields.

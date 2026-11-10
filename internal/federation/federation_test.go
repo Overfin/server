@@ -147,7 +147,7 @@ func TestSignedRequestRefused(t *testing.T) {
 }
 
 func TestNoncesForgotten(t *testing.T) {
-	var n nonces
+	var n Nonces
 	if !n.add("a", now) || n.add("a", now) {
 		t.Fatal("a nonce must be accepted once")
 	}

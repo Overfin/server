@@ -104,7 +104,10 @@ type Verifier struct {
 	// Host is this server's own host, as its address names it: a request
 	// signed for another server is refused, even if sent here.
 	Host string
-	seen nonces
+	// Seen remembers the nonces already accepted. Shared by the Verifiers
+	// a server makes over its life (each settings change rebuilds them),
+	// so a request can't be replayed across one; nil for one of its own.
+	Seen *Nonces
 }
 
 // Verified is what a valid request proves.
@@ -145,21 +148,24 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 	}
 	// Only once the signature is good is the nonce remembered: nobody
 	// can fill the memory with nonces they made up.
-	if !v.seen.add(nonce, now) {
+	if v.Seen == nil {
+		v.Seen = &Nonces{}
+	}
+	if !v.Seen.add(nonce, now) {
 		return Verified{}, ErrSignature
 	}
 	return Verified{Key: ed25519.PublicKey(key), Nonce: nonce}, nil
 }
 
-// nonces remembers the nonces of the requests accepted within the last
+// Nonces remembers the nonces of the requests accepted within the last
 // 2×MaxSkew: any older request is refused by its date anyway.
-type nonces struct {
+type Nonces struct {
 	mu   sync.Mutex
 	seen map[string]time.Time
 	last time.Time // when the old ones were last cleared
 }
 
-func (n *nonces) add(nonce string, now time.Time) bool {
+func (n *Nonces) add(nonce string, now time.Time) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if n.seen == nil {
