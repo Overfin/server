@@ -154,9 +154,13 @@ func (m *Managed) setupPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// An emailed link proved the address; a copied one didn't, which
-	// matters only when emails can confirm it.
+	// matters only when emails can confirm it, and only for someone new: an
+	// account past its setup, its address confirmed (by its own link, or
+	// vouched for by an admin before setup links), keeps it confirmed when
+	// a setup link brings it a new password.
 	hold, unverified := false, false
-	if purpose == "setup" && m.canMail() {
+	proven := !u.SetupPending && u.Confirmed && !u.Unverified
+	if purpose == "setup" && m.canMail() && !proven {
 		choice, err := m.Store.CopiedSetup(ctx)
 		if err != nil {
 			m.fail(w, r, err)
