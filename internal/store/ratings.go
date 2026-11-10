@@ -122,14 +122,14 @@ type RatedTitle struct {
 	TMDB string
 }
 
-// TitlesToRate returns up to limit titles, in the library or in discovery,
+// TitlesToRate returns up to limit titles, held (heldTitles) or in discovery,
 // whose certifications weren't fetched since before.
 //
 // Titles that can't be watched at home yet (as of today, YYYY-MM-DD) are
 // fetched again sooner, after pendingBefore, so a new release shows soon.
 func (s *Store) TitlesToRate(ctx context.Context, before, pendingBefore time.Time, today string, limit int) ([]RatedTitle, error) {
 	rows, err := s.read.QueryContext(ctx, `SELECT kind, tmdb FROM (
-			SELECT kind, tmdb FROM catalog_items WHERE kind IN ('movie', 'series') AND tmdb IS NOT NULL
+			`+heldTitles+`
 			UNION SELECT kind, tmdb FROM catalog_titles) t
 		WHERE NOT EXISTS (SELECT 1 FROM title_ratings_fetched f
 			WHERE f.kind = t.kind AND f.tmdb = t.tmdb AND f.fetched_at >= ?

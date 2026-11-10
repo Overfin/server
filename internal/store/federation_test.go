@@ -194,3 +194,35 @@ func TestPeerTitles(t *testing.T) {
 		t.Fatalf("not replaced: %v", n)
 	}
 }
+
+// TMDB's data is kept for what paired servers hold too: a series with the
+// seasons they have; nothing of a server not paired.
+func TestHeldTitles(t *testing.T) {
+	s, ctx := openTest(t), context.Background()
+	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A")
+	s.SetPeerTitles(ctx, p.ID, []PeerTitle{{Key: "series/tmdb/1399", Kind: "series", Library: "x"},
+		{Key: "series/tmdb/1399/s1", Kind: "season", Library: "x"}, {Key: "series/tmdb/1399/s3", Kind: "season", Library: "x"},
+		{Key: "movie/tmdb/949", Kind: "movie", Library: "x"}, {Key: "series/tvdb/5", Kind: "series", Library: "x"}})
+	if got, _ := s.ArtworkToFetch(ctx, time.Now(), 10); len(got) != 0 {
+		t.Fatalf("a server not paired yet: %+v", got)
+	}
+	s.SetPeerState(ctx, p.ID, PeerTheirs, PeerPaired)
+	got, err := s.ArtworkToFetch(ctx, time.Now(), 10)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("artwork: %+v, %v", got, err)
+	}
+	for _, a := range got {
+		if a.Kind == "series" && (a.TMDB != "1399" || len(a.Seasons) != 2 || a.Seasons[0]+a.Seasons[1] != 4) {
+			t.Fatalf("series: %+v", a)
+		}
+		if a.Kind == "movie" && a.TMDB != "949" {
+			t.Fatalf("film: %+v", a)
+		}
+	}
+	if got, _ := s.TextsToFetch(ctx, "fr", time.Now(), 10); len(got) != 2 {
+		t.Fatalf("texts: %+v", got)
+	}
+	if got, _ := s.TitlesToRate(ctx, time.Now(), time.Now(), "2026-11-10", 10); len(got) != 2 {
+		t.Fatalf("ratings: %+v", got)
+	}
+}

@@ -301,6 +301,14 @@ func (s *Store) DeleteExpiredPairingCodes(ctx context.Context) error {
 // PairingSecretHash is how a code is found when redeemed.
 func PairingSecretHash(secret []byte) []byte { return pairingSecretHash(secret) }
 
+// heldTitles, in SQL, are the films and series this server can play or
+// will: its library's, and those its paired servers hold for it (by TMDB
+// ID), as (kind, tmdb) rows. TMDB's data is kept for all of them alike.
+const heldTitles = `SELECT kind, tmdb FROM catalog_items WHERE kind IN ('movie', 'series') AND tmdb IS NOT NULL
+	UNION SELECT p.kind, substr(p.title_key, length(p.kind) + 7) FROM peer_titles p
+		WHERE p.kind IN ('movie', 'series') AND p.title_key LIKE p.kind || '/tmdb/%'
+		AND EXISTS (SELECT 1 FROM peers e WHERE e.id = p.peer_id AND e.state = 'paired')`
+
 // PeerOffers lists our libraries offered to a peer, by ID.
 func (s *Store) PeerOffers(ctx context.Context, peerID string) ([]string, error) {
 	rows, err := s.read.QueryContext(ctx, `SELECT library_id FROM peer_offers WHERE peer_id = ? ORDER BY library_id`, peerID)

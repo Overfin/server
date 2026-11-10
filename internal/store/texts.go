@@ -80,12 +80,10 @@ func (s *Store) SetSeasonTexts(ctx context.Context, language, series string, se 
 	return tx.Commit()
 }
 
-// TextsToFetch lists library films and series without texts in language,
-// or with texts fetched before before, with their seasons as the library
-// has them.
+// TextsToFetch lists the films and series this server holds (heldTitles)
+// without texts in language, or with texts fetched before before.
 func (s *Store) TextsToFetch(ctx context.Context, language string, before time.Time, limit int) ([]ArtworkTarget, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT kind, tmdb FROM (SELECT DISTINCT kind, tmdb FROM catalog_items
-			WHERE kind IN ('movie', 'series') AND tmdb IS NOT NULL) t
+	rows, err := s.read.QueryContext(ctx, `SELECT kind, tmdb FROM (`+heldTitles+`) t
 		WHERE NOT EXISTS (SELECT 1 FROM catalog_title_texts x WHERE x.kind = t.kind AND x.tmdb = t.tmdb
 			AND x.language = ? AND x.fetched_at >= ?)
 		LIMIT ?`, language, before.Unix(), limit)

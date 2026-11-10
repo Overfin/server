@@ -21,14 +21,19 @@ type ArtworkTarget struct {
 // Key is the target's title key.
 func (t ArtworkTarget) Key() string { return t.Kind + "/tmdb/" + t.TMDB }
 
-// ArtworkToFetch returns up to limit films and series of the library whose
-// artwork wasn't fetched since before.
+// ArtworkToFetch returns up to limit films and series this server holds
+// (its library's and its paired servers', heldTitles) whose artwork wasn't
+// fetched since before.
 func (s *Store) ArtworkToFetch(ctx context.Context, before time.Time, limit int) ([]ArtworkTarget, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT kind, tmdb, (SELECT group_concat(DISTINCT se.season_number)
-			FROM catalog_items se JOIN catalog_items o ON o.id = se.series_id
-			WHERE t.kind = 'series' AND se.kind = 'season' AND se.season_number IS NOT NULL
-			AND o.kind = 'series' AND o.tmdb = t.tmdb)
-		FROM (SELECT DISTINCT kind, tmdb FROM catalog_items WHERE kind IN ('movie', 'series') AND tmdb IS NOT NULL) t
+	// The seasons: the library's, and those paired servers hold.
+	rows, err := s.read.QueryContext(ctx, `SELECT kind, tmdb, (SELECT group_concat(DISTINCT n) FROM (
+				SELECT se.season_number AS n FROM catalog_items se JOIN catalog_items o ON o.id = se.series_id
+				WHERE t.kind = 'series' AND se.kind = 'season' AND se.season_number IS NOT NULL
+				AND o.kind = 'series' AND o.tmdb = t.tmdb
+				UNION SELECT CAST(substr(p.title_key, length('series/tmdb/' || t.tmdb || '/s') + 1) AS INTEGER) FROM peer_titles p
+				WHERE t.kind = 'series' AND p.kind = 'season' AND p.title_key LIKE 'series/tmdb/' || t.tmdb || '/s%'
+				AND EXISTS (SELECT 1 FROM peers e WHERE e.id = p.peer_id AND e.state = 'paired')))
+		FROM (`+heldTitles+`) t
 		WHERE NOT EXISTS (SELECT 1 FROM artwork_fetched f WHERE f.key = t.kind || '/tmdb/' || t.tmdb AND f.fetched_at >= ?)
 		LIMIT ?`, before.Unix(), limit)
 	if err != nil {
