@@ -121,7 +121,7 @@
   <p id="done" hidden></p>
 
   {{else if eq .P.Mode "reset"}}
-  <h1>{{.T.resetTitle}}</h1>
+  <h1 id="reset-title" data-new="{{.T.changeTitle}}">{{.T.resetTitle}}</h1>
   <form id="reset" novalidate>
     <p class="muted">{{.T.resetIntro}}</p>
     <label>{{.T.email}}<input id="email" type="email" autocomplete="username" required autofocus></label>

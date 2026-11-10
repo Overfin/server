@@ -229,6 +229,10 @@ if (page.mode === 'confirm') {
 if (reset && $('reset-new')) {
   $('reset').hidden = true;
   $('reset-new').hidden = false;
+  // The page asks for the new password now: its title says so.
+  const title = $('reset-title');
+  document.title = document.title.replace(title.textContent, title.dataset.new);
+  title.textContent = title.dataset.new;
   $('new-password').focus();
   run($('reset-new'), () => post('/api/v1/reset/password', { link: reset, password: same('new-password', 'new-password2') }));
 }

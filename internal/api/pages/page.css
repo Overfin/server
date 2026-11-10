@@ -38,6 +38,8 @@ button:disabled { opacity: .55; cursor: default; }
 p { margin: 0; }
 .hint { font-size: .9rem; margin-top: -.5rem; }
 .links { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; }
+/* Below a form or a message, not inside a form (its gap spaces it there). */
+main > .links { margin-top: 1.25rem; }
 .muted { color: var(--muted); }
 .error { color: var(--danger); margin-top: 1rem; }
 .error:empty { display: none; }
