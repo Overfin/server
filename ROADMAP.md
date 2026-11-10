@@ -585,33 +585,35 @@ Jellyfin account.
   a short while; a peer's key that changes otherwise stops the pairing
   until its operator confirms it.
 
-**Hosted networks**, for more than a few servers. Pairing every pair by
-hand doesn't scale, and a mesh where every member pairs with every other
-by itself would break as it grows and spread trust nobody controls, so
-there's none. Instead, a **network host**, a small separate program that
-holds no media, is the network's authority: it invites and removes
-members, and keeps a signed, append-only directory of them (a display
-name chosen for the network, an address, a key). Members then talk to
-each other directly, as in a pairing, end to end, so the host never sees
-who asks whom for what; streams never go through it. Each member offers
-libraries to the network as a whole and lends it one pool of streams and
-transcodes, with exceptions for members of its choosing; blocks always
-win over the directory. Joining means trusting the host with who's in the
-network, and the panel says so in plain words. Against a hostile host:
-before trusting a key, a member confirms it with the peer directly, at
-the address its streams come from, so swapping keys would mean carrying
-all that peer's streams; members compare the directory they see whenever
-they talk, so showing different members different directories gets
-caught; and operators who know each other can compare fingerprints.
+**Hosted networks**, for many servers, up to hundreds around the world.
+Pairing every pair by hand doesn't scale, and a mesh where every member
+pairs with every other by itself would break as it grows and spread trust
+nobody controls, so there's none. Instead, a **network host**, a small
+separate program that holds no media, is the network's authority and its
+broker: it decides who joins, removes members, and keeps a signed,
+append-only directory of them (a display name chosen for the network and a
+key). Members never talk to each other directly: every message between
+them goes through the host, so it protects members from each other. They
+never learn each other's gateway address, the host can refuse and limit
+requests before they reach anyone, and a removed member is cut off
+everywhere at once. Streams never go through it (far too much data): they
+still come straight from the owner, so a member's viewers see its
+streaming address. While the host is down, the network is paused. Each
+member offers libraries to the network as a whole and lends it one pool of
+streams and transcodes, with exceptions for members of its choosing;
+blocks always win over the directory. Joining means trusting the host, and
+the panel says so in plain words; a host that can't be trusted is a
+separate concern. Before trusting a key, a member can still confirm it
+with the peer directly, at the address its streams come from, and
+operators who know each other can compare fingerprints.
 
 Basic federation only, out of scope: swarms of servers or of browsers (as
 PeerTube does), copying a peer's files to one's own server, and watching
-together across servers (a social feature). The network host only keeps
-the directory and never carries members' messages: even encrypted, it would
-see who talks to whom and when, it would stop the whole network when down,
-and the addresses it would hide still show through each member's streams
-(an operator who wants theirs hidden relays their streams). Open question:
-who may invite to a hosted network besides its host.
+together across servers (a social feature). Open questions for hosted
+networks: how a server joins (an invitation, or a request to a host it
+knows) and who decides; whether members' messages are end to end encrypted
+(hidden from the host) or readable by it (so it can refuse abusive
+requests).
 
 ## Beyond Jellyfin
 
