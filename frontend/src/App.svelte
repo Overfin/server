@@ -7,6 +7,7 @@
   import { message, setLanguageNames } from './lib/format';
   import { icons } from './lib/icons';
   import { route } from './lib/router.svelte';
+  import { watchNews } from './lib/news.svelte';
   import Server from './pages/Server.svelte';
   import Features from './pages/Features.svelte';
   import Branding from './pages/Branding.svelte';
@@ -55,6 +56,7 @@
     (s) => {
       setLanguageNames(s.languages ?? []);
       who = s.name ? `Signed in as ${s.name}` : 'Signed in';
+      watchNews();
     },
     (err) => (problem = message(err)),
   );

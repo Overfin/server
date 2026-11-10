@@ -304,6 +304,7 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/folders", p.signedIn(p.browseFolders))
 	mux.HandleFunc("POST /admin/api/logout", p.logout)
 	mux.HandleFunc("GET /admin/api/accounts", p.signedIn(p.accounts))
+	mux.HandleFunc("GET /admin/api/news", p.signedIn(p.news))
 	mux.HandleFunc("PATCH /admin/api/accounts/{id}", p.signedIn(p.changeAccount))
 	mux.HandleFunc("DELETE /admin/api/accounts/{id}", p.signedIn(p.deleteAccount))
 	mux.HandleFunc("DELETE /admin/api/accounts/{id}/sessions/{session}", p.signedIn(p.endSession))
@@ -512,9 +513,17 @@ func (p *Panel) current(r *http.Request) *session {
 		delete(p.sessions, key)
 		return nil
 	}
-	s.lastSeen = now
+	// The panel asking in the background (news) isn't someone here: it
+	// doesn't keep a forgotten tab signed in (rule 58's idle limit).
+	if r.Header.Get(backgroundHeader) != "1" {
+		s.lastSeen = now
+	}
 	return s
 }
+
+// backgroundHeader marks a request the panel makes by itself, not for
+// someone using it.
+const backgroundHeader = "Overfin-Background"
 
 // signedIn lets only signed-in admins through.
 func (p *Panel) signedIn(h func(http.ResponseWriter, *http.Request, *session)) http.HandlerFunc {

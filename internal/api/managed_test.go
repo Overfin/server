@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -197,8 +198,23 @@ func TestManagedRegistration(t *testing.T) {
 			t.Errorf("%q: %d %v", pw, c, out)
 		}
 	}
+	usesSince := func() []any {
+		rec := httptest.NewRecorder()
+		panel.ServeHTTP(rec, httptest.NewRequest("GET", "/admin/api/modules/invites/uses?since="+strconv.FormatInt(time.Now().Add(-time.Minute).Unix(), 10), nil))
+		var out struct{ Items []any }
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return out.Items
+	}
+	if got := usesSince(); len(got) != 0 {
+		t.Fatalf("uses before registering: %v", got)
+	}
 	if c, out := signinPost(t, b, srv, "/api/v1/register", checked(t, srv, map[string]any{"email": "New@example.org", "password": "a long password 1"})); c != 200 || out["sent"] != true {
 		t.Fatalf("registering: %d %v", c, out)
+	}
+	// The panel hears of it: the invitation's name and the account template
+	// it gives.
+	if got := usesSince(); len(got) != 1 || got[0].(map[string]any)["invitation"] != "Friends" || got[0].(map[string]any)["template"] == "" {
+		t.Errorf("uses after registering: %v", got)
 	}
 	m.Wait()
 	mails := box.all()

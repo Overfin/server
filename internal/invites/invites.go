@@ -27,6 +27,7 @@ import (
 	"io/fs"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -87,6 +88,7 @@ func (Feature) Setup(h feature.Host) error {
 		"GET /invites":           a.invites,
 		"POST /invites":          a.createInvite,
 		"DELETE /invites/{id}":   a.deleteInvite,
+		"GET /uses":              a.usesSince,
 	} {
 		if err := h.HandleAdmin(pattern, fn); err != nil {
 			return err
@@ -511,6 +513,56 @@ func (a admin) invites(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		out = append(out, inv)
+	}
+	if err := rows.Err(); err != nil {
+		a.fail(w, err)
+		return
+	}
+	feature.JSON(w, map[string]any{"items": out})
+}
+
+// usesSince (GET /uses?since=Unix seconds) lists the invitations used by
+// a registration since then (its account comes later, when its person
+// sets it up): the invitation's name and the account template it gives,
+// for the control panel to say so. An account made from an invitation is
+// the core's news, not this.
+func (a admin) usesSince(w http.ResponseWriter, r *http.Request) {
+	since, err := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+	if err != nil || since <= 0 {
+		feature.Problem(w, feature.InvalidRequest, "since: a time in Unix seconds")
+		return
+	}
+	ts, err := a.h.Templates(r.Context())
+	if err != nil {
+		a.fail(w, err)
+		return
+	}
+	names := map[string]string{}
+	for _, t := range ts {
+		names[t.ID] = t.Name
+	}
+	rows, err := a.db.QueryContext(r.Context(), `
+		SELECT u.rowid, i.label, i.account_template FROM invites_uses u JOIN invites i ON i.id = u.invite_id
+		WHERE u.hold_hash IS NOT NULL AND u.used_at >= ? ORDER BY u.used_at, u.rowid`, since)
+	if err != nil {
+		a.fail(w, err)
+		return
+	}
+	defer rows.Close()
+	type use struct {
+		ID         string `json:"id"`
+		Invitation string `json:"invitation"`
+		Template   string `json:"template"`
+	}
+	out := []use{}
+	for rows.Next() {
+		var id int64
+		var label, tmpl string
+		if err := rows.Scan(&id, &label, &tmpl); err != nil {
+			a.fail(w, err)
+			return
+		}
+		out = append(out, use{ID: strconv.FormatInt(id, 10), Invitation: label, Template: names[tmpl]})
 	}
 	if err := rows.Err(); err != nil {
 		a.fail(w, err)

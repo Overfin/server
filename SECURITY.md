@@ -421,7 +421,9 @@ comes from the internet, and media files can be written by anyone.
     public API: no admin route can be registered there, and the panel has
     its own routes, guards and sessions. Admins confirm it's them every
     time they sign in to it; a session ends after 30 minutes without
-    activity, and after 12 hours at most. Where it lives is a secure
+    activity, and after 12 hours at most. What the panel asks by itself in
+    the background (news of invitations used and accounts made) isn't
+    activity: it never keeps a forgotten panel signed in. Where it lives is a secure
     default:
     - With Overfin's own sign-in, it's at `/admin/` on the site, for people
       marked admin, who confirmed a fresh login (rule 21) in the last five
