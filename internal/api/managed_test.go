@@ -1130,3 +1130,31 @@ func TestGateAndStepUp(t *testing.T) {
 		}
 	}
 }
+
+// The link in an email confirming an address opens a page of its own:
+// its title, one button, nothing of signing in, and no trip to ask again
+// for the login cookie (the link needs none), even from another site.
+func TestConfirmAddressPage(t *testing.T) {
+	srv, _ := newServerWith(t, options{managed: true, mailbox: &mailbox{}})
+	b := newBrowser(srv)
+	res, body := visit(t, b, srv, "/signin?confirm=1", map[string]string{"Accept-Language": "en", "Sec-Fetch-Dest": "document", "Sec-Fetch-Site": "cross-site"})
+	if res.StatusCode != 200 || !strings.Contains(body, `data-mode="confirm"`) {
+		t.Fatalf("confirming page: %d %s", res.StatusCode, body)
+	}
+	if !strings.Contains(body, "<h1>Confirm your address</h1>") || !strings.Contains(body, `id="verify"`) {
+		t.Errorf("not its own page: %s", body)
+	}
+	for _, gone := range []string{`id="signin"`, `id="device-start"`, `id="password"`, ">Sign in</h1>"} {
+		if strings.Contains(body, gone) {
+			t.Errorf("confirming page has %s", gone)
+		}
+	}
+	// Once an invitation's form is sent, the page's title says what's next.
+	if _, body := openPage(t, b, srv, "/invite/AAAAAAAAAAAAAAAAAAAAAA"); !strings.Contains(body, `data-check-mail="Vérifiez vos courriels"`) {
+		t.Error("the invitation page lacks its next title")
+	}
+	// The sign-in itself no longer carries a confirming form.
+	if _, body := openPage(t, b, srv, "/signin"); strings.Contains(body, `id="verify"`) {
+		t.Error("the sign-in page still confirms addresses")
+	}
+}
