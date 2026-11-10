@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 )
@@ -269,6 +270,13 @@ func TestHeldByPeers(t *testing.T) {
 	}
 	if got["series/tmdb/2/s1"].Have != 2 || got["series/tmdb/2/s0"].Have != 1 {
 		t.Fatalf("seasons: %d, specials %d", got["series/tmdb/2/s1"].Have, got["series/tmdb/2/s0"].Have)
+	}
+	s1, _ := ParseTitleKey("series/tmdb/2/s1")
+	if eps, err := s.SeasonEpisodes(ctx, s1); err != nil || !slices.Equal(eps, []int{1, 2}) {
+		t.Fatalf("season 1's episodes: %v %v", eps, err)
+	}
+	if seasons, err := s.SeriesSeasons(ctx, s1.Series(), nil); err != nil || !slices.Equal(seasons, []int{0, 1}) {
+		t.Fatalf("seasons: %v %v", seasons, err)
 	}
 	if m, _ := s.TitlePeers(ctx, keys); len(m["movie/tmdb/1"]) != 1 || len(m["series/tmdb/2/s0"]) != 0 {
 		t.Fatalf("TitlePeers: %v", m)

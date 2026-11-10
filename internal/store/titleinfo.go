@@ -485,7 +485,8 @@ func (s *Store) countEpisodes(ctx context.Context, t *TitleInfo, today string) e
 }
 
 // SeasonEpisodes lists the episodes of a series' season as titles: those
-// TMDB lists and those the library has, by number.
+// TMDB lists, those the library has, and those paired servers hold for
+// us, by number.
 func (s *Store) SeasonEpisodes(ctx context.Context, season TitleRef) ([]int, error) {
 	seen := map[int]bool{}
 	var out []int
@@ -517,12 +518,18 @@ func (s *Store) SeasonEpisodes(ctx context.Context, season TitleRef) ([]int, err
 		AND coalesce(shown_season, season_number) = ? AND episode_number IS NOT NULL ORDER BY 1`, lo, hi, season.Season); err != nil {
 		return nil, err
 	}
+	// Those paired servers hold for us, by the numbers their keys name.
+	plo, phi := keyRange(season.Key() + "/e")
+	if err := add(`SELECT CAST(substr(t.title_key, ?) AS INTEGER) FROM peer_titles t JOIN peers p ON p.id = t.peer_id AND p.state = 'paired'
+		WHERE t.kind = 'episode' AND t.title_key >= ? AND t.title_key < ? AND t.title_key GLOB '*/e[0-9]*'`, len(plo)+1, plo, phi); err != nil {
+		return nil, err
+	}
 	slices.Sort(out)
 	return out, nil
 }
 
-// SeriesSeasons lists a series' seasons by number: those TMDB lists and
-// those the library has.
+// SeriesSeasons lists a series' seasons by number: those TMDB lists, those
+// the library has, and those paired servers hold for us.
 func (s *Store) SeriesSeasons(ctx context.Context, series TitleRef, listed []SeasonInfo) ([]int, error) {
 	seen := map[int]bool{}
 	var out []int
@@ -535,7 +542,10 @@ func (s *Store) SeriesSeasons(ctx context.Context, series TitleRef, listed []Sea
 	lo, hi := keyRange(series.Key() + "/")
 	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT coalesce(shown_season, season_number) FROM catalog_items
 		WHERE (kind = 'episode' OR (kind = 'season' AND NOT EXISTS (SELECT 1 FROM series_orders o WHERE o.series = ?)))
-		AND title_key >= ? AND title_key < ? AND season_number IS NOT NULL`, series.ID, lo, hi)
+		AND title_key >= ? AND title_key < ? AND season_number IS NOT NULL
+		UNION SELECT CAST(substr(t.title_key, ?) AS INTEGER) FROM peer_titles t JOIN peers p ON p.id = t.peer_id AND p.state = 'paired'
+		WHERE t.kind IN ('season', 'episode') AND t.title_key >= ? AND t.title_key < ? AND t.title_key GLOB '*/s[0-9]*'`,
+		series.ID, lo, hi, len(lo)+2, lo, hi)
 	if err != nil {
 		return nil, err
 	}
