@@ -67,8 +67,9 @@
       <thead><tr><th>Title</th><th class="hide-narrow">Folder or file</th><th class="hide-narrow">Kind</th><th>Check</th></tr></thead>
       <tbody>
         {#each shown.slice(0, 500) as t (t.itemId)}
-          <tr data-id={t.itemId}>
-            <td><button type="button" class="pick name" onclick={() => (opened = t.itemId)}>{titleOf(t)}</button></td>
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+          <tr data-id={t.itemId} onclick={() => (opened = t.itemId)}>
+            <td><button type="button" class="pick name" onclick={(e) => { e.stopPropagation(); opened = t.itemId; }}>{titleOf(t)}</button></td>
             <td class="hide-narrow hint">{t.folderName || t.fileName || ''}</td>
             <td class="hide-narrow">{t.kind === 'movie' ? 'Film' : 'Series'}</td>
             <td>
