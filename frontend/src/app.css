@@ -37,14 +37,13 @@
 @media (max-width: 600px) { .setting > .row { justify-content: flex-start; } }
 /* A field among settings: the same line above it and the same room. */
 .setting + label.field { padding: .85rem 0; border-top: 1px solid var(--border); }
-/* A card's foot with nothing to say yet isn't shown; an empty status takes
-   no room, so a window's buttons stay on one line on a phone. */
+/* A card's foot with nothing to say yet isn't shown (the kit's next
+   version gives an empty status no room, and a message its own line on a
+   phone: e9e7d24). */
 .card-foot:has(> .status:only-child:empty) { display: none; }
-.card-foot .status:empty { min-width: 0; }
 @media (max-width: 600px) {
-  /* A status gets its own line, the buttons go under it, on the right. */
+  /* A message on its own line: the buttons under it stay on the right. */
   .card-foot:has(> .status:not(:empty)) { justify-content: flex-end; }
-  .card-foot .status:not(:empty) { flex-basis: 100%; }
   /* A card's badge (or a window's ×) stays beside its title only: the
      description takes the card's whole width. */
   .card-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 .75rem; }
@@ -56,8 +55,6 @@
 /* The sidebar scrolls when the screen is shorter than its menu (a tablet
    on its side, a 768-pixel laptop), so Sign out stays reachable. */
 .sidebar { overflow-y: auto; }
-/* On a narrow screen the bar on top keeps its height on a short page. */
-@media (max-width: 860px) { .shell { grid-template-rows: auto 1fr; } }
 /* A table's row buttons go on two lines on a phone rather than past the
    table's edge. */
 @media (max-width: 600px) {
