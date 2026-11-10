@@ -513,6 +513,9 @@ func (s *Service) CheckSoon(peers []*store.Peer) {
 // never passes on what it receives (rule 65).
 
 type librariesAnswer struct {
+	// Name is what this server calls itself now (its branding's name),
+	// for the caller's site to show.
+	Name      string              `json:"name,omitempty"`
 	Libraries []store.PeerLibrary `json:"libraries"`
 	// Limits is what the caller may use of this server at once, so it never
 	// offers what this server would refuse.
@@ -576,7 +579,7 @@ func (s *Service) libraries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Store.PeerSeen(ctx, p.ID)
-	s.answer(w, v.Nonce, librariesAnswer{Libraries: offered, Limits: &p.Limits})
+	s.answer(w, v.Nonce, librariesAnswer{Name: s.Name(r.Context()), Libraries: offered, Limits: &p.Limits})
 }
 
 // ErrNotPaired is returned for sharing with a server not paired yet.
@@ -616,6 +619,10 @@ func (s *Service) TheirLibraries(ctx context.Context, p *store.Peer) ([]store.Pe
 			name = "?"
 		}
 		out = append(out, store.PeerLibrary{ID: l.ID, Name: name, Kind: cleanKind(l.Kind)})
+	}
+	// What it calls itself and its libraries now, for our site's menu.
+	if err := s.Store.RenamePeerWants(ctx, p.ID, textclean.Plain(answer.Name, maxName), out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -743,6 +750,12 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 	libs := []string{}
 	for _, w := range wants {
 		libs = append(libs, w.ID)
+	}
+	if len(libs) > 0 {
+		// Its names and ours of it, as it gives them now.
+		if _, err := s.TheirLibraries(ctx, p); err != nil {
+			return 0, err
+		}
 	}
 	all := []store.PeerTitle{}
 	after := ""

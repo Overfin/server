@@ -141,6 +141,14 @@ func (a Access) itemAllowed(table string) (string, []any) {
 		for _, t := range a.BlockedTags {
 			args = append(args, FoldTag(t))
 		}
+		// A paired server's film or series, as listings give it
+		// (listedRows): by its own.
+		conds = append(conds, `(`+table+`.id NOT GLOB '`+PeerItemPrefix+`*'
+			OR NOT EXISTS (SELECT 1 FROM catalog_title_keywords k WHERE k.kind = `+table+`.kind AND k.tmdb = `+table+`.tmdb
+				AND k.folded IN (`+marks(len(a.BlockedTags))+`)))`)
+		for _, t := range a.BlockedTags {
+			args = append(args, FoldTag(t))
+		}
 	}
 	for _, cats := range [][]*CategoryFilter{a.Categories, a.TemplateCategories} {
 		if cats != nil {

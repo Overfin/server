@@ -504,8 +504,39 @@ var listOrder = map[string]string{
 	"latest": "coalesce(max(added_at, " + newestOfSeries + "), added_at, " + newestOfSeries + ")",
 }
 
-// ListCatalog returns the item IDs of a listing's page, in order. What's
-// missing a sort value comes last, whichever the order.
+// PeerItemPrefix starts the IDs listings give the films and series paired
+// servers hold for us: "peer:" + the peer's ID + ":" + the title's key.
+const PeerItemPrefix = "peer:"
+
+// listedRows are the rows a listing reads, in SQL, under the name
+// catalog_items: the index's items and, when paired servers hold films
+// and series for us in the libraries of our menu (ROADMAP.md milestone 6),
+// one row for each of those too (PeerItemPrefix), with what listings read
+// of a row. Only those TMDB's page of is kept: there's nothing else to
+// show of them. Never for a series' seasons or episodes, nor for a profile
+// limited to some libraries or categories (rule 28: only what they have).
+func (s *Store) listedRows(ctx context.Context, q ListQuery) (string, error) {
+	if q.ParentID != "" || q.Access.Limited() || (len(q.Kinds) > 0 && !slices.Contains(q.Kinds, "movie") && !slices.Contains(q.Kinds, "series")) {
+		return "catalog_items", nil
+	}
+	var any bool
+	if err := s.read.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM peer_titles)`).Scan(&any); err != nil || !any {
+		return "catalog_items", err
+	}
+	return `(SELECT id, kind, title_key, tmdb, library_id, series_id, season_id, sort_name, added_at, premiere_date, community_rating, year
+			FROM catalog_items
+		UNION ALL SELECT '` + PeerItemPrefix + `' || t.peer_id || ':' || t.title_key, t.kind, t.title_key, substr(t.title_key, length(t.kind) + 7),
+			w.menu_id, NULL, NULL, t.title_key, t.added_at, NULL, NULL, NULL
+		FROM peer_titles t JOIN peers p ON p.id = t.peer_id AND p.state = 'paired'
+		JOIN peer_wants w ON w.peer_id = t.peer_id AND w.library_id = t.library_id
+		WHERE t.kind IN ('movie', 'series') AND t.title_key LIKE t.kind || '/tmdb/%'
+			AND EXISTS (SELECT 1 FROM catalog_titles c WHERE c.kind = t.kind AND c.tmdb = substr(t.title_key, length(t.kind) + 7)
+				AND c.details IS NOT NULL)) AS catalog_items`, nil
+}
+
+// ListCatalog returns the item IDs of a listing's page, in order, a
+// paired server's title by a PeerItemPrefix ID. What's missing a sort
+// value comes last, whichever the order.
 func (s *Store) ListCatalog(ctx context.Context, q ListQuery) ([]string, error) {
 	order, ok := listOrder[q.Sort]
 	var orderArgs []any
@@ -526,6 +557,10 @@ func (s *Store) ListCatalog(ctx context.Context, q ListQuery) ([]string, error) 
 		return nil, fmt.Errorf("store: unknown sort %q", q.Sort)
 	}
 	where, args := q.where()
+	from, err := s.listedRows(ctx, q)
+	if err != nil {
+		return nil, err
+	}
 	dir := "ASC"
 	if q.Descending {
 		dir = "DESC"
@@ -534,7 +569,7 @@ func (s *Store) ListCatalog(ctx context.Context, q ListQuery) ([]string, error) 
 	// pages and counts are of titles.
 	query := `SELECT id FROM (SELECT id, sort_name, ` + order + ` AS o,
 			row_number() OVER (PARTITION BY coalesce(title_key, id) ORDER BY id) AS copy
-			FROM catalog_items WHERE ` + strings.Join(where, " AND ") + `)
+			FROM ` + from + ` WHERE ` + strings.Join(where, " AND ") + `)
 		WHERE copy = 1 ORDER BY o IS NULL, o ` + dir + `, sort_name COLLATE NOCASE, id LIMIT ? OFFSET ?`
 	return s.ids(ctx, query, append(append(orderArgs, args...), q.Limit, q.Offset)...)
 }
@@ -549,8 +584,12 @@ func (s *Store) CatalogIDs(ctx context.Context, q ListQuery) ([]string, error) {
 // CountCatalog counts the titles a listing has in all.
 func (s *Store) CountCatalog(ctx context.Context, q ListQuery) (int, error) {
 	where, args := q.where()
+	from, err := s.listedRows(ctx, q)
+	if err != nil {
+		return 0, err
+	}
 	var n int
-	err := s.read.QueryRowContext(ctx, `SELECT count(DISTINCT coalesce(title_key, id)) FROM catalog_items WHERE `+
+	err = s.read.QueryRowContext(ctx, `SELECT count(DISTINCT coalesce(title_key, id)) FROM `+from+` WHERE `+
 		strings.Join(where, " AND "), args...).Scan(&n)
 	return n, err
 }
@@ -683,8 +722,12 @@ func (s *Store) CatalogGenres(ctx context.Context, libraryID string, category *C
 		cond, a := access.itemAllowed("catalog_items")
 		where, args = append(where, cond), append(args, a...)
 	}
+	from, err := s.listedRows(ctx, ListQuery{Access: access})
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.read.QueryContext(ctx, `SELECT g.name, count(DISTINCT g.kind || g.tmdb)
-		FROM catalog_items JOIN catalog_details_genres g ON g.kind = catalog_items.kind AND g.tmdb = catalog_items.tmdb
+		FROM `+from+` JOIN catalog_details_genres g ON g.kind = catalog_items.kind AND g.tmdb = catalog_items.tmdb
 		WHERE `+strings.Join(where, " AND ")+`
 		GROUP BY g.name`, args...)
 	if err != nil {

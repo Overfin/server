@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -191,5 +192,95 @@ func TestPlayFromPeer(t *testing.T) {
 			t.Fatalf("B's stream after A stopped: %d", res.StatusCode)
 		}
 		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// A's site lists what B holds for it, beside its own: the library taken
+// from B is an entry of the menu, "Films (B)" (or A's own name for it),
+// listing B's films; all titles list both films, each once.
+func TestPeerTitlesListed(t *testing.T) {
+	ctx := context.Background()
+	var stB, stA *store.Store
+	var b, a *federation.Service
+	srvB, _ := newServerWith(t, options{store: &stB, federation: &b})
+	b.Name = func(context.Context) string { return "Bee" }
+	stB.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "Heat", SortName: "heat",
+		TMDB: "949", LibraryID: "films"}, {ID: fmt.Sprintf("%032x", 2), Kind: "movie", Name: "Up", SortName: "up",
+		TMDB: "14160", LibraryID: "films"}}, 1)
+	stB.RefreshTitleKeys(ctx)
+	stB.SetLibraries(ctx, []store.Library{{ID: "films", Item: []byte(`{"Name":"Films","CollectionType":"movies"}`)}})
+	srvA, _ := newServerWith(t, options{store: &stA, federation: &a})
+	a.HTTP = srvB.Client()
+	// A has Up itself; it keeps TMDB's pages of both.
+	stA.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 9), Kind: "movie", Name: "Up", SortName: "up",
+		TMDB: "14160", LibraryID: "mine"}}, 1)
+	stA.RefreshTitleKeys(ctx)
+	stA.SetCatalogState(ctx, store.CatalogState{Pass: 1})
+	now := time.Now()
+	stA.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "949", Name: "Heat", Year: 1995}, []byte(`{}`), now)
+	stA.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "14160", Name: "Up", Year: 2009}, []byte(`{}`), now)
+
+	code, _, _ := b.NewCode(ctx, "")
+	bOnA, err := a.UseCode(ctx, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ := stB.Peers(ctx)
+	aOnB, _ := b.Accept(ctx, list[0].ID)
+	stA.SetPeerState(ctx, bOnA.ID, store.PeerTheirs, store.PeerPaired)
+	bOnA, _ = stA.PeerByID(ctx, bOnA.ID)
+	b.SetOffers(ctx, aOnB, []string{"films"})
+	if err := a.SetWants(ctx, bOnA, []string{"films"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SyncTitles(ctx, bOnA); err != nil {
+		t.Fatal(err)
+	}
+
+	type page struct {
+		Items []struct {
+			ID, Name, Kind string
+		}
+		TotalCount int
+	}
+	var libs page
+	get(t, srvA, "/api/v1/libraries", &libs)
+	var entry string
+	for _, l := range libs.Items {
+		if l.Name == "Films (Bee)" && l.Kind == "movies" {
+			entry = l.ID
+		}
+	}
+	if entry == "" {
+		t.Fatalf("A's menu: %+v", libs.Items)
+	}
+	names := func(path string) []string {
+		t.Helper()
+		var p page
+		if status := get(t, srvA, path, &p); status != 200 {
+			t.Fatalf("%s: %d", path, status)
+		}
+		var out []string
+		for _, it := range p.Items {
+			out = append(out, it.Name)
+		}
+		if p.TotalCount != len(out) {
+			t.Fatalf("%s: total %d for %v", path, p.TotalCount, out)
+		}
+		return out
+	}
+	if got := names("/api/v1/titles?library=" + entry + "&kind=movie&kind=series&sort=name"); len(got) != 2 || got[0] != "Heat" || got[1] != "Up" {
+		t.Fatalf("B's library on A: %v", got)
+	}
+	if got := names("/api/v1/titles?kind=movie&kind=series&sort=name"); len(got) != 2 || got[0] != "Heat" || got[1] != "Up" {
+		t.Fatalf("all titles on A (each once): %v", got)
+	}
+	// A's own name for the entry.
+	if err := stA.LabelPeerWant(ctx, bOnA.ID, "films", "Their films"); err != nil {
+		t.Fatal(err)
+	}
+	get(t, srvA, "/api/v1/libraries", &libs)
+	if !slices.ContainsFunc(libs.Items, func(l struct{ ID, Name, Kind string }) bool { return l.Name == "Their films" && l.ID == entry }) {
+		t.Fatalf("renamed: %+v", libs.Items)
 	}
 }

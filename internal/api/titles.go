@@ -260,6 +260,8 @@ func (l Library) visibility(ctx context.Context, p *store.Profile, titles []*sto
 		switch {
 		case a.Limited():
 			continue // limited to some libraries or categories: only what they have
+		case held && !t.Known:
+			continue // TMDB's page of it isn't kept yet: nothing to show
 		case t.Ref.Kind == "item" || t.Ref.TMDB() == "":
 			continue // nothing to show but its copies, and it has none
 		case !held && part && t.Ref.Season == 0 && (t.Ref.Kind == "episode" || t.Have == 0):

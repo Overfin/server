@@ -189,6 +189,25 @@ func (l Library) libraries(w http.ResponseWriter, r *http.Request) {
 			out = append(out, lib)
 		}
 	}
+	// Then those taken from paired servers (ROADMAP.md milestone 6), but
+	// for a profile limited to some libraries or categories (rule 28).
+	a, err := l.access(r.Context(), p)
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	if !a.Limited() {
+		theirs, err := l.Provisioner.Store.MenuLibraries(r.Context())
+		if err != nil {
+			l.storeError(w, err)
+			return
+		}
+		for _, m := range theirs {
+			if lib, ok := library.PeerLibraryOf(m.ID, m.Name, m.Kind); ok {
+				out = append(out, lib)
+			}
+		}
+	}
 	writeOK(w, map[string]any{"items": out})
 }
 

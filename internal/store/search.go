@@ -55,7 +55,8 @@ func likeWords(query string) string {
 	return b.String()
 }
 
-// SearchLibrary finds the library's films and series (by title key) whose
+// SearchLibrary finds the library's films and series, and those paired
+// servers hold for us (ROADMAP.md milestone 6), by title key, whose
 // name matches query: TMDB's name, or a file's own for one TMDB doesn't
 // know, or a name an admin gave it, in any language. Whole names first,
 // then names that start so, then the others, the best rated first. At
@@ -77,7 +78,11 @@ func (s *Store) SearchLibrary(ctx context.Context, query string, limit int) ([]s
 			SELECT title_key, min(rank) AS rank, max(rating) AS rating FROM (
 				SELECT i.title_key, min(`+rank(name)+`, coalesce(`+edited+`, 3)) AS rank,
 					coalesce(t.rating, i.community_rating, 0) AS rating
-				FROM catalog_items i LEFT JOIN catalog_titles t INDEXED BY catalog_titles_listing ON t.kind = i.kind AND t.tmdb = i.tmdb
+				FROM (SELECT kind, tmdb, title_key, name, community_rating FROM catalog_items
+					UNION ALL SELECT x.kind, substr(x.title_key, length(x.kind) + 7), x.title_key, '', NULL FROM peer_titles x
+					JOIN peers p ON p.id = x.peer_id AND p.state = 'paired'
+					WHERE x.kind IN ('movie', 'series') AND x.title_key LIKE x.kind || '/tmdb/%') i
+				LEFT JOIN catalog_titles t INDEXED BY catalog_titles_listing ON t.kind = i.kind AND t.tmdb = i.tmdb
 				WHERE i.kind IN ('movie', 'series') AND i.title_key IS NOT NULL)
 			WHERE rank < 3 GROUP BY title_key)
 		ORDER BY rank, rating DESC, title_key LIMIT ?4`, q, prefix, pattern, limit)

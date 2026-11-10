@@ -328,8 +328,21 @@ func (s *Store) CategorySample(ctx context.Context, f *CategoryFilter, n int) ([
 	if err != nil || len(ids) == 0 {
 		return nil, err
 	}
-	return s.ids(ctx, `SELECT coalesce((SELECT t.name FROM catalog_titles t WHERE t.kind = i.kind AND t.tmdb = i.tmdb), i.name)
-		FROM catalog_items i JOIN json_each(?) j ON j.value = i.id ORDER BY j.key`, jsonList(ids))
+	keys, err := s.TitleKeys(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, id := range ids {
+		var name string
+		err := s.read.QueryRowContext(ctx, `SELECT coalesce((SELECT t.name FROM catalog_titles t WHERE t.kind || '/tmdb/' || t.tmdb = ?),
+			(SELECT i.name FROM catalog_items i WHERE i.id = ?), '')`, keys[id], id).Scan(&name)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, nil
 }
 
 // dropCategory takes a category out of the categories lists of a table's

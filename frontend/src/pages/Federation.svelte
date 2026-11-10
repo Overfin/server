@@ -26,6 +26,8 @@
     kind: string;
     picked: boolean;
     gone?: boolean;
+    label?: string;
+    shown?: string;
   }
   interface Limits {
     streams: number;
@@ -75,6 +77,8 @@
   let sharing = $state<Sharing | null>(null);
   let offer = $state<string[]>([]);
   let want = $state<string[]>([]);
+  // Your names for the wanted libraries' entries on the site, by ID.
+  let labels = $state<Record<string, string>>({});
   let limits = $state<Limits>({ streams: 2, transcodes: 1, bitrateKbps: 0 });
 
   async function load() {
@@ -182,6 +186,7 @@
       const sh = await api<Sharing>('GET', `/admin/api/federation/peers/${p.id}/sharing`);
       offer = sh.ours.filter((l) => l.picked).map((l) => l.id);
       want = sh.theirs.filter((l) => l.picked).map((l) => l.id);
+      labels = Object.fromEntries(sh.theirs.map((l) => [l.id, l.label ?? '']));
       limits = { ...sh.limits };
       sharing = sh;
       sharingWith = p;
@@ -196,6 +201,7 @@
     await api('PUT', `/admin/api/federation/peers/${sharingWith.id}/sharing`, {
       offer,
       want,
+      labels: Object.fromEntries(want.map((id) => [id, (labels[id] ?? '').trim()])),
       limits: { streams: n(limits.streams), transcodes: n(limits.transcodes), bitrateKbps: n(limits.bitrateKbps) },
     });
     toast('Sharing saved.');
@@ -227,7 +233,7 @@
   load();
 </script>
 
-<PageHead title="Federation" description="Pair this server with other Overfin servers. One operator makes a code and sends it to the other, who pastes it here; the first then accepts, after you both compared fingerprints. Then each picks, library by library, what it offers the other and what it wants: only what one offers and the other wants is shared. Nothing plays across servers yet.">
+<PageHead title="Federation" description="Pair this server with other Overfin servers. One operator makes a code and sends it to the other, who pastes it here; the first then accepts, after you both compared fingerprints. Then each picks, library by library, what it offers the other and what it wants: only what one offers and the other wants is shared. Its titles then show on your site beside yours, and play straight from it.">
   {#snippet actions()}
     {#if s?.available}
       <button type="button" onclick={useCode}>Use a code</button>
@@ -330,7 +336,7 @@
 {/if}
 
 {#if sharingWith && sharing}
-  <FormModal title={`Sharing with ${sharingWith.name}`} description="Only what one server offers and the other wants is shared. Nothing plays across servers yet: this sets what will." saveLabel="Save" save={saveSharing} close={() => { sharingWith = null; sharing = null; }}>
+  <FormModal title={`Sharing with ${sharingWith.name}`} description="Only what one server offers and the other wants is shared." saveLabel="Save" save={saveSharing} close={() => { sharingWith = null; sharing = null; }}>
     <div class="setting stack">
       <div><div class="label">You offer</div><div class="hint">Your libraries {sharingWith.name} may take. You only ever offer your own.</div></div>
       <div class="checks all">
@@ -347,6 +353,14 @@
       </div>
       {#if sharing.theirLimits}<div class="hint">{sharingWith.name} lets you use {limitsText(sharing.theirLimits)}.</div>{/if}
     </div>
+    {#if want.length}
+      <div class="setting stack">
+        <div><div class="label">Names on your site</div><div class="hint">Each library you want is an entry of the site's menu, beside yours, while "Libraries in the menu" is on (Library → Categories); your categories take its titles in by their rules either way. Leave a name empty for the one {sharingWith.name} gives.</div></div>
+        {#each sharing.theirs.filter((l) => want.includes(l.id)) as l (l.id)}
+          <label class="stack">{l.name} <input type="text" maxlength="64" bind:value={labels[l.id]} placeholder={l.shown ?? l.name} /></label>
+        {/each}
+      </div>
+    {/if}
     <Setting label="Streams at once" hint={`What ${sharingWith.name}'s people may play from this server at the same time.`}>
       {#snippet children(ids)}<input type="number" min="0" max="50" bind:value={limits.streams} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
     </Setting>

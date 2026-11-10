@@ -276,6 +276,18 @@ func LibraryOf(r *jellyfin.RawItem) (Library, bool) {
 	}, true
 }
 
+// PeerLibraryOf is a library taken from a paired server (ROADMAP.md
+// milestone 6) as the menu shows it, by its ID on this server's site (32
+// hex digits, as ours), its name here and its kind as Jellyfin's
+// collection types: no image of its own.
+func PeerLibraryOf(id, name, collectionType string) (Library, bool) {
+	w := wrap(LibraryPrefix, id)
+	if w == "" {
+		return Library{}, false
+	}
+	return Library{ID: w, Name: textclean.Plain(name, maxName), Kind: libraryKind(collectionType)}, true
+}
+
 func libraryKind(collectionType string) string {
 	switch collectionType {
 	case "movies":

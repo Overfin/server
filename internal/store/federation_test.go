@@ -274,3 +274,88 @@ func TestHeldByPeers(t *testing.T) {
 		t.Fatalf("TitlePeers: %v", m)
 	}
 }
+
+// Listings read paired servers' films and series too: not for a profile
+// limited to some libraries, nor one a tag of theirs is hidden from; an
+// entry keeps its ID while wanted, and a title its arrival while held.
+func TestPeerListing(t *testing.T) {
+	s, ctx := openTest(t), context.Background()
+	now := time.Unix(1_000_000, 0)
+	s.now = func() time.Time { return now }
+	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A")
+	s.SetPeerState(ctx, p.ID, PeerTheirs, PeerPaired)
+	s.SetPeerWants(ctx, p.ID, []PeerLibrary{{ID: "x", Name: "Films", Kind: "movies"}})
+	menu, _ := s.MenuLibraries(ctx)
+	if len(menu) != 0 {
+		t.Fatalf("an entry holding nothing: %+v", menu)
+	}
+	s.SetPeerTitles(ctx, p.ID, []PeerTitle{{Key: "movie/tmdb/1", Kind: "movie", Library: "x"}, {Key: "movie/tmdb/2", Kind: "movie", Library: "x"},
+		{Key: "movie/tmdb/3", Kind: "movie", Library: "x"}})
+	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "1", Name: "One"}, []byte(`{}`), now)
+	s.SetTitleDetails(ctx, Title{Kind: "movie", TMDB: "2", Name: "Two", Keywords: []string{"Horror"}}, []byte(`{}`), now)
+	// 3: TMDB's page of it isn't kept, so it isn't listed.
+	menu, _ = s.MenuLibraries(ctx)
+	if len(menu) != 1 || menu[0].Name != "Films (A)" || len(menu[0].ID) != 32 {
+		t.Fatalf("menu: %+v", menu)
+	}
+	list := func(q ListQuery) []string {
+		t.Helper()
+		q.Sort, q.Limit = "name", 10
+		ids, err := s.ListCatalog(ctx, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys, _ := s.TitleKeys(ctx, ids)
+		var out []string
+		for _, id := range ids {
+			out = append(out, keys[id])
+		}
+		if n, _ := s.CountCatalog(ctx, q); n != len(out) {
+			t.Fatalf("count %d for %v", n, out)
+		}
+		return out
+	}
+	if got := list(ListQuery{LibraryID: menu[0].ID}); len(got) != 2 || got[0] != "movie/tmdb/1" {
+		t.Fatalf("the entry: %v", got)
+	}
+	if got := list(ListQuery{Access: &Access{BlockedTags: []string{"horror"}}}); len(got) != 1 || got[0] != "movie/tmdb/1" {
+		t.Fatalf("horror hidden: %v", got)
+	}
+	if got := list(ListQuery{Access: &Access{Libraries: []string{menu[0].ID}}}); len(got) != 0 {
+		t.Fatalf("limited to some libraries: %v", got)
+	}
+	if got := list(ListQuery{Kinds: []string{"episode"}}); len(got) != 0 {
+		t.Fatalf("episodes: %v", got)
+	}
+	if got, err := s.SearchLibrary(ctx, "one", 10); err != nil || len(got) != 1 || got[0] != "movie/tmdb/1" {
+		t.Fatalf("search: %v %v", got, err)
+	}
+	// Read again later: the entry and the arrival are kept.
+	now = now.Add(time.Hour)
+	s.SetPeerWants(ctx, p.ID, []PeerLibrary{{ID: "x", Name: "Movies", Kind: "movies"}, {ID: "y", Name: "Series", Kind: "tvshows"}})
+	s.SetPeerTitles(ctx, p.ID, []PeerTitle{{Key: "movie/tmdb/1", Kind: "movie", Library: "x"}, {Key: "movie/tmdb/2", Kind: "movie", Library: "x"}})
+	again, _ := s.MenuLibraries(ctx)
+	if len(again) != 1 || again[0].ID != menu[0].ID || again[0].Name != "Movies (A)" {
+		t.Fatalf("menu again: %+v (was %+v)", again, menu)
+	}
+	var added int64
+	s.read.QueryRow(`SELECT added_at FROM peer_titles WHERE title_key = 'movie/tmdb/1'`).Scan(&added)
+	if added != 1_000_000 {
+		t.Fatalf("arrival: %d", added)
+	}
+	if got := list(ListQuery{Sort: "latest"}); len(got) != 2 {
+		t.Fatalf("latest: %v", got)
+	}
+	s.LabelPeerWant(ctx, p.ID, "x", "Theirs")
+	if again, _ := s.MenuLibraries(ctx); again[0].Name != "Theirs" {
+		t.Fatalf("labelled: %+v", again)
+	}
+	if err := s.LabelPeerWant(ctx, p.ID, "nope", "x"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("labelling what isn't wanted: %v", err)
+	}
+	// A library no longer wanted: gone from the menu and the listings.
+	s.SetPeerWants(ctx, p.ID, nil)
+	if got := list(ListQuery{}); len(got) != 0 {
+		t.Fatalf("after: %v", got)
+	}
+}

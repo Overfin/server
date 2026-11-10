@@ -79,6 +79,15 @@ func (p *Panel) categories(w http.ResponseWriter, r *http.Request, _ *session) {
 		json.Unmarshal(l.Item, &item)
 		ls = append(ls, choiceJSON{ID: l.ID, Name: textclean.Plain(item.Name, 64)})
 	}
+	// And those taken from paired servers, as the menu names them.
+	theirs, err := st.MenuLibraries(ctx)
+	if err != nil {
+		p.fail(w, "listing libraries from paired servers", err)
+		return
+	}
+	for _, l := range theirs {
+		ls = append(ls, choiceJSON{ID: l.ID, Name: textclean.Plain(l.Name, 64)})
+	}
 	tags, err := st.CatalogTags(ctx)
 	if err != nil {
 		p.fail(w, "listing tags", err)

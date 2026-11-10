@@ -29,6 +29,13 @@ type Personal struct {
 func (s *Store) TitleKeys(ctx context.Context, itemIDs []string) (map[string]string, error) {
 	out := map[string]string{}
 	for _, id := range itemIDs {
+		// A paired server's title, as listings give it: its key.
+		if rest, ok := strings.CutPrefix(id, PeerItemPrefix); ok {
+			if _, key, ok := strings.Cut(rest, ":"); ok {
+				out[id] = key
+				continue
+			}
+		}
 		var key sql.NullString
 		err := s.read.QueryRowContext(ctx, `SELECT title_key FROM catalog_items WHERE id = ?`, id).Scan(&key)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {

@@ -9,10 +9,14 @@ import (
 
 	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/internal/textclean"
 )
 
+// maxLabel is how long our name for a taken library's entry may be.
+const maxLabel = 64
+
 // Federation: pairing this server with others (ROADMAP.md milestone 6,
-// SECURITY.md rule 65). Pairing only, so far: nothing is shared yet.
+// SECURITY.md rule 65): pairing, then sharing library by library.
 
 type peerJSON struct {
 	ID          string `json:"id"`
@@ -322,6 +326,10 @@ func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
 		Picked bool   `json:"picked"`
 		// Gone: we want it, and the other server no longer offers it.
 		Gone bool `json:"gone,omitempty"`
+		// Label is our name for a wanted one's entry in the site's menu,
+		// "" for Shown, the one made of the other server's names.
+		Label string `json:"label,omitempty"`
+		Shown string `json:"shown,omitempty"`
 	}
 	outOurs := []lib{}
 	for _, l := range ours {
@@ -334,19 +342,30 @@ func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
 	theirs, err := fed.TheirLibraries(ctx, peer)
 	reachable := err == nil
 	if reachable {
+		// What it says we may use of it and what it calls itself, read
+		// again with its libraries.
+		if again, err := p.Store.PeerByID(ctx, peer.ID); err == nil {
+			peer = again
+		}
+	}
+	label := func(id string) string {
+		for _, w := range wants {
+			if w.ID == id {
+				return w.Label
+			}
+		}
+		return ""
+	}
+	if reachable {
 		for _, l := range theirs {
-			outTheirs = append(outTheirs, lib{ID: l.ID, Name: l.Name, Kind: l.Kind, Picked: wanted(l.ID)})
+			outTheirs = append(outTheirs, lib{ID: l.ID, Name: l.Name, Kind: l.Kind, Picked: wanted(l.ID),
+				Label: label(l.ID), Shown: l.Name + " (" + peer.Name + ")"})
 		}
 	}
 	for _, w := range wants {
 		if !slices.ContainsFunc(theirs, func(l store.PeerLibrary) bool { return l.ID == w.ID }) {
-			outTheirs = append(outTheirs, lib{ID: w.ID, Name: w.Name, Kind: w.Kind, Picked: true, Gone: reachable})
-		}
-	}
-	if reachable {
-		// What it says we may use of it, read again with its libraries.
-		if again, err := p.Store.PeerByID(ctx, peer.ID); err == nil {
-			peer = again
+			outTheirs = append(outTheirs, lib{ID: w.ID, Name: w.Name, Kind: w.Kind, Picked: true, Gone: reachable,
+				Label: w.Label, Shown: w.Name + " (" + peer.Name + ")"})
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ours": outOurs, "theirs": outTheirs, "reachable": reachable,
@@ -362,6 +381,9 @@ func (p *Panel) setSharing(w http.ResponseWriter, r *http.Request, s *session) {
 		Offer  []string          `json:"offer"`
 		Want   []string          `json:"want"`
 		Limits *store.PeerLimits `json:"limits"`
+		// Labels are our names for wanted libraries' entries in the site's
+		// menu, by the other server's library ID ("" for its own names).
+		Labels map[string]string `json:"labels"`
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request"})
@@ -415,6 +437,13 @@ func (p *Panel) setSharing(w http.ResponseWriter, r *http.Request, s *session) {
 				return
 			}
 			p.fail(w, "setting wants", err)
+			return
+		}
+	}
+	for id, l := range req.Labels {
+		err := p.Store.LabelPeerWant(ctx, peer.ID, id, textclean.Plain(l, maxLabel))
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			p.fail(w, "naming a library from a peer", err)
 			return
 		}
 	}

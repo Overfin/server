@@ -3865,6 +3865,9 @@ paths:
                 type: object
                 required: [libraries]
                 properties:
+                  name:
+                    type: string
+                    description: What the answering server calls itself now (its branding's name, else its address), for the caller's site to show.
                   libraries:
                     type: array
                     items:

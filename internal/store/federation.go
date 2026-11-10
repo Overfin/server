@@ -367,11 +367,14 @@ type PeerLibrary struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Kind string `json:"kind"`
+	// Label is our operator's own name for its entry in the site's menu,
+	// "" for the one made of the peer's names; never sent to peers.
+	Label string `json:"-"`
 }
 
 // PeerWants lists the peer's libraries we want, by name.
 func (s *Store) PeerWants(ctx context.Context, peerID string) ([]PeerLibrary, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT library_id, name, kind FROM peer_wants WHERE peer_id = ? ORDER BY name, library_id`, peerID)
+	rows, err := s.read.QueryContext(ctx, `SELECT library_id, name, kind, coalesce(label, '') FROM peer_wants WHERE peer_id = ? ORDER BY name, library_id`, peerID)
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +382,7 @@ func (s *Store) PeerWants(ctx context.Context, peerID string) ([]PeerLibrary, er
 	out := []PeerLibrary{}
 	for rows.Next() {
 		var l PeerLibrary
-		if err := rows.Scan(&l.ID, &l.Name, &l.Kind); err != nil {
+		if err := rows.Scan(&l.ID, &l.Name, &l.Kind, &l.Label); err != nil {
 			return nil, err
 		}
 		out = append(out, l)
@@ -387,23 +390,100 @@ func (s *Store) PeerWants(ctx context.Context, peerID string) ([]PeerLibrary, er
 	return out, rows.Err()
 }
 
-// SetPeerWants replaces what we want of a peer's libraries.
+// SetPeerWants replaces what we want of a peer's libraries. Those still
+// wanted keep their entry in the menu (its ID, our operator's name).
 func (s *Store) SetPeerWants(ctx context.Context, peerID string, libs []PeerLibrary) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM peer_wants WHERE peer_id = ?`, peerID); err != nil {
+	ids := make([]string, len(libs))
+	for i, l := range libs {
+		ids[i] = l.ID
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM peer_wants WHERE peer_id = ? AND library_id NOT IN (SELECT value FROM json_each(?))`,
+		peerID, jsonList(ids)); err != nil {
 		return err
 	}
 	for _, l := range libs {
-		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO peer_wants (peer_id, library_id, name, kind) VALUES (?, ?, ?, ?)`,
+		if _, err := tx.ExecContext(ctx, `INSERT INTO peer_wants (peer_id, library_id, name, kind, menu_id)
+			VALUES (?, ?, ?, ?, lower(hex(randomblob(16))))
+			ON CONFLICT (peer_id, library_id) DO UPDATE SET name = excluded.name, kind = excluded.kind`,
 			peerID, l.ID, l.Name, l.Kind); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
+}
+
+// RenamePeerWants keeps what a peer now calls the libraries we want of it
+// (those it still offers), and what it calls itself.
+func (s *Store) RenamePeerWants(ctx context.Context, peerID, name string, libs []PeerLibrary) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if name != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE peers SET name = ? WHERE id = ?`, name, peerID); err != nil {
+			return err
+		}
+	}
+	for _, l := range libs {
+		if _, err := tx.ExecContext(ctx, `UPDATE peer_wants SET name = ?, kind = ? WHERE peer_id = ? AND library_id = ?`,
+			l.Name, l.Kind, peerID, l.ID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// LabelPeerWant sets our operator's name for a wanted library's entry in
+// the menu ("" for the one made of the peer's names).
+func (s *Store) LabelPeerWant(ctx context.Context, peerID, libraryID, label string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE peer_wants SET label = nullif(?, '') WHERE peer_id = ? AND library_id = ?`,
+		label, peerID, libraryID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// MenuLibrary is a library taken from a paired server, as the site's
+// menu shows it beside ours.
+type MenuLibrary struct {
+	// ID is its ID on this server's site, 32 hex digits as ours.
+	ID string
+	// Name is our operator's name for it, else the peer's: "Films (B)".
+	Name string
+	Kind string // movies, tvshows… as Jellyfin's
+}
+
+// MenuLibraries lists the libraries taken from paired servers that hold
+// something for us, in the order they were paired, then by name.
+func (s *Store) MenuLibraries(ctx context.Context) ([]MenuLibrary, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT w.menu_id, coalesce(w.label, w.name || ' (' || p.name || ')'), w.kind
+		FROM peer_wants w JOIN peers p ON p.id = w.peer_id AND p.state = 'paired'
+		WHERE w.menu_id IS NOT NULL
+			AND EXISTS (SELECT 1 FROM peer_titles t WHERE t.peer_id = w.peer_id AND t.library_id = w.library_id)
+		ORDER BY p.paired_at, p.id, w.name, w.library_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []MenuLibrary{}
+	for rows.Next() {
+		var l MenuLibrary
+		if err := rows.Scan(&l.ID, &l.Name, &l.Kind); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 // PeerTitle is a title a library holds, as servers tell each other: its
@@ -501,17 +581,26 @@ func (s *Store) SetPeerTitles(ctx context.Context, peerID string, titles []PeerT
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM peer_titles WHERE peer_id = ?`, peerID); err != nil {
+	// When each arrived is kept: what the peer held already isn't new.
+	keys := make([]string, len(titles))
+	for i, t := range titles {
+		keys[i] = t.Key
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM peer_titles WHERE peer_id = ? AND title_key NOT IN (SELECT value FROM json_each(?))`,
+		peerID, jsonList(keys)); err != nil {
 		return err
 	}
-	stmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO peer_titles (peer_id, title_key, kind, library_id, audio, subtitles)
-		VALUES (?, ?, ?, ?, ?, ?)`)
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO peer_titles (peer_id, title_key, kind, library_id, audio, subtitles, added_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (peer_id, title_key) DO UPDATE SET kind = excluded.kind, library_id = excluded.library_id,
+			audio = excluded.audio, subtitles = excluded.subtitles`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
+	now := s.now().Unix()
 	for _, t := range titles {
-		if _, err := stmt.ExecContext(ctx, peerID, t.Key, t.Kind, t.Library, jsonList(t.Audio), jsonList(t.Subtitles)); err != nil {
+		if _, err := stmt.ExecContext(ctx, peerID, t.Key, t.Kind, t.Library, jsonList(t.Audio), jsonList(t.Subtitles), now); err != nil {
 			return err
 		}
 	}
