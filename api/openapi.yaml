@@ -3876,6 +3876,54 @@ paths:
                         kind: {type: string, description: "Jellyfin's kind: movies, tvshows…; empty if other"}
         "404": {description: "Not signed, or not a paired server."}
 
+  /federation/titles:
+    post:
+      operationId: federationTitles
+      summary: The titles in the libraries this server offers the caller
+      description: |
+        Server to server, signed both ways as for pair, for a paired server
+        only. A page of the identified titles (films, series, seasons,
+        episodes, by title key) in the libraries asked for, among those this
+        server offers the caller; others asked for are ignored. A film's or
+        an episode's audio and subtitle languages come with it, so the
+        caller never suggests a source without its viewer's language. Never
+        a file, a path or a media server's ID. Anyone else gets the plain
+        404.
+      tags: [federation]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [libraries]
+              properties:
+                libraries: {type: array, items: {type: string}}
+                after: {type: string, description: "The previous page's next"}
+      responses:
+        "200":
+          description: A page of titles, in key order. Signed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [titles]
+                properties:
+                  titles:
+                    type: array
+                    items:
+                      type: object
+                      required: [key, kind, library]
+                      properties:
+                        key: {type: string, description: "movie/tmdb/949, series/tmdb/1399/s1/e2…"}
+                        kind: {type: string, enum: [movie, series, season, episode]}
+                        library: {type: string}
+                        audio: {type: array, items: {type: string}, description: "Language tags, fr-CA"}
+                        subtitles: {type: array, items: {type: string}}
+                  next: {type: string, description: "Where the next page starts; absent after the last"}
+        "404": {description: "Not signed, or not a paired server."}
+
 components:
   securitySchemes:
     session:

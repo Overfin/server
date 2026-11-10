@@ -147,3 +147,50 @@ func TestPeerSharing(t *testing.T) {
 		t.Fatalf("wants outlived the peer: %v", got)
 	}
 }
+
+// A library's identified titles, each once, in pages; a peer's titles
+// replaced whole and counted.
+func TestPeerTitles(t *testing.T) {
+	s, ctx := openTest(t), context.Background()
+	s.PutCatalog(ctx, []CatalogItem{
+		{ID: "00000000000000000000000000000001", Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "949", LibraryID: "films",
+			AudioTags: []string{"en"}},
+		{ID: "00000000000000000000000000000002", Kind: "movie", Name: "Heat (4K)", SortName: "heat", TMDB: "949", LibraryID: "films4k",
+			AudioTags: []string{"en", "fr-CA"}, SubtitleTags: []string{"fr"}},
+		{ID: "00000000000000000000000000000003", Kind: "movie", Name: "Home", SortName: "home", LibraryID: "films"},
+		{ID: "00000000000000000000000000000004", Kind: "movie", Name: "Alien", SortName: "alien", TMDB: "348", LibraryID: "other"},
+		{ID: "00000000000000000000000000000005", Kind: "movie", Name: "Up", SortName: "up", TMDB: "14160", LibraryID: "films"},
+	}, 1)
+	if err := s.RefreshTitleKeys(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.TitlesInLibraries(ctx, []string{"films", "films4k"}, "", 1)
+	if err != nil || len(got) != 1 || got[0].Key != "movie/tmdb/14160" {
+		t.Fatalf("first page: %+v, %v", got, err)
+	}
+	got, _ = s.TitlesInLibraries(ctx, []string{"films", "films4k"}, got[0].Key, 10)
+	if len(got) != 1 || got[0].Key != "movie/tmdb/949" || got[0].Library != "films" {
+		t.Fatalf("second page (Heat once, the unidentified file and the other library left out): %+v", got)
+	}
+	// Its languages: both copies'.
+	if a, s := got[0].Audio, got[0].Subtitles; len(a) != 2 || a[0] != "en" || a[1] != "fr-CA" || len(s) != 1 || s[0] != "fr" {
+		t.Fatalf("languages: %v %v", a, s)
+	}
+	if only, _ := s.TitlesInLibraries(ctx, []string{"films"}, "movie/tmdb/14160", 10); len(only[0].Audio) != 1 {
+		t.Fatalf("languages from a library not asked for: %+v", only)
+	}
+	if got, _ := s.TitlesInLibraries(ctx, nil, "", 10); len(got) != 0 {
+		t.Fatalf("no library: %+v", got)
+	}
+	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A")
+	if err := s.SetPeerTitles(ctx, p.ID, []PeerTitle{{Key: "movie/tmdb/1", Kind: "movie", Library: "x", Audio: []string{"fr-CA"}}, {Key: "series/tmdb/2", Kind: "series", Library: "x"}, {Key: "series/tmdb/2/s1", Kind: "season", Library: "x"}}); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := s.PeerTitleCounts(ctx); n[p.ID] != 2 {
+		t.Fatalf("counts: %v", n)
+	}
+	s.SetPeerTitles(ctx, p.ID, nil)
+	if n, _ := s.PeerTitleCounts(ctx); n[p.ID] != 0 {
+		t.Fatalf("not replaced: %v", n)
+	}
+}

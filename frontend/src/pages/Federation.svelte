@@ -18,6 +18,7 @@
     seenAt?: string;
     offers: number;
     wants: number;
+    titles: number;
   }
   interface Lib {
     id: string;
@@ -189,7 +190,7 @@
 
   const kinds: Record<string, string> = { movies: 'Films', tvshows: 'Series', music: 'Music', musicvideos: 'Music videos', homevideos: 'Home videos', boxsets: 'Collections', books: 'Books', photos: 'Photos', mixed: 'Mixed' };
 
-  const shareText = (p: Peer) => `Offers ${plural(p.offers, 'library', 'libraries')} · wants ${p.wants}`;
+  const shareText = (p: Peer) => `Offers ${plural(p.offers, 'library', 'libraries')} · wants ${p.wants}${p.wants ? ` (${plural(p.titles, 'title')})` : ''}`;
   // The kind, unless the name already says it ("Films").
   const kindOf = (l: Lib) => (kinds[l.kind] && kinds[l.kind].toLowerCase() !== l.name.toLowerCase() ? kinds[l.kind] : '');
 

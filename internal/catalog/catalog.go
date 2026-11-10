@@ -26,6 +26,7 @@ import (
 	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/textclean"
+	"github.com/overfin/server/internal/tracks"
 )
 
 // Service is the Jellyfin service account the catalog reads with.
@@ -507,6 +508,18 @@ func convert(raw jellyfin.RawItem) (store.CatalogItem, bool) {
 		if l := lang.Base(s.Language); s.Type == "Audio" && l != "" && !slices.Contains(it.AudioLanguages, l) &&
 			len(it.AudioLanguages) < maxAudioLanguages {
 			it.AudioLanguages = append(it.AudioLanguages, l)
+		}
+	}
+	// Its languages as the player lists them, for its title's sources.
+	audio, subtitles, _ := tracks.Read(raw.MediaStreams)
+	for _, t := range audio {
+		if t.Role == tracks.Main && t.Language != "" && !slices.Contains(it.AudioTags, t.Language) && len(it.AudioTags) < maxAudioLanguages {
+			it.AudioTags = append(it.AudioTags, t.Language)
+		}
+	}
+	for _, t := range subtitles {
+		if t.Language != "" && !slices.Contains(it.SubtitleTags, t.Language) && len(it.SubtitleTags) < maxAudioLanguages {
+			it.SubtitleTags = append(it.SubtitleTags, t.Language)
 		}
 	}
 	it.PrimaryTag = matching(imageTag, raw.ImageTags["Primary"])

@@ -23,9 +23,11 @@ type peerJSON struct {
 	CreatedAt   string `json:"createdAt"`
 	PairedAt    string `json:"pairedAt,omitempty"`
 	SeenAt      string `json:"seenAt,omitempty"`
-	// Offers and Wants count the libraries we offer it and want of it.
+	// Offers and Wants count the libraries we offer it and want of it;
+	// Titles, the films and series it holds in those we want.
 	Offers int `json:"offers"`
 	Wants  int `json:"wants"`
+	Titles int `json:"titles"`
 }
 
 func peerOf(p *store.Peer) peerJSON {
@@ -92,6 +94,11 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 	for _, c := range codes {
 		outCodes = append(outCodes, codeOf(c))
 	}
+	counts, err := p.Store.PeerTitleCounts(ctx)
+	if err != nil {
+		p.fail(w, "counting peers' titles", err)
+		return
+	}
 	outPeers := []peerJSON{}
 	for _, pe := range peers {
 		j := peerOf(pe)
@@ -105,7 +112,7 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 			p.fail(w, "reading wants", err)
 			return
 		}
-		j.Offers, j.Wants = len(offers), len(wants)
+		j.Offers, j.Wants, j.Titles = len(offers), len(wants), counts[pe.ID]
 		outPeers = append(outPeers, j)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"available": true, "address": s.Address,
@@ -377,7 +384,12 @@ func (p *Panel) setSharing(w http.ResponseWriter, r *http.Request, s *session) {
 	slices.Sort(asked)
 	asked = slices.Compact(asked)
 	if !slices.Equal(now, asked) {
-		if err := fed.SetWants(ctx, peer, req.Want); err != nil {
+		err := fed.SetWants(ctx, peer, req.Want)
+		if err == nil {
+			// Its titles, for what we want now.
+			fed.SyncSoon(peer)
+		}
+		if err != nil {
 			if errors.Is(err, federation.ErrUnreachable) || errors.Is(err, federation.ErrUnknown) {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
 					"detail": "What you offer is saved, but what you want couldn't be: the other server can't be reached now. Try again later."})

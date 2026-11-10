@@ -295,8 +295,13 @@ func TestUpgradeRepairsChosenOrders(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.PutCatalog(ctx, []CatalogItem{{ID: id(0), Kind: "series", Name: "S", SortName: "s", TMDB: "7"},
-		{ID: id(1), Kind: "episode", Name: "E", SortName: "e", SeriesID: id(0), SeasonNumber: n(1), EpisodeNumber: n(1)}}, 1); err != nil {
+	// Today's PutCatalog writes columns schema 80 doesn't have: the rows,
+	// as that Overfin wrote them.
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO catalog_items (id, kind, name, sort_name, tmdb, seen, rating) VALUES (?, 'series', 'S', 's', '7', 1, '')`, id(0)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO catalog_items (id, kind, name, sort_name, series_id, season_number, episode_number, seen, rating)
+		VALUES (?, 'episode', 'E', 'e', ?, ?, ?, 1, '')`, id(1), id(0), *n(1), *n(1)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.ExecContext(ctx, `UPDATE catalog_items SET title_key = 'series/tmdb/7/e900' WHERE id = ?`, id(1)); err != nil {

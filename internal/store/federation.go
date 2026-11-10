@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/overfin/server/internal/ids"
@@ -377,4 +379,160 @@ func (s *Store) SetPeerWants(ctx context.Context, peerID string, libs []PeerLibr
 		}
 	}
 	return tx.Commit()
+}
+
+// PeerTitle is a title a library holds, as servers tell each other: its
+// key, its kind and the library.
+type PeerTitle struct {
+	Key     string `json:"key"`
+	Kind    string `json:"kind"`
+	Library string `json:"library"`
+	// Audio and Subtitles are its copies' languages, as tags ("fr-CA"):
+	// a film's or an episode's.
+	Audio     []string `json:"audio,omitempty"`
+	Subtitles []string `json:"subtitles,omitempty"`
+}
+
+// TitlesInLibraries lists, in key order after after, at most limit of the
+// identified titles the given libraries hold (films, series, seasons,
+// episodes; files TMDB doesn't know are left out), each once, with one of
+// the libraries holding it.
+func (s *Store) TitlesInLibraries(ctx context.Context, libraries []string, after string, limit int) ([]PeerTitle, error) {
+	out := []PeerTitle{}
+	if len(libraries) == 0 {
+		return out, nil
+	}
+	args := []any{after}
+	marks := ""
+	for i, l := range libraries {
+		if i > 0 {
+			marks += ", "
+		}
+		marks += "?"
+		args = append(args, l)
+	}
+	args = append(args, limit)
+	rows, err := s.read.QueryContext(ctx, `SELECT title_key, min(kind), min(library_id) FROM catalog_items
+		WHERE title_key > ? AND library_id IN (`+marks+`) AND kind IN ('movie', 'series', 'season', 'episode')
+			AND title_key NOT LIKE 'item/%'
+		GROUP BY title_key ORDER BY title_key LIMIT ?`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var t PeerTitle
+		if err := rows.Scan(&t.Key, &t.Kind, &t.Library); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Each one's languages: every copy's in those libraries.
+	for i := range out {
+		if out[i].Kind != "movie" && out[i].Kind != "episode" {
+			continue
+		}
+		langs, err := s.read.QueryContext(ctx, `SELECT audio_tags, subtitle_tags FROM catalog_items
+			WHERE title_key = ? AND library_id IN (`+marks+`)`, append([]any{out[i].Key}, args[1:len(args)-1]...)...)
+		if err != nil {
+			return nil, err
+		}
+		for langs.Next() {
+			var audio, subs sql.NullString
+			if err := langs.Scan(&audio, &subs); err != nil {
+				langs.Close()
+				return nil, err
+			}
+			out[i].Audio = mergeTags(out[i].Audio, audio.String)
+			out[i].Subtitles = mergeTags(out[i].Subtitles, subs.String)
+		}
+		langs.Close()
+		if err := langs.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// mergeTags adds a JSON list's tags to tags, each once.
+func mergeTags(tags []string, list string) []string {
+	var more []string
+	json.Unmarshal([]byte(list), &more)
+	for _, t := range more {
+		if !slices.Contains(tags, t) {
+			tags = append(tags, t)
+		}
+	}
+	return tags
+}
+
+// SetPeerTitles replaces what we know a peer holds for us, and notes when.
+func (s *Store) SetPeerTitles(ctx context.Context, peerID string, titles []PeerTitle) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM peer_titles WHERE peer_id = ?`, peerID); err != nil {
+		return err
+	}
+	stmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO peer_titles (peer_id, title_key, kind, library_id, audio, subtitles)
+		VALUES (?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, t := range titles {
+		if _, err := stmt.ExecContext(ctx, peerID, t.Key, t.Kind, t.Library, jsonList(t.Audio), jsonList(t.Subtitles)); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE peers SET titles_at = ? WHERE id = ?`, s.now().Unix(), peerID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// PeerTitleCounts counts, per peer, the films and series we know it holds
+// for us.
+func (s *Store) PeerTitleCounts(ctx context.Context) (map[string]int, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT peer_id, count(*) FROM peer_titles WHERE kind IN ('movie', 'series') GROUP BY peer_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}
+
+// TitlesOfPeer lists what we know a peer holds for us, in key order.
+func (s *Store) TitlesOfPeer(ctx context.Context, peerID string) ([]PeerTitle, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT title_key, kind, library_id, audio, subtitles FROM peer_titles
+		WHERE peer_id = ? ORDER BY title_key`, peerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []PeerTitle{}
+	for rows.Next() {
+		var t PeerTitle
+		var audio, subs sql.NullString
+		if err := rows.Scan(&t.Key, &t.Kind, &t.Library, &audio, &subs); err != nil {
+			return nil, err
+		}
+		t.Audio, t.Subtitles = mergeTags(nil, audio.String), mergeTags(nil, subs.String)
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }

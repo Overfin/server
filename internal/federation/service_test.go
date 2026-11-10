@@ -248,3 +248,45 @@ func TestSharing(t *testing.T) {
 		t.Fatalf("a stranger: %v", err)
 	}
 }
+
+// B learns which titles the library it wants of A holds, with their
+// languages; nothing of a library A doesn't offer it, even if asked.
+func TestSyncTitles(t *testing.T) {
+	ctx := context.Background()
+	a, b := newServer(t, "A"), newServer(t, "B")
+	libraries(t, a, `{"Id":"films","Name":"Films","CollectionType":"movies"}`, `{"Id":"private","Name":"Privé","CollectionType":"movies"}`)
+	a.s.Store.PutCatalog(ctx, []store.CatalogItem{
+		{ID: "00000000000000000000000000000001", Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "949", LibraryID: "films",
+			AudioTags: []string{"en", "fr-CA"}, SubtitleTags: []string{"fr"}},
+		{ID: "00000000000000000000000000000002", Kind: "movie", Name: "Secret", SortName: "secret", TMDB: "1", LibraryID: "private"},
+	}, 1)
+	a.s.Store.RefreshTitleKeys(ctx)
+	code, _, _ := a.s.NewCode(ctx, "")
+	aOnB, _ := b.s.UseCode(ctx, code)
+	bOnA, _ := a.s.Accept(ctx, onlyPeer(t, a).ID)
+	aOnB, _ = b.s.Store.PeerByID(ctx, aOnB.ID)
+	a.s.SetOffers(ctx, bOnA, []string{"films"})
+	b.s.SetWants(ctx, aOnB, []string{"films"})
+	// Asking for the library A doesn't offer, too: ignored.
+	b.s.Store.SetPeerWants(ctx, aOnB.ID, []store.PeerLibrary{{ID: "films", Name: "Films"}, {ID: "private", Name: "Privé"}})
+	n, err := b.s.SyncTitles(ctx, aOnB)
+	if err != nil || n != 1 {
+		t.Fatalf("synced %d, %v", n, err)
+	}
+	got, _ := b.s.Store.TitlesOfPeer(ctx, aOnB.ID)
+	if len(got) != 1 || got[0].Key != "movie/tmdb/949" || len(got[0].Audio) != 2 || got[0].Audio[1] != "fr-CA" || got[0].Subtitles[0] != "fr" {
+		t.Fatalf("B knows: %+v", got)
+	}
+	// B no longer wants anything: it knows of nothing.
+	b.s.Store.SetPeerWants(ctx, aOnB.ID, nil)
+	if n, _ := b.s.SyncTitles(ctx, aOnB); n != 0 {
+		t.Fatalf("still %d", n)
+	}
+}
+
+func TestCleanTags(t *testing.T) {
+	got := cleanTags([]string{"fr-CA", "fr-CA", "", "x", "<script>", "es-419", "toolongtagvalue"})
+	if len(got) != 2 || got[0] != "fr-CA" || got[1] != "es-419" {
+		t.Fatalf("%v", got)
+	}
+}

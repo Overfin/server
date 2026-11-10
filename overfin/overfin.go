@@ -479,6 +479,8 @@ func run(logger *slog.Logger) error {
 	// Overfin, keeping where an abandoned playback stopped).
 	go api.RunJanitor(ctx, func() api.Playback { return gw.current.Load().playback })
 	go purgeExpired(ctx, db, logger)
+	// Federation: each paired server's titles, read again regularly.
+	go syncPeers(ctx, func() *federation.Service { return gw.current.Load().fed })
 	// The catalog's index, read through Overfin's Jellyfin service account,
 	// as Jellyfin's socket says the library changed (polling only while
 	// it's out of reach), and whole once a day.
@@ -725,6 +727,23 @@ func newSwap(h http.Handler) *swap {
 func (s *swap) set(h http.Handler) { s.h.Store(&h) }
 
 func (s *swap) ServeHTTP(w http.ResponseWriter, r *http.Request) { (*s.h.Load()).ServeHTTP(w, r) }
+
+// syncPeers reads every paired server's titles a minute after starting,
+// then every federation.SyncEvery, with the federation in effect then.
+func syncPeers(ctx context.Context, fed func() *federation.Service) {
+	wait := time.Minute
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		wait = federation.SyncEvery()
+		if s := fed(); s != nil {
+			s.SyncAll(ctx)
+		}
+	}
+}
 
 // purgeExpired deletes expired sessions and logins every hour. They are
 // already refused when expired; this only keeps the database small.

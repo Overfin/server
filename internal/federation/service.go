@@ -74,8 +74,9 @@ func NewHTTPClient() *http.Client {
 	}
 }
 
-// maxAnswer caps what's read from a peer's answer.
-const maxAnswer = 64 << 10
+// maxAnswer caps what's read from a peer's answer: a page of titles is
+// the largest.
+const maxAnswer = 4 << 20
 
 // maxName caps a peer's name.
 const maxName = 80
@@ -108,7 +109,10 @@ func (p Plugin) Register(r *plugin.Registrar) error {
 	if err := r.HandlePublic("POST /api/v1/federation/hello", http.HandlerFunc(p.S.hello)); err != nil {
 		return err
 	}
-	return r.HandlePublic("POST /api/v1/federation/libraries", http.HandlerFunc(p.S.libraries))
+	if err := r.HandlePublic("POST /api/v1/federation/libraries", http.HandlerFunc(p.S.libraries)); err != nil {
+		return err
+	}
+	return r.HandlePublic("POST /api/v1/federation/titles", http.HandlerFunc(p.S.titles))
 }
 
 type pairRequest struct {
@@ -648,4 +652,177 @@ func cleanKind(kind string) string {
 		return kind
 	}
 	return ""
+}
+
+// Titles: a paired server learns which titles the libraries it wants of
+// ours hold, by title key, a page at a time; never a file, a path or
+// Jellyfin's IDs. Its own server then shows them as one more source.
+
+// titlesPage is how many titles a page holds at most.
+const titlesPage = 5000
+
+// maxPeerTitles caps how many titles we keep of one peer.
+const maxPeerTitles = 500_000
+
+type titlesRequest struct {
+	Libraries []string `json:"libraries"`
+	After     string   `json:"after"`
+}
+
+type titlesAnswer struct {
+	Titles []store.PeerTitle `json:"titles"`
+	// Next is where the next page starts; empty after the last.
+	Next string `json:"next,omitempty"`
+}
+
+// titles answers a paired peer with a page of the titles in the libraries
+// it asks for, among those we offer it; anyone else gets the plain 404.
+func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
+	v, body, ok := s.verified(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	p, err := s.Store.PeerByKey(ctx, v.Key)
+	if err != nil || p.State != store.PeerPaired {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	var req titlesRequest
+	if json.Unmarshal(body, &req) != nil || len(req.After) > 512 {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	offered, err := s.Store.PeerOffers(ctx, p.ID)
+	if err != nil {
+		problem.Send(w, problem.Internal, "")
+		return
+	}
+	// Only libraries we offer it: anything else asked is ignored.
+	libs := []string{}
+	for _, l := range req.Libraries {
+		if slices.Contains(offered, l) && !slices.Contains(libs, l) {
+			libs = append(libs, l)
+		}
+	}
+	page, err := s.Store.TitlesInLibraries(ctx, libs, req.After, titlesPage)
+	if err != nil {
+		problem.Send(w, problem.Internal, "")
+		return
+	}
+	answer := titlesAnswer{Titles: page}
+	if len(page) == titlesPage {
+		answer.Next = page[len(page)-1].Key
+	}
+	s.Store.PeerSeen(ctx, p.ID)
+	s.answer(w, v.Nonce, answer)
+}
+
+// SyncTitles reads again which titles a paired peer holds in the
+// libraries we want of it, and keeps them, replacing what we knew. With
+// nothing wanted, we know of nothing.
+func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
+	if p.State != store.PeerPaired {
+		return 0, ErrNotPaired
+	}
+	wants, err := s.Store.PeerWants(ctx, p.ID)
+	if err != nil {
+		return 0, err
+	}
+	libs := []string{}
+	for _, w := range wants {
+		libs = append(libs, w.ID)
+	}
+	all := []store.PeerTitle{}
+	after := ""
+	for len(libs) > 0 {
+		var answer titlesAnswer
+		status, err := s.call(ctx, p.Address, p.PublicKey, "/api/v1/federation/titles", titlesRequest{Libraries: libs, After: after}, &answer)
+		switch {
+		case err != nil:
+			return 0, err
+		case status == http.StatusNotFound:
+			return 0, ErrUnknown
+		case status != http.StatusOK:
+			return 0, ErrUnreachable
+		}
+		for _, t := range answer.Titles {
+			// Only what we asked for, and only keys we read the same way.
+			ref, ok := store.ParseTitleKey(t.Key)
+			if !ok || ref.Kind != t.Kind || ref.Key() != t.Key || !slices.Contains(libs, t.Library) {
+				continue
+			}
+			t.Audio, t.Subtitles = cleanTags(t.Audio), cleanTags(t.Subtitles)
+			all = append(all, t)
+		}
+		if answer.Next == "" || answer.Next <= after || len(all) >= maxPeerTitles {
+			break
+		}
+		after = answer.Next
+	}
+	if len(all) > maxPeerTitles {
+		all = all[:maxPeerTitles]
+	}
+	if err := s.Store.SetPeerTitles(ctx, p.ID, all); err != nil {
+		return 0, err
+	}
+	s.Store.PeerSeen(ctx, p.ID)
+	return len(all), nil
+}
+
+// syncEvery is how often each peer's titles are read again.
+const syncEvery = 30 * time.Minute
+
+// SyncAll reads again every paired peer's titles; one that can't be
+// reached keeps what we knew.
+func (s *Service) SyncAll(ctx context.Context) {
+	peers, err := s.Store.Peers(ctx)
+	if err != nil {
+		s.Logger.Error("federation: listing peers failed", "error", err)
+		return
+	}
+	for _, p := range peers {
+		if p.State != store.PeerPaired {
+			continue
+		}
+		n, err := s.SyncTitles(ctx, p)
+		if err != nil {
+			s.Logger.Info("federation: a peer's titles couldn't be read", "name", p.Name, "error", err)
+			continue
+		}
+		s.Logger.Info("federation: a peer's titles read", "name", p.Name, "titles", n)
+	}
+}
+
+// SyncSoon reads a peer's titles again in the background (after what we
+// want of it changed).
+func (s *Service) SyncSoon(p *store.Peer) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		if _, err := s.SyncTitles(ctx, p); err != nil {
+			s.Logger.Info("federation: a peer's titles couldn't be read", "name", p.Name, "error", err)
+		}
+	}()
+}
+
+// SyncEvery is how often the gateway should call SyncAll.
+func SyncEvery() time.Duration { return syncEvery }
+
+// cleanTags keeps a peer's language tags that look like tags ("fr",
+// "fr-CA", "es-419"), at most 12, each once.
+func cleanTags(tags []string) []string {
+	var out []string
+	for _, t := range tags {
+		if len(out) == 12 {
+			break
+		}
+		if len(t) < 2 || len(t) > 12 || slices.Contains(out, t) || strings.IndexFunc(t, func(r rune) bool {
+			return !(r == '-' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9')
+		}) >= 0 {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
