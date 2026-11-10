@@ -118,3 +118,32 @@ func TestPeers(t *testing.T) {
 		t.Fatalf("deleted twice: %v", err)
 	}
 }
+
+// What we offer and want is per peer, replaced whole, and goes with it.
+func TestPeerSharing(t *testing.T) {
+	s, ctx := openTest(t), context.Background()
+	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A")
+	if err := s.SetPeerOffers(ctx, p.ID, []string{"lib2", "lib1", "lib1"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.PeerOffers(ctx, p.ID); len(got) != 2 || got[0] != "lib1" {
+		t.Fatalf("offers: %v", got)
+	}
+	s.SetPeerOffers(ctx, p.ID, []string{"lib3"})
+	if got, _ := s.PeerOffers(ctx, p.ID); len(got) != 1 || got[0] != "lib3" {
+		t.Fatalf("offers replaced: %v", got)
+	}
+	if err := s.SetPeerWants(ctx, p.ID, []PeerLibrary{{ID: "x", Name: "Films", Kind: "movies"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.PeerWants(ctx, p.ID); len(got) != 1 || got[0].Name != "Films" {
+		t.Fatalf("wants: %v", got)
+	}
+	s.DeletePeer(ctx, p.ID)
+	if got, _ := s.PeerOffers(ctx, p.ID); len(got) != 0 {
+		t.Fatalf("offers outlived the peer: %v", got)
+	}
+	if got, _ := s.PeerWants(ctx, p.ID); len(got) != 0 {
+		t.Fatalf("wants outlived the peer: %v", got)
+	}
+}

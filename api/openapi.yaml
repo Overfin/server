@@ -3839,6 +3839,43 @@ paths:
               schema: {$ref: "#/components/schemas/FederationState"}
         "404": {description: "Not signed, or not a peer of this server."}
 
+  /federation/libraries:
+    post:
+      operationId: federationLibraries
+      summary: The libraries this server offers the caller
+      description: |
+        Server to server, signed both ways as for pair, for a paired server
+        only. Each server offers each of its peers the libraries its
+        operator picked; the caller picks which it wants. A server only
+        offers its own libraries, never what it gets from another. Anyone
+        else, or a server not paired yet, gets the plain 404.
+      tags: [federation]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        "200":
+          description: What this server offers the caller. Signed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [libraries]
+                properties:
+                  libraries:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, kind]
+                      properties:
+                        id: {type: string}
+                        name: {type: string}
+                        kind: {type: string, description: "Jellyfin's kind: movies, tvshows…; empty if other"}
+        "404": {description: "Not signed, or not a paired server."}
+
 components:
   securitySchemes:
     session:

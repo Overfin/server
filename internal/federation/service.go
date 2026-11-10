@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/internal/textclean"
 )
 
 // How pairing goes, between server A, whose operator made the code, and
@@ -103,7 +105,10 @@ func (p Plugin) Register(r *plugin.Registrar) error {
 	if err := r.HandlePublic("POST /api/v1/federation/pair", http.HandlerFunc(p.S.pair)); err != nil {
 		return err
 	}
-	return r.HandlePublic("POST /api/v1/federation/hello", http.HandlerFunc(p.S.hello))
+	if err := r.HandlePublic("POST /api/v1/federation/hello", http.HandlerFunc(p.S.hello)); err != nil {
+		return err
+	}
+	return r.HandlePublic("POST /api/v1/federation/libraries", http.HandlerFunc(p.S.libraries))
 }
 
 type pairRequest struct {
@@ -493,4 +498,154 @@ func (s *Service) CheckSoon(peers []*store.Peer) {
 			s.Check(ctx, p)
 		}()
 	}
+}
+
+// Sharing, library by library: each side offers its own libraries to each
+// peer, and wants some of what the peer offers. Only what one offers and
+// the other wants is ever shared; a server only offers what it owns, and
+// never passes on what it receives (rule 65).
+
+type librariesAnswer struct {
+	Libraries []store.PeerLibrary `json:"libraries"`
+}
+
+// maxLibraries caps the libraries a peer's answer may list.
+const maxLibraries = 200
+
+// OurLibraries lists this server's libraries, as the index knows them.
+func (s *Service) OurLibraries(ctx context.Context) ([]store.PeerLibrary, error) {
+	libs, err := s.Store.Libraries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := []store.PeerLibrary{}
+	for _, l := range libs {
+		var item struct{ Name, CollectionType string }
+		json.Unmarshal(l.Item, &item)
+		out = append(out, store.PeerLibrary{ID: l.ID, Name: textclean.Plain(item.Name, maxName), Kind: cleanKind(item.CollectionType)})
+	}
+	return out, nil
+}
+
+// OfferedTo lists our libraries offered to a peer: those we picked that
+// still exist.
+func (s *Service) OfferedTo(ctx context.Context, peerID string) ([]store.PeerLibrary, error) {
+	ids, err := s.Store.PeerOffers(ctx, peerID)
+	if err != nil {
+		return nil, err
+	}
+	ours, err := s.OurLibraries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := []store.PeerLibrary{}
+	for _, l := range ours {
+		if slices.Contains(ids, l.ID) {
+			out = append(out, l)
+		}
+	}
+	return out, nil
+}
+
+// libraries answers a paired peer with what we offer it, and nothing
+// else: any other caller gets the plain 404.
+func (s *Service) libraries(w http.ResponseWriter, r *http.Request) {
+	v, _, ok := s.verified(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	p, err := s.Store.PeerByKey(ctx, v.Key)
+	if err != nil || p.State != store.PeerPaired {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	offered, err := s.OfferedTo(ctx, p.ID)
+	if err != nil {
+		problem.Send(w, problem.Internal, "")
+		return
+	}
+	s.Store.PeerSeen(ctx, p.ID)
+	s.answer(w, v.Nonce, librariesAnswer{Libraries: offered})
+}
+
+// ErrNotPaired is returned for sharing with a server not paired yet.
+var ErrNotPaired = errors.New("federation: not paired yet")
+
+// TheirLibraries asks a paired peer which of its libraries it offers us.
+func (s *Service) TheirLibraries(ctx context.Context, p *store.Peer) ([]store.PeerLibrary, error) {
+	if p.State != store.PeerPaired {
+		return nil, ErrNotPaired
+	}
+	var answer librariesAnswer
+	status, err := s.call(ctx, p.Address, p.PublicKey, "/api/v1/federation/libraries", struct{}{}, &answer)
+	switch {
+	case err != nil:
+		return nil, err
+	case status == http.StatusNotFound:
+		return nil, ErrUnknown
+	case status != http.StatusOK:
+		return nil, ErrUnreachable
+	}
+	s.Store.PeerSeen(ctx, p.ID)
+	out := []store.PeerLibrary{}
+	for _, l := range answer.Libraries {
+		if len(out) == maxLibraries {
+			break
+		}
+		if l.ID == "" || len(l.ID) > 64 {
+			continue
+		}
+		name := textclean.Plain(l.Name, maxName)
+		if name == "" {
+			name = "?"
+		}
+		out = append(out, store.PeerLibrary{ID: l.ID, Name: name, Kind: cleanKind(l.Kind)})
+	}
+	return out, nil
+}
+
+// SetOffers sets which of our libraries we offer a paired peer; IDs that
+// aren't our libraries are left out.
+func (s *Service) SetOffers(ctx context.Context, p *store.Peer, ids []string) error {
+	if p.State != store.PeerPaired {
+		return ErrNotPaired
+	}
+	ours, err := s.OurLibraries(ctx)
+	if err != nil {
+		return err
+	}
+	keep := []string{}
+	for _, l := range ours {
+		if slices.Contains(ids, l.ID) {
+			keep = append(keep, l.ID)
+		}
+	}
+	return s.Store.SetPeerOffers(ctx, p.ID, keep)
+}
+
+// SetWants sets which of a paired peer's libraries we want, out of those
+// it offers us now (so it must be reachable); IDs it doesn't offer are left
+// out.
+func (s *Service) SetWants(ctx context.Context, p *store.Peer, ids []string) error {
+	theirs, err := s.TheirLibraries(ctx, p)
+	if err != nil {
+		return err
+	}
+	keep := []store.PeerLibrary{}
+	for _, l := range theirs {
+		if slices.Contains(ids, l.ID) {
+			keep = append(keep, l)
+		}
+	}
+	return s.Store.SetPeerWants(ctx, p.ID, keep)
+}
+
+// cleanKind keeps Jellyfin's kinds of library, and "" for anything else.
+func cleanKind(kind string) string {
+	switch kind {
+	case "movies", "tvshows", "music", "musicvideos", "homevideos", "boxsets", "books", "photos", "mixed":
+		return kind
+	}
+	return ""
 }

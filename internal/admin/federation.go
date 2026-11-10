@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/overfin/server/internal/federation"
@@ -22,6 +23,9 @@ type peerJSON struct {
 	CreatedAt   string `json:"createdAt"`
 	PairedAt    string `json:"pairedAt,omitempty"`
 	SeenAt      string `json:"seenAt,omitempty"`
+	// Offers and Wants count the libraries we offer it and want of it.
+	Offers int `json:"offers"`
+	Wants  int `json:"wants"`
 }
 
 func peerOf(p *store.Peer) peerJSON {
@@ -90,7 +94,19 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 	}
 	outPeers := []peerJSON{}
 	for _, pe := range peers {
-		outPeers = append(outPeers, peerOf(pe))
+		j := peerOf(pe)
+		offers, err := p.Store.PeerOffers(ctx, pe.ID)
+		if err != nil {
+			p.fail(w, "reading offers", err)
+			return
+		}
+		wants, err := p.Store.PeerWants(ctx, pe.ID)
+		if err != nil {
+			p.fail(w, "reading wants", err)
+			return
+		}
+		j.Offers, j.Wants = len(offers), len(wants)
+		outPeers = append(outPeers, j)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"available": true, "address": s.Address,
 		"fingerprint": federation.Fingerprint(s.Key.Public()), "codes": outCodes, "peers": outPeers})
@@ -262,4 +278,133 @@ func (p *Panel) pairingProblem(w http.ResponseWriter, err error) {
 		return
 	}
 	writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": detail})
+}
+
+// sharing is what we offer a paired server and what we want of its
+// libraries: ours, each offered or not; theirs as it offers them now (or,
+// when it can't be reached, only those we want, as we last saw them).
+func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
+	fed := p.fed(w)
+	if fed == nil {
+		return
+	}
+	ctx := r.Context()
+	peer := p.pairedPeer(w, r)
+	if peer == nil {
+		return
+	}
+	ours, err := fed.OurLibraries(ctx)
+	if err != nil {
+		p.fail(w, "listing libraries", err)
+		return
+	}
+	offered, err := p.Store.PeerOffers(ctx, peer.ID)
+	if err != nil {
+		p.fail(w, "reading offers", err)
+		return
+	}
+	wants, err := p.Store.PeerWants(ctx, peer.ID)
+	if err != nil {
+		p.fail(w, "reading wants", err)
+		return
+	}
+	type lib struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Kind   string `json:"kind"`
+		Picked bool   `json:"picked"`
+		// Gone: we want it, and the other server no longer offers it.
+		Gone bool `json:"gone,omitempty"`
+	}
+	outOurs := []lib{}
+	for _, l := range ours {
+		outOurs = append(outOurs, lib{ID: l.ID, Name: l.Name, Kind: l.Kind, Picked: slices.Contains(offered, l.ID)})
+	}
+	wanted := func(id string) bool {
+		return slices.ContainsFunc(wants, func(w store.PeerLibrary) bool { return w.ID == id })
+	}
+	outTheirs := []lib{}
+	theirs, err := fed.TheirLibraries(ctx, peer)
+	reachable := err == nil
+	if reachable {
+		for _, l := range theirs {
+			outTheirs = append(outTheirs, lib{ID: l.ID, Name: l.Name, Kind: l.Kind, Picked: wanted(l.ID)})
+		}
+	}
+	for _, w := range wants {
+		if !slices.ContainsFunc(theirs, func(l store.PeerLibrary) bool { return l.ID == w.ID }) {
+			outTheirs = append(outTheirs, lib{ID: w.ID, Name: w.Name, Kind: w.Kind, Picked: true, Gone: reachable})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ours": outOurs, "theirs": outTheirs, "reachable": reachable})
+}
+
+func (p *Panel) setSharing(w http.ResponseWriter, r *http.Request, s *session) {
+	fed := p.fed(w)
+	if fed == nil {
+		return
+	}
+	var req struct {
+		Offer []string `json:"offer"`
+		Want  []string `json:"want"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request"})
+		return
+	}
+	ctx := r.Context()
+	peer := p.pairedPeer(w, r)
+	if peer == nil {
+		return
+	}
+	if err := fed.SetOffers(ctx, peer, req.Offer); err != nil {
+		p.fail(w, "setting offers", err)
+		return
+	}
+	// What we want changes only when it did: picking needs the other
+	// server's list, so it must be reachable then.
+	wants, err := p.Store.PeerWants(ctx, peer.ID)
+	if err != nil {
+		p.fail(w, "reading wants", err)
+		return
+	}
+	now := []string{}
+	for _, w := range wants {
+		now = append(now, w.ID)
+	}
+	slices.Sort(now)
+	asked := slices.Clone(req.Want)
+	slices.Sort(asked)
+	asked = slices.Compact(asked)
+	if !slices.Equal(now, asked) {
+		if err := fed.SetWants(ctx, peer, req.Want); err != nil {
+			if errors.Is(err, federation.ErrUnreachable) || errors.Is(err, federation.ErrUnknown) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
+					"detail": "What you offer is saved, but what you want couldn't be: the other server can't be reached now. Try again later."})
+				return
+			}
+			p.fail(w, "setting wants", err)
+			return
+		}
+	}
+	p.Logger.Info("sharing with a peer changed in the control panel", "peer", peer.ID, "offers", len(req.Offer), "wants", len(req.Want), "by", s.logID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// pairedPeer is the paired server the request names, or nil after
+// answering.
+func (p *Panel) pairedPeer(w http.ResponseWriter, r *http.Request) *store.Peer {
+	peer, err := p.Store.PeerByID(r.Context(), r.PathValue("id"))
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		notFound(w, "No such server")
+		return nil
+	case err != nil:
+		p.fail(w, "reading a peer", err)
+		return nil
+	case peer.State != store.PeerPaired:
+		writeJSON(w, http.StatusConflict, map[string]string{"type": "not-paired", "detail": "Sharing starts once both operators have accepted."})
+		return nil
+	}
+	return peer
 }

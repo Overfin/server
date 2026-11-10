@@ -12,6 +12,7 @@ import (
 
 	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/plugin"
+	"github.com/overfin/server/internal/store"
 )
 
 // fedPanel is a signed-in panel whose server has federation, on a test
@@ -39,7 +40,10 @@ type fedState struct {
 	Available   bool
 	Fingerprint string
 	Codes       []struct{ ID, Note string }
-	Peers       []struct{ ID, Name, State, Fingerprint string }
+	Peers       []struct {
+		ID, Name, State, Fingerprint string
+		Offers, Wants                int
+	}
 }
 
 func readState(t *testing.T, b *browser) fedState {
@@ -129,5 +133,51 @@ func TestFederationUnavailable(t *testing.T) {
 	}
 	if rec := b.do("POST", "/admin/api/federation/codes", `{"note":""}`, nil); rec.Code != 409 {
 		t.Fatalf("a code without federation: %d", rec.Code)
+	}
+}
+
+// Sharing from the panels: A offers Films to B; B sees it and wants it;
+// each list counts it; a server not paired yet has no sharing.
+func TestSharingPanel(t *testing.T) {
+	ctx := context.Background()
+	a, fa := fedPanel(t, "A")
+	b, fb := fedPanel(t, "B")
+	fa.Store.SetLibraries(ctx, []store.Library{{ID: "films", Item: json.RawMessage(`{"Name":"Films","CollectionType":"movies"}`)},
+		{ID: "series", Item: json.RawMessage(`{"Name":"Séries","CollectionType":"tvshows"}`)}})
+	code, _, _ := fa.NewCode(ctx, "")
+	aOnB, err := fb.UseCode(ctx, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bOnA := readState(t, a).Peers[0]
+	if rec := a.do("GET", "/admin/api/federation/peers/"+bOnA.ID+"/sharing", "", nil); rec.Code != 409 {
+		t.Fatalf("sharing before pairing: %d", rec.Code)
+	}
+	fa.Accept(ctx, bOnA.ID)
+
+	rec := a.do("GET", "/admin/api/federation/peers/"+bOnA.ID+"/sharing", "", nil)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"name":"Films","kind":"movies","picked":false`) {
+		t.Fatalf("A's sharing: %d %s", rec.Code, rec.Body)
+	}
+	if rec := a.do("PUT", "/admin/api/federation/peers/"+bOnA.ID+"/sharing", `{"offer":["films"],"want":[]}`, nil); rec.Code != 204 {
+		t.Fatalf("A offers: %d %s", rec.Code, rec.Body)
+	}
+	rec = b.do("GET", "/admin/api/federation/peers/"+aOnB.ID+"/sharing", "", nil)
+	var sh struct {
+		Theirs    []struct{ ID, Name string }
+		Reachable bool
+	}
+	json.Unmarshal(rec.Body.Bytes(), &sh)
+	if !sh.Reachable || len(sh.Theirs) != 1 || sh.Theirs[0].Name != "Films" {
+		t.Fatalf("B sees: %s", rec.Body)
+	}
+	if rec := b.do("PUT", "/admin/api/federation/peers/"+aOnB.ID+"/sharing", `{"offer":[],"want":["films","series"]}`, nil); rec.Code != 204 {
+		t.Fatalf("B wants: %d %s", rec.Code, rec.Body)
+	}
+	if s := readState(t, b); s.Peers[0].Wants != 1 {
+		t.Fatalf("B wants what A doesn't offer: %+v", s.Peers)
+	}
+	if s := readState(t, a); s.Peers[0].Offers != 1 {
+		t.Fatalf("A's count: %+v", s.Peers)
 	}
 }

@@ -5,7 +5,7 @@
   import { onDestroy } from 'svelte';
   import { PageHead, Card, Field, FormModal, Modal, Secret, Setting, Empty, Loading, Notice, ask, toast } from '@overfin/ui';
   import { api } from '../lib/api';
-  import { ago, day, when, message } from '../lib/format';
+  import { ago, day, when, message, plural } from '../lib/format';
 
   interface Peer {
     id: string;
@@ -16,6 +16,20 @@
     createdAt: string;
     pairedAt?: string;
     seenAt?: string;
+    offers: number;
+    wants: number;
+  }
+  interface Lib {
+    id: string;
+    name: string;
+    kind: string;
+    picked: boolean;
+    gone?: boolean;
+  }
+  interface Sharing {
+    ours: Lib[];
+    theirs: Lib[];
+    reachable: boolean;
   }
   interface Code {
     id: string;
@@ -48,6 +62,11 @@
   let pasted = $state('');
   let preview = $state<Preview | null>(null);
   let pairing = $state(false);
+  // Sharing with a paired server: what we offer, what we want.
+  let sharingWith = $state<Peer | null>(null);
+  let sharing = $state<Sharing | null>(null);
+  let offer = $state<string[]>([]);
+  let want = $state<string[]>([]);
 
   async function load() {
     try {
@@ -149,6 +168,31 @@
     await load();
   }
 
+  async function openSharing(p: Peer) {
+    try {
+      const sh = await api<Sharing>('GET', `/admin/api/federation/peers/${p.id}/sharing`);
+      offer = sh.ours.filter((l) => l.picked).map((l) => l.id);
+      want = sh.theirs.filter((l) => l.picked).map((l) => l.id);
+      sharing = sh;
+      sharingWith = p;
+    } catch (err) {
+      toast(message(err), true);
+    }
+  }
+
+  async function saveSharing() {
+    if (!sharingWith) return;
+    await api('PUT', `/admin/api/federation/peers/${sharingWith.id}/sharing`, { offer, want });
+    toast('Sharing saved.');
+    await load();
+  }
+
+  const kinds: Record<string, string> = { movies: 'Films', tvshows: 'Series', music: 'Music', musicvideos: 'Music videos', homevideos: 'Home videos', boxsets: 'Collections', books: 'Books', photos: 'Photos', mixed: 'Mixed' };
+
+  const shareText = (p: Peer) => `Offers ${plural(p.offers, 'library', 'libraries')} · wants ${p.wants}`;
+  // The kind, unless the name already says it ("Films").
+  const kindOf = (l: Lib) => (kinds[l.kind] && kinds[l.kind].toLowerCase() !== l.name.toLowerCase() ? kinds[l.kind] : '');
+
   function stateText(p: Peer): string {
     switch (p.state) {
       case 'ours':
@@ -165,7 +209,7 @@
   load();
 </script>
 
-<PageHead title="Federation" description="Pair this server with other Overfin servers. One operator makes a code and sends it to the other, who pastes it here; the first then accepts, after you both compared fingerprints. Pairing only for now: nothing is shared yet.">
+<PageHead title="Federation" description="Pair this server with other Overfin servers. One operator makes a code and sends it to the other, who pastes it here; the first then accepts, after you both compared fingerprints. Then each picks, library by library, what it offers the other and what it wants: only what one offers and the other wants is shared. Nothing plays across servers yet.">
   {#snippet actions()}
     {#if s?.available}
       <button type="button" onclick={useCode}>Use a code</button>
@@ -200,14 +244,15 @@
         <tbody>
           {#each s.peers ?? [] as p (p.id)}
             <tr>
-              <td><div class="name">{p.name}</div><div class="hint">{p.address}</div><div class="only-narrow">{stateText(p)}</div></td>
-              <td class="hide-narrow"><div>{stateText(p)}</div>{#if p.seenAt}<div class="hint">heard from {ago(p.seenAt)}</div>{/if}</td>
+              <td><div class="name">{p.name}</div><div class="hint">{p.address}</div><div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
+              <td class="hide-narrow"><div>{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint">{shareText(p)}</div>{/if}{#if p.seenAt}<div class="hint">heard from {ago(p.seenAt)}</div>{/if}</td>
               <td class="hide-narrow"><code class="fingerprint">{p.fingerprint}</code></td>
               <td class="row-actions">
                 {#if p.state === 'ours'}
                   <button type="button" class="small primary" onclick={() => accept(p)}>Accept</button>
                   <button type="button" class="small danger" onclick={() => end(p)}>Refuse</button>
                 {:else if p.state === 'paired'}
+                  <button type="button" class="small primary" onclick={() => openSharing(p)}>Sharing</button>
                   <button type="button" class="small" onclick={() => check(p)}>Check</button>
                   <button type="button" class="small danger" onclick={() => end(p)}>End</button>
                 {:else}
@@ -263,6 +308,26 @@
 {#if using}
   <FormModal title="Use a code" description="The code another server's operator sent you." saveLabel="Read the code" save={read} close={() => (using = false)}>
     <Field label="Code" wide><textarea bind:value={pasted} rows="4" spellcheck="false" autocomplete="off" placeholder="overfin-pair-1.…" required></textarea></Field>
+  </FormModal>
+{/if}
+
+{#if sharingWith && sharing}
+  <FormModal title={`Sharing with ${sharingWith.name}`} description="Only what one server offers and the other wants is shared. Nothing plays across servers yet: this sets what will." saveLabel="Save" save={saveSharing} close={() => { sharingWith = null; sharing = null; }}>
+    <div class="setting stack">
+      <div><div class="label">You offer</div><div class="hint">Your libraries {sharingWith.name} may take. You only ever offer your own.</div></div>
+      <div class="checks all">
+        {#each sharing.ours as l (l.id)}<label class="inline"><input type="checkbox" value={l.id} bind:group={offer} /> {l.name}{#if kindOf(l)} <span class="hint">({kindOf(l)})</span>{/if}</label>
+        {:else}<span class="hint">This server has no library yet.</span>{/each}
+      </div>
+    </div>
+    <div class="setting stack">
+      <div><div class="label">You want</div><div class="hint">Out of what {sharingWith.name} offers you.</div></div>
+      {#if !sharing.reachable}<Notice warn>{sharingWith.name} can't be reached now: what you want can't be changed until it can.</Notice>{/if}
+      <div class="checks all">
+        {#each sharing.theirs as l (l.id)}<label class="inline"><input type="checkbox" value={l.id} bind:group={want} disabled={!sharing.reachable} /> {l.name}{#if kindOf(l)} <span class="hint">({kindOf(l)})</span>{/if}{#if l.gone} <span class="hint">· no longer offered</span>{/if}</label>
+        {:else}<span class="hint">{sharing.reachable ? `${sharingWith.name} offers you nothing yet.` : ''}</span>{/each}
+      </div>
+    </div>
   </FormModal>
 {/if}
 

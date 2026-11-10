@@ -298,3 +298,83 @@ func (s *Store) DeleteExpiredPairingCodes(ctx context.Context) error {
 
 // PairingSecretHash is how a code is found when redeemed.
 func PairingSecretHash(secret []byte) []byte { return pairingSecretHash(secret) }
+
+// PeerOffers lists our libraries offered to a peer, by ID.
+func (s *Store) PeerOffers(ctx context.Context, peerID string) ([]string, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT library_id FROM peer_offers WHERE peer_id = ? ORDER BY library_id`, peerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// SetPeerOffers replaces what we offer a peer.
+func (s *Store) SetPeerOffers(ctx context.Context, peerID string, libraryIDs []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM peer_offers WHERE peer_id = ?`, peerID); err != nil {
+		return err
+	}
+	for _, id := range libraryIDs {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO peer_offers (peer_id, library_id) VALUES (?, ?)`, peerID, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// PeerLibrary is a library a peer offers us.
+type PeerLibrary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+}
+
+// PeerWants lists the peer's libraries we want, by name.
+func (s *Store) PeerWants(ctx context.Context, peerID string) ([]PeerLibrary, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT library_id, name, kind FROM peer_wants WHERE peer_id = ? ORDER BY name, library_id`, peerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []PeerLibrary{}
+	for rows.Next() {
+		var l PeerLibrary
+		if err := rows.Scan(&l.ID, &l.Name, &l.Kind); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// SetPeerWants replaces what we want of a peer's libraries.
+func (s *Store) SetPeerWants(ctx context.Context, peerID string, libs []PeerLibrary) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM peer_wants WHERE peer_id = ?`, peerID); err != nil {
+		return err
+	}
+	for _, l := range libs {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO peer_wants (peer_id, library_id, name, kind) VALUES (?, ?, ?, ?)`,
+			peerID, l.ID, l.Name, l.Kind); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}

@@ -341,6 +341,8 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/federation/peers/{id}/accept", p.signedIn(p.acceptPeer))
 	mux.HandleFunc("POST /admin/api/federation/peers/{id}/check", p.signedIn(p.checkPeer))
 	mux.HandleFunc("DELETE /admin/api/federation/peers/{id}", p.signedIn(p.endPeer))
+	mux.HandleFunc("GET /admin/api/federation/peers/{id}/sharing", p.signedIn(p.sharing))
+	mux.HandleFunc("PUT /admin/api/federation/peers/{id}/sharing", p.signedIn(p.setSharing))
 	// What apps read with their keys (no admin sign-in: the key says who).
 	mux.HandleFunc("GET /apps/v1/watch-stats", p.watchStats)
 	mux.HandleFunc("GET /apps/v1/titles", p.appTitles)

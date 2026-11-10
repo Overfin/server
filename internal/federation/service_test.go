@@ -3,6 +3,7 @@ package federation
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -182,4 +183,68 @@ func TestImpostor(t *testing.T) {
 		t.Fatalf("an answer from another key: %v", err)
 	}
 	noPeers(t, b)
+}
+
+func libraries(t *testing.T, s *server, items ...string) {
+	t.Helper()
+	var libs []store.Library
+	for _, it := range items {
+		var l struct{ Id string }
+		json.Unmarshal([]byte(it), &l)
+		libs = append(libs, store.Library{ID: l.Id, Item: json.RawMessage(it)})
+	}
+	if err := s.s.Store.SetLibraries(context.Background(), libs); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// B sees only what A offers it, wants only out of that, and nobody else
+// sees anything.
+func TestSharing(t *testing.T) {
+	ctx := context.Background()
+	a, b, c := newServer(t, "A"), newServer(t, "B"), newServer(t, "C")
+	libraries(t, a, `{"Id":"films","Name":"Films","CollectionType":"movies"}`,
+		`{"Id":"series","Name":"<b>Séries</b>","CollectionType":"tvshows"}`, `{"Id":"home","Name":"Vidéos de famille","CollectionType":"homevideos"}`)
+
+	// Before pairing: nothing to share.
+	code, _, _ := a.s.NewCode(ctx, "")
+	pending, err := b.s.UseCode(ctx, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.s.TheirLibraries(ctx, pending); !errors.Is(err, ErrNotPaired) {
+		t.Fatalf("libraries before pairing: %v", err)
+	}
+	if err := a.s.SetOffers(ctx, onlyPeer(t, a), []string{"films"}); !errors.Is(err, ErrNotPaired) {
+		t.Fatalf("offers before pairing: %v", err)
+	}
+	bOnA, err := a.s.Accept(ctx, onlyPeer(t, a).ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aOnB, _ := b.s.Store.PeerByID(ctx, pending.ID)
+
+	// Nothing offered yet.
+	if got, err := b.s.TheirLibraries(ctx, aOnB); err != nil || len(got) != 0 {
+		t.Fatalf("offered before A chose: %v, %v", got, err)
+	}
+	if err := a.s.SetOffers(ctx, bOnA, []string{"films", "series", "not-a-library"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := b.s.TheirLibraries(ctx, aOnB)
+	if err != nil || len(got) != 2 || got[0].Name != "Films" || got[1].Name != "Séries" || got[1].Kind != "tvshows" {
+		t.Fatalf("B sees: %+v, %v", got, err)
+	}
+	if err := b.s.SetWants(ctx, aOnB, []string{"series", "home"}); err != nil {
+		t.Fatal(err)
+	}
+	if w, _ := b.s.Store.PeerWants(ctx, aOnB.ID); len(w) != 1 || w[0].ID != "series" {
+		t.Fatalf("B wants what A doesn't offer: %+v", w)
+	}
+
+	// A stranger, signing with its own key, gets the plain 404.
+	stranger := &store.Peer{State: store.PeerPaired, Address: a.url, PublicKey: a.s.Key.Public()}
+	if _, err := c.s.TheirLibraries(ctx, stranger); !errors.Is(err, ErrUnknown) {
+		t.Fatalf("a stranger: %v", err)
+	}
 }
