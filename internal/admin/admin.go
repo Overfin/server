@@ -33,6 +33,7 @@ import (
 	"github.com/overfin/server/internal/config"
 	"github.com/overfin/server/internal/connector"
 	"github.com/overfin/server/internal/cookie"
+	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/imdb"
 	"github.com/overfin/server/internal/introskipper"
@@ -129,6 +130,8 @@ type Panel struct {
 	// TMDB, when set, says whether Overfin has a source for TMDB's data
 	// (TMDB itself, or Seerr).
 	TMDB func() bool
+	// Federation is federation now: nil without the site's address.
+	Federation func() *federation.Service
 	// TMDBTokens, when set, shows and changes the operator's TMDB token.
 	TMDBTokens TMDBTokens
 	// IntroSkipper, when set, shows Intro Skipper's state on Overfin's
@@ -330,6 +333,14 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("GET /admin/api/apps", p.signedIn(p.appKeys))
 	mux.HandleFunc("POST /admin/api/apps", p.signedIn(p.createAppKey))
 	mux.HandleFunc("DELETE /admin/api/apps/{id}", p.signedIn(p.deleteAppKey))
+	mux.HandleFunc("GET /admin/api/federation", p.signedIn(p.federation))
+	mux.HandleFunc("POST /admin/api/federation/codes", p.signedIn(p.createPairingCode))
+	mux.HandleFunc("DELETE /admin/api/federation/codes/{id}", p.signedIn(p.deletePairingCode))
+	mux.HandleFunc("POST /admin/api/federation/preview", p.signedIn(p.previewPairingCode))
+	mux.HandleFunc("POST /admin/api/federation/peers", p.signedIn(p.usePairingCode))
+	mux.HandleFunc("POST /admin/api/federation/peers/{id}/accept", p.signedIn(p.acceptPeer))
+	mux.HandleFunc("POST /admin/api/federation/peers/{id}/check", p.signedIn(p.checkPeer))
+	mux.HandleFunc("DELETE /admin/api/federation/peers/{id}", p.signedIn(p.endPeer))
 	// What apps read with their keys (no admin sign-in: the key says who).
 	mux.HandleFunc("GET /apps/v1/watch-stats", p.watchStats)
 	mux.HandleFunc("GET /apps/v1/titles", p.appTitles)

@@ -550,6 +550,7 @@ func run(logger *slog.Logger) error {
 		o := cfg.OIDC
 		p := &admin.Panel{Features: gw, Modules: gw, Jellyfin: gw, Libraries: libraries{gw}, Transcoding: gw, Seerr: gw, Catalog: cat, Group: a.Group, Logger: logger,
 			TMDB: func() bool { return gw.tmdbSource() != nil }, TMDBTokens: gw, IntroSkipper: skipper,
+			Federation: func() *federation.Service { return gw.current.Load().fed },
 			// A new language: artwork and discovery's lists, read again now.
 			OnLanguage: func() { sh.titles.Wake(); sh.lists.Wake() },
 			Store:      db, Provisioner: gw.Provisioner, Interests: gw.Interests, Playing: gw, Notices: sh.notices, IMDb: imdbData,

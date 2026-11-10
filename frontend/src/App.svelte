@@ -21,6 +21,7 @@
   import Metadata from './pages/Metadata.svelte';
   import Valuation from './pages/Valuation.svelte';
   import Apps from './pages/Apps.svelte';
+  import Federation from './pages/Federation.svelte';
 
   const pages = {
     server: { label: 'Server', icon: icons.server, page: Server },
@@ -36,11 +37,12 @@
     metadata: { label: 'Metadata', icon: icons.check, page: Metadata },
     valuation: { label: 'Valuation', icon: icons.scale, page: Valuation },
     apps: { label: 'Apps', icon: icons.key, page: Apps },
+    federation: { label: 'Federation', icon: icons.link, page: Federation },
   };
   type Tab = keyof typeof pages;
   const group = (label: string, tabs: Tab[]) => ({ label, items: tabs.map((t) => ({ href: `#/${t}`, label: pages[t].label, icon: pages[t].icon })) });
   const nav: NavGroup[] = [
-    group('Server', ['server', 'features', 'branding']),
+    group('Server', ['server', 'features', 'branding', 'federation']),
     group('People', ['people', 'registration', 'templates', 'notices', 'playing']),
     group('Library', ['libraries', 'categories', 'metadata', 'valuation', 'apps']),
   ];

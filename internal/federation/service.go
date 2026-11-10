@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -56,6 +57,8 @@ type Service struct {
 	Seen *Nonces
 
 	verifier *Verifier
+	mu       sync.Mutex
+	asked    map[string]time.Time // CheckSoon's, by peer ID
 }
 
 // NewHTTPClient is the client for talking to peers: short timeouts, and
@@ -463,4 +466,31 @@ func LoadKey(ctx context.Context, st *store.Store) (Key, error) {
 		}
 	}
 	return KeyFromSeed(seed)
+}
+
+// checkEvery is how often, at most, a peer is asked where things stand
+// while our panel is open on it.
+const checkEvery = 20 * time.Second
+
+// CheckSoon asks, in the background, every server whose operator we're
+// waiting for: so the panel shows a pairing once they've accepted, without
+// anyone pressing anything. Each is asked at most every checkEvery.
+func (s *Service) CheckSoon(peers []*store.Peer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.asked == nil {
+		s.asked = map[string]time.Time{}
+	}
+	now := s.now()
+	for _, p := range peers {
+		if p.State != store.PeerTheirs || now.Sub(s.asked[p.ID]) < checkEvery {
+			continue
+		}
+		s.asked[p.ID] = now
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			s.Check(ctx, p)
+		}()
+	}
 }
