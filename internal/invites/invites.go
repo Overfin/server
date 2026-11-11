@@ -168,6 +168,17 @@ func (Feature) Hold(ctx context.Context, h feature.Host, code string, until time
 	return hold, nil
 }
 
+// Keep holds a registration's use until a later time (never sooner), if
+// it's still held.
+func (Feature) Keep(ctx context.Context, h feature.Host, hold string, until time.Time) error {
+	if !holdPattern.MatchString(hold) {
+		return nil // a code kept by a registration from before holds
+	}
+	_, err := h.DB().ExecContext(ctx, `UPDATE invites_uses SET held_until = max(held_until, ?)
+		WHERE hold_hash = ? AND held_until > unixepoch()`, until.Unix(), hash(hold))
+	return err
+}
+
 // Release gives back a use held for a registration.
 func (Feature) Release(ctx context.Context, h feature.Host, hold string) error {
 	if !holdPattern.MatchString(hold) {

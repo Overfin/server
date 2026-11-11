@@ -105,4 +105,8 @@ type Inviter interface {
 	Hold(ctx context.Context, h Host, code string, until time.Time) (hold string, err error)
 	// Release gives back the use held for a registration that wasn't made.
 	Release(ctx context.Context, h Host, hold string) error
+	// Keep holds a registration's use until a later time, once its
+	// address is confirmed: someone who confirmed late still sets up the
+	// account the invitation shapes. It never shortens a hold.
+	Keep(ctx context.Context, h Host, hold string, until time.Time) error
 }

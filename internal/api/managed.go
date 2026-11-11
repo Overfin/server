@@ -59,6 +59,9 @@ const (
 	// the time to confirm the address, then a day more to set up the
 	// account.
 	holdFor = UnconfirmedFor + 24*time.Hour
+	// keptFor is how long it's held once the address is confirmed, to set
+	// up the account (its first sign-in), however late that came.
+	keptFor = 30 * 24 * time.Hour
 )
 
 // Managed is Overfin's own sign-in (identity mode "managed"): people sign
@@ -630,6 +633,14 @@ func (m *Managed) verify(w http.ResponseWriter, r *http.Request) {
 	if err := m.Store.ConfirmUser(ctx, u.Subject); err != nil {
 		m.fail(w, r, err)
 		return
+	}
+	// Its invitation's use stays held while they set up the account.
+	if hold, err := m.Store.UserInvitation(ctx, u.Subject); err == nil && hold != "" {
+		if inviter, h := inviterOf(m.Mounts); inviter != nil {
+			if err := inviter.Keep(ctx, h, hold, time.Now().Add(keptFor)); err != nil {
+				m.Logger.Error("keeping an invitation's use held failed", "err", err)
+			}
+		}
 	}
 	u.Confirmed = true
 	m.startLogin(w, r, u, "/", hash != "")

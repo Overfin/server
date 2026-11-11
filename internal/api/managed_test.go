@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -421,8 +422,9 @@ func TestManagedRegistrantSetsUpLater(t *testing.T) {
 	var st *store.Store
 	var m *api.Managed
 	var tmpl string
+	var dbs map[string]*sql.DB
 	panel := http.NewServeMux()
-	srv, _ := newServerWith(t, options{managed: true, mailbox: box, store: &st, signIn: &m, template: &tmpl, admin: panel,
+	srv, _ := newServerWith(t, options{managed: true, mailbox: box, store: &st, signIn: &m, template: &tmpl, admin: panel, dbs: &dbs,
 		modules: []feature.Feature{invites.Feature{}}, settings: map[string]map[string]string{"invites": {"required": "on"}}})
 	admin := func(method, path string, body any) map[string]any {
 		raw, _ := json.Marshal(body)
@@ -444,6 +446,13 @@ func TestManagedRegistrantSetsUpLater(t *testing.T) {
 	token := linkIn(box.all()[0].body, "verify")
 	if c, out := signinPost(t, newBrowser(srv), srv, "/api/v1/signin/verify", map[string]any{"link": token, "password": "a long password 1"}); c != 200 {
 		t.Fatalf("confirming: %d %v", c, out)
+	}
+	// Confirmed: the invitation's use stays held a month to set up the
+	// account, however late the address was confirmed.
+	var until int64
+	if err := dbs["invites"].QueryRow(`SELECT held_until FROM invites_uses WHERE hold_hash IS NOT NULL`).Scan(&until); err != nil ||
+		time.Until(time.Unix(until, 0)) < 29*24*time.Hour {
+		t.Errorf("the hold after confirming: %v, %v", time.Unix(until, 0), err)
 	}
 	// Days later, in a browser with no invitation's cookie.
 	later := newBrowser(srv)
