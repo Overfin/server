@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"net/http"
@@ -24,6 +25,27 @@ const maxBatch = 20
 
 // batchParallel is how many of a batch's requests run at the same time.
 const batchParallel = 6
+
+// maxBatchAnswer bounds each answer a batch holds in memory: far above
+// any listing's.
+const maxBatchAnswer = 4 << 20
+
+// cappedRecorder records an answer up to maxBatchAnswer; past it, the
+// rest is dropped and over says so.
+type cappedRecorder struct {
+	*httptest.ResponseRecorder
+	over bool
+}
+
+func (c *cappedRecorder) Write(b []byte) (int, error) {
+	if c.over || c.Body.Len()+len(b) > maxBatchAnswer {
+		c.over = true
+		return 0, errBatchAnswer
+	}
+	return c.ResponseRecorder.Write(b)
+}
+
+var errBatchAnswer = errors.New("server: a batch's answer too large")
 
 // notBatched are the GET routes a batch refuses: they answer with media or
 // redirects, not JSON, or start a login (a cookie a batch would pass on).
@@ -87,9 +109,14 @@ func batch(api http.Handler) http.HandlerFunc {
 				sub.Method, sub.URL, sub.RequestURI = http.MethodGet, u, u.RequestURI()
 				sub.Body, sub.ContentLength = http.NoBody, 0
 				sub.Header.Del("Content-Type")
-				rec := httptest.NewRecorder()
+				rec := &cappedRecorder{ResponseRecorder: httptest.NewRecorder()}
 				api.ServeHTTP(rec, sub)
 				answers[i].Status = rec.Code
+				if rec.over {
+					// Larger than any answer a batch is for: not held.
+					answers[i].Status = http.StatusInsufficientStorage
+					return
+				}
 				cookies[i] = rec.Header().Values("Set-Cookie")
 				if mt, _, _ := mime.ParseMediaType(rec.Header().Get("Content-Type")); (mt == "application/json" ||
 					mt == "application/problem+json") && json.Valid(rec.Body.Bytes()) {
