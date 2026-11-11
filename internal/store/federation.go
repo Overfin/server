@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/overfin/server/internal/ids"
@@ -585,35 +586,74 @@ func mergeTags(tags []string, list string) []string {
 	return tags
 }
 
-// SetPeerTitles replaces what we know a peer holds for us, and notes when.
+// SetPeerTitles replaces what we know a peer holds for us, and notes when:
+// PutPeerTitles and EndPeerTitles at once.
 func (s *Store) SetPeerTitles(ctx context.Context, peerID string, titles []PeerTitle) error {
+	reading := PeerReading()
+	if err := s.PutPeerTitles(ctx, peerID, reading, titles); err != nil {
+		return err
+	}
+	return s.EndPeerTitles(ctx, peerID, reading)
+}
+
+var lastReading atomic.Int64
+
+// PeerReading numbers a reading of a peer's titles: each one's number
+// exceeds those before it, those of earlier runs too (it's the time, in
+// nanoseconds, or one more than the last).
+func PeerReading() int64 {
+	for {
+		last, now := lastReading.Load(), time.Now().UnixNano()
+		if now <= last {
+			now = last + 1
+		}
+		if lastReading.CompareAndSwap(last, now) {
+			return now
+		}
+	}
+}
+
+// PutPeerTitles keeps a page of what a peer holds for us, as seen by
+// reading (a number later readings exceed). A peer's titles come a page
+// at a time, however many it has: none is held in memory whole.
+func (s *Store) PutPeerTitles(ctx context.Context, peerID string, reading int64, titles []PeerTitle) error {
+	if len(titles) == 0 {
+		return nil
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	// When each arrived is kept: what the peer held already isn't new.
-	keys := make([]string, len(titles))
-	for i, t := range titles {
-		keys[i] = t.Key
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM peer_titles WHERE peer_id = ? AND title_key NOT IN (SELECT value FROM json_each(?))`,
-		peerID, jsonList(keys)); err != nil {
-		return err
-	}
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO peer_titles (peer_id, title_key, kind, library_id, audio, subtitles, added_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO peer_titles (peer_id, title_key, kind, library_id, audio, subtitles, added_at, seen)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (peer_id, title_key) DO UPDATE SET kind = excluded.kind, library_id = excluded.library_id,
-			audio = excluded.audio, subtitles = excluded.subtitles`)
+			audio = excluded.audio, subtitles = excluded.subtitles, seen = excluded.seen`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 	now := s.now().Unix()
 	for _, t := range titles {
-		if _, err := stmt.ExecContext(ctx, peerID, t.Key, t.Kind, t.Library, jsonList(t.Audio), jsonList(t.Subtitles), now); err != nil {
+		if _, err := stmt.ExecContext(ctx, peerID, t.Key, t.Kind, t.Library, jsonList(t.Audio), jsonList(t.Subtitles), now, reading); err != nil {
 			return err
 		}
+	}
+	return tx.Commit()
+}
+
+// EndPeerTitles closes a whole reading of a peer's titles: those it
+// didn't see are no longer held for us. A reading cut short never ends,
+// so what we knew stays, with what it added.
+func (s *Store) EndPeerTitles(ctx context.Context, peerID string, reading int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM peer_titles WHERE peer_id = ? AND seen < ?`, peerID, reading); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE peers SET titles_at = ? WHERE id = ?`, s.now().Unix(), peerID); err != nil {
 		return err

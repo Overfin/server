@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -193,6 +194,32 @@ func TestPeerTitles(t *testing.T) {
 	s.SetPeerTitles(ctx, p.ID, nil)
 	if n, _ := s.PeerTitleCounts(ctx); n[p.ID] != 0 {
 		t.Fatalf("not replaced: %v", n)
+	}
+
+	// Page by page: a reading cut short keeps what was known, with what it
+	// added; a whole one leaves out what it didn't see.
+	films := func(from, to int) []PeerTitle {
+		var out []PeerTitle
+		for i := from; i < to; i++ {
+			out = append(out, PeerTitle{Key: fmt.Sprintf("movie/tmdb/%d", i), Kind: "movie", Library: "x"})
+		}
+		return out
+	}
+	first := PeerReading()
+	s.PutPeerTitles(ctx, p.ID, first, films(1, 6))
+	s.PutPeerTitles(ctx, p.ID, first, films(6, 11))
+	s.EndPeerTitles(ctx, p.ID, first)
+	cut := PeerReading()
+	s.PutPeerTitles(ctx, p.ID, cut, films(20, 22))
+	if n, _ := s.PeerTitleCounts(ctx); n[p.ID] != 12 {
+		t.Fatalf("cut short: %v", n)
+	}
+	whole := PeerReading()
+	s.PutPeerTitles(ctx, p.ID, whole, films(3, 5))
+	s.PutPeerTitles(ctx, p.ID, whole, films(21, 22))
+	s.EndPeerTitles(ctx, p.ID, whole)
+	if n, _ := s.PeerTitleCounts(ctx); n[p.ID] != 3 {
+		t.Fatalf("whole: %v", n)
 	}
 }
 

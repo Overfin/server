@@ -691,9 +691,6 @@ func cleanKind(kind string) string {
 // titlesPage is how many titles a page holds at most.
 const titlesPage = 5000
 
-// maxPeerTitles caps how many titles we keep of one peer.
-const maxPeerTitles = 500_000
-
 type titlesRequest struct {
 	Libraries []string `json:"libraries"`
 	After     string   `json:"after"`
@@ -769,7 +766,10 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 			return 0, err
 		}
 	}
-	all := []store.PeerTitle{}
+	// Each page is kept as it comes (a peer may hold any number); those
+	// the peer no longer has go once the last page is read.
+	reading := store.PeerReading()
+	count := 0
 	after := ""
 	for len(libs) > 0 {
 		var answer titlesAnswer
@@ -782,6 +782,7 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 		case status != http.StatusOK:
 			return 0, ErrUnreachable
 		}
+		page := make([]store.PeerTitle, 0, len(answer.Titles))
 		for _, t := range answer.Titles {
 			// Only what we asked for, and only keys we read the same way:
 			// TMDB's, as TMDB numbers them (a "movie/tmdb/0550" would be
@@ -792,21 +793,22 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 				continue
 			}
 			t.Audio, t.Subtitles = cleanTags(t.Audio), cleanTags(t.Subtitles)
-			all = append(all, t)
+			page = append(page, t)
 		}
-		if answer.Next == "" || answer.Next <= after || len(all) >= maxPeerTitles {
+		if err := s.Store.PutPeerTitles(ctx, p.ID, reading, page); err != nil {
+			return 0, err
+		}
+		count += len(page)
+		if answer.Next == "" || answer.Next <= after {
 			break
 		}
 		after = answer.Next
 	}
-	if len(all) > maxPeerTitles {
-		all = all[:maxPeerTitles]
-	}
-	if err := s.Store.SetPeerTitles(ctx, p.ID, all); err != nil {
+	if err := s.Store.EndPeerTitles(ctx, p.ID, reading); err != nil {
 		return 0, err
 	}
 	s.Store.PeerSeen(ctx, p.ID)
-	return len(all), nil
+	return count, nil
 }
 
 // syncEvery is how often each peer's titles are read again.
