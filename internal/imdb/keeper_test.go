@@ -178,3 +178,21 @@ func TestInflatedIsCapped(t *testing.T) {
 		t.Fatalf("read %d, %v", len(b), err)
 	}
 }
+
+// A redirect is a failed refresh: the files come from IMDb's own address
+// only (rule 68).
+func TestKeeperRefusesRedirects(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://elsewhere.example/x.gz", http.StatusFound)
+	}))
+	defer srv.Close()
+	k := NewKeeper(t.TempDir(), nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	res, err := k.Client.Get(srv.URL + "/title.ratings.tsv.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusFound {
+		t.Errorf("followed: %d", res.StatusCode)
+	}
+}

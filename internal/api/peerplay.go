@@ -361,8 +361,12 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	}
 	// Its URLs are its stream's, on its address, nothing else; its words
 	// are plain text, as every other's (rule 9).
-	if !keepPeerURLs(&out, peer.Address) || !cleanPeerText(&out) {
-		pb.Logger.Warn("a paired server answered a playback with other addresses", "peer", peer.Name)
+	if ok := keepPeerURLs(&out, peer.Address); !ok || !cleanPeerText(&out) {
+		why := "values Overfin doesn't give"
+		if !ok {
+			why = "other addresses"
+		}
+		pb.Logger.Warn("a paired server answered a playback with "+why, "peer", peer.Name)
 		pb.stopRemote(peer, out.ID, 0)
 		problem.Send(w, problem.NotPlayable, "")
 		return

@@ -323,10 +323,10 @@ func invitationOf(ctx context.Context, db *sql.DB, r *http.Request) (inv *invite
 		inv, err = heldBy(ctx, db, hash(stored))
 		return inv, hash(stored), err
 	case stored != "":
-		// A registration from before holds kept the code itself.
-		if inv, err = usable(ctx, db, stored); inv != nil || err != nil {
-			return inv, "", err
-		}
+		// A registration from before holds kept the code itself: its
+		// invitation only, as with a hold.
+		inv, err = usable(ctx, db, stored)
+		return inv, "", err
 	}
 	if c, err := cookie.Get(r, cookieName); err == nil {
 		inv, err := usable(ctx, db, c.Value)
