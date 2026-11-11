@@ -26,7 +26,11 @@ async function post(path, data) {
   } catch {
     // No JSON: the generic message below.
   }
-  if (!res.ok) throw new Error(answer.detail || page.failed);
+  if (!res.ok) {
+    const err = new Error(answer.detail || page.failed);
+    err.status = res.status;
+    throw err;
+  }
   return answer;
 }
 
@@ -201,9 +205,8 @@ $('leave')?.addEventListener('click', async (event) => {
 });
 
 run($('register'), async () => {
-  const password = same('password', 'password2');
   const to = $('email').value.trim();
-  await checked('/api/v1/register', { email: to, password });
+  await checked('/api/v1/register', { email: to });
   // What to do next is the page's title now, not the invitation.
   document.querySelector('h1').textContent = page.checkMail;
   document.title = document.title.replace(/^[^·]*/, page.checkMail + ' ');
@@ -237,15 +240,37 @@ if (page.mode === 'confirm') {
     $('verify-none').hidden = false;
     $('verify-signin').hidden = false;
   } else {
+    // The address it's for (looking uses nothing up), and, for someone
+    // who registered, the password they choose now.
+    let choose = false;
+    post('/api/v1/signin/look', { link: verify }).then((got) => {
+      $('verify-email').textContent = got.email;
+      choose = got.choosePassword;
+      $('verify-password').hidden = !choose;
+      $('verify-click').hidden = choose;
+      $('verify').hidden = false;
+      (choose ? $('new-password') : $('verify').querySelector('button')).focus();
+    }, failed);
     $('verify').addEventListener('submit', async (event) => {
       event.preventDefault();
+      $('error').textContent = '';
       const button = $('verify').querySelector('button');
+      let password;
+      try {
+        password = choose ? same('new-password', 'new-password2') : undefined;
+      } catch (err) {
+        $('error').textContent = err.message;
+        return;
+      }
       button.disabled = true;
       try {
-        const answer = await post('/api/v1/signin/verify', { link: verify });
+        const answer = await post('/api/v1/signin/verify', { link: verify, password });
         if (answer?.next) go(answer.next);
-      } catch {
-        failed();
+      } catch (err) {
+        // A password the rules refuse can be fixed here; a link that no
+        // longer works can't.
+        if (choose && err?.status === 400) $('error').textContent = err.message;
+        else failed();
       } finally {
         button.disabled = false;
       }

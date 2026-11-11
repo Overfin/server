@@ -41,6 +41,7 @@ var publicRoutes = map[string]string{
 	"GET /api/v1/pages/challenge":                   "their check against scripts",
 	"POST /api/v1/signin":                           "the sign-in calls",
 	"POST /api/v1/signin/verify":                    "the sign-in calls",
+	"POST /api/v1/signin/look":                      "the sign-in calls",
 	"POST /api/v1/signin/resend":                    "the sign-in calls",
 	"POST /api/v1/signin/password":                  "the sign-in calls",
 	"POST /api/v1/register":                         "the registration call",

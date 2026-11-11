@@ -180,23 +180,15 @@ func TestManagedRegistration(t *testing.T) {
 
 	// Without the invitation's page first, no registering.
 	b := newBrowser(srv)
-	if c, out := signinPost(t, b, srv, "/api/v1/register", checked(t, srv, map[string]any{"email": "new@example.org", "password": "a long password 1"})); c != 403 {
+	if c, out := signinPost(t, b, srv, "/api/v1/register", checked(t, srv, map[string]any{"email": "new@example.org"})); c != 403 {
 		t.Errorf("without an invitation: %d %v", c, out)
 	}
 	if res, body := openPage(t, b, srv, "/invite/AAAAAAAAAAAAAAAAAAAAAA"); res.StatusCode != 200 || !strings.Contains(body, "n’est pas valide") || strings.Contains(body, `id="register"`) {
 		t.Errorf("a made-up invitation: %d %s", res.StatusCode, body)
 	}
 	res, body := openPage(t, b, srv, link)
-	if res.StatusCode != 200 || !strings.Contains(body, "Vous êtes invité à rejoindre Overfin") || !strings.Contains(body, `id="register"`) ||
-		!strings.Contains(body, "Au moins 10 caractères, dont un chiffre et un caractère spécial.") {
+	if res.StatusCode != 200 || !strings.Contains(body, "Vous êtes invité à rejoindre Overfin") || !strings.Contains(body, `id="register"`) {
 		t.Fatalf("the invitation's page: %d %s", res.StatusCode, body)
-	}
-	// The password rules.
-	for pw, want := range map[string]string{"short1!": "10 caractères", "no digits here": "chiffre", "nospecial123": "spécial"} {
-		if c, out := signinPost(t, b, srv, "/api/v1/register", checked(t, srv, map[string]any{"email": "new@example.org", "password": pw})); c != 400 ||
-			!strings.Contains(out["detail"].(string), want) {
-			t.Errorf("%q: %d %v", pw, c, out)
-		}
 	}
 	usesSince := func() []any {
 		rec := httptest.NewRecorder()
@@ -208,7 +200,7 @@ func TestManagedRegistration(t *testing.T) {
 	if got := usesSince(); len(got) != 0 {
 		t.Fatalf("uses before registering: %v", got)
 	}
-	if c, out := signinPost(t, b, srv, "/api/v1/register", checked(t, srv, map[string]any{"email": "New@example.org", "password": "a long password 1"})); c != 200 || out["sent"] != true {
+	if c, out := signinPost(t, b, srv, "/api/v1/register", checked(t, srv, map[string]any{"email": "New@example.org"})); c != 200 || out["sent"] != true {
 		t.Fatalf("registering: %d %v", c, out)
 	}
 	// The panel hears of it: the invitation's name and the account template
@@ -225,35 +217,57 @@ func TestManagedRegistration(t *testing.T) {
 	if token == "" || !strings.Contains(mails[0].body, "https://media.example.org/signin?confirm=1#verify=") {
 		t.Fatalf("the link: %s", mails[0].body)
 	}
-	// Before confirming, the right password only says so.
+	// Before confirming, the account has no password: nothing signs in.
 	other := newBrowser(srv)
-	if c, out := signinPost(t, other, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "new@example.org", "password": "a long password 1"})); c != 200 || out["unconfirmed"] != true {
-		t.Errorf("unconfirmed: %d %v", c, out)
+	if c, out := signinPost(t, other, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "new@example.org", "password": "a long password 1"})); c == 200 {
+		t.Errorf("signed in before confirming: %d %v", c, out)
 	}
 	// The same email again gets a notice, with the same answer.
-	if c, out := signinPost(t, b, srv, "/api/v1/register", checked(t, srv, map[string]any{"email": "new@example.org", "password": "another password 2"})); c != 200 || out["sent"] != true {
+	if c, out := signinPost(t, b, srv, "/api/v1/register", checked(t, srv, map[string]any{"email": "new@example.org"})); c != 200 || out["sent"] != true {
 		t.Errorf("registering twice: %d %v", c, out)
 	}
 	m.Wait()
 	if mails := box.all(); len(mails) != 2 || mails[1].subject != "Vous avez déjà un compte" {
 		t.Errorf("notice: %+v", mails)
 	}
-	// The link, opened in another browser: confirmed, signed in, and the
-	// account is made by the invitation.
-	c, out := signinPost(t, other, srv, "/api/v1/signin/verify", map[string]any{"link": token})
+	// The link's page says which address, and that a password is chosen
+	// there; looking doesn't use the link up.
+	for range 2 {
+		if c, out := signinPost(t, other, srv, "/api/v1/signin/look", map[string]any{"link": token}); c != 200 ||
+			out["email"] != "New@example.org" || out["choosePassword"] != true {
+			t.Fatalf("looking: %d %v", c, out)
+		}
+	}
+	// No password, or one against the rules, leaves the link as it was.
+	if c, out := signinPost(t, other, srv, "/api/v1/signin/verify", map[string]any{"link": token}); c != 400 {
+		t.Errorf("no password: %d %v", c, out)
+	}
+	for pw, want := range map[string]string{"short1!": "10 caractères", "no digits here": "chiffre", "nospecial123": "spécial"} {
+		if c, out := signinPost(t, other, srv, "/api/v1/signin/verify", map[string]any{"link": token, "password": pw}); c != 400 ||
+			!strings.Contains(out["detail"].(string), want) {
+			t.Errorf("%q: %d %v", pw, c, out)
+		}
+	}
+	// The link, opened in another browser, with a password: confirmed,
+	// signed in, and the account is made by the invitation.
+	c, out := signinPost(t, other, srv, "/api/v1/signin/verify", map[string]any{"link": token, "password": "a long password 1"})
 	if c != 200 || out["next"] != "/" {
 		t.Fatalf("confirming: %d %v", c, out)
 	}
-	if c, _ := signinPost(t, other, srv, "/api/v1/signin/verify", map[string]any{"link": token}); c != 401 {
+	if c, _ := signinPost(t, other, srv, "/api/v1/signin/verify", map[string]any{"link": token, "password": "a long password 1"}); c != 401 {
 		t.Errorf("the link twice: %d", c)
 	}
-	// Signed in, but not "fresh": no password was typed (rule 21).
+	// The password chosen signs in.
+	if c, out := signinPost(t, newBrowser(srv), srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "new@example.org", "password": "a long password 1"})); c != 200 || out["unconfirmed"] == true {
+		t.Errorf("signing in after: %d %v", c, out)
+	}
+	// Signed in and "fresh": the password was just typed (rule 21).
 	u, _ := url.Parse(srv.URL)
 	found := false
 	for _, ck := range other.Jar.Cookies(u) {
 		if strings.Contains(ck.Name, api.LoginCookie) {
 			found = true
-			if l, err := st.LoginByToken(context.Background(), ck.Value); err != nil || !l.Fresh.IsZero() {
+			if l, err := st.LoginByToken(context.Background(), ck.Value); err != nil || l.Fresh.IsZero() {
 				t.Errorf("the login: %v %+v", err, l)
 			}
 		}
@@ -302,7 +316,7 @@ func TestManagedSingleUseInvitation(t *testing.T) {
 		return out["invite"].(map[string]any)["id"].(string), strings.TrimPrefix(out["link"].(string), "https://media.example.org")
 	}
 	register := func(b *http.Client, email string) (int, map[string]any) {
-		return signinPost(t, b, srv, "/api/v1/register", checked(t, srv, map[string]any{"email": email, "password": "a long password 1"}))
+		return signinPost(t, b, srv, "/api/v1/register", checked(t, srv, map[string]any{"email": email}))
 	}
 	// confirm opens the link sent to email in a new browser, and sets up
 	// the account there.
@@ -316,7 +330,7 @@ func TestManagedSingleUseInvitation(t *testing.T) {
 			}
 		}
 		b := newBrowser(srv)
-		if c, out := signinPost(t, b, srv, "/api/v1/signin/verify", map[string]any{"link": token}); c != 200 {
+		if c, out := signinPost(t, b, srv, "/api/v1/signin/verify", map[string]any{"link": token, "password": "a long password 1"}); c != 200 {
 			t.Fatalf("confirming %s: %d %v", email, c, out)
 		}
 		req, _ := http.NewRequest("POST", srv.URL+"/api/v1/me", strings.NewReader("{}"))
@@ -423,12 +437,12 @@ func TestManagedRegistrantSetsUpLater(t *testing.T) {
 
 	b := newBrowser(srv)
 	openPage(t, b, srv, link)
-	if c, out := signinPost(t, b, srv, "/api/v1/register", checked(t, srv, map[string]any{"email": "ann@example.org", "password": "a long password 1"})); c != 200 {
+	if c, out := signinPost(t, b, srv, "/api/v1/register", checked(t, srv, map[string]any{"email": "ann@example.org"})); c != 200 {
 		t.Fatalf("registering: %d %v", c, out)
 	}
 	m.Wait()
 	token := linkIn(box.all()[0].body, "verify")
-	if c, out := signinPost(t, newBrowser(srv), srv, "/api/v1/signin/verify", map[string]any{"link": token}); c != 200 {
+	if c, out := signinPost(t, newBrowser(srv), srv, "/api/v1/signin/verify", map[string]any{"link": token, "password": "a long password 1"}); c != 200 {
 		t.Fatalf("confirming: %d %v", c, out)
 	}
 	// Days later, in a browser with no invitation's cookie.
@@ -1173,6 +1187,9 @@ func TestConfirmAddressPage(t *testing.T) {
 	}
 	if !strings.Contains(body, "<h1>Confirm your address</h1>") || !strings.Contains(body, `id="verify"`) {
 		t.Errorf("not its own page: %s", body)
+	}
+	if !strings.Contains(body, `id="verify-password"`) || !strings.Contains(body, `id="verify-email"`) {
+		t.Errorf("no address or password on the confirming page: %s", body)
 	}
 	for _, gone := range []string{`id="signin"`, `id="device-start"`, `id="password"`, ">Sign in</h1>"} {
 		if strings.Contains(body, gone) {

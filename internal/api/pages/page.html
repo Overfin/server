@@ -54,8 +54,16 @@
   <!-- The link in an email confirming an address: one click, never on
        opening (mail scanners open links). -->
   <h1>{{.T.verifyTitle}}</h1>
-  <form id="verify" novalidate>
-    <p class="muted">{{.T.confirmIntro}}</p>
+  <form id="verify" hidden novalidate>
+    <p class="muted">{{.T.confirmFor}}</p>
+    <p><strong id="verify-email"></strong></p>
+    <p class="muted" id="verify-click">{{.T.confirmIntro}}</p>
+    <div id="verify-password" hidden>
+      <p class="muted">{{.T.confirmChoose}}</p>
+      <label>{{.T.password}}<input id="new-password" type="password" autocomplete="new-password" required></label>
+      <label>{{.T.passwordAgain}}<input id="new-password2" type="password" autocomplete="new-password" required></label>
+      <p class="hint muted">{{.Rules}}</p>
+    </div>
     <button class="primary" type="submit">{{.T.confirm}}</button>
   </form>
   <p id="verify-none" hidden>{{.T.confirmNoLink}}</p>
@@ -92,9 +100,6 @@
   <form id="register" novalidate>
     <p class="muted">{{.T.inviteIntro}}</p>
     <label>{{.T.email}}<input id="email" type="email" autocomplete="username" required autofocus></label>
-    <label>{{.T.password}}<input id="password" type="password" autocomplete="new-password" required></label>
-    <label>{{.T.passwordAgain}}<input id="password2" type="password" autocomplete="new-password" required></label>
-    <p class="hint muted">{{.Rules}}</p>
     <button class="primary" type="submit">{{.T.register}}</button>
   </form>
   <p id="done" hidden></p>

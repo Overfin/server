@@ -146,6 +146,7 @@ func (m *Managed) Register(r *plugin.Registrar) error {
 		"POST /api/v1/signin":          m.signIn,
 		"POST /api/v1/signin/password": m.changePassword,
 		"POST /api/v1/signin/verify":   m.verify,
+		"POST /api/v1/signin/look":     m.verifyLook,
 		"POST /api/v1/signin/resend":   m.resend,
 		"POST /api/v1/register":        m.register,
 		"POST /api/v1/reset":           m.askReset,
@@ -515,9 +516,11 @@ func (m *Managed) changePassword(w http.ResponseWriter, r *http.Request) {
 // ---- Registering ----------------------------------------------------------------------
 
 // register makes the account of someone with an invitation (opened in
-// this browser): their email and password, then a link to their email to
-// confirm it. The registration takes a use of the invitation at once, so
-// a single-use invitation lets one person register. An email that has an
+// this browser): their email alone, then a link to it, where they confirm
+// it and choose their password. Nobody chooses the password of an address
+// they can't read: someone registering another's address gets nothing.
+// The registration takes a use of the invitation at once, so a single-use
+// invitation lets one person register. An email that has an
 // account here gets a notice instead, and the use is given back; the
 // answer is the same.
 func (m *Managed) register(w http.ResponseWriter, r *http.Request) {
@@ -542,10 +545,6 @@ func (m *Managed) register(w http.ResponseWriter, r *http.Request) {
 		m.refuse(w, r, problem.InvitationRequired, "inviteInvalid")
 		return
 	}
-	hash, ok := m.newPassword(w, r, req.Password)
-	if !ok {
-		return
-	}
 	ctx := r.Context()
 	inviter, h := inviterOf(m.Mounts)
 	hold, err := inviter.Hold(ctx, h, code, time.Now().Add(holdFor))
@@ -559,7 +558,7 @@ func (m *Managed) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lang := pageLang(r, m.Store)
-	u, err := m.Store.RegisterUser(ctx, req.Email, hash, hold)
+	u, err := m.Store.RegisterUser(ctx, req.Email, "", hold)
 	if err != nil {
 		if rerr := inviter.Release(ctx, h, hold); rerr != nil {
 			m.Logger.Error("giving back an invitation's use failed", "err", rerr)
@@ -594,23 +593,64 @@ func (m *Managed) invitation(r *http.Request) (string, bool, error) {
 }
 
 // verify takes the link confirming an address: the account works then,
-// and its person is signed in. The invitation they registered with stays
-// on their record, to shape the account when they set it up.
+// and its person is signed in. Someone who registered chooses their
+// password here, with the link: none was chosen before (register). One
+// who has a password already (a held setup, a reminder) confirms by the
+// link alone, and that login isn't fresh. The invitation they registered
+// with stays on their record, to shape the account when they set it up.
 func (m *Managed) verify(w http.ResponseWriter, r *http.Request) {
 	req, ok := m.read(w, r)
 	if !ok {
 		return
 	}
-	u, ok := m.takeLink(w, r, "verify", req.Link)
+	ctx := r.Context()
+	u, ok := m.lookLink(w, r, "verify", req.Link)
 	if !ok {
 		return
 	}
-	if err := m.Store.ConfirmUser(r.Context(), u.Subject); err != nil {
+	var hash string
+	if u.PasswordHash == "" {
+		if !m.followsRules(w, r, req.Password) {
+			return
+		}
+		if hash, ok = m.hashPassword(w, r, req.Password); !ok {
+			return
+		}
+	}
+	// Used up once the password is hashed: a request cut short leaves it.
+	if u, ok = m.takeLink(w, r, "verify", req.Link); !ok {
+		return
+	}
+	if hash != "" && u.PasswordHash == "" {
+		if err := m.Store.SetPassword(ctx, u.Subject, hash); err != nil {
+			m.fail(w, r, err)
+			return
+		}
+	}
+	if err := m.Store.ConfirmUser(ctx, u.Subject); err != nil {
 		m.fail(w, r, err)
 		return
 	}
 	u.Confirmed = true
-	m.startLogin(w, r, u, "/", false)
+	m.startLogin(w, r, u, "/", hash != "")
+}
+
+// verifyLook says which address a confirming link is for, and whether
+// its person chooses their password with it, without using it up.
+func (m *Managed) verifyLook(w http.ResponseWriter, r *http.Request) {
+	req, ok := m.read(w, r)
+	if !ok {
+		return
+	}
+	if !m.byIP.allow("verify "+clientFrom(identity.ClientIP(r.Context())), time.Now()) {
+		m.refuse(w, r, problem.RateLimited, "tooManyTries")
+		return
+	}
+	u, ok := m.lookLink(w, r, "verify", req.Link)
+	if !ok {
+		return
+	}
+	writeOK(w, map[string]any{"email": u.Email, "choosePassword": u.PasswordHash == ""})
 }
 
 // ReleaseInvitation gives back the use of an invitation held for someone
@@ -950,6 +990,29 @@ func (m *Managed) hashPassword(w http.ResponseWriter, r *http.Request, pw string
 		return "", false
 	}
 	return hash, true
+}
+
+// lookLink is takeLink without using the link up.
+func (m *Managed) lookLink(w http.ResponseWriter, r *http.Request, purpose, link string) (*store.User, bool) {
+	if len(link) != 43 {
+		m.refuse(w, r, problem.SigninFailed, "oldLink")
+		return nil, false
+	}
+	subject, err := m.Store.PeekEmailLink(r.Context(), purpose, m.hash(purpose, link))
+	if errors.Is(err, store.ErrNotFound) {
+		m.refuse(w, r, problem.SigninFailed, "oldLink")
+		return nil, false
+	}
+	if err != nil {
+		m.fail(w, r, err)
+		return nil, false
+	}
+	u, err := m.Store.UserBySubject(r.Context(), subject)
+	if err != nil || u.Disabled {
+		m.refuse(w, r, problem.SigninFailed, "oldLink")
+		return nil, false
+	}
+	return u, true
 }
 
 // takeLink uses up a link from an email, answering when it doesn't work.

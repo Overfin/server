@@ -1051,6 +1051,10 @@ paths:
       description: The link in the email that follows registering
         (`/signin#verify=…`, read by the page and sent on a click), once,
         within 24 hours. The account works then, and its person is signed in.
+        Someone who registered has no password yet and sends theirs with the
+        link (`password`, following the rules); a link refused for its
+        password stays usable. An account that has one confirms by the link
+        alone.
       tags: [account]
       security: []
       requestBody:
@@ -1067,11 +1071,49 @@ paths:
               schema:
                 $ref: "#/components/schemas/SigninDone"
         "400":
-          description: Not a request this step takes (`invalid-request`).
+          description: Not a request this step takes, or a missing password
+            or one against the rules (`invalid-request`).
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "401":
+          description: Expired or used link (`signin-failed`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /signin/look:
+    post:
+      operationId: lookAtConfirmLink
+      summary: The address a confirming link is for
+      description: Says which address a link from `/signin#verify=…` is for,
+        and whether its person chooses their password with it
+        (`choosePassword`), without using it up. Only `link` is read.
+      tags: [account]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Signin"
+      responses:
+        "200":
+          description: The account's address.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [email, choosePassword]
+                properties:
+                  email:
+                    type: string
+                  choosePassword:
+                    type: boolean
         "401":
           description: Expired or used link (`signin-failed`).
           content:
@@ -1118,10 +1160,12 @@ paths:
       summary: Create an account with an invitation
       description: |
         From an invitation's page (`/invite/<code>` on the site), which
-        keeps the invitation in this browser: an email and a password
-        following the password rules, with the check against scripts
-        solved. Only when the server sends emails: a link to confirm the
-        address goes there, and the account works once it's opened.
+        keeps the invitation in this browser: an email, with the check
+        against scripts solved; no password (one sent is ignored). Only
+        when the server sends emails: a link to confirm the address goes
+        there, and its person chooses their password with it
+        (`/signin/verify`), so nobody sets the password of an address they
+        can't read.
         Registering takes a use of the invitation at once, so a single-use
         invitation lets one person register; the account set up after
         confirming gets that invitation's plan. An email that has an
@@ -1143,8 +1187,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/SigninDone"
         "400":
-          description: Not an email, a password against the rules, the
-            check failed, or this server sends no emails (`invalid-request`).
+          description: Not an email, the check failed, or this server
+            sends no emails (`invalid-request`).
           content:
             application/problem+json:
               schema:
