@@ -174,6 +174,9 @@ type TitleInfo struct {
 	Have, Aired, Listed int
 	// Known: TMDB's data for it is kept.
 	Known bool
+	// listed is what its series' page says of a season whose own page
+	// isn't kept yet: its episode count (countEpisodes).
+	listed int
 	// ItemKind is what the index calls an unidentified file (movie,
 	// episode…).
 	ItemKind string
@@ -347,6 +350,15 @@ func (s *Store) titleInfo(ctx context.Context, r TitleRef, today string, b *info
 			t.Known, t.Poster = true, poster.String
 		case !errors.Is(err, sql.ErrNoRows):
 			return nil, err
+		default:
+			// Its own page not fetched yet (nobody opened it): what its
+			// series' page says, so it shows there and opening it fetches
+			// the rest.
+			for _, se := range series.Details.Seasons {
+				if se.Number == r.Season {
+					t.Name, t.AirDate, t.listed = se.Name, se.AirDate, se.EpisodeCount
+				}
+			}
 		}
 		if t.Poster == "" {
 			t.Poster = series.Poster
@@ -472,6 +484,13 @@ func (s *Store) countEpisodes(ctx context.Context, t *TitleInfo, today string) e
 	}
 	if err := s.read.QueryRowContext(ctx, q, args...).Scan(&t.Listed, &t.Aired); err != nil {
 		return err
+	}
+	if t.Listed == 0 && t.Ref.Kind == "season" && t.listed > 0 {
+		// Not kept yet: its series page's count, aired once it has.
+		t.Listed = t.listed
+		if t.AirDate != "" && t.AirDate <= today {
+			t.Aired = t.listed
+		}
 	}
 	if t.Listed == 0 && t.Ref.Kind == "series" {
 		// No season kept yet: the series page's counts.

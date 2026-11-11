@@ -340,3 +340,31 @@ func TestMeOffers(t *testing.T) {
 		t.Errorf("with Seerr: %d %+v", code, me)
 	}
 }
+
+// A series no library has, whose seasons nobody opened yet (TMDB's pages
+// of them not fetched): its page lists them from its own, so they can be
+// opened and wished for. A season not out yet stays hidden.
+func TestOutsideSeriesSeasonsUnfetched(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{store: &st})
+	ctx := context.Background()
+	now := time.Now()
+	det, _ := json.Marshal(store.TitleDetails{Genres: []string{"Drame"}, Seasons: []store.SeasonInfo{
+		{Number: 0, Name: "Épisodes spéciaux", EpisodeCount: 2, AirDate: "2019-01-01"},
+		{Number: 1, Name: "Saison 1", EpisodeCount: 5, AirDate: "2019-05-06"},
+		{Number: 2, Name: "Saison 2", EpisodeCount: 6, AirDate: "2099-01-01"}}})
+	st.SetTitleDetails(ctx, store.Title{Kind: "series", TMDB: "87108", Name: "Tchernobyl", Year: 2019}, det, now)
+	st.SetTitleRatings(ctx, store.RatedTitle{Kind: "series", TMDB: "87108"}, nil, "2019-05-06", "2019-05-06", now)
+
+	var series testTitle
+	if code := get(t, srv, "/api/v1/titles/title_series_tmdb_87108", &series); code != 200 {
+		t.Fatalf("series: %d", code)
+	}
+	if series.Availability != "missing" || len(series.Seasons) != 1 {
+		t.Fatalf("seasons: %+v", series)
+	}
+	if s1 := series.Seasons[0]; s1.ID != "title_series_tmdb_87108_s1" || s1.Name != "Saison 1" || s1.Availability != "missing" ||
+		s1.EpisodeCount == nil || s1.EpisodeCount.Aired != 5 {
+		t.Errorf("season 1: %+v", s1)
+	}
+}
