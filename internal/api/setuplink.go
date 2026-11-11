@@ -136,7 +136,9 @@ func (m *Managed) setupPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	subject, purpose, err := m.setupSubject(ctx, req.Link, true)
+	// The link is looked at first, and used up only once the password is
+	// hashed: a request cut short while hashing leaves it working.
+	subject, purpose, err := m.setupSubject(ctx, req.Link, false)
 	var u *store.User
 	if err == nil {
 		u, err = m.Store.UserBySubject(ctx, subject)
@@ -151,6 +153,13 @@ func (m *Managed) setupPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	hash, ok := m.hashPassword(w, r, req.Password)
 	if !ok {
+		return
+	}
+	if taken, _, err := m.setupSubject(ctx, req.Link, true); errors.Is(err, store.ErrNotFound) || (err == nil && taken != subject) {
+		m.refuse(w, r, problem.SigninFailed, "oldLink") // used meanwhile
+		return
+	} else if err != nil {
+		m.fail(w, r, err)
 		return
 	}
 	// An emailed link proved the address; a copied one didn't, which
