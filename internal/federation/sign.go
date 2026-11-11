@@ -115,7 +115,15 @@ type Verifier struct {
 	// fills no memory, and strangers heard while a code is live fill only a
 	// small one of their own, never the paired servers'.
 	Admit func(r *http.Request, key ed25519.PublicKey) (heard, known bool)
+	// Forgotten, when set, says whether a key Admit doesn't hear is a
+	// server's whose pairing ended: its request, signed and new, gets
+	// ErrForgotten (and a signed "unknown"), not ErrSignature.
+	Forgotten func(r *http.Request, key ed25519.PublicKey) bool
 }
+
+// ErrForgotten: a valid request from a server whose pairing with this one
+// ended. Its Verified says who, for the answer to be signed.
+var ErrForgotten = errors.New("federation: a server this one no longer knows")
 
 // Verified is what a valid request proves.
 type Verified struct {
@@ -123,6 +131,9 @@ type Verified struct {
 	// paired server is the caller's to look up.
 	Key   ed25519.PublicKey
 	Nonce string
+	// Known: a server this one knows (paired or not yet), not a stranger
+	// heard while a code is live.
+	Known bool
 }
 
 // Check verifies r, whose body is body, at now. It checks only that the
@@ -160,7 +171,17 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 	if v.Admit != nil {
 		var heard bool
 		if heard, known = v.Admit(r, ed25519.PublicKey(key)); !heard {
-			return Verified{}, ErrSignature
+			if v.Forgotten == nil || !v.Forgotten(r, ed25519.PublicKey(key)) {
+				return Verified{}, ErrSignature
+			}
+			// Remembered as a stranger's: a replay gets the plain 404.
+			if v.Seen == nil {
+				v.Seen = &Nonces{}
+			}
+			if !v.Seen.add(string(key)+nonce, now, false) {
+				return Verified{}, ErrSignature
+			}
+			return Verified{Key: ed25519.PublicKey(key), Nonce: nonce}, ErrForgotten
 		}
 	}
 	if v.Seen == nil {
@@ -169,7 +190,7 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 	if !v.Seen.add(string(key)+nonce, now, known) {
 		return Verified{}, ErrSignature
 	}
-	return Verified{Key: ed25519.PublicKey(key), Nonce: nonce}, nil
+	return Verified{Key: ed25519.PublicKey(key), Nonce: nonce, Known: known}, nil
 }
 
 // maxNonces caps the nonces remembered: past it (after clearing the old

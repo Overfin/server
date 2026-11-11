@@ -299,15 +299,41 @@ func (s *Store) PeerSeen(ctx context.Context, id string) error {
 
 // DeletePeer removes a peer, ending any pairing at once; ErrNotFound if
 // there's none.
+//
+// Its key is remembered, by its hash (PeerForgotten): its requests are
+// answered "unknown", signed.
 func (s *Store) DeletePeer(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM peers WHERE id = ?`, id)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	defer tx.Rollback()
+	var key []byte
+	switch err := tx.QueryRowContext(ctx, `SELECT public_key FROM peers WHERE id = ?`, id).Scan(&key); {
+	case errors.Is(err, sql.ErrNoRows):
 		return ErrNotFound
+	case err != nil:
+		return err
 	}
-	return nil
+	hash := sha256.Sum256(key)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO forgotten_peers (key_hash, forgotten_at) VALUES (?, ?)
+		ON CONFLICT (key_hash) DO UPDATE SET forgotten_at = excluded.forgotten_at`, hash[:], s.now().Unix()); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM peers WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// PeerForgotten says whether a key is a server's whose pairing with this
+// one ended (DeletePeer) and that isn't paired again.
+func (s *Store) PeerForgotten(ctx context.Context, publicKey []byte) (bool, error) {
+	hash := sha256.Sum256(publicKey)
+	var n int
+	err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM forgotten_peers f WHERE f.key_hash = ?
+		AND NOT EXISTS (SELECT 1 FROM peers p WHERE p.public_key = ?)`, hash[:], publicKey).Scan(&n)
+	return n > 0, err
 }
 
 // DeleteExpiredPairingCodes removes codes past their time.

@@ -3825,6 +3825,10 @@ paths:
         `Overfin-Signature`, over the method, this server's host, the path,
         the date, the nonce and the body's SHA-256); the answer is signed by
         this server's key, over the request's nonce, the status and the body.
+        A refusal to a server this one knows, or knew (its pairing ended),
+        is signed the same way, on every federation route: the caller
+        counts only a signed one, so nobody between two servers can fake
+        one. A stranger's is the plain 404, unsigned.
         `secretHash` is the SHA-256 of the code's secret, which finds the
         code; `proof` is an HMAC-SHA256, with the secret, of the caller's key
         and address, so the secret never travels. The code is used once. A

@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"slices"
 	"strconv"
@@ -107,17 +108,65 @@ func (p Plugin) Name() string { return "federation" }
 // Register declares the routes other servers call. They're public: the
 // caller is a server, proven by its signature, never a person.
 func (p Plugin) Register(r *plugin.Registrar) error {
-	p.S.verifier = &Verifier{Host: p.S.host(), Seen: p.S.Seen, Admit: p.S.admit}
-	if err := r.HandlePublic("POST /api/v1/federation/pair", http.HandlerFunc(p.S.pair)); err != nil {
+	p.S.verifier = &Verifier{Host: p.S.host(), Seen: p.S.Seen, Admit: p.S.admit, Forgotten: p.S.forgotten}
+	if err := r.HandlePublic("POST /api/v1/federation/pair", SignRefusals(http.HandlerFunc(p.S.pair))); err != nil {
 		return err
 	}
-	if err := r.HandlePublic("POST /api/v1/federation/hello", http.HandlerFunc(p.S.hello)); err != nil {
+	if err := r.HandlePublic("POST /api/v1/federation/hello", SignRefusals(http.HandlerFunc(p.S.hello))); err != nil {
 		return err
 	}
-	if err := r.HandlePublic("POST /api/v1/federation/libraries", http.HandlerFunc(p.S.libraries)); err != nil {
+	if err := r.HandlePublic("POST /api/v1/federation/libraries", SignRefusals(http.HandlerFunc(p.S.libraries))); err != nil {
 		return err
 	}
-	return r.HandlePublic("POST /api/v1/federation/titles", http.HandlerFunc(p.S.titles))
+	return r.HandlePublic("POST /api/v1/federation/titles", SignRefusals(http.HandlerFunc(p.S.titles)))
+}
+
+// forgotten says whether a key is a server's whose pairing with this one
+// ended.
+func (s *Service) forgotten(r *http.Request, key ed25519.PublicKey) bool {
+	f, err := s.Store.PeerForgotten(r.Context(), key)
+	return err == nil && f
+}
+
+// refusalWriter holds a federation route's answer until its handler is
+// done: a refusal to a server this one knows, or knew, is then signed
+// (the signature covers the body). A stranger's stays the plain 404.
+type refusalWriter struct {
+	rec  *httptest.ResponseRecorder
+	sign func(status int, body []byte) string
+}
+
+func (rw *refusalWriter) Header() http.Header         { return rw.rec.Header() }
+func (rw *refusalWriter) Write(b []byte) (int, error) { return rw.rec.Write(b) }
+func (rw *refusalWriter) WriteHeader(status int)      { rw.rec.WriteHeader(status) }
+
+// SignRefusals wraps a route other servers call, so that its refusals to
+// a server this one knows are signed like its answers: nobody between the
+// two can fake one ("unknown", "not playable"…). The route's handler
+// reads the request with verified (or PeerRequest), which says whom.
+func SignRefusals(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rw := &refusalWriter{rec: httptest.NewRecorder()}
+		h.ServeHTTP(rw, r)
+		res := rw.rec
+		for k, v := range res.Header() {
+			w.Header()[k] = v
+		}
+		body := res.Body.Bytes()
+		if res.Code != http.StatusOK && rw.sign != nil && w.Header().Get(HeaderSignature) == "" {
+			w.Header().Set(HeaderSignature, rw.sign(res.Code, body))
+		}
+		w.WriteHeader(res.Code)
+		w.Write(body)
+	})
+}
+
+// signsFor marks w's refusals to be signed for the request whose nonce it
+// was, when w is a route's (SignRefusals).
+func (s *Service) signsFor(w http.ResponseWriter, nonce string) {
+	if rw, ok := w.(*refusalWriter); ok {
+		rw.sign = func(status int, body []byte) string { return SignResponse(s.Key, nonce, status, body) }
+	}
 }
 
 type pairRequest struct {
@@ -165,9 +214,18 @@ func (s *Service) verified(w http.ResponseWriter, r *http.Request) (Verified, []
 		return Verified{}, nil, false
 	}
 	v, err := s.verifier.Check(r, body, s.now())
+	if errors.Is(err, ErrForgotten) {
+		// A server whose pairing ended: "unknown", signed.
+		s.signsFor(w, v.Nonce)
+		problem.Send(w, problem.NotFound, "")
+		return Verified{}, nil, false
+	}
 	if err != nil {
 		problem.Send(w, problem.NotFound, "")
 		return Verified{}, nil, false
+	}
+	if v.Known {
+		s.signsFor(w, v.Nonce)
 	}
 	return v, body, true
 }
@@ -341,8 +399,15 @@ func (s *Service) call(ctx context.Context, address string, peer ed25519.PublicK
 		return 0, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
 	if res.StatusCode != http.StatusOK {
-		// Refusals aren't signed: a 404 is the same for everyone.
-		return res.StatusCode, nil
+		// A refusal counts only signed by its key: a server we're paired
+		// with, or were, signs its own; anything else may come from
+		// someone between the two. A code's server doesn't know us yet:
+		// its refusal is a stranger's, plain, and costs only that pairing.
+		if path == "/api/v1/federation/pair" ||
+			CheckResponse(peer, nonce, res.StatusCode, answer, res.Header.Get(HeaderSignature)) == nil {
+			return res.StatusCode, nil
+		}
+		return 0, fmt.Errorf("%w: a refusal not signed by its key (%d)", ErrUnreachable, res.StatusCode)
 	}
 	if CheckResponse(peer, nonce, res.StatusCode, answer, res.Header.Get(HeaderSignature)) != nil {
 		return 0, fmt.Errorf("%w: its answer isn't signed by its key", ErrUnreachable)

@@ -60,10 +60,10 @@ func (pb Playback) Register(r *plugin.Registrar) error {
 	}
 	// A paired server's viewers: the caller is a server, proven by its
 	// signature (federation), never a person.
-	if err := r.HandlePublic("POST /api/v1/federation/play", http.HandlerFunc(pb.peerPlay)); err != nil {
+	if err := r.HandlePublic("POST /api/v1/federation/play", federation.SignRefusals(http.HandlerFunc(pb.peerPlay))); err != nil {
 		return err
 	}
-	return r.HandlePublic("POST /api/v1/federation/stop", http.HandlerFunc(pb.peerStop))
+	return r.HandlePublic("POST /api/v1/federation/stop", federation.SignRefusals(http.HandlerFunc(pb.peerStop)))
 }
 
 // IdleTimeout ends a playback with neither progress reports nor stream

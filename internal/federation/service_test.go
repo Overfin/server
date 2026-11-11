@@ -247,9 +247,10 @@ func TestSharing(t *testing.T) {
 		t.Fatalf("B wants what A doesn't offer: %+v", w)
 	}
 
-	// A stranger, signing with its own key, gets the plain 404.
+	// A stranger, signing with its own key, gets the plain 404, unsigned:
+	// to it, as good as no answer.
 	stranger := &store.Peer{State: store.PeerPaired, Address: a.url, PublicKey: a.s.Key.Public()}
-	if _, err := c.s.TheirLibraries(ctx, stranger); !errors.Is(err, ErrUnknown) {
+	if _, err := c.s.TheirLibraries(ctx, stranger); !errors.Is(err, ErrUnreachable) {
 		t.Fatalf("a stranger: %v", err)
 	}
 }
@@ -293,5 +294,47 @@ func TestCleanTags(t *testing.T) {
 	got := cleanTags([]string{"fr-CA", "fr-CA", "", "x", "<script>", "es-419", "toolongtagvalue"})
 	if len(got) != 2 || got[0] != "fr-CA" || got[1] != "es-419" {
 		t.Fatalf("%v", got)
+	}
+}
+
+// Someone between two paired servers answering "unknown" for one of them
+// can't end the pairing: a refusal counts only signed by its key. The
+// real one, after the pairing ended there, is signed, and does.
+func TestForgedRefusal(t *testing.T) {
+	ctx := context.Background()
+	a, b := newServer(t, "A"), newServer(t, "B")
+	code, _, _ := a.s.NewCode(ctx, "")
+	pa, err := b.s.UseCode(ctx, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.s.Accept(ctx, onlyPeer(t, a).ID); err != nil {
+		t.Fatal(err)
+	}
+	pa = onlyPeer(t, b)
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"type":"not-found"}`))
+	}))
+	defer fake.Close()
+	forged := *pa
+	forged.Address = fake.URL
+	if _, err := b.s.Check(ctx, &forged); !errors.Is(err, ErrUnreachable) {
+		t.Fatalf("a forged unknown: %v", err)
+	}
+	if _, err := b.s.TheirLibraries(ctx, &forged); !errors.Is(err, ErrUnreachable) {
+		t.Fatalf("a forged unknown, libraries: %v", err)
+	}
+	if got := onlyPeer(t, b); got.State != store.PeerPaired {
+		t.Fatalf("the pairing after a forged refusal: %+v", got)
+	}
+	// A ends it while B is away: A remembers B's key, and its "unknown"
+	// is signed.
+	if err := a.s.Store.DeletePeer(ctx, onlyPeer(t, a).ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := b.s.Check(ctx, pa); err != nil || got.State != store.PeerGone {
+		t.Fatalf("the real unknown: %+v, %v", got, err)
 	}
 }
