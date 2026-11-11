@@ -447,3 +447,20 @@ func TestCopyInto(t *testing.T) {
 		t.Errorf("allowed again: %v", err)
 	}
 }
+
+// The service account's policy holds whole: one Jellyfin changed (made an
+// administrator) doesn't.
+func TestServicePolicyHolds(t *testing.T) {
+	policy := jellyfin.Policy{"IsAdministrator": false, "EnableAllFolders": false, "SomethingNew": "kept"}
+	servicePolicy(policy)
+	raw, _ := json.Marshal(policy)
+	var fromJellyfin jellyfin.Policy
+	json.Unmarshal(raw, &fromJellyfin)
+	if same, err := policyHolds(fromJellyfin); err != nil || !same {
+		t.Fatalf("as set: %v %v", same, err)
+	}
+	fromJellyfin["IsAdministrator"] = true
+	if same, _ := policyHolds(fromJellyfin); same {
+		t.Error("an administrator holds")
+	}
+}

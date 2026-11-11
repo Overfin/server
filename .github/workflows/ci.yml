@@ -61,6 +61,7 @@ jobs:
 
       - name: API specification
         run: |
+          # The distribution's package, signed and fixed, not PyPI's latest.
           python3 -c "import yaml" 2>/dev/null ||
-            python3 -m pip install --quiet --user --break-system-packages pyyaml
+            { sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends python3-yaml; }
           python3 -c "import yaml; yaml.safe_load(open('api/openapi.yaml'))"
