@@ -766,6 +766,9 @@ func purgeExpired(ctx context.Context, db *store.Store, logger *slog.Logger) {
 		if err := db.DeleteExpiredPairingCodes(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("purging expired pairing codes failed", "err", err)
 		}
+		if err := db.DeleteUnusedUploads(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("purging unused artwork uploads failed", "err", err)
+		}
 		// Those who registered and never confirmed their address go.
 		if n, err := db.DeleteUnconfirmed(ctx, time.Now().Add(-api.UnconfirmedFor)); err != nil && ctx.Err() == nil {
 			logger.Error("removing unconfirmed registrations failed", "err", err)

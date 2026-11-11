@@ -108,11 +108,13 @@ type Verifier struct {
 	// a server makes over its life (each settings change rebuilds them),
 	// so a request can't be replayed across one; nil for one of its own.
 	Seen *Nonces
-	// Admit, when set, says whether a key may be heard at all (a known
-	// server's, or anyone's while a pairing code is live): asked once the
-	// signature is good, before the nonce is remembered, so a stranger
-	// signing with keys of their own fills no memory.
-	Admit func(r *http.Request, key ed25519.PublicKey) bool
+	// Admit, when set, says whether a key may be heard at all (heard: a
+	// known server's, or anyone's while a pairing code is live) and whether
+	// it's a known server's: asked once the signature is good, before the
+	// nonce is remembered, so a stranger signing with keys of their own
+	// fills no memory, and strangers heard while a code is live fill only a
+	// small one of their own, never the paired servers'.
+	Admit func(r *http.Request, key ed25519.PublicKey) (heard, known bool)
 }
 
 // Verified is what a valid request proves.
@@ -154,13 +156,17 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 	// Only once the signature is good, and the key one this server hears,
 	// is the nonce remembered: nobody can fill the memory with nonces, or
 	// keys, they made up.
-	if v.Admit != nil && !v.Admit(r, ed25519.PublicKey(key)) {
-		return Verified{}, ErrSignature
+	known := true
+	if v.Admit != nil {
+		var heard bool
+		if heard, known = v.Admit(r, ed25519.PublicKey(key)); !heard {
+			return Verified{}, ErrSignature
+		}
 	}
 	if v.Seen == nil {
 		v.Seen = &Nonces{}
 	}
-	if !v.Seen.add(string(key)+nonce, now) {
+	if !v.Seen.add(string(key)+nonce, now, known) {
 		return Verified{}, ErrSignature
 	}
 	return Verified{Key: ed25519.PublicKey(key), Nonce: nonce}, nil
@@ -171,33 +177,46 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 // memory growing.
 const maxNonces = 100_000
 
+// maxStrangerNonces caps those of strangers' requests (servers pairing).
+const maxStrangerNonces = 1_000
+
 // Nonces remembers the nonces of the requests accepted within the last
 // 2×MaxSkew, each with the key that signed it: any older request is
 // refused by its date anyway.
 type Nonces struct {
-	mu   sync.Mutex
-	seen map[string]time.Time
-	last time.Time // when the old ones were last cleared
+	mu        sync.Mutex
+	seen      map[string]time.Time // known servers'
+	strangers map[string]time.Time // others', heard while a code is live
+	last      time.Time            // when the old ones were last cleared
 }
 
-func (n *Nonces) add(nonce string, now time.Time) bool {
+func (n *Nonces) add(nonce string, now time.Time, known bool) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if n.seen == nil {
-		n.seen = map[string]time.Time{}
+		n.seen, n.strangers = map[string]time.Time{}, map[string]time.Time{}
 	}
-	if now.Sub(n.last) > time.Minute || len(n.seen) >= maxNonces {
-		for k, t := range n.seen {
-			if now.Sub(t) > 2*MaxSkew {
-				delete(n.seen, k)
+	m, max := n.seen, maxNonces
+	if !known {
+		m, max = n.strangers, maxStrangerNonces
+	}
+	if now.Sub(n.last) > time.Minute || len(m) >= max {
+		for _, each := range []map[string]time.Time{n.seen, n.strangers} {
+			for k, t := range each {
+				if now.Sub(t) > 2*MaxSkew {
+					delete(each, k)
+				}
 			}
 		}
 		n.last = now
 	}
-	if _, dup := n.seen[nonce]; dup || len(n.seen) >= maxNonces {
+	// A nonce is refused if either memory has it.
+	_, dup := n.seen[nonce]
+	_, dupStranger := n.strangers[nonce]
+	if dup || dupStranger || len(m) >= max {
 		return false
 	}
-	n.seen[nonce] = now
+	m[nonce] = now
 	return true
 }
 

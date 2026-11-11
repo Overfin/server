@@ -3,11 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"github.com/overfin/server/internal/textclean"
+	"github.com/overfin/server/internal/tracks"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/jellyfin"
@@ -356,8 +359,9 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 		problem.Send(w, problem.NotPlayable, "")
 		return
 	}
-	// Its URLs are its stream's, on its address, nothing else.
-	if !keepPeerURLs(&out, peer.Address) {
+	// Its URLs are its stream's, on its address, nothing else; its words
+	// are plain text, as every other's (rule 9).
+	if !keepPeerURLs(&out, peer.Address) || !cleanPeerText(&out) {
 		pb.Logger.Warn("a paired server answered a playback with other addresses", "peer", peer.Name)
 		pb.stopRemote(peer, out.ID, 0)
 		problem.Send(w, problem.NotPlayable, "")
@@ -427,6 +431,71 @@ func keepPeerURLs(out *sessionJSON, address string) bool {
 				return false
 			}
 		}
+	}
+	return true
+}
+
+// peerLabel is a paired server's label as one line of plain text.
+func peerLabel(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, textclean.Plain(s, 64))
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// cleanPeerText keeps of a paired server's playback answer only plain
+// text, and values Overfin itself gives; false when its method isn't one.
+func cleanPeerText(out *sessionJSON) bool {
+	switch out.Method {
+	case "direct", "remux", "transcode":
+	default:
+		return false
+	}
+	switch out.Stream.MimeType {
+	case "", "application/vnd.apple.mpegurl":
+	default:
+		out.Stream.MimeType = ""
+	}
+	clean := func(list []trackJSON) []trackJSON {
+		kept := list[:0]
+		for _, t := range list {
+			t.Label = peerLabel(t.Label)
+			t.Language = languageTag(t.Language)
+			if t.Role != tracks.Commentary && t.Role != tracks.Description {
+				t.Role = ""
+			}
+			if t.Label != "" {
+				kept = append(kept, t)
+			}
+		}
+		return kept
+	}
+	out.AudioTracks, out.SubtitleTracks, out.ForcedTracks = clean(out.AudioTracks), clean(out.SubtitleTracks), clean(out.ForcedTracks)
+	versions := out.Versions[:0]
+	for _, v := range out.Versions {
+		if v.Name = peerLabel(v.Name); v.Name != "" {
+			versions = append(versions, v)
+		}
+	}
+	out.Versions = versions
+	if in := out.Info; in != nil {
+		in.Container = textclean.Plain(in.Container, 32)
+		for _, st := range []*streamInfoJSON{in.Video, in.Audio} {
+			if st != nil {
+				st.Codec, st.Profile, st.Range = textclean.Plain(st.Codec, 32), textclean.Plain(st.Profile, 32), textclean.Plain(st.Range, 32)
+				st.Language = languageTag(st.Language)
+			}
+		}
+		reasons := in.Reasons[:0]
+		for _, r := range in.Reasons {
+			if r = textclean.Plain(r, 64); r != "" {
+				reasons = append(reasons, r)
+			}
+		}
+		in.Reasons = reasons
 	}
 	return true
 }

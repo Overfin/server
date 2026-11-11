@@ -179,10 +179,10 @@ func TestSignedRequestRefused(t *testing.T) {
 
 func TestNoncesForgotten(t *testing.T) {
 	var n Nonces
-	if !n.add("a", now) || n.add("a", now) {
+	if !n.add("a", now, true) || n.add("a", now, true) {
 		t.Fatal("a nonce must be accepted once")
 	}
-	n.add("b", now.Add(2*MaxSkew+2*time.Minute))
+	n.add("b", now.Add(2*MaxSkew+2*time.Minute), true)
 	if _, kept := n.seen["a"]; kept {
 		t.Fatal("an old nonce was kept")
 	}
@@ -193,7 +193,10 @@ func TestNoncesForgotten(t *testing.T) {
 // memory that way. The memory has a cap all the same.
 func TestStrangersFillNoMemory(t *testing.T) {
 	known := NewKey()
-	v := &Verifier{Host: "films.example.org", Admit: func(_ *http.Request, key ed25519.PublicKey) bool { return SameKey(key, known.Public()) }}
+	v := &Verifier{Host: "films.example.org", Admit: func(_ *http.Request, key ed25519.PublicKey) (bool, bool) {
+		k := SameKey(key, known.Public())
+		return k, k
+	}}
 	for range 50 {
 		req, _ := request(NewKey(), "POST", "/api/v1/federation/hello", nil, now)
 		if _, err := v.Check(req, nil, now); err == nil {
@@ -209,12 +212,12 @@ func TestStrangersFillNoMemory(t *testing.T) {
 	}
 	var n Nonces
 	for i := range maxNonces {
-		n.add(fmt.Sprint(i), now)
+		n.add(fmt.Sprint(i), now, true)
 	}
-	if n.add("one more", now) {
+	if n.add("one more", now, true) {
 		t.Fatal("past the cap, a nonce was remembered")
 	}
-	if !n.add("later", now.Add(2*MaxSkew+2*time.Minute)) {
+	if !n.add("later", now.Add(2*MaxSkew+2*time.Minute), true) {
 		t.Fatal("room didn't come back once the old ones went")
 	}
 }
@@ -273,4 +276,23 @@ func FuzzParseCode(f *testing.F) {
 			t.Fatalf("accepted a bad code: %+v", c)
 		}
 	})
+}
+
+// Strangers heard while a code is live fill a small memory of their own:
+// a paired server is still heard when it's full.
+func TestStrangersOwnMemory(t *testing.T) {
+	n := &Nonces{}
+	now := time.Now()
+	for i := range maxStrangerNonces {
+		n.add(fmt.Sprint("s", i), now, false)
+	}
+	if n.add("one more stranger", now, false) {
+		t.Error("strangers past their cap")
+	}
+	if !n.add("a paired server", now, true) {
+		t.Error("a paired server refused")
+	}
+	if n.add("a paired server", now, false) {
+		t.Error("a nonce twice")
+	}
 }

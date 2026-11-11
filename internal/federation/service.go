@@ -146,15 +146,15 @@ const (
 // admit says whether a signed request's key may be heard: a server this
 // one knows (whatever its state: each route checks that), or, on the
 // pairing route, anyone while a pairing code is live.
-func (s *Service) admit(r *http.Request, key ed25519.PublicKey) bool {
+func (s *Service) admit(r *http.Request, key ed25519.PublicKey) (heard, known bool) {
 	if _, err := s.Store.PeerByKey(r.Context(), key); err == nil {
-		return true
+		return true, true
 	}
 	if r.URL.Path != "/api/v1/federation/pair" {
-		return false
+		return false, false
 	}
 	live, err := s.Store.LivePairingCodes(r.Context())
-	return err == nil && live
+	return err == nil && live, false
 }
 
 // verified reads and checks a request; ok is false once it has answered.

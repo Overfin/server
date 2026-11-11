@@ -190,3 +190,20 @@ func keywordsOf(t testing.TB, s *Store, kind, tmdb string, words ...string) {
 		}
 	}
 }
+
+// An upload no edit uses goes an hour after it was sent, without waiting
+// for another edit (rule 39).
+func TestUnusedUploadsGoHourly(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	id := strings.Repeat("a", 32)
+	if err := s.PutTitleUpload(ctx, id, TitleUpload{Type: "poster", ContentType: "image/jpeg", Data: []byte{1}}, time.Now().Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteUnusedUploads(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := s.TitleUploadOf(ctx, id); err != nil || found {
+		t.Errorf("still there: %v %v", found, err)
+	}
+}

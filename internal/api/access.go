@@ -102,6 +102,9 @@ func (l Library) keep(ctx context.Context, p *store.Profile, items []jellyfin.Ra
 			ok = allowed[id]
 		case a.Ceiling != nil || a.Categories != nil || a.TemplateCategories != nil:
 			// Not in the index, so not rated nor in any category: hidden.
+		case len(a.BlockedTags) > 0 && indexedKind(it.Type):
+			// Not in the index yet, so its keywords aren't known: hidden
+			// until they are, as the index hides it (rule 28).
 		case a.Libraries == nil:
 			ok = true
 		default:
@@ -116,6 +119,16 @@ func (l Library) keep(ctx context.Context, p *store.Profile, items []jellyfin.Ra
 		}
 	}
 	return out, nil
+}
+
+// indexedKind says whether the catalog index holds items of a Jellyfin
+// type: films and series, their seasons and episodes.
+func indexedKind(t string) bool {
+	switch t {
+	case "Movie", "Series", "Season", "Episode":
+		return true
+	}
+	return false
 }
 
 // mayOpen says whether the profile may see an item read from Jellyfin.
