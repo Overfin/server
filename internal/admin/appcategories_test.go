@@ -58,6 +58,13 @@ func TestAppCategories(t *testing.T) {
 	if rec := app.do("GET", "/apps/v1/categories", "", nil); rec.Code != 401 {
 		t.Errorf("without a key: %d", rec.Code)
 	}
+	// Which Overfin answers: any key may ask.
+	if rec := app.do("GET", "/apps/v1/server", "", auth); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"version"`) {
+		t.Errorf("server: %d %s", rec.Code, rec.Body)
+	}
+	if rec := app.do("GET", "/apps/v1/server", "", nil); rec.Code != 401 {
+		t.Errorf("server without a key: %d", rec.Code)
+	}
 
 	rec = app.do("GET", "/apps/v1/titles?list=suggestions", "", auth)
 	var page struct {

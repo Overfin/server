@@ -27,3 +27,12 @@ func (p *Panel) appCategories(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"categories": out})
 }
+
+// appServer (GET /apps/v1/server, any key) says which Overfin answers: its
+// version, for an app's page about the services it uses (Overtide's).
+func (p *Panel) appServer(w http.ResponseWriter, r *http.Request) {
+	if p.appKey(w, r, "") == nil {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"version": p.Version})
+}

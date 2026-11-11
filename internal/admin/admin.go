@@ -116,6 +116,8 @@ type Modules interface {
 
 // Panel serves the control panel.
 type Panel struct {
+	// Version is this Overfin's, as apps read it (GET /apps/v1/server).
+	Version  string
 	Features Features
 	// Jellyfin, when set, shows and changes how Overfin reaches Jellyfin.
 	Jellyfin Jellyfin
@@ -347,6 +349,7 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("GET /apps/v1/watch-stats", p.watchStats)
 	mux.HandleFunc("GET /apps/v1/titles", p.appTitles)
 	mux.HandleFunc("GET /apps/v1/history", p.appHistory)
+	mux.HandleFunc("GET /apps/v1/server", p.appServer)
 	mux.HandleFunc("GET /apps/v1/categories", p.appCategories)
 	mux.HandleFunc("GET /apps/v1/episode-orders", p.appEpisodeOrders)
 	mux.HandleFunc("GET /apps/v1/wishes", p.appWishes)

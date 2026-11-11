@@ -506,6 +506,35 @@ paths:
               schema:
                 $ref: "#/components/schemas/AppError"
 
+  /apps/v1/server:
+    get:
+      operationId: appServer
+      summary: Which Overfin answers
+      description: |
+        This Overfin's version, for an app's page about the services it
+        uses. Any key may read it.
+      tags: [apps]
+      security:
+        - appKey: []
+      responses:
+        "200":
+          description: The server.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version]
+                properties:
+                  version:
+                    type: string
+                    description: As its releases name it, e.g. "0.9.0" or "v0.9.0-122-g595dce0".
+        "401":
+          description: No key, or a key that doesn't work.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+
   /apps/v1/categories:
     get:
       operationId: appCategories

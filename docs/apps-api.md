@@ -8,7 +8,7 @@ libraries**), **what came and went** (when each film and season arrived
 in the libraries and left them), **wishes to fetch** (what people wished
 for, in Overfin's turns, for the app that fetches them: `/apps/v1/wishes` in
 [api/apps.yaml](../api/apps.yaml)), and **categories and episode orders**
-(`/apps/v1/categories` and `/apps/v1/episode-orders`, below). Totals per title only, never anything per person; counts
+(`/apps/v1/categories` and `/apps/v1/episode-orders`, below). Any key may also ask which Overfin answers (`/apps/v1/server`: its version). Totals per title only, never anything per person; counts
 below 2 are given as 0, and so are plays and favorites when fewer than two
 people account for them, so none points at one person. Apps ask the control
 panel's address (the site's, or its own private listener when you gave it
