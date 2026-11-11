@@ -373,3 +373,26 @@ func TestPeerListing(t *testing.T) {
 		t.Fatalf("%d titles left of a library no longer wanted", left)
 	}
 }
+
+// Addresses kept before they were normalized are, as the other side and
+// browsers now write them.
+func TestPeerAddressesNormalized(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	key := make([]byte, 32)
+	key[0] = 9
+	p, err := s.AddPeer(ctx, key, "https://Films.Example.org:443", "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlText, err := migrations.ReadFile("migrations/100_peer_addresses.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, string(sqlText)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.PeerByID(ctx, p.ID); got.Address != "https://films.example.org" {
+		t.Errorf("address: %q", got.Address)
+	}
+}

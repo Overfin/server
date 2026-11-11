@@ -268,7 +268,7 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 		api.Account{Sessions: sessions, Provisioner: prov, Logger: logger, Mounts: mounts,
 			Images: sh.images, PINs: checker,
 			// With Overfin's own sign-in, newcomers name their profile first.
-			AskFirst: managed != nil},
+			AskFirst: managed != nil, EndPlaybacks: pb.EndWhere},
 		api.Profiles{Sessions: sessions, Provisioner: prov, Store: db, Service: sh.service,
 			PINs: checker, Images: sh.images, LogoutURL: cfg.Identity.LogoutURL, Logger: logger,
 			EndPlaybacks: pb.EndWhere},

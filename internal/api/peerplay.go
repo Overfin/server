@@ -205,7 +205,7 @@ func origin(address string) string {
 	if err != nil {
 		return ""
 	}
-	return u.Scheme + "://" + u.Host
+	return federation.Origin(u.Scheme + "://" + u.Host) // as browsers write it
 }
 
 // A title this server's people play from a paired server: no copy here

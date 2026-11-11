@@ -143,11 +143,13 @@ func (a Access) itemAllowed(table string) (string, []any) {
 		}
 		// Nor one whose keywords aren't known yet (its TMDB page not
 		// fetched yet, a just-added film): hidden until they are, as titles
-		// no library has are (TitlesTagFree). A file TMDB doesn't identify
-		// has no keywords to hide it by, and stays.
+		// no library has are (TitlesTagFree). A file TMDB doesn't identify,
+		// or whose page TMDB no longer has (asked, and nothing kept), has no
+		// keywords to hide it by, and stays.
 		conds = append(conds, `NOT EXISTS (SELECT 1 FROM catalog_items s
 			WHERE s.id IN (`+table+`.id, coalesce(`+table+`.series_id, '')) AND s.kind IN ('movie', 'series') AND s.tmdb IS NOT NULL
-			AND NOT EXISTS (SELECT 1 FROM catalog_titles t WHERE t.kind = s.kind AND t.tmdb = s.tmdb AND t.details_at IS NOT NULL))`)
+			AND NOT EXISTS (SELECT 1 FROM catalog_titles t WHERE t.kind = s.kind AND t.tmdb = s.tmdb AND t.details_at IS NOT NULL)
+			AND NOT EXISTS (SELECT 1 FROM artwork_fetched f WHERE f.key = s.kind || '/tmdb/' || s.tmdb))`)
 		// A paired server's film or series, as listings give it
 		// (listedRows): by its own, known.
 		conds = append(conds, `(`+table+`.id NOT GLOB '`+PeerItemPrefix+`*'

@@ -188,6 +188,14 @@ func TestAccessAndListings(t *testing.T) {
 	if got := list(ListQuery{Access: &Access{BlockedTags: []string{"HORROR"}}}); !slices.Equal(got, []string{id(0), id(5), id(6), id(7)}) {
 		t.Errorf("horror hidden, the new film's keywords known: %v", got)
 	}
+	// One TMDB no longer has: asked, nothing kept; it stays visible.
+	s.PutCatalog(ctx, []CatalogItem{{ID: id(8), Kind: "movie", Name: "Gone", SortName: "i", TMDB: "8", LibraryID: "films"}}, 1)
+	if err := s.SetArtwork(ctx, ArtworkTarget{Kind: "movie", TMDB: "8"}, nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if got := list(ListQuery{Access: &Access{BlockedTags: []string{"HORROR"}}}); !slices.Contains(got, id(8)) {
+		t.Errorf("one TMDB doesn't know: %v", got)
+	}
 }
 
 // The watched, not watched and in progress filters, for seasons as for

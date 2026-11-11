@@ -223,7 +223,11 @@ func (p *Panel) changeAccount(w http.ResponseWriter, r *http.Request, s *session
 		}
 		p.accessChanged()
 	}
-	if c.TemplateID != nil || (c.Disabled != nil && *c.Disabled) || (c.ExpiresAt != nil && !expires.IsZero() && !expires.After(time.Now())) {
+	// Its playbacks end when it may no longer play them: on another
+	// template, disabled, or expired. The form sends the template it has,
+	// changed or not.
+	otherTemplate := c.TemplateID != nil && *c.TemplateID != a.Template.ID
+	if otherTemplate || (c.Disabled != nil && *c.Disabled) || (c.ExpiresAt != nil && !expires.IsZero() && !expires.After(time.Now())) {
 		p.endPlaybacksOf(a.ID, "")
 	}
 	if err != nil {

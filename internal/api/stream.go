@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/overfin/server/internal/jellyfin"
@@ -226,27 +227,23 @@ func (s Stream) proxy(w http.ResponseWriter, r *http.Request, st *playback.Strea
 	w.WriteHeader(res.StatusCode)
 	// io.Copy streams in small chunks: memory stays flat however long the
 	// film. If the client goes away, or the playback ends, the context ends
-	// the upstream read too. While it flows, the playback is in use: a
-	// paired server's viewer sends no progress here, and a film played
-	// straight is often one long download.
-	_, _ = io.Copy(&touching{w: w, tickets: s.Playback.Tickets, st: st}, res.Body)
-}
-
-// touching is a response writer that notes its playback in use, at most
-// every half minute, as the bytes go.
-type touching struct {
-	w       io.Writer
-	tickets *playback.Tickets
-	st      *playback.Stream
-	last    time.Time
-}
-
-func (t *touching) Write(b []byte) (int, error) {
-	if now := time.Now(); now.Sub(t.last) > 30*time.Second {
-		t.last = now
-		t.tickets.Touch(t.st, now)
-	}
-	return t.w.Write(b)
+	// the upstream read too. While the response is open, flowing or held
+	// (a paused player with its buffer full reads nothing), the playback is
+	// in use: a paired server's viewer sends no progress here, and a film
+	// played straight is often one long download.
+	go func() {
+		tick := time.NewTicker(30 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case now := <-tick.C:
+				s.Playback.Tickets.Touch(st, now)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	_, _ = io.Copy(w, res.Body)
 }
 
 // mediaType keeps an upstream content type only when it is audio or video;
@@ -263,7 +260,8 @@ func mediaType(ct string) string {
 // subtitleReads bounds how many subtitle tracks are held in memory at
 // once: each is read whole before it is checked (a PGS track may be up to
 // playback.MaxPGS), so many asked together could otherwise take hundreds
-// of megabytes. A read waits for a slot as long as its request lasts.
+// of megabytes. A read waits for a slot as long as its request lasts; the
+// slot is freed once the track is checked, before it's sent.
 var subtitleReads = make(chan struct{}, 4)
 
 // subtitleSlot takes a slot, and gives the function that frees it; false
@@ -303,6 +301,7 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	free = sync.OnceFunc(free)
 	defer free()
 	body, err := l.Jellyfin.ReadSubtitles(r.Context(), *a, path, maxSubtitles)
 	if err != nil {
@@ -315,6 +314,7 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
+	free() // checked: the slot is for reading, not for the client's pace
 	w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
 	w.Header().Set("Content-Length", strconv.Itoa(len(vtt)))
 	_, _ = w.Write(vtt)
@@ -349,6 +349,7 @@ func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	free = sync.OnceFunc(free)
 	defer free()
 	body, err := l.Jellyfin.ReadSubtitles(r.Context(), *a, path, playback.MaxPGS)
 	if err != nil {
@@ -360,6 +361,7 @@ func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
+	free() // checked: the slot is for reading, not for the client's pace
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	_, _ = w.Write(body)

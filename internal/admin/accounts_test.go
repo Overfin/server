@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -54,7 +55,10 @@ func signedInPanel(t *testing.T) (*Panel, *browser, *store.Store, *[]string) {
 
 func TestAccounts(t *testing.T) {
 	ctx := context.Background()
-	_, b, db, calls := signedInPanel(t)
+	p, b, db, calls := signedInPanel(t)
+	playing := &fakePlaying{}
+	p.Playing = playing
+	b.h = p.Handler()
 	acct, owner, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", JellyfinUsername: "of-1", JellyfinToken: "t"})
 	_ = db.SetPIN(ctx, acct.ID, owner.ID, []byte("hash"))
 	_ = db.RecordPIN(ctx, owner.ID, 5, time.Now(), time.Now().Add(time.Hour))
@@ -78,6 +82,16 @@ func TestAccounts(t *testing.T) {
 		!strings.Contains(rec.Body.String(), `"name":"Family"`) {
 		t.Fatalf("change: %d %s", rec.Code, rec.Body)
 	}
+	// On another template and expired: its playbacks end. Its label alone,
+	// the form sending the same template: they don't.
+	if !slices.Equal(playing.ended, []string{acct.ID + "/"}) {
+		t.Errorf("ended: %v", playing.ended)
+	}
+	playing.ended = nil
+	if rec := b.do("PATCH", "/admin/api/accounts/"+acct.ID, `{"label":"Bobby","templateId":"`+family.ID+`"}`, nil); rec.Code != 200 || len(playing.ended) != 0 {
+		t.Errorf("label only: %d, ended %v", rec.Code, playing.ended)
+	}
+	b.do("PATCH", "/admin/api/accounts/"+acct.ID, `{"label":"Bob"}`, nil)
 	for _, bad := range []string{`{"label":"<b>x</b>"}`, `{"templateId":"tmpl_nope"}`, `{"expiresAt":"tomorrow"}`, `{"owner":true}`} {
 		if rec := b.do("PATCH", "/admin/api/accounts/"+acct.ID, bad, nil); rec.Code != 400 {
 			t.Errorf("%s: %d", bad, rec.Code)

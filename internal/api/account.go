@@ -38,6 +38,8 @@ type Account struct {
 	// owner names their profile, and may give it a PIN, before it exists.
 	// Otherwise, with nothing else on offer, the first visit makes it.
 	AskFirst bool
+	// EndPlaybacks, when set, stops an account's playbacks as it's deleted.
+	EndPlaybacks func(match func(*playback.Stream) bool)
 }
 
 // Offers says what the server offers that depends on its setup: discovery

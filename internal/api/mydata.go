@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"github.com/overfin/server/internal/playback"
 	"net/http"
 	"time"
 
@@ -40,6 +41,9 @@ func (a Account) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		if a.Images != nil {
 			a.Images.Forget(p.ID)
 		}
+	}
+	if a.EndPlaybacks != nil {
+		a.EndPlaybacks(func(s *playback.Stream) bool { return s.AccountID == c.Account.ID })
 	}
 	clearCookie(w, r)
 	if in := a.Sessions.SignIn; in != nil {
