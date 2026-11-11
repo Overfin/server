@@ -89,10 +89,13 @@
     }
   }
 
-  // While another operator is to accept, the page asks again by itself
-  // (the server checks with the other in the background).
+  // The page asks again by itself every 10 seconds while it's on screen:
+  // another server using a code, the other operator accepting, what they
+  // offer, how many titles came (the server checks with the others in the
+  // background). Open windows keep what's typed in them: only the lists
+  // change.
   const timer = setInterval(() => {
-    if (s?.peers?.some((p) => p.state === 'theirs')) load();
+    if (!document.hidden) load();
   }, 10_000);
   onDestroy(() => clearInterval(timer));
 
