@@ -11,7 +11,9 @@ info:
     per person. Each app has a key an admin made for it in the control
     panel, for the scopes the admin ticked. This API is apart from the
     public API (`openapi.yaml`): its own keys, its own address, and plain
-    JSON errors instead of problem details.
+    JSON errors instead of problem details. Each key may make 120 calls a
+    minute; past them, 429 `rate-limited` with `Retry-After`. Watch
+    statistics are kept a minute: asked again within it, the same.
 
 servers:
   - url: /

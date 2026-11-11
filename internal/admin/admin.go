@@ -203,6 +203,10 @@ type Panel struct {
 	Logger *slog.Logger
 
 	valued measurement
+	// appCalls limits each app key's calls; stats keeps watch statistics
+	// a minute.
+	appCalls appLimiter
+	stats    statsCache
 
 	mu       sync.Mutex
 	sessions map[string]*session // by token hash

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base32"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -138,7 +140,84 @@ func (p *Panel) appKey(w http.ResponseWriter, r *http.Request, scope string) *st
 		p.fail(w, "checking an app key", err)
 		return nil
 	}
+	if !p.appCalls.allow(k.ID, p.clock()) {
+		w.Header().Set("Retry-After", "60")
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"type": "rate-limited"})
+		return nil
+	}
 	return k
+}
+
+// appCallsPerMinute is how many calls an app key may make a minute: far
+// above any app's needs, low enough that a leaked key looping on the
+// heaviest calls (watch statistics, titles TMDB is asked about) can't
+// weigh on the server.
+const appCallsPerMinute = 120
+
+// appLimiter counts each app key's calls, by the minute. Keys are few
+// (an admin makes them), so they're all kept.
+type appLimiter struct {
+	mu   sync.Mutex
+	keys map[string]*appMinute
+}
+
+type appMinute struct {
+	start time.Time
+	calls int
+}
+
+func (l *appLimiter) allow(key string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.keys == nil {
+		l.keys = map[string]*appMinute{}
+	}
+	m := l.keys[key]
+	if m == nil || now.Sub(m.start) >= time.Minute {
+		m = &appMinute{start: now}
+		l.keys[key] = m
+	}
+	if m.calls >= appCallsPerMinute {
+		return false
+	}
+	m.calls++
+	return true
+}
+
+// statsCache keeps watch statistics a minute, by the day asked from: they
+// read every profile's history, and apps ask the same over and over.
+type statsCache struct {
+	mu   sync.Mutex
+	kept map[int64]keptStats
+}
+
+type keptStats struct {
+	at  time.Time
+	all []store.WatchStats
+}
+
+// statsKept is how many days asked from are kept at once.
+const statsKept = 32
+
+func (c *statsCache) get(ctx context.Context, st *store.Store, since, now time.Time) ([]store.WatchStats, error) {
+	key := since.Unix()
+	c.mu.Lock()
+	if k, ok := c.kept[key]; ok && now.Sub(k.at) < time.Minute {
+		c.mu.Unlock()
+		return k.all, nil
+	}
+	c.mu.Unlock()
+	all, err := st.AllWatchStats(ctx, since)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.kept == nil || len(c.kept) >= statsKept {
+		c.kept = map[int64]keptStats{}
+	}
+	c.kept[key] = keptStats{at: now, all: all}
+	return all, nil
 }
 
 type watchStatsJSON struct {
@@ -175,7 +254,7 @@ func (p *Panel) watchStats(w http.ResponseWriter, r *http.Request) {
 		since = dayOf(since)
 	}
 	now := p.clock()
-	all, err := p.Store.AllWatchStats(r.Context(), since)
+	all, err := p.stats.get(r.Context(), p.Store, since, now)
 	if err != nil {
 		p.fail(w, "reading watch statistics", err)
 		return

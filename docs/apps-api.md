@@ -12,7 +12,8 @@ for, in Overfin's turns, for the app that fetches them: `/apps/v1/wishes` in
 below 2 are given as 0, and so are plays and favorites when fewer than two
 people account for them, so none points at one person. Apps ask the control
 panel's address (the site's, or its own private listener when you gave it
-one):
+one). Each key may make 120 calls a minute, and watch statistics are kept
+a minute:
 
 ```
 GET /apps/v1/titles?inLibrary=true&sort=score&order=asc&limit=100

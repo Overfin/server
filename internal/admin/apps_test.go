@@ -14,7 +14,7 @@ import (
 // per title, nothing per person; revoked, it's refused.
 func TestApps(t *testing.T) {
 	ctx := context.Background()
-	_, b, db, _ := signedInPanel(t)
+	p, b, db, _ := signedInPanel(t)
 	acct, prof, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", JellyfinUsername: "of-1", JellyfinToken: "t"})
 	db.PutCatalog(ctx, []store.CatalogItem{{ID: strings.Repeat("0", 31) + "a", Kind: "movie", Name: "Heat", SortName: "h", TMDB: "949", IMDb: "tt0113277"}}, 1)
 	db.RefreshTitleKeys(ctx)
@@ -57,6 +57,12 @@ func TestApps(t *testing.T) {
 	// as 0.
 	_, prof2, _ := db.CreateAccount(ctx, "person-2", store.NewOwner{Name: "Other", JellyfinUserID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", JellyfinUsername: "of-2", JellyfinToken: "t"})
 	db.RecordPlay(ctx, prof2.ID, "movie/tmdb/949", "", 0, true, time.Date(2026, 10, 19, 21, 0, 0, 0, time.UTC))
+	// Statistics are kept a minute: asked again at once, the same.
+	if rec := app.do("GET", "/apps/v1/watch-stats", "", map[string]string{"Authorization": "Bearer " + made.Key}); !strings.Contains(rec.Body.String(), `"titles":[]`) {
+		t.Errorf("stats within the minute: %s", rec.Body)
+	}
+	later := time.Now().Add(61 * time.Second)
+	p.now = func() time.Time { return later }
 	rec = app.do("GET", "/apps/v1/watch-stats", "", map[string]string{"Authorization": "Bearer " + made.Key})
 	stats.Titles = nil
 	json.Unmarshal(rec.Body.Bytes(), &stats)
@@ -96,5 +102,25 @@ func TestApps(t *testing.T) {
 	}
 	if rec := b.do("POST", "/admin/api/apps", `{"name":"x","scope":"everything"}`, nil); rec.Code != 400 {
 		t.Errorf("unknown scope: %d", rec.Code)
+	}
+}
+
+// Each app key has its own calls a minute; the next minute starts again.
+func TestAppLimiter(t *testing.T) {
+	var l appLimiter
+	now := time.Now()
+	for i := range appCallsPerMinute {
+		if !l.allow("a", now) {
+			t.Fatalf("call %d refused", i)
+		}
+	}
+	if l.allow("a", now) {
+		t.Error("one call too many")
+	}
+	if !l.allow("b", now) {
+		t.Error("another key refused")
+	}
+	if !l.allow("a", now.Add(time.Minute)) {
+		t.Error("the next minute refused")
 	}
 }
