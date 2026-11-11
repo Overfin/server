@@ -285,6 +285,13 @@ func ownSettings(ctx context.Context, db *store.Store, url, key string, logger *
 	if err != nil {
 		return
 	}
+	// Access to Jellyfin itself left open (opened in the panel, or a close
+	// that failed): said at every start. Overfin can't tell which, so it
+	// doesn't close it by itself.
+	if open, since, err := db.JellyfinAccess(ctx); err == nil && open {
+		logger.Warn("access to Jellyfin itself is open; close it in the control panel when it's no longer needed (SECURITY.md rule 67)",
+			"since", since.Format(time.RFC3339))
+	}
 	family, device, err := db.Transcoding(ctx)
 	if err != nil {
 		logger.Warn("the GPU chosen can't be read", "err", err)
