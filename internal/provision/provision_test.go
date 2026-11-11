@@ -456,11 +456,11 @@ func TestServicePolicyHolds(t *testing.T) {
 	raw, _ := json.Marshal(policy)
 	var fromJellyfin jellyfin.Policy
 	json.Unmarshal(raw, &fromJellyfin)
-	if same, err := policyHolds(fromJellyfin); err != nil || !same {
-		t.Fatalf("as set: %v %v", same, err)
+	if differ, err := policyDiffers(fromJellyfin); err != nil || len(differ) != 0 {
+		t.Fatalf("as set: %v %v", differ, err)
 	}
 	fromJellyfin["IsAdministrator"] = true
-	if same, _ := policyHolds(fromJellyfin); same {
-		t.Error("an administrator holds")
+	if differ, _ := policyDiffers(fromJellyfin); len(differ) != 1 || differ[0] != "IsAdministrator" {
+		t.Errorf("an administrator: %v", differ)
 	}
 }

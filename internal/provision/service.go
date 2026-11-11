@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
+	"sort"
 	"sync"
 
 	"github.com/overfin/server/internal/jellyfin"
@@ -171,30 +172,37 @@ func servicePolicy(policy jellyfin.Policy) {
 	policy["RemoteClientBitrateLimit"] = 0
 }
 
-// policyHolds says whether policy, as Jellyfin gives it, already is the
-// service account's: compared as JSON, as Jellyfin reads it.
-func policyHolds(policy jellyfin.Policy) (bool, error) {
+// policyDiffers lists the settings of policy, as Jellyfin gives it, that
+// aren't the service account's: compared as JSON, as Jellyfin reads it.
+// None: the policy holds.
+func policyDiffers(policy jellyfin.Policy) ([]string, error) {
 	raw, err := json.Marshal(policy)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	var have, want map[string]any
 	if err := json.Unmarshal(raw, &have); err != nil {
-		return false, err
+		return nil, err
 	}
 	wanted := jellyfin.Policy{}
 	if err := json.Unmarshal(raw, &wanted); err != nil {
-		return false, err
+		return nil, err
 	}
 	servicePolicy(wanted)
-	raw, err = json.Marshal(wanted)
-	if err != nil {
-		return false, err
+	if raw, err = json.Marshal(wanted); err != nil {
+		return nil, err
 	}
 	if err := json.Unmarshal(raw, &want); err != nil {
-		return false, err
+		return nil, err
 	}
-	return reflect.DeepEqual(have, want), nil
+	var differ []string
+	for k, v := range want {
+		if !reflect.DeepEqual(have[k], v) {
+			differ = append(differ, k)
+		}
+	}
+	sort.Strings(differ)
+	return differ, nil
 }
 
 // ensurePolicy gives an existing account the current policy (one made
@@ -208,13 +216,14 @@ func (s *Service) ensurePolicy(ctx context.Context) error {
 	}
 	// Every setting of its policy, as Overfin sets it: one changed in
 	// Jellyfin (made an administrator, say) is set back (rule 67).
-	if same, err := policyHolds(policy); err != nil || same {
+	differ, err := policyDiffers(policy)
+	if err != nil || len(differ) == 0 {
 		return err
 	}
 	servicePolicy(policy)
 	if err := p.Jellyfin.SetUserPolicy(ctx, admin, s.account.UserID, policy); err != nil {
 		return err
 	}
-	p.Logger.Info("the Jellyfin service account's policy was set back")
+	p.Logger.Info("the Jellyfin service account's policy was set back", "settings", differ)
 	return nil
 }
