@@ -365,11 +365,16 @@ func stateOf(s store.Personal) *library.UserState {
 // describe makes sure TMDB's data for a title is kept, fetching what's
 // missing now: a title no library has, or a season no one browsed yet.
 // When TMDB can't answer, what's kept is shown.
-func (l Library) describe(ctx context.Context, r store.TitleRef) {
+//
+// Each account asks TMDB at most Lookups' number a minute (a title or a
+// season not kept yet): someone asking made-up IDs can't have this server
+// flood TMDB. Past it, the page shows what's kept.
+func (l Library) describe(ctx context.Context, account string, r store.TitleRef) {
 	tmdbID := r.TMDB()
 	if l.Titles == nil || tmdbID == "" {
 		return
 	}
+	asks := func() bool { return l.Lookups == nil || l.Lookups.allow(account, time.Now()) }
 	st := l.Provisioner.Store
 	kind := r.Kind
 	if kind != "movie" {
@@ -377,12 +382,18 @@ func (l Library) describe(ctx context.Context, r store.TitleRef) {
 	}
 	t, err := st.TitleByTMDB(ctx, kind, tmdbID)
 	if err == nil && (t == nil || len(t.Details) == 0) {
+		if !asks() {
+			return
+		}
 		err = l.Titles.FetchTitle(ctx, kind, tmdbID)
 	}
 	// An episode by ID is of a season kept already.
 	if err == nil && (r.Kind == "season" || (r.Kind == "episode" && r.EpisodeID == 0)) {
 		var se *store.Season
 		if se, err = st.SeasonByTMDB(ctx, tmdbID, r.Season); err == nil && se == nil {
+			if !asks() {
+				return
+			}
 			err = l.Titles.FetchSeason(ctx, tmdbID, r.Season)
 		}
 	}
@@ -432,7 +443,7 @@ func (l Library) title(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	l.describe(ctx, ref)
+	l.describe(ctx, p.AccountID, ref)
 	l.textless(ctx, ref)
 	st := l.Provisioner.Store
 	key := ref.Key()

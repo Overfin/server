@@ -179,7 +179,7 @@ func (wl Wishes) add(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.WishesOff, "")
 		return
 	}
-	l.describe(ctx, ref)
+	l.describe(ctx, c.Profile.AccountID, ref)
 	t, ok := l.visibleTitleRef(w, ctx, c.Profile, ref)
 	if !ok {
 		return
@@ -191,7 +191,7 @@ func (wl Wishes) add(w http.ResponseWriter, r *http.Request) {
 	keys := []string{ref.Key()}
 	if ref.Kind == "series" {
 		var err error
-		if keys, err = wl.missingSeasons(ctx, ref, t); err != nil {
+		if keys, err = wl.missingSeasons(ctx, c.Profile.AccountID, ref, t); err != nil {
 			l.storeError(w, err)
 			return
 		}
@@ -220,7 +220,7 @@ func (wl Wishes) add(w http.ResponseWriter, r *http.Request) {
 // missingSeasons are a series' seasons out now (specials aside) that no
 // library has whole, in order: their pages are read first, so their
 // episodes are counted.
-func (wl Wishes) missingSeasons(ctx context.Context, series store.TitleRef, t *store.TitleInfo) ([]string, error) {
+func (wl Wishes) missingSeasons(ctx context.Context, account string, series store.TitleRef, t *store.TitleInfo) ([]string, error) {
 	l := wl.Library
 	now := today()
 	var keys []string
@@ -229,7 +229,7 @@ func (wl Wishes) missingSeasons(ctx context.Context, series store.TitleRef, t *s
 			continue
 		}
 		season := store.TitleRef{Kind: "season", Source: series.Source, ID: series.ID, Season: se.Number}
-		l.describe(ctx, season)
+		l.describe(ctx, account, season)
 		keys = append(keys, season.Key())
 	}
 	infos, err := l.Provisioner.Store.TitleInfos(ctx, keys, now, "")

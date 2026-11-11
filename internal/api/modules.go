@@ -244,7 +244,7 @@ func (b profileBackend) Title(ctx context.Context, id string) (feature.Title, er
 	if !ok {
 		return feature.Title{}, feature.ErrNotFound
 	}
-	b.l.describe(ctx, ref)
+	b.l.describe(ctx, b.p.AccountID, ref)
 	got, err := b.l.titleSummaries(ctx, b.p, []string{ref.Key()})
 	if err != nil {
 		return feature.Title{}, err

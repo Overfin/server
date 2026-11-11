@@ -641,7 +641,10 @@ func newShared(cfg *config.Config, db *store.Store, moduleDBs map[string]*sql.DB
 	sh := &shared{logger: logger, db: db, moduleDBs: moduleDBs, keys: k, jf: jf,
 		images: art, tickets: playback.NewTickets(24 * time.Hour), folders: api.NewFolderCache(),
 		searches: &api.AccountLimiter{PerMinute: 30},
-		service:  &provision.Service{},
+		// TMDB asked about titles not kept yet, per account: far above
+		// browsing, and a series wished whole fits.
+		lookups: &api.AccountLimiter{PerMinute: 120},
+		service: &provision.Service{},
 		// Emails, with the operator's own templates next to the database.
 		emails: &emails.Writer{Dir: filepath.Join(filepath.Dir(cfg.Storage.Path), "mail-templates"), Store: db, Logger: logger},
 		proof:  &proof.Checker{Key: k.Proof}}

@@ -52,6 +52,9 @@ type Library struct {
 	Texts *catalog.Texts
 	// Searches, when set, limits how often each account searches.
 	Searches *AccountLimiter
+	// Lookups limits what each account has TMDB asked about titles not
+	// kept yet (describe); nil: no limit.
+	Lookups *AccountLimiter
 }
 
 func (Library) Name() string { return "library" }

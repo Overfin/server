@@ -96,6 +96,7 @@ type shared struct {
 	texts *catalog.Texts
 	// searches limits searches per account, across reloads.
 	searches *api.AccountLimiter
+	lookups  *api.AccountLimiter
 	// directory is the identity provider's connector, when configured:
 	// who the people behind accounts are, kept briefly in memory.
 	directory *connector.Cache
@@ -223,7 +224,7 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 		checker.UnlockAfter = 15 * time.Minute
 	}
 	lib := api.Library{Sessions: sessions, Provisioner: prov, Jellyfin: sh.jf, Images: sh.images, CursorKey: k.Cursor,
-		Folders: sh.folders, Service: sh.service, Titles: sh.titles, Texts: sh.texts, Searches: sh.searches, Logger: logger}
+		Folders: sh.folders, Service: sh.service, Titles: sh.titles, Texts: sh.texts, Searches: sh.searches, Lookups: sh.lookups, Logger: logger}
 	// Discovery, when there's a source for TMDB's data.
 	var disc *api.Discovery
 	if sh.source() != nil {
