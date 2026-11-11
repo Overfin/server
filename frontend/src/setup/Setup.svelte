@@ -142,7 +142,14 @@
   // The steps' Next: what each saves. It returns true to move on, 'stay'
   // when its answer is worth reading first.
   const actions: Record<string, () => Promise<boolean | 'stay'>> = {
-    code: async () => (await post('code')) !== null,
+    code: async () => {
+      // Jellyfin's address, when the configuration fixes it, comes with
+      // the right code.
+      const ans: { fixedUrl?: string } | null = await post('code');
+      if (ans === null) return false;
+      setup.fixedUrl = ans.fixedUrl || '';
+      return true;
+    },
     language: async () => (await post('language', { language })) !== null,
     jellyfin: async () => {
       const ans: JellyfinAnswer | null = await post('jellyfin', {

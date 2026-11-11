@@ -178,8 +178,9 @@ func TestSearchEditedNames(t *testing.T) {
 func keywordsOf(t testing.TB, s *Store, kind, tmdb string, words ...string) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO catalog_titles (kind, tmdb, name, overview, status, seen_at)
-		VALUES (?, ?, ?, '', 0, ?)`, kind, tmdb, tmdb, time.Now().Unix()); err != nil {
+	// Its page fetched: its keywords are known (none, if words are none).
+	if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO catalog_titles (kind, tmdb, name, overview, status, seen_at, details_at)
+		VALUES (?, ?, ?, '', 0, ?, ?)`, kind, tmdb, tmdb, time.Now().Unix(), time.Now().Unix()); err != nil {
 		t.Fatal(err)
 	}
 	for _, w := range words {

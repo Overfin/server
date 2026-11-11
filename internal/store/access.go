@@ -141,11 +141,19 @@ func (a Access) itemAllowed(table string) (string, []any) {
 		for _, t := range a.BlockedTags {
 			args = append(args, FoldTag(t))
 		}
+		// Nor one whose keywords aren't known yet (its TMDB page not
+		// fetched yet, a just-added film): hidden until they are, as titles
+		// no library has are (TitlesTagFree). A file TMDB doesn't identify
+		// has no keywords to hide it by, and stays.
+		conds = append(conds, `NOT EXISTS (SELECT 1 FROM catalog_items s
+			WHERE s.id IN (`+table+`.id, coalesce(`+table+`.series_id, '')) AND s.kind IN ('movie', 'series') AND s.tmdb IS NOT NULL
+			AND NOT EXISTS (SELECT 1 FROM catalog_titles t WHERE t.kind = s.kind AND t.tmdb = s.tmdb AND t.details_at IS NOT NULL))`)
 		// A paired server's film or series, as listings give it
-		// (listedRows): by its own.
+		// (listedRows): by its own, known.
 		conds = append(conds, `(`+table+`.id NOT GLOB '`+PeerItemPrefix+`*'
-			OR NOT EXISTS (SELECT 1 FROM catalog_title_keywords k WHERE k.kind = `+table+`.kind AND k.tmdb = `+table+`.tmdb
-				AND k.folded IN (`+marks(len(a.BlockedTags))+`)))`)
+			OR (EXISTS (SELECT 1 FROM catalog_titles t WHERE t.kind = `+table+`.kind AND t.tmdb = `+table+`.tmdb AND t.details_at IS NOT NULL)
+				AND NOT EXISTS (SELECT 1 FROM catalog_title_keywords k WHERE k.kind = `+table+`.kind AND k.tmdb = `+table+`.tmdb
+				AND k.folded IN (`+marks(len(a.BlockedTags))+`))))`)
 		for _, t := range a.BlockedTags {
 			args = append(args, FoldTag(t))
 		}

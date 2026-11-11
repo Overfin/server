@@ -358,6 +358,19 @@ func (t *Tickets) remove(s *Stream, reason, by string, now time.Time) bool {
 	return true
 }
 
+// Where lists the playbacks match keeps.
+func (t *Tickets) Where(match func(*Stream) bool) []*Stream {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var out []*Stream
+	for _, s := range t.byID {
+		if match(s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // ForAccount lists an account's playbacks, oldest first.
 func (t *Tickets) ForAccount(accountID string) []*Stream {
 	t.mu.Lock()

@@ -84,6 +84,14 @@ func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream
 		a := st.Auth
 		return st, &a
 	}
+	// This server's own viewers ask from its own site: a request another
+	// site starts (a link, an embedded video) goes no further, so it never
+	// starts a session or replaces the cookie (media routes are let through
+	// for paired servers' viewers).
+	if site := r.Header.Get("Sec-Fetch-Site"); site == "cross-site" || site == "same-site" {
+		problem.Send(w, problem.NotFound, "")
+		return nil, nil
+	}
 	l := s.Playback.Library
 	c := l.Sessions.Current(w, r)
 	if c == nil {
@@ -252,6 +260,23 @@ func mediaType(ct string) string {
 	return "application/octet-stream"
 }
 
+// subtitleReads bounds how many subtitle tracks are held in memory at
+// once: each is read whole before it is checked (a PGS track may be up to
+// playback.MaxPGS), so many asked together could otherwise take hundreds
+// of megabytes. A read waits for a slot as long as its request lasts.
+var subtitleReads = make(chan struct{}, 4)
+
+// subtitleSlot takes a slot, and gives the function that frees it; false
+// when the request ended while waiting.
+func subtitleSlot(r *http.Request) (func(), bool) {
+	select {
+	case subtitleReads <- struct{}{}:
+		return func() { <-subtitleReads }, true
+	case <-r.Context().Done():
+		return nil, false
+	}
+}
+
 // subtitles serves one text subtitle track as sanitized WebVTT.
 func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 	track := r.PathValue("track")
@@ -274,6 +299,11 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 	}
 	l := s.Playback.Library
 	path := "/Videos/" + st.ItemID + "/" + st.SourceID + "/Subtitles/" + strconv.Itoa(index) + "/Stream.vtt"
+	free, ok := subtitleSlot(r)
+	if !ok {
+		return
+	}
+	defer free()
 	body, err := l.Jellyfin.ReadSubtitles(r.Context(), *a, path, maxSubtitles)
 	if err != nil {
 		l.upstreamError(w, err)
@@ -315,6 +345,11 @@ func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
 	}
 	l := s.Playback.Library
 	path := "/Videos/" + st.ItemID + "/" + st.SourceID + "/Subtitles/" + strconv.Itoa(index) + "/Stream.pgssub"
+	free, ok := subtitleSlot(r)
+	if !ok {
+		return
+	}
+	defer free()
 	body, err := l.Jellyfin.ReadSubtitles(r.Context(), *a, path, playback.MaxPGS)
 	if err != nil {
 		l.upstreamError(w, err)

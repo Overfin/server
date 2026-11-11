@@ -128,22 +128,55 @@ func (s *Sender) SendMessage(ctx context.Context, to string, m Message) error {
 		}
 	}
 	if err := c.Mail(from.Address); err != nil {
-		return fmt.Errorf("mail: %w", err)
+		return refused("the sender", err)
 	}
 	if err := c.Rcpt(rcpt.Address); err != nil {
-		return fmt.Errorf("mail: %w", err)
+		return refused("the recipient", err)
 	}
 	w, err := c.Data()
 	if err != nil {
-		return fmt.Errorf("mail: %w", err)
+		return refused("the message", err)
 	}
 	if _, err := w.Write(msg); err != nil {
-		return fmt.Errorf("mail: %w", err)
+		return refused("the message", err)
 	}
 	if err := w.Close(); err != nil {
-		return fmt.Errorf("mail: %w", err)
+		return refused("the message", err)
 	}
 	return c.Quit()
+}
+
+// Refused is an SMTP server's refusal. Its Error gives only the reply's
+// code: servers' replies often repeat the address ("550 <bob@…>: user
+// unknown"), and errors reach the log, where addresses never go (rule 54).
+// Reply keeps the whole answer for an administrator to read (Detail).
+type Refused struct {
+	What  string // what was refused: the sender, the recipient, the message
+	Code  int
+	Reply string
+}
+
+func (e *Refused) Error() string {
+	return fmt.Sprintf("mail: the SMTP server refused %s (%d)", e.What, e.Code)
+}
+
+// refused keeps an SMTP server's reply out of the error's text.
+func refused(what string, err error) error {
+	var te *textproto.Error
+	if errors.As(err, &te) {
+		return &Refused{What: what, Code: te.Code, Reply: te.Error()}
+	}
+	return fmt.Errorf("mail: %w", err)
+}
+
+// Detail is an error with an SMTP server's whole reply, for an
+// administrator, never for the log.
+func Detail(err error) string {
+	var r *Refused
+	if errors.As(err, &r) {
+		return r.Reply
+	}
+	return err.Error()
 }
 
 // message is the email's headers and body: plain text alone, or text and

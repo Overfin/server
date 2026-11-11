@@ -56,6 +56,7 @@ func TestHiddenTagAnyCase(t *testing.T) {
 	}, 1)
 	keywordsOf(t, s, "movie", "1", "épouvante")
 	keywordsOf(t, s, "movie", "2", "Épouvante")
+	keywordsOf(t, s, "movie", "3")
 	if err := s.RefreshTitleKeys(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +92,8 @@ func TestAccessAndListings(t *testing.T) {
 	}, 1)
 	keywordsOf(t, s, "movie", "2", "Horror")
 	keywordsOf(t, s, "series", "3", "horror")
+	keywordsOf(t, s, "movie", "1")
+	keywordsOf(t, s, "series", "4")
 	if err := s.RefreshTitleKeys(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -171,6 +174,19 @@ func TestAccessAndListings(t *testing.T) {
 	s.SetProfileAccess(ctx, acct.ID, prof.ID, nil, nil)
 	if p, _ := s.Profile(ctx, acct.ID, prof.ID); p.Libraries != nil || AccessOf(p) != nil {
 		t.Errorf("cleared: %+v", p)
+	}
+	// A film just added, its keywords not known yet: hidden from that
+	// profile until they are; a file TMDB doesn't identify stays.
+	s.PutCatalog(ctx, []CatalogItem{
+		{ID: id(6), Kind: "movie", Name: "New", SortName: "g", TMDB: "6", LibraryID: "films"},
+		{ID: id(7), Kind: "movie", Name: "Home video", SortName: "h", LibraryID: "films"},
+	}, 1)
+	if got := list(ListQuery{Access: &Access{BlockedTags: []string{"HORROR"}}}); !slices.Equal(got, []string{id(0), id(5), id(7)}) {
+		t.Errorf("horror hidden, with a new film: %v", got)
+	}
+	keywordsOf(t, s, "movie", "6")
+	if got := list(ListQuery{Access: &Access{BlockedTags: []string{"HORROR"}}}); !slices.Equal(got, []string{id(0), id(5), id(6), id(7)}) {
+		t.Errorf("horror hidden, the new film's keywords known: %v", got)
 	}
 }
 

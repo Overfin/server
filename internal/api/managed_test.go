@@ -247,6 +247,20 @@ func TestManagedRegistration(t *testing.T) {
 	if c, _ := signinPost(t, other, srv, "/api/v1/signin/verify", map[string]any{"link": token}); c != 401 {
 		t.Errorf("the link twice: %d", c)
 	}
+	// Signed in, but not "fresh": no password was typed (rule 21).
+	u, _ := url.Parse(srv.URL)
+	found := false
+	for _, ck := range other.Jar.Cookies(u) {
+		if strings.Contains(ck.Name, api.LoginCookie) {
+			found = true
+			if l, err := st.LoginByToken(context.Background(), ck.Value); err != nil || !l.Fresh.IsZero() {
+				t.Errorf("the login: %v %+v", err, l)
+			}
+		}
+	}
+	if !found {
+		t.Error("no login cookie")
+	}
 	req, _ := http.NewRequest("POST", srv.URL+"/api/v1/me", strings.NewReader("{}"))
 	req.Header.Set("Content-Type", "application/json")
 	resMe, err := other.Do(req)
@@ -1172,5 +1186,32 @@ func TestConfirmAddressPage(t *testing.T) {
 	// The sign-in itself no longer carries a confirming form.
 	if _, body := openPage(t, b, srv, "/signin"); strings.Contains(body, `id="verify"`) {
 		t.Error("the sign-in page still confirms addresses")
+	}
+}
+
+// Someone guessing an email's password from many addresses can lock its
+// sign-in for a while, but not its person's confirming it's them where
+// they're signed in already: that counts for their login alone.
+func TestStepUpNotLockedByOthersGuesses(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{managed: true, store: &st})
+	ctx := context.Background()
+	ann, _ := st.CreateUser(ctx, "ann@example.org", false)
+	hash, _ := password.Hash("a long password 1")
+	st.SetPassword(ctx, ann.Subject, hash)
+	b := newBrowser(srv)
+	if c, out := signinPost(t, b, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "ann@example.org", "password": "a long password 1"})); c != 200 {
+		t.Fatalf("signing in: %d %v", c, out)
+	}
+	for i := range 100 {
+		signinPostFrom(t, newBrowser(srv), srv, "/api/v1/signin",
+			checked(t, srv, map[string]any{"email": "ann@example.org", "password": "a wrong one"}), fmt.Sprintf("192.0.2.%d", 10+i/10))
+	}
+	if c, _ := signinPostFrom(t, newBrowser(srv), srv, "/api/v1/signin",
+		checked(t, srv, map[string]any{"email": "ann@example.org", "password": "a long password 1"}), "198.51.100.7"); c != 429 {
+		t.Errorf("signing in elsewhere, after 100 wrong: %d", c)
+	}
+	if c, out := signinPost(t, b, srv, "/api/v1/signin", map[string]any{"fresh": true, "password": "a long password 1"}); c != 200 {
+		t.Errorf("confirming where she's signed in: %d %v", c, out)
 	}
 }

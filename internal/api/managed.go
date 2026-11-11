@@ -355,17 +355,21 @@ func (m *Managed) signIn(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	client := clientFrom(identity.ClientIP(r.Context()))
 	if req.Fresh {
-		_, signedIn := m.current(r)
+		login, signedIn := m.current(r)
 		if signedIn == nil || !signedIn.Confirmed {
 			problem.Send(w, problem.NotAuthenticated, "")
 			return
 		}
 		req.Email = signedIn.Email
+		// Confirming it's them counts for this login only: someone guessing
+		// the email's password from elsewhere can't stop its person from
+		// confirming, nor the other way round.
+		client = "login " + login.ID
 	} else if !m.checked(w, r, req) || !m.cleanEmail(w, r, &req) {
 		return
 	}
-	client := clientFrom(identity.ClientIP(r.Context()))
 	if !m.mayTry(req.Email, client, time.Now()) {
 		m.refuse(w, r, problem.RateLimited, "tooManyTries")
 		return
@@ -404,7 +408,7 @@ func (m *Managed) signIn(w http.ResponseWriter, r *http.Request) {
 		m.confirmFresh(w, r, u, req.Return)
 		return
 	}
-	m.startLogin(w, r, u, req.Return)
+	m.startLogin(w, r, u, req.Return, true)
 }
 
 // mayTry says whether one more password may be tried for email from client
@@ -413,6 +417,9 @@ func (m *Managed) mayTry(email, client string, now time.Time) bool {
 	if !m.tries.allow(triesKey(email, client), now) {
 		return false
 	}
+	if strings.HasPrefix(client, "login ") {
+		return true // a signed-in person confirming: counted by login alone
+	}
 	return m.triesAll.allow(strings.ToLower(email), now)
 }
 
@@ -420,11 +427,12 @@ func (m *Managed) mayTry(email, client string, now time.Time) bool {
 func triesKey(email, client string) string { return strings.ToLower(email) + " " + client }
 
 // startLogin signs someone in, here; one with a new password to choose is
-// sent to choose it first.
-func (m *Managed) startLogin(w http.ResponseWriter, r *http.Request, u *store.User, ret string) {
+// sent to choose it first. The login counts as fresh (rule 21) only when
+// a password was just typed: not from an emailed link alone.
+func (m *Managed) startLogin(w http.ResponseWriter, r *http.Request, u *store.User, ret string, typed bool) {
 	ctx := r.Context()
 	l, token, err := m.Store.CreateLogin(ctx, u.Subject, nil, "", m.LoginLifetime)
-	if err == nil {
+	if err == nil && typed {
 		err = m.Store.SetLoginFresh(ctx, l.ID) // just typed: confirmed
 	}
 	if err != nil {
@@ -602,7 +610,7 @@ func (m *Managed) verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u.Confirmed = true
-	m.startLogin(w, r, u, "/")
+	m.startLogin(w, r, u, "/", false)
 }
 
 // ReleaseInvitation gives back the use of an invitation held for someone
@@ -690,6 +698,11 @@ func (m *Managed) reset(w http.ResponseWriter, r *http.Request) {
 	if err == nil && !u.Confirmed {
 		err = m.Store.ConfirmUser(ctx, u.Subject)
 	}
+	// The emailed link proved the address, and the password is theirs now:
+	// an account an admin made is set up.
+	if err == nil && (u.SetupPending || u.Unverified) {
+		err = m.Store.SetupDone(ctx, u.Subject, false, false)
+	}
 	if err == nil {
 		err = m.Store.DeleteLogins(ctx, u.Subject)
 	}
@@ -698,7 +711,7 @@ func (m *Managed) reset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u.Confirmed, u.MustChange = true, false
-	m.startLogin(w, r, u, "/")
+	m.startLogin(w, r, u, "/", true)
 }
 
 // ---- One's own password ---------------------------------------------------------------

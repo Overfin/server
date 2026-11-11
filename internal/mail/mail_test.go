@@ -50,6 +50,8 @@ func fakeSMTP(t *testing.T) (port int, got chan string) {
 					all.WriteString(l)
 				}
 				say("250 ok")
+			case strings.HasPrefix(cmd, "RCPT") && strings.Contains(cmd, "NOBODY@"):
+				say("550 5.1.1 <nobody@example.org>: Recipient address rejected")
 			case cmd == "QUIT":
 				say("221 bye")
 				got <- all.String()
@@ -126,5 +128,19 @@ func TestHTML(t *testing.T) {
 		if !strings.Contains(all, want) {
 			t.Errorf("missing %q in:\n%s", want, all)
 		}
+	}
+}
+
+// A refusal's text, which repeats the address, stays out of the error the
+// log gets; an administrator reads it with Detail.
+func TestRefusalKeepsTheAddressOut(t *testing.T) {
+	port, _ := fakeSMTP(t)
+	s := &Sender{Host: "127.0.0.1", Port: port, TLS: "none", From: "noreply@example.org"}
+	err := s.Send(context.Background(), "nobody@example.org", "Hi", "Hello")
+	if err == nil || strings.Contains(err.Error(), "nobody") || !strings.Contains(err.Error(), "550") {
+		t.Fatalf("error: %v", err)
+	}
+	if d := Detail(err); !strings.Contains(d, "nobody@example.org") {
+		t.Errorf("detail: %q", d)
 	}
 }

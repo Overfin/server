@@ -243,10 +243,18 @@ func Reencode(raw []byte, contentType string) ([]byte, error) {
 	return encode(img, contentType)
 }
 
+var prepareSlots = make(chan struct{}, 2)
+
 // Prepare makes an uploaded image Overfin's: checked and decoded as
 // Reencode does, no wider than maxWidth (Shrink), encoded again as
 // contentType. Every image Overfin keeps goes through it or Reencode.
+//
+// Uploads decode two at a time: a decoded picture may take up to 64 MiB
+// of memory, and several sent at once (a panel's whole branding, a few
+// tabs) shouldn't take more than that many.
 func Prepare(raw []byte, maxWidth int, contentType string) ([]byte, error) {
+	prepareSlots <- struct{}{}
+	defer func() { <-prepareSlots }()
 	img, err := decodeChecked(raw)
 	if err != nil {
 		return nil, err

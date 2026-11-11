@@ -164,7 +164,7 @@ func (s *Setup) PrivateSiteHandler() http.Handler { return privateOnly(s.handler
 func (s *Setup) handler(public bool) http.Handler {
 	mux := http.NewServeMux()
 	ui, _ := fs.Sub(uiFiles, "dist")
-	files := http.StripPrefix("/admin/", http.FileServerFS(ui))
+	files := http.StripPrefix("/admin/", http.FileServerFS(noListing{ui}))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
 	})
@@ -187,14 +187,16 @@ func (s *Setup) handler(public bool) http.Handler {
 		for _, id := range s.stepList() {
 			steps = append(steps, step{id, s.saved[id], optional[id]})
 		}
-		out := map[string]any{"steps": steps, "fixedUrl": s.FixedURL, "site": public, "finished": s.done}
+		// Jellyfin's address, when the configuration gives it, only to
+		// whoever has the code (it answers below): this page needs none.
+		out := map[string]any{"steps": steps, "site": public, "finished": s.done}
 		if s.Language != nil {
 			out["languages"] = lang.Choices
 		}
 		writeJSON(w, http.StatusOK, out)
 	})
 	mux.HandleFunc("POST /admin/api/setup/code", s.step(func(w http.ResponseWriter, r *http.Request, _ json.RawMessage) {
-		w.WriteHeader(http.StatusNoContent)
+		writeJSON(w, http.StatusOK, map[string]string{"fixedUrl": s.FixedURL})
 	}))
 	mux.HandleFunc("POST /admin/api/setup/language", s.step(s.language))
 	mux.HandleFunc("POST /admin/api/setup/jellyfin", s.step(s.jellyfin))

@@ -207,5 +207,7 @@ func (p *Panel) poster(w http.ResponseWriter, r *http.Request, _ *session) {
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "private, max-age=86400")
+	// A picture, never a page, like the panel's other images.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Write(data)
 }

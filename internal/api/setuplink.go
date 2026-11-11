@@ -185,7 +185,7 @@ func (m *Managed) setupPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u.MustChange, u.Confirmed = false, true
-	m.startLogin(w, r, u, "/")
+	m.startLogin(w, r, u, "/", true)
 }
 
 // addressInfo says whether the signed-in person's address still needs

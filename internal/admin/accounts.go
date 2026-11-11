@@ -223,6 +223,9 @@ func (p *Panel) changeAccount(w http.ResponseWriter, r *http.Request, s *session
 		}
 		p.accessChanged()
 	}
+	if c.TemplateID != nil || (c.Disabled != nil && *c.Disabled) || (c.ExpiresAt != nil && !expires.IsZero() && !expires.After(time.Now())) {
+		p.endPlaybacksOf(a.ID, "")
+	}
 	if err != nil {
 		p.fail(w, "changing an account", err)
 		return
@@ -254,6 +257,7 @@ func (p *Panel) deleteAccount(w http.ResponseWriter, r *http.Request, s *session
 		p.fail(w, "deleting an account", err)
 		return
 	}
+	p.endPlaybacksOf(r.PathValue("id"), "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -268,6 +272,14 @@ func (p *Panel) unlockPIN(w http.ResponseWriter, r *http.Request, _ *session) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// endPlaybacksOf stops an account's playbacks (or one session's), when
+// the panel knows what plays.
+func (p *Panel) endPlaybacksOf(accountID, sessionID string) {
+	if p.Playing != nil {
+		p.Playing.EndPlaybacksOf(accountID, sessionID)
+	}
+}
+
 func (p *Panel) endSession(w http.ResponseWriter, r *http.Request, _ *session) {
 	err := p.Store.DeleteSession(r.Context(), r.PathValue("id"), r.PathValue("session"))
 	if errors.Is(err, store.ErrNotFound) {
@@ -277,6 +289,7 @@ func (p *Panel) endSession(w http.ResponseWriter, r *http.Request, _ *session) {
 		p.fail(w, "ending a session", err)
 		return
 	}
+	p.endPlaybacksOf(r.PathValue("id"), r.PathValue("session"))
 	w.WriteHeader(http.StatusNoContent)
 }
 

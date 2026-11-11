@@ -261,7 +261,7 @@ func (p *Panel) SiteHandler(private bool) http.Handler {
 func (p *Panel) handler() http.Handler {
 	mux := http.NewServeMux()
 	ui, _ := fs.Sub(uiFiles, "dist")
-	mux.Handle("GET /admin/", http.StripPrefix("/admin/", http.FileServerFS(ui)))
+	mux.Handle("GET /admin/", http.StripPrefix("/admin/", http.FileServerFS(noListing{ui})))
 	mux.Handle("GET /admin/theme.css", theme.Handler())
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
@@ -1211,7 +1211,7 @@ func (p *Panel) moduleTabs(w http.ResponseWriter, r *http.Request, _ *session) {
 func (p *Panel) moduleFile(w http.ResponseWriter, r *http.Request, _ *session) {
 	for _, t := range p.tabs() {
 		if t.Name == r.PathValue("name") && t.UI != nil {
-			http.StripPrefix("/admin/modules/"+t.Name+"/", http.FileServerFS(t.UI)).ServeHTTP(w, r)
+			http.StripPrefix("/admin/modules/"+t.Name+"/", http.FileServerFS(noListing{t.UI})).ServeHTTP(w, r)
 			return
 		}
 	}

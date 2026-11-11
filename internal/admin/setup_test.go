@@ -65,6 +65,20 @@ func get(h http.Handler, peer string) string {
 
 const local = "127.0.0.1:50000"
 
+// Jellyfin's address, fixed by the configuration, goes only to whoever has
+// the code.
+func TestSetupFixedURLNeedsTheCode(t *testing.T) {
+	s, _ := newSetup()
+	s.FixedURL = "http://jellyfin.internal:8096"
+	h := s.Handler()
+	if got := get(h, local); strings.Contains(got, "jellyfin.internal") {
+		t.Errorf("without the code: %s", got)
+	}
+	if rec := post(h, local, "code", `{"code":"K7QM-2XRP"}`); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "jellyfin.internal") {
+		t.Errorf("with it: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestSetup(t *testing.T) {
 	s, saved := newSetup()
 	done := 0
@@ -92,7 +106,7 @@ func TestSetup(t *testing.T) {
 	if rec := post(h, local, "code", `{"code":"AAAA-AAAA"}`); rec.Code != http.StatusForbidden {
 		t.Errorf("wrong code: %d %s", rec.Code, rec.Body)
 	}
-	if rec := post(h, local, "code", `{"code":" k7qm2xrp "}`); rec.Code != http.StatusNoContent {
+	if rec := post(h, local, "code", `{"code":" k7qm2xrp "}`); rec.Code != http.StatusOK {
 		t.Errorf("right code: %d %s", rec.Code, rec.Body)
 	}
 	// Each step needs it too.

@@ -527,7 +527,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 	plugins := append([]plugin.Plugin{lib, pb, api.Stream{Playback: pb},
 		api.Account{Sessions: sessions, Provisioner: prov, Logger: logger, PINs: checker, Mounts: mounts},
 		api.Profiles{Sessions: sessions, Provisioner: prov, Store: st, Service: service, LogoutURL: "/sign-out", Logger: logger,
-			PINs: checker},
+			PINs: checker, EndPlaybacks: pb.EndWhere},
 		api.Branding{Store: st},
 		api.Info{Store: st},
 		api.Pages{Proof: checker2},
@@ -839,6 +839,20 @@ func TestStartPlaybackNeverLeaksUpstream(t *testing.T) {
 	if len(s.Segments) != 1 || s.Segments[0].Kind != "intro" {
 		t.Errorf("segments: %+v", s.Segments)
 	}
+	// Another site can't use the stream, nor start a session with it.
+	for _, from := range []string{"cross-site", "same-site"} {
+		req, _ := http.NewRequest("GET", srv.URL+s.Stream.URL, nil)
+		req.Header.Set("Remote-User", subject)
+		req.Header.Set("Sec-Fetch-Site", from)
+		res, err := client(srv, subject).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || len(res.Cookies()) > 0 {
+			t.Errorf("%s: status %d, cookies %v", from, res.StatusCode, res.Cookies())
+		}
+	}
 }
 
 func TestStartPlaybackRefuses(t *testing.T) {
@@ -847,6 +861,8 @@ func TestStartPlaybackRefuses(t *testing.T) {
 		`{"itemId":"not-an-id","capabilities":{}}`,
 		`{"itemId":"item_` + fmt.Sprintf("%032x", 1) + `","capabilities":{},"audioTrack":"s1"}`,
 		`{"itemId":"item_` + fmt.Sprintf("%032x", 1) + `","capabilities":{},"startPositionMs":-5}`,
+		`{"itemId":"item_` + fmt.Sprintf("%032x", 1) + `","capabilities":{},"startPositionMs":922337203685477580}`,
+		`{"itemId":"item_` + fmt.Sprintf("%032x", 1) + `","capabilities":{},"maxBitrateKbps":9223372036854775}`,
 		`{"itemId":"item_` + fmt.Sprintf("%032x", 1) + `","capabilities":{},"extra":true}`,
 	} {
 		if code, _ := post(t, srv, "/api/v1/playback", body); code != http.StatusBadRequest {
@@ -1225,6 +1241,23 @@ func TestLiveViewStopsAPlayback(t *testing.T) {
 	}
 	if live := pb.Tickets.Live(time.Now()); len(live) != 0 {
 		t.Errorf("after: %+v", live)
+	}
+}
+
+// Signing out ends the session's playbacks: its transcode stops, and the
+// live view no longer lists it.
+func TestLogoutEndsPlaybacks(t *testing.T) {
+	var pb api.Playback
+	srv, fake := newServerWith(t, options{maxStreams: 2, playback: &pb})
+	startPlayback(t, srv, "Bedroom laptop")
+	if code, _ := post(t, srv, "/api/v1/logout", "{}"); code >= 300 {
+		t.Fatalf("logout: %d", code)
+	}
+	if live := pb.Tickets.Live(time.Now()); len(live) != 0 {
+		t.Errorf("after: %+v", live)
+	}
+	if !eventually(t, func() bool { return fake.called("DELETE /Videos/ActiveEncodings") == 1 }) {
+		t.Error("its transcode was not stopped")
 	}
 }
 

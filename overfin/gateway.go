@@ -270,7 +270,8 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 			// With Overfin's own sign-in, newcomers name their profile first.
 			AskFirst: managed != nil},
 		api.Profiles{Sessions: sessions, Provisioner: prov, Store: db, Service: sh.service,
-			PINs: checker, Images: sh.images, LogoutURL: cfg.Identity.LogoutURL, Logger: logger},
+			PINs: checker, Images: sh.images, LogoutURL: cfg.Identity.LogoutURL, Logger: logger,
+			EndPlaybacks: pb.EndWhere},
 		api.Branding{Store: db},
 		api.Info{Store: db, Mounts: mounts},
 		// Overfin's own pages (signing in, invitations), whatever the
@@ -520,13 +521,17 @@ func (g *gateway) SendInvitation(ctx context.Context, to, link string) error {
 	if s == nil {
 		return problem("Email is off: set it up first.")
 	}
+	// Only this site's invitations go out from its address.
+	if site := strings.TrimSuffix(siteURL(g.cfg), "/"); site == "" || !strings.HasPrefix(link, site+"/invite/") {
+		return problem("That isn't one of this site's invitation links.")
+	}
 	_, lang, _, _ := g.sh.db.Languages(ctx)
 	msg, err := g.sh.emails.Write(ctx, "invite", lang, emails.Vars{Link: link})
 	if err != nil {
 		return err
 	}
 	if err := s.SendMessage(ctx, to, msg); err != nil {
-		return problemf("It didn't go through: %v", err)
+		return problemf("It didn't go through: %s", mail.Detail(err))
 	}
 	return nil
 }
@@ -774,6 +779,11 @@ func (g *gateway) NowPlaying() ([]playback.Live, int) {
 // EndPlayback stops a playback from the control panel.
 func (g *gateway) EndPlayback(id string) bool { return g.current.Load().playback.EndByAdmin(id) }
 
+// EndPlaybacksOf stops an account's playbacks, or one session's.
+func (g *gateway) EndPlaybacksOf(accountID, sessionID string) {
+	g.current.Load().playback.EndOf(accountID, sessionID)
+}
+
 func (g *gateway) Previews(ctx context.Context) (bool, error) { return g.sh.db.Previews(ctx) }
 
 // SetPreviews saves whether Overfin's Jellyfin makes seek-bar previews, and
@@ -913,13 +923,17 @@ func (g *gateway) Seerr() string {
 }
 
 // SetSeerr connects Seerr, or changes its address or key (an empty key
-// keeps the current one), tested first and applied at once; with neither,
-// it disconnects Seerr. Errors say what's wrong in plain words.
+// keeps the current one, for the same address only: the key never goes to
+// another server), tested first and applied at once; with neither, it
+// disconnects Seerr. Errors say what's wrong in plain words.
 func (g *gateway) SetSeerr(ctx context.Context, url, key string) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	url = strings.TrimRight(strings.TrimSpace(url), "/")
 	if key = strings.TrimSpace(key); key == "" {
+		if url != "" && g.sh.seerrURL != "" && url != g.sh.seerrURL {
+			return "", problem("At a new address, Seerr's API key is needed again.")
+		}
 		key = g.sh.seerrKey
 	}
 	var client *seerr.Client
@@ -1237,7 +1251,7 @@ func (g *gateway) SendSample(ctx context.Context, name, to string) error {
 		return err
 	}
 	if err := s.SendMessage(ctx, to, msg); err != nil {
-		return problemf("It didn't go through: %v", err)
+		return problemf("It didn't go through: %s", mail.Detail(err))
 	}
 	return nil
 }
@@ -1279,7 +1293,7 @@ func (g *gateway) SetMail(ctx context.Context, m config.Mail, password, testTo s
 		return "", err
 	}
 	if err := s.SendMessage(ctx, testTo, msg); err != nil {
-		return "", problemf("A test email to %s didn't go through, so nothing changed: %v", testTo, err)
+		return "", problemf("A test email to %s didn't go through, so nothing changed: %s", testTo, mail.Detail(err))
 	}
 	raw, err := json.Marshal(m)
 	if err != nil {

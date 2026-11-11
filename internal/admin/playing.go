@@ -21,6 +21,9 @@ type Playing interface {
 	// EndPlayback stops a playback; its player says an administrator
 	// stopped it. False when it had already ended.
 	EndPlayback(id string) bool
+	// EndPlaybacksOf stops an account's playbacks, or one session's of it
+	// (sessionID not empty): ended, disabled, deleted, given other limits.
+	EndPlaybacksOf(accountID, sessionID string)
 }
 
 type playingJSON struct {

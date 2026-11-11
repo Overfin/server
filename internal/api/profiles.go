@@ -16,6 +16,7 @@ import (
 	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/library"
 	"github.com/overfin/server/internal/pin"
+	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/provision"
@@ -24,6 +25,13 @@ import (
 )
 
 // Profiles serves profiles ("Who's watching?") and sessions.
+// endPlaybacks stops the playbacks match keeps, when it can.
+func (p Profiles) endPlaybacks(match func(*playback.Stream) bool) {
+	if p.EndPlaybacks != nil {
+		p.EndPlaybacks(match)
+	}
+}
+
 type Profiles struct {
 	Sessions    *Sessions
 	Provisioner *provision.Provisioner
@@ -32,6 +40,9 @@ type Profiles struct {
 	// Images, when set, forgets a profile's image access when its limits
 	// change.
 	Images *images.Pipeline
+	// EndPlaybacks, when set, stops the playbacks match keeps: a session's
+	// when it ends, a profile's when its access changes.
+	EndPlaybacks func(match func(*playback.Stream) bool)
 	// Service is Overfin's one Jellyfin account, which lists the libraries.
 	Service *provision.Service
 	// LogoutURL is where the site sends a user to also leave the identity
@@ -530,6 +541,7 @@ func (p Profiles) changeLimits(w http.ResponseWriter, r *http.Request, c *Caller
 	if p.Images != nil {
 		p.Images.Forget(pr.ID)
 	}
+	p.endPlaybacks(func(s *playback.Stream) bool { return s.AccountID == c.Account.ID && s.ProfileID == pr.ID })
 	return true
 }
 
@@ -693,6 +705,7 @@ func (p Profiles) remove(w http.ResponseWriter, r *http.Request) {
 	if p.Images != nil {
 		p.Images.Forget(pr.ID)
 	}
+	p.endPlaybacks(func(s *playback.Stream) bool { return s.AccountID == c.Account.ID && s.ProfileID == pr.ID })
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -790,6 +803,7 @@ func (p Profiles) endSession(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
+	p.endPlaybacks(func(s *playback.Stream) bool { return s.AccountID == c.Account.ID && s.SessionID == target.ID })
 	if target.ID == c.Session.ID {
 		clearCookie(w, r)
 	}
@@ -829,6 +843,7 @@ func (p Profiles) endOtherSessions(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.Internal, "")
 		return
 	}
+	p.endPlaybacks(func(s *playback.Stream) bool { return s.AccountID == c.Account.ID && s.SessionID != c.Session.ID })
 	// The other devices' logins end too, or they'd start a new session at
 	// their next request: signed out for real. This browser's stays.
 	if ck, err := cookie.Get(r, LoginCookie); err == nil && len(ck.Value) <= 64 {
@@ -849,6 +864,7 @@ func (p Profiles) logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := cookie.Get(r, CookieName); err == nil && len(c.Value) <= 64 {
 		if s, err := p.Store.SessionByToken(ctx, c.Value); err == nil {
 			_ = p.Store.DeleteSession(ctx, s.AccountID, s.ID)
+			p.endPlaybacks(func(st *playback.Stream) bool { return st.AccountID == s.AccountID && st.SessionID == s.ID })
 		}
 	}
 	clearCookie(w, r)

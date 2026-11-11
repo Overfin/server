@@ -14,6 +14,11 @@ import (
 type fakePlaying struct {
 	live    []playback.Live
 	stopped []string
+	ended   []string // accountID/sessionID
+}
+
+func (f *fakePlaying) EndPlaybacksOf(accountID, sessionID string) {
+	f.ended = append(f.ended, accountID+"/"+sessionID)
 }
 
 func (f *fakePlaying) NowPlaying() ([]playback.Live, int) { return f.live, 2 }

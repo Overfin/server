@@ -422,6 +422,10 @@ func TestSetSeerr(t *testing.T) {
 	if _, err := g.SetSeerr(ctx, seerrSrv.URL, ""); err != nil {
 		t.Errorf("same key: %v", err)
 	}
+	// But not for another address: the key would go to another server.
+	if _, err := g.SetSeerr(ctx, "http://elsewhere.example:5055", ""); err == nil || !strings.Contains(err.Error(), "needed again") {
+		t.Errorf("new address, no key: %v", err)
+	}
 	// Disconnected: discovery is gone, and so are the settings.
 	if _, err := g.SetSeerr(ctx, "", ""); err != nil || status(g, "/api/v1/discover") != 404 {
 		t.Errorf("disconnect: %v", err)

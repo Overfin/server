@@ -146,6 +146,23 @@ func (pb Playback) state(s *playback.Stream, snap playback.Snapshot) jellyfin.Pl
 // EndByAdmin ends a playback from the control panel's live view; its
 // player is told an administrator stopped it. False when it had already
 // ended.
+// EndWhere stops the playbacks match keeps: those of a session that
+// ended, or of a profile whose access changed (it starts again under the
+// new limits, or not at all).
+func (pb Playback) EndWhere(match func(*playback.Stream) bool) {
+	for _, s := range pb.Tickets.Where(match) {
+		pb.end(s, "stopped", "")
+	}
+}
+
+// EndOf stops an account's playbacks, or only one session's of it; never a
+// paired server's viewers'.
+func (pb Playback) EndOf(accountID, sessionID string) {
+	pb.EndWhere(func(s *playback.Stream) bool {
+		return s.AccountID == accountID && (sessionID == "" || s.SessionID == sessionID)
+	})
+}
+
 func (pb Playback) EndByAdmin(id string) bool {
 	s, ok := pb.Tickets.Find(id, time.Now())
 	if !ok || !pb.Tickets.Remove(s, "ended-by-admin", "", time.Now()) {
@@ -226,7 +243,7 @@ func sendEnded(w http.ResponseWriter, e *playback.Ended) {
 
 func (pb Playback) progress(w http.ResponseWriter, r *http.Request) {
 	var req progressRequest
-	if !decode(r, &req) || req.PositionMs < 0 {
+	if !decode(r, &req) || req.PositionMs < 0 || req.PositionMs > maxPositionMs {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
@@ -254,7 +271,7 @@ func (pb Playback) progress(w http.ResponseWriter, r *http.Request) {
 // is simply already stopped.
 func (pb Playback) stop(w http.ResponseWriter, r *http.Request) {
 	var req progressRequest
-	if !decode(r, &req) || req.PositionMs < 0 || !playIDRe.MatchString(r.PathValue("id")) {
+	if !decode(r, &req) || req.PositionMs < 0 || req.PositionMs > maxPositionMs || !playIDRe.MatchString(r.PathValue("id")) {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
@@ -468,7 +485,7 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 		_, ok = titleRef(req.TitleID)
 		ok = ok && req.ItemID == ""
 	}
-	if !ok || req.StartPositionMs < 0 || req.MaxBitrateKbps < 0 || len(req.Queue) > 0 ||
+	if !ok || req.StartPositionMs < 0 || req.StartPositionMs > maxPositionMs || req.MaxBitrateKbps < 0 || req.MaxBitrateKbps > maxKbps || req.Capabilities.MaxBitrateKbps < 0 || req.Capabilities.MaxBitrateKbps > maxKbps || len(req.Queue) > 0 ||
 		(req.Device != "" && !deviceRe.MatchString(req.Device)) {
 		// Queues arrive with the rest of playback management.
 		problem.Send(w, problem.InvalidRequest, "")
@@ -670,6 +687,14 @@ func (pb Playback) checkRemux(s *playback.Stream) {
 	}
 }
 
+// Bounds on what a browser says of a playback: positions within a hundred
+// days (ticks are milliseconds × 10,000 in an int64), bitrates within
+// 10 Gb/s, so no multiplication overflows.
+const (
+	maxPositionMs = 100 * 24 * 3600 * 1000
+	maxKbps       = 10_000_000
+)
+
 // trickplaySheet serves one sheet of a playback's seek-bar previews, to
 // whoever may see the playback, re-encoded like every image (rule 10).
 func (pb Playback) trickplaySheet(w http.ResponseWriter, r *http.Request) {
@@ -679,7 +704,7 @@ func (pb Playback) trickplaySheet(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := strconv.Atoi(r.PathValue("sheet"))
 	tp := s.Trickplay
-	if err != nil || tp == nil || n < 0 || n*tp.Columns*tp.Rows >= tp.Count || strconv.Itoa(n) != r.PathValue("sheet") {
+	if err != nil || tp == nil || n < 0 || tp.Columns <= 0 || tp.Rows <= 0 || n >= (tp.Count+tp.Columns*tp.Rows-1)/(tp.Columns*tp.Rows) || strconv.Itoa(n) != r.PathValue("sheet") {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
