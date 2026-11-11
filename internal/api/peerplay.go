@@ -202,6 +202,71 @@ func (pb Playback) peerStop(w http.ResponseWriter, r *http.Request) {
 	fed.Answer(w, nonce, struct{}{})
 }
 
+type peerProgressRequest struct {
+	ID         string `json:"id"`
+	PositionMs int64  `json:"positionMs"`
+	Paused     bool   `json:"paused"`
+}
+
+// peerProgress is a paired server's viewer still watching, paused or not:
+// their playback here isn't idle (IdleTimeout), and Jellyfin hears where
+// it stands, as for this server's own.
+func (pb Playback) peerProgress(w http.ResponseWriter, r *http.Request) {
+	fed := pb.fed()
+	if fed == nil {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	peer, body, nonce, ok := fed.PeerRequest(w, r)
+	if !ok {
+		return
+	}
+	var req peerProgressRequest
+	if json.Unmarshal(body, &req) != nil || !playIDRe.MatchString(req.ID) || req.PositionMs < 0 || req.PositionMs > maxPositionMs {
+		problem.Send(w, problem.InvalidRequest, "")
+		return
+	}
+	s, ended, ok := pb.Tickets.ByID(req.ID, playback.PeerPrefix+peer.ID, time.Now())
+	if !ok || ended != nil {
+		problem.Send(w, problem.PlaybackStopped, "")
+		return
+	}
+	pb.Tickets.Progress(s, req.PositionMs*10_000, req.Paused, time.Now())
+	if err := pb.Library.Jellyfin.ReportProgress(r.Context(), s.Auth, pb.state(s, pb.Tickets.Snapshot(s))); err != nil {
+		pb.Logger.Warn("could not report progress", "playback", s.ID, "err", err)
+	}
+	fed.Answer(w, nonce, struct{}{})
+}
+
+// tellEvery is how often a paired server hears one of its playbacks is
+// still watched here: well within its IdleTimeout.
+const tellEvery = 45 * time.Second
+
+// tellRemote tells a paired server, in the background and at most every
+// tellEvery, that a playback there is still watched here.
+func (pb Playback) tellRemote(rm *playback.Remote, positionMs int64, paused bool) {
+	fed := pb.fed()
+	if fed == nil {
+		return
+	}
+	now := time.Now().UnixNano()
+	last := rm.Told.Load()
+	if now-last < int64(tellEvery) || !rm.Told.CompareAndSwap(last, now) {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		peer, err := pb.Library.Provisioner.Store.PeerByID(ctx, rm.PeerID)
+		if err != nil {
+			return
+		}
+		if _, err := fed.Call(ctx, peer, "/api/v1/federation/progress", peerProgressRequest{ID: rm.ID, PositionMs: positionMs, Paused: paused}, &struct{}{}); err != nil {
+			pb.Logger.Info("a paired server couldn't be told a playback is still watched", "peer", peer.Name, "err", err)
+		}
+	}()
+}
+
 // origin is an address's origin, as browsers send it: scheme://host.
 func origin(address string) string {
 	u, err := url.Parse(address)

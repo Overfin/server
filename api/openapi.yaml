@@ -4020,6 +4020,29 @@ paths:
         "404": {description: "Not signed, not a paired server, or a title not offered it."}
         "409": {description: "The pairing's limit, or every transcode it may take, is reached."}
 
+  /federation/progress:
+    post:
+      operationId: federationProgress
+      summary: A paired server's viewer is still watching
+      description: Server to server, signed both ways. Sent at most every 45 seconds while the viewer watches or pauses, so the caller's own playback isn't ended as idle (2 minutes without activity). Another's, or one already over, is refused.
+      tags: [federation]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: {type: string}
+                positionMs: {type: integer}
+                paused: {type: boolean}
+      responses:
+        "200": {description: "Noted. Signed."}
+        "404": {description: "Not signed, or not a paired server."}
+        "410": {description: "No such playback of its own, or over (`playback-stopped`). Signed."}
+
   /federation/stop:
     post:
       operationId: federationStop

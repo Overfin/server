@@ -63,6 +63,9 @@ func (pb Playback) Register(r *plugin.Registrar) error {
 	if err := r.HandlePublic("POST /api/v1/federation/play", federation.SignRefusals(http.HandlerFunc(pb.peerPlay))); err != nil {
 		return err
 	}
+	if err := r.HandlePublic("POST /api/v1/federation/progress", federation.SignRefusals(http.HandlerFunc(pb.peerProgress))); err != nil {
+		return err
+	}
 	return r.HandlePublic("POST /api/v1/federation/stop", federation.SignRefusals(http.HandlerFunc(pb.peerStop)))
 }
 
@@ -253,8 +256,10 @@ func (pb Playback) progress(w http.ResponseWriter, r *http.Request) {
 	}
 	pb.Tickets.Progress(s, req.PositionMs*10_000, req.Paused, time.Now())
 	pb.record(r.Context(), s, req.PositionMs, false)
-	if s.Remote != nil {
-		// Played on a paired server, kept alive there by its stream's use.
+	if rm := s.Remote; rm != nil {
+		// Played on a paired server: its stream's use keeps it alive
+		// there, and, paused, this does.
+		pb.tellRemote(rm, req.PositionMs, req.Paused)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}

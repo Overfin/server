@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/overfin/server/internal/ids"
@@ -290,6 +291,9 @@ type Remote struct {
 	PeerID string // our pairing's
 	ID     string // the playback's there
 	Key    string // the title's key
+	// Told is when the paired server last heard it's still watched (Unix
+	// nanoseconds): it's told now and then, paused or not.
+	Told atomic.Int64
 }
 
 // PeerPrefix starts the account, profile and session IDs of a paired

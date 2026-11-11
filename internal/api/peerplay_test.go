@@ -106,6 +106,14 @@ func TestPeerPlayback(t *testing.T) {
 	if status, _ := a.Call(ctx, bOnA, "/api/v1/federation/play", map[string]any{"title": "movie/tmdb/1", "capabilities": map[string]any{}}, &s2); status != http.StatusNotFound {
 		t.Fatalf("a title not offered: %d", status)
 	}
+	// Still watching, paused: noted; a playback that isn't A's is refused,
+	// signed.
+	if status, err := a.Call(ctx, bOnA, "/api/v1/federation/progress", map[string]any{"id": s.ID, "positionMs": 300000, "paused": true}, &struct{}{}); status != 200 || err != nil {
+		t.Fatalf("progress: %d %v", status, err)
+	}
+	if status, err := a.Call(ctx, bOnA, "/api/v1/federation/progress", map[string]any{"id": "play_" + strings.Repeat("a", 26), "positionMs": 0}, &struct{}{}); status != http.StatusGone || err != nil {
+		t.Fatalf("progress of another playback: %d %v", status, err)
+	}
 	if status, err := a.Call(ctx, bOnA, "/api/v1/federation/stop", map[string]any{"id": s.ID, "positionMs": 600000}, &struct{}{}); status != 200 || err != nil {
 		t.Fatalf("stop: %d %v", status, err)
 	}
