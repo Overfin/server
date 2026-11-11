@@ -64,6 +64,14 @@ func TestAppWishes(t *testing.T) {
 	if got := list(); got != "" {
 		t.Fatalf("not to Overtide: %q", got)
 	}
+	status := func(body string, want int) {
+		t.Helper()
+		if rec := app.do("POST", "/apps/v1/wishes/status", body, auth); rec.Code != want {
+			t.Fatalf("%s: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	// Nor anything to say of them.
+	status(`{"kind":"movie","tmdbId":"1","state":"waiting"}`, 404)
 	feats := p.Features.(*memFeatures)
 	feats.f.Wishes.To = config.WishesToOvertide
 	// Ann's and Bob's accounts in turn (neither had one: by ID), each its
@@ -79,12 +87,6 @@ func TestAppWishes(t *testing.T) {
 	rec = app.do("GET", "/apps/v1/wishes", "", auth)
 	if !strings.Contains(rec.Body.String(), `"name":"Game of Thrones"`) {
 		t.Errorf("a season's name: %s", rec.Body)
-	}
-	status := func(body string, want int) {
-		t.Helper()
-		if rec := app.do("POST", "/apps/v1/wishes/status", body, auth); rec.Code != want {
-			t.Fatalf("%s: %d %s", body, rec.Code, rec.Body)
-		}
 	}
 	// The first in line was searched and found: its account's turn is
 	// spent, so the other account goes first now.

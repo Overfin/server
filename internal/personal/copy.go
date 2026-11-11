@@ -2,6 +2,7 @@ package personal
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"strconv"
 	"time"
@@ -16,6 +17,13 @@ import (
 // TMDB or IMDb ID, a show by its TMDB, TVDB or IMDb ID, an episode by its
 // show's and its numbers (store.TitleKeys). What can't be named that way
 // is left out; skipped counts it.
+// copyLimit bounds each list read from the other server (watched,
+// started, favorites): far above a real history.
+const copyLimit = 100_000
+
+// ErrTooMuch: the other server sent more than any history holds.
+var ErrTooMuch = errors.New("personal: the other server sent too many items")
+
 func FromServer(ctx context.Context, jf *jellyfin.Client, a jellyfin.Auth, userID string) (states []store.Personal, skipped int, err error) {
 	items := map[string]jellyfin.RawItem{}
 	played, favorite := true, true
@@ -26,6 +34,10 @@ func FromServer(ctx context.Context, jf *jellyfin.Client, a jellyfin.Auth, userI
 	} {
 		q.ExtraFields = "ProviderIds"
 		for start := 0; ; start += pageSize {
+			// The other server is another's: what it sends is bounded.
+			if start >= copyLimit {
+				return nil, 0, ErrTooMuch
+			}
 			q.StartIndex, q.Limit = start, pageSize
 			page, err := jf.Items(ctx, a, userID, q)
 			if err != nil {

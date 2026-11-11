@@ -29,6 +29,10 @@ var kinds = map[string]Kind{
 	"tvEpisode": Episode, "tvSpecial": Special,
 }
 
+// maxSeasons bounds the seasons a build keeps in memory: far above IMDb's
+// (well under a million).
+const maxSeasons = 10_000_000
+
 // Build writes a file Open reads from the three datasets, uncompressed:
 // title.basics, title.episode and title.ratings. They're read side by
 // side, once each, in IMDb's order (by ID, as text), so memory stays small
@@ -120,6 +124,9 @@ func Build(out io.Writer, basics, episodes, ratings io.Reader, now time.Time) (i
 			k := [2]uint64{series, uint64(t.Season)}
 			s := seasons[k]
 			if s == nil {
+				if len(seasons) >= maxSeasons {
+					return 0, errors.New("imdb: more seasons than IMDb has")
+				}
 				s = &sums{}
 				seasons[k] = s
 			}

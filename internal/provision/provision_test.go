@@ -57,7 +57,7 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method + " " + r.URL.Path {
 	case "GET /System/Info/Public":
-		json.NewEncoder(w).Encode(map[string]any{"Version": "12.2.0", "Id": "old-server", "StartupWizardCompleted": true})
+		json.NewEncoder(w).Encode(map[string]any{"Version": "12.2.0", "Id": "0123456789abcdef0123456789abcdef", "StartupWizardCompleted": true})
 	case "POST /Sessions/Logout":
 		f.logouts++
 		w.WriteHeader(http.StatusNoContent)

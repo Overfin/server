@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -166,5 +167,14 @@ func TestKeeperRefusesTooFewRatings(t *testing.T) {
 	}
 	if days, err := VoteDays(dir); err != nil || len(days) != 0 {
 		t.Errorf("days kept: %v, %v", days, err)
+	}
+}
+
+// A dataset that inflates past the limit is refused, not read to the end.
+func TestInflatedIsCapped(t *testing.T) {
+	c := &capped{r: strings.NewReader(strings.Repeat("x", 100)), left: 10}
+	b, err := io.ReadAll(c)
+	if len(b) != 10 || err == nil {
+		t.Fatalf("read %d, %v", len(b), err)
 	}
 }

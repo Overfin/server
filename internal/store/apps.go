@@ -70,9 +70,9 @@ func (s *Store) DeleteAppKey(ctx context.Context, id string) error {
 // AppKeyFor finds the key presented by an app, and notes its use.
 func (s *Store) AppKeyFor(ctx context.Context, key string, at time.Time) (*AppKey, error) {
 	var k AppKey
-	var created int64
-	err := s.read.QueryRowContext(ctx, `SELECT id, name, scope, created_at FROM app_keys WHERE key_hash = ?`, hashKey(key)).
-		Scan(&k.ID, &k.Name, &k.Scope, &created)
+	var created, used int64
+	err := s.read.QueryRowContext(ctx, `SELECT id, name, scope, created_at, coalesce(last_used_at, 0) FROM app_keys WHERE key_hash = ?`, hashKey(key)).
+		Scan(&k.ID, &k.Name, &k.Scope, &created, &used)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -80,7 +80,10 @@ func (s *Store) AppKeyFor(ctx context.Context, key string, at time.Time) (*AppKe
 		return nil, err
 	}
 	k.Created = time.Unix(created, 0).UTC()
-	_, err = s.db.ExecContext(ctx, `UPDATE app_keys SET last_used_at = ? WHERE id = ?`, at.Unix(), k.ID)
+	// Noted once a minute at most: an app reading often writes nothing.
+	if at.Unix()-used >= 60 {
+		_, err = s.db.ExecContext(ctx, `UPDATE app_keys SET last_used_at = ? WHERE id = ?`, at.Unix(), k.ID)
+	}
 	return &k, err
 }
 

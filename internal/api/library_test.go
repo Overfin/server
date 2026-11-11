@@ -1352,7 +1352,7 @@ func otherServer(t *testing.T) string {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/System/Info/Public":
-			json.NewEncoder(w).Encode(map[string]any{"Version": "10.11.0", "Id": "the-old-server", "StartupWizardCompleted": true})
+			json.NewEncoder(w).Encode(map[string]any{"Version": "10.11.0", "Id": "0123456789abcdef0123456789abcdef", "StartupWizardCompleted": true})
 		case "/Users/AuthenticateByName":
 			var in struct{ Username, Pw string }
 			json.NewDecoder(r.Body).Decode(&in)

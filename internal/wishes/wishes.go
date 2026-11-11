@@ -15,6 +15,10 @@ import (
 	"github.com/overfin/server/internal/store"
 )
 
+// unreleasedAgain: a title said to be unreleased, with no date, is
+// offered again after that long.
+const unreleasedAgain = 30 * 24 * time.Hour
+
 // Next is a title to fetch, and whose turn it is: the account and profile
 // whose wish it is (the first in line, when several wished it).
 type Next struct {
@@ -88,8 +92,15 @@ func Order(wishes []store.Wish, states map[string]store.WishState, turns map[str
 			return true
 		case st.State == store.WishNotFound:
 			return !st.NextTry.After(now)
+		case st.State == store.WishUnreleased:
+			// Once out, or asked again after a month when nobody knows
+			// when: the fetcher's word isn't kept forever.
+			if out, err := time.Parse(time.DateOnly, st.ReleaseOn); err == nil {
+				return now.After(out.AddDate(0, 0, 1))
+			}
+			return now.Sub(st.Updated) > unreleasedAgain
 		}
-		return false // downloading, or not out yet
+		return false // downloading
 	}
 	// take gives a profile's highest wish that can be tried, if any.
 	take := func(p *profile) (string, bool) {

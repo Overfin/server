@@ -75,6 +75,19 @@ func TestStuckWishesAreSkipped(t *testing.T) {
 	same(t, Order(w, states, nil, now, 10), "a:m4", "a:m5")
 }
 
+// A title said to be unreleased comes back once it's out, or after a
+// month when nobody said when: the fetcher's word isn't kept forever.
+func TestUnreleasedComesBack(t *testing.T) {
+	w := wishlist([]string{"a", "p", "m1", "m2", "m3", "m4"})
+	states := map[string]store.WishState{
+		"m1": {State: store.WishUnreleased, ReleaseOn: now.AddDate(0, 0, -3).Format(time.DateOnly)},
+		"m2": {State: store.WishUnreleased, Updated: now.AddDate(0, 0, -40)},
+		"m3": {State: store.WishUnreleased, Updated: now.AddDate(0, 0, -2)},
+		"m4": {State: store.WishUnreleased, ReleaseOn: now.AddDate(0, 1, 0).Format(time.DateOnly)},
+	}
+	same(t, Order(w, states, nil, now, 10), "a:m1", "a:m2")
+}
+
 // A title several people wished is fetched once, on the first turn that
 // reaches it.
 func TestSharedWishGoesOnce(t *testing.T) {

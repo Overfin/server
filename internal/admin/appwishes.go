@@ -141,6 +141,9 @@ func (p *Panel) appWishes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"titles": out, "generatedAt": p.clock().UTC().Format(time.RFC3339)})
 }
 
+// appWishMaxWait is the furthest an app can put a wish's next try.
+const appWishMaxWait = 90 * 24 * time.Hour
+
 // appWishStatus (POST /apps/v1/wishes/status) is the app saying what became
 // of a wished title: downloading, notFound (with nextTry, when it tries
 // again), unreleased (with releaseDate, if known) or waiting (it gave up on
@@ -148,6 +151,11 @@ func (p *Panel) appWishes(w http.ResponseWriter, r *http.Request) {
 // that wished for it; waiting for a release spends nothing.
 func (p *Panel) appWishStatus(w http.ResponseWriter, r *http.Request) {
 	if p.appKey(w, r, "wishes") == nil {
+		return
+	}
+	// Wishes going to Seerr are followed there: an app has none to report.
+	if !p.toOvertide() {
+		notFound(w, "Wishes don't go to an app")
 		return
 	}
 	var req struct {
@@ -191,6 +199,10 @@ func (p *Panel) appWishStatus(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				invalid(w, "nextTry: an RFC 3339 time")
 				return
+			}
+			// Within three months: a wish is never parked for good.
+			if latest := p.clock().Add(appWishMaxWait); at.After(latest) {
+				at = latest
 			}
 			st.NextTry = at
 		}

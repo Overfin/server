@@ -201,10 +201,20 @@ type copied struct {
 // fetch signs in to the other server as the person (subject, for limiting
 // failed tries), checks that their account there wasn't copied already,
 // reads their history and signs out. Callers hold p.mu.
+// copyTimeout bounds a whole history copy from another server.
+const copyTimeout = 5 * time.Minute
+
 func (p *Provisioner) fetch(ctx context.Context, from *jellyfin.Client, username, password string, history History,
 	subject string, now time.Time) (copied, error) {
+	// Another server, holding the lock on accounts: never for long.
+	ctx, cancel := context.WithTimeout(ctx, copyTimeout)
+	defer cancel()
 	server, err := from.Public(ctx)
 	if err != nil {
+		return copied{}, err
+	}
+	// Its ID keys the one-copy rule: a Jellyfin ID, like any of its IDs.
+	if server.ID, err = jellyfin.NormalizeID(server.ID); err != nil {
 		return copied{}, err
 	}
 	token, userID, err := from.Authenticate(ctx, "overfin-migration", username, password)

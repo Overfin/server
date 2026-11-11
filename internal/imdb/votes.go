@@ -37,7 +37,7 @@ func WriteVotes(dir, ratings string, day time.Time) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("imdb: %s: %w", RatingsFile, err)
 	}
-	t, err := newTable(z, "tconst", "averageRating", "numVotes")
+	t, err := newTable(inflated(z), "tconst", "averageRating", "numVotes")
 	if err != nil {
 		return 0, fmt.Errorf("imdb: %s: %w", RatingsFile, err)
 	}
@@ -142,7 +142,7 @@ func ReadVotes(dir, day string, fn func(id string, votes int)) error {
 	if err != nil {
 		return err
 	}
-	r := bufio.NewReader(z)
+	r := bufio.NewReader(inflated(z))
 	var prev int64
 	for {
 		d, err := binary.ReadVarint(r)

@@ -311,6 +311,30 @@ func (k *Keeper) download(ctx context.Context, name, path string) error {
 	return nil
 }
 
+// maxInflated bounds a dataset once decompressed: IMDb's largest is about
+// 1 GB; a file that inflates past this is no dataset.
+const maxInflated = 16 << 30
+
+// inflated reads a decompressed dataset, failing past maxInflated.
+func inflated(r io.Reader) io.Reader { return &capped{r: r, left: maxInflated} }
+
+type capped struct {
+	r    io.Reader
+	left int64
+}
+
+func (c *capped) Read(p []byte) (int, error) {
+	if c.left <= 0 {
+		return 0, errors.New("imdb: too large once decompressed")
+	}
+	if int64(len(p)) > c.left {
+		p = p[:c.left]
+	}
+	n, err := c.r.Read(p)
+	c.left -= int64(n)
+	return n, err
+}
+
 // BuildFiles builds the file path from the three datasets as IMDb
 // publishes them (gzipped), safely: what was at path stays until the new
 // file is whole on disk.
@@ -326,7 +350,7 @@ func BuildFiles(path, basics, episodes, ratings string, now time.Time) (int, err
 		if err != nil {
 			return 0, fmt.Errorf("imdb: %s: %w", filepath.Base(p), err)
 		}
-		readers = append(readers, z)
+		readers = append(readers, inflated(z))
 	}
 	tmp := path + ".tmp"
 	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
