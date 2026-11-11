@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/overfin/server/internal/tmdb"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -105,7 +107,7 @@ func (p Plugin) Name() string { return "federation" }
 // Register declares the routes other servers call. They're public: the
 // caller is a server, proven by its signature, never a person.
 func (p Plugin) Register(r *plugin.Registrar) error {
-	p.S.verifier = &Verifier{Host: p.S.host(), Seen: p.S.Seen}
+	p.S.verifier = &Verifier{Host: p.S.host(), Seen: p.S.Seen, Admit: p.S.admit}
 	if err := r.HandlePublic("POST /api/v1/federation/pair", http.HandlerFunc(p.S.pair)); err != nil {
 		return err
 	}
@@ -140,6 +142,20 @@ const (
 	helloWaiting = "waiting"
 	helloEnded   = "ended"
 )
+
+// admit says whether a signed request's key may be heard: a server this
+// one knows (whatever its state: each route checks that), or, on the
+// pairing route, anyone while a pairing code is live.
+func (s *Service) admit(r *http.Request, key ed25519.PublicKey) bool {
+	if _, err := s.Store.PeerByKey(r.Context(), key); err == nil {
+		return true
+	}
+	if r.URL.Path != "/api/v1/federation/pair" {
+		return false
+	}
+	live, err := s.Store.LivePairingCodes(r.Context())
+	return err == nil && live
+}
 
 // verified reads and checks a request; ok is false once it has answered.
 func (s *Service) verified(w http.ResponseWriter, r *http.Request) (Verified, []byte, bool) {
@@ -459,11 +475,7 @@ func (s *Service) NewCode(ctx context.Context, note string) (string, *store.Pair
 }
 
 func cleanNote(note string) string {
-	note = strings.Join(strings.Fields(note), " ")
-	if r := []rune(note); len(r) > maxName {
-		note = string(r[:maxName])
-	}
-	return note
+	return cleanName(note, "")
 }
 
 // LoadKey reads this server's federation key, making it the first time.
@@ -621,7 +633,7 @@ func (s *Service) TheirLibraries(ctx context.Context, p *store.Peer) ([]store.Pe
 		out = append(out, store.PeerLibrary{ID: l.ID, Name: name, Kind: cleanKind(l.Kind)})
 	}
 	// What it calls itself and its libraries now, for our site's menu.
-	if err := s.Store.RenamePeerWants(ctx, p.ID, textclean.Plain(answer.Name, maxName), out); err != nil {
+	if err := s.Store.RenamePeerWants(ctx, p.ID, cleanName(answer.Name, ""), out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -771,9 +783,12 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 			return 0, ErrUnreachable
 		}
 		for _, t := range answer.Titles {
-			// Only what we asked for, and only keys we read the same way.
+			// Only what we asked for, and only keys we read the same way:
+			// TMDB's, as TMDB numbers them (a "movie/tmdb/0550" would be
+			// one more title here, a duplicate nobody can play, and one
+			// more page asked of TMDB).
 			ref, ok := store.ParseTitleKey(t.Key)
-			if !ok || ref.Kind != t.Kind || ref.Key() != t.Key || !slices.Contains(libs, t.Library) {
+			if !ok || ref.Kind != t.Kind || ref.Key() != t.Key || !slices.Contains(libs, t.Library) || !canonicalTMDB(ref.TMDB()) {
 				continue
 			}
 			t.Audio, t.Subtitles = cleanTags(t.Audio), cleanTags(t.Subtitles)
@@ -799,6 +814,9 @@ const syncEvery = 30 * time.Minute
 
 // SyncAll reads again every paired peer's titles; one that can't be
 // reached keeps what we knew.
+// syncTimeout is how long reading one peer's titles may take.
+const syncTimeout = 5 * time.Minute
+
 func (s *Service) SyncAll(ctx context.Context) {
 	peers, err := s.Store.Peers(ctx)
 	if err != nil {
@@ -809,7 +827,10 @@ func (s *Service) SyncAll(ctx context.Context) {
 		if p.State != store.PeerPaired {
 			continue
 		}
-		n, err := s.SyncTitles(ctx, p)
+		// Each peer in its own time: a slow one doesn't hold the others up.
+		peerCtx, cancel := context.WithTimeout(ctx, syncTimeout)
+		n, err := s.SyncTitles(peerCtx, p)
+		cancel()
 		if err != nil {
 			s.Logger.Info("federation: a peer's titles couldn't be read", "name", p.Name, "error", err)
 			continue
@@ -917,4 +938,10 @@ func (s *Service) MediaOrigins() []string {
 	}
 	s.origins, s.originsAt = out, now
 	return out
+}
+
+// canonicalTMDB reports whether id is a TMDB ID as TMDB writes it.
+func canonicalTMDB(id string) bool {
+	n, err := strconv.Atoi(id)
+	return err == nil && strconv.Itoa(n) == id && tmdb.ValidID(n)
 }

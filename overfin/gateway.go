@@ -331,7 +331,7 @@ type fedShared struct {
 // return address), or one with a path: peers reach a server at its site's
 // root.
 func federationService(cfg *config.Config, sh *shared) *federation.Service {
-	address := siteURL(cfg)
+	address := federation.Origin(siteURL(cfg))
 	if address == "" || sh.fed.http == nil {
 		return nil
 	}

@@ -35,6 +35,7 @@ func (s *Store) ArtworkToFetch(ctx context.Context, before time.Time, limit int)
 				AND EXISTS (SELECT 1 FROM peers e WHERE e.id = p.peer_id AND e.state = 'paired')))
 		FROM (`+heldTitles+`) t
 		WHERE NOT EXISTS (SELECT 1 FROM artwork_fetched f WHERE f.key = t.kind || '/tmdb/' || t.tmdb AND f.fetched_at >= ?)
+		`+ownFirst+`
 		LIMIT ?`, before.Unix(), limit)
 	if err != nil {
 		return nil, err

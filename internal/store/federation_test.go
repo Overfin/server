@@ -361,9 +361,15 @@ func TestPeerListing(t *testing.T) {
 	if err := s.LabelPeerWant(ctx, p.ID, "nope", "x"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("labelling what isn't wanted: %v", err)
 	}
-	// A library no longer wanted: gone from the menu and the listings.
+	// A library no longer wanted: gone from the menu and the listings, its
+	// titles with it at once.
 	s.SetPeerWants(ctx, p.ID, nil)
 	if got := list(ListQuery{}); len(got) != 0 {
 		t.Fatalf("after: %v", got)
+	}
+	var left int
+	s.read.QueryRow(`SELECT count(*) FROM peer_titles WHERE peer_id = ?`, p.ID).Scan(&left)
+	if left != 0 {
+		t.Fatalf("%d titles left of a library no longer wanted", left)
 	}
 }

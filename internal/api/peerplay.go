@@ -114,6 +114,12 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 	pr.MaxStreamingBitrate = kbps * 1000
 	pr.DeviceProfile = playback.DeviceProfile(req.Capabilities, pr.MaxStreamingBitrate)
 
+	// The pairing's streams all taken: refused before asking Jellyfin
+	// anything (Admit refuses it again, under its lock).
+	if len(pb.Tickets.ForAccount(playback.PeerPrefix+peer.ID)) >= peer.Limits.Streams {
+		problem.Send(w, problem.StreamLimitReached, "")
+		return
+	}
 	ja, uid, ok := l.account(w, r)
 	if !ok {
 		return
@@ -465,14 +471,16 @@ func (pb Playback) chooseRemoteTracks(w http.ResponseWriter, r *http.Request, s 
 	}
 	var err error
 	if audio != nil {
-		if t, ok := find(view.AudioTracks, *audio); ok && t.Language != "" && t.Role == "" {
+		// The owner's words for the language, kept only when they're one:
+		// what's kept here for the profile is never a peer's free text.
+		if t, ok := find(view.AudioTracks, *audio); ok && languageTag(t.Language) != "" && t.Role == "" {
 			err = st.SetTitleAudio(ctx, s.ProfileID, key, t.Language)
 		}
 	}
 	if err == nil && subtitles != nil {
 		if *subtitles == "" {
 			err = st.SetTitleSubtitles(ctx, s.ProfileID, key, "")
-		} else if t, ok := find(view.SubtitleTracks, *subtitles); ok && t.Language != "" {
+		} else if t, ok := find(view.SubtitleTracks, *subtitles); ok && languageTag(t.Language) != "" {
 			err = st.SetTitleSubtitles(ctx, s.ProfileID, key, t.Language)
 		}
 	}

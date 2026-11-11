@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"github.com/overfin/server/internal/store"
 	"io"
 	"net/http"
 	"regexp"
@@ -60,6 +62,21 @@ func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream
 	}
 	// A paired server's viewer, from its site: no session here.
 	if st, ok := s.Playback.Tickets.ByPeerTicket(ticket, time.Now()); ok {
+		// Only from that server's site, when the browser says where it
+		// comes from; and only while the pairing lasts: an ended one ends
+		// its playbacks.
+		if o := r.Header.Get("Origin"); o != "" && o != st.Origin {
+			problem.Send(w, problem.NotFound, "")
+			return nil, nil
+		}
+		peer, err := s.Playback.Library.Provisioner.Store.PeerByID(r.Context(), strings.TrimPrefix(st.ProfileID, playback.PeerPrefix))
+		if err != nil || peer.State != store.PeerPaired {
+			if errors.Is(err, store.ErrNotFound) || err == nil {
+				s.Playback.end(st, "pairing ended", "")
+			}
+			problem.Send(w, problem.NotFound, "")
+			return nil, nil
+		}
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", st.Origin)
 		h.Set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges")
@@ -201,8 +218,27 @@ func (s Stream) proxy(w http.ResponseWriter, r *http.Request, st *playback.Strea
 	w.WriteHeader(res.StatusCode)
 	// io.Copy streams in small chunks: memory stays flat however long the
 	// film. If the client goes away, or the playback ends, the context ends
-	// the upstream read too.
-	_, _ = io.Copy(w, res.Body)
+	// the upstream read too. While it flows, the playback is in use: a
+	// paired server's viewer sends no progress here, and a film played
+	// straight is often one long download.
+	_, _ = io.Copy(&touching{w: w, tickets: s.Playback.Tickets, st: st}, res.Body)
+}
+
+// touching is a response writer that notes its playback in use, at most
+// every half minute, as the bytes go.
+type touching struct {
+	w       io.Writer
+	tickets *playback.Tickets
+	st      *playback.Stream
+	last    time.Time
+}
+
+func (t *touching) Write(b []byte) (int, error) {
+	if now := time.Now(); now.Sub(t.last) > 30*time.Second {
+		t.last = now
+		t.tickets.Touch(t.st, now)
+	}
+	return t.w.Write(b)
 }
 
 // mediaType keeps an upstream content type only when it is audio or video;

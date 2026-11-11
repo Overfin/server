@@ -108,6 +108,11 @@ type Verifier struct {
 	// a server makes over its life (each settings change rebuilds them),
 	// so a request can't be replayed across one; nil for one of its own.
 	Seen *Nonces
+	// Admit, when set, says whether a key may be heard at all (a known
+	// server's, or anyone's while a pairing code is live): asked once the
+	// signature is good, before the nonce is remembered, so a stranger
+	// signing with keys of their own fills no memory.
+	Admit func(r *http.Request, key ed25519.PublicKey) bool
 }
 
 // Verified is what a valid request proves.
@@ -146,19 +151,29 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 	if !ed25519.Verify(key, msg, sig) {
 		return Verified{}, ErrSignature
 	}
-	// Only once the signature is good is the nonce remembered: nobody
-	// can fill the memory with nonces they made up.
+	// Only once the signature is good, and the key one this server hears,
+	// is the nonce remembered: nobody can fill the memory with nonces, or
+	// keys, they made up.
+	if v.Admit != nil && !v.Admit(r, ed25519.PublicKey(key)) {
+		return Verified{}, ErrSignature
+	}
 	if v.Seen == nil {
 		v.Seen = &Nonces{}
 	}
-	if !v.Seen.add(nonce, now) {
+	if !v.Seen.add(string(key)+nonce, now) {
 		return Verified{}, ErrSignature
 	}
 	return Verified{Key: ed25519.PublicKey(key), Nonce: nonce}, nil
 }
 
+// maxNonces caps the nonces remembered: past it (after clearing the old
+// ones), requests are refused until room comes back, rather than the
+// memory growing.
+const maxNonces = 100_000
+
 // Nonces remembers the nonces of the requests accepted within the last
-// 2×MaxSkew: any older request is refused by its date anyway.
+// 2×MaxSkew, each with the key that signed it: any older request is
+// refused by its date anyway.
 type Nonces struct {
 	mu   sync.Mutex
 	seen map[string]time.Time
@@ -171,7 +186,7 @@ func (n *Nonces) add(nonce string, now time.Time) bool {
 	if n.seen == nil {
 		n.seen = map[string]time.Time{}
 	}
-	if now.Sub(n.last) > time.Minute {
+	if now.Sub(n.last) > time.Minute || len(n.seen) >= maxNonces {
 		for k, t := range n.seen {
 			if now.Sub(t) > 2*MaxSkew {
 				delete(n.seen, k)
@@ -179,7 +194,7 @@ func (n *Nonces) add(nonce string, now time.Time) bool {
 		}
 		n.last = now
 	}
-	if _, dup := n.seen[nonce]; dup {
+	if _, dup := n.seen[nonce]; dup || len(n.seen) >= maxNonces {
 		return false
 	}
 	n.seen[nonce] = now

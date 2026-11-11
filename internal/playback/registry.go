@@ -310,6 +310,15 @@ func (t *Tickets) ByID(id, profileID string, now time.Time) (*Stream, *Ended, bo
 	return nil, nil, false
 }
 
+// Touch notes a playback's stream is in use now: a long download (a
+// paired server's viewer playing a file straight, which sends no progress
+// here) keeps it alive while it flows.
+func (t *Tickets) Touch(s *Stream, now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s.lastSeen = now
+}
+
 // Progress records a progress report.
 func (t *Tickets) Progress(s *Stream, positionTicks int64, paused bool, now time.Time) {
 	t.mu.Lock()

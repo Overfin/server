@@ -318,6 +318,11 @@ func (s *Store) DeleteExpiredPairingCodes(ctx context.Context) error {
 // PairingSecretHash is how a code is found when redeemed.
 func PairingSecretHash(secret []byte) []byte { return pairingSecretHash(secret) }
 
+// ownFirst orders heldTitles (as t) with the library's own titles first:
+// what paired servers hold is fetched from TMDB once ours is, so a large
+// peer index never holds our own library's pages back.
+const ownFirst = `ORDER BY NOT EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = t.kind AND i.tmdb = t.tmdb)`
+
 // heldTitles, in SQL, are the films and series this server can play or
 // will: its library's, and those its paired servers hold for it (by TMDB
 // ID), as (kind, tmdb) rows. TMDB's data is kept for all of them alike.
@@ -403,6 +408,12 @@ func (s *Store) SetPeerWants(ctx context.Context, peerID string, libs []PeerLibr
 		ids[i] = l.ID
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM peer_wants WHERE peer_id = ? AND library_id NOT IN (SELECT value FROM json_each(?))`,
+		peerID, jsonList(ids)); err != nil {
+		return err
+	}
+	// The titles of a library no longer wanted go with it, at once: not at
+	// the next reading of the peer's titles, which may not come soon.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM peer_titles WHERE peer_id = ? AND library_id NOT IN (SELECT value FROM json_each(?))`,
 		peerID, jsonList(ids)); err != nil {
 		return err
 	}
@@ -781,4 +792,12 @@ func (s *Store) TitlePeers(ctx context.Context, keys []string) (map[string][]str
 		out[key] = append(out[key], id)
 	}
 	return out, rows.Err()
+}
+
+// LivePairingCodes reports whether a pairing code of ours is still live:
+// only then may a server this one doesn't know be heard (to pair).
+func (s *Store) LivePairingCodes(ctx context.Context) (bool, error) {
+	var live bool
+	err := s.read.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pairing_codes WHERE expires_at > ?)`, s.now().Unix()).Scan(&live)
+	return live, err
 }

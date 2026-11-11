@@ -86,6 +86,7 @@ func (s *Store) TextsToFetch(ctx context.Context, language string, before time.T
 	rows, err := s.read.QueryContext(ctx, `SELECT kind, tmdb FROM (`+heldTitles+`) t
 		WHERE NOT EXISTS (SELECT 1 FROM catalog_title_texts x WHERE x.kind = t.kind AND x.tmdb = t.tmdb
 			AND x.language = ? AND x.fetched_at >= ?)
+		`+ownFirst+`
 		LIMIT ?`, language, before.Unix(), limit)
 	if err != nil {
 		return nil, err

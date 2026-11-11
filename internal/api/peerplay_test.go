@@ -171,11 +171,30 @@ func TestPlayFromPeer(t *testing.T) {
 	if status != 201 || !strings.HasPrefix(s.Stream.URL, srvB.URL+"/api/v1/stream/") || !strings.HasPrefix(s.ID, "play_") {
 		t.Fatalf("play on A: %d %s", status, body)
 	}
+	// Only from A's site, when the browser says where it comes from.
+	foreign, _ := http.NewRequest("GET", s.Stream.URL, nil)
+	foreign.Header.Set("Origin", "https://elsewhere.example.org")
+	if res, err := srvB.Client().Do(foreign); err != nil || res.StatusCode != http.StatusNotFound {
+		t.Fatalf("from another site: %v %v", res, err)
+	}
 	if status, body := post(t, srvA, "/api/v1/playback/"+s.ID+"/progress", `{"positionMs":600000}`); status != 204 {
 		t.Fatalf("progress: %d %s", status, body)
 	}
 	if status, _ := post(t, srvA, "/api/v1/playback/"+s.ID+"/stop", `{"positionMs":600000}`); status != 204 {
 		t.Fatalf("stop: %d", status)
+	}
+	// A second playback, then B ends the pairing: its stream ends at once.
+	status, body = post(t, srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{},"audioLanguage":"fr"}`)
+	var again peerSession
+	json.Unmarshal([]byte(body), &again)
+	if status != 201 {
+		t.Fatalf("second play: %d %s", status, body)
+	}
+	if err := stB.DeletePeer(ctx, aOnB.ID); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := srvB.Client().Get(again.Stream.URL); err != nil || res.StatusCode != http.StatusNotFound {
+		t.Fatalf("after the pairing ended: %v %v", res, err)
 	}
 	// B hears of it in the background.
 	deadline := time.Now().Add(5 * time.Second)

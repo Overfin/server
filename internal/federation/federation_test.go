@@ -2,6 +2,8 @@ package federation
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -83,6 +85,35 @@ func request(k Key, method, target string, body []byte, at time.Time) (*http.Req
 	return req, SignRequest(req, body, k, at)
 }
 
+// An address is what browsers send as an origin: lower case, no default
+// port; anything a CSP or CORS header could be broken by is refused.
+func TestAddresses(t *testing.T) {
+	for _, ok := range []string{"https://films.example.org", "http://192.0.2.10:8096", "https://[2001:db8::1]:8443"} {
+		if checkAddress(ok) != nil {
+			t.Errorf("%s refused", ok)
+		}
+	}
+	for _, bad := range []string{"https://evil;script-src", "https://a,b", "https://ex.com'", "https://Films.example.org",
+		"https://films.example.org:443", "http://films.example.org:80", "https://films.example.org/path", "ftp://films.example.org"} {
+		if checkAddress(bad) == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+	if got := Origin("HTTPS://Films.Example.org:443/"); got != "https://films.example.org" {
+		t.Errorf("origin: %q", got)
+	}
+}
+
+// Only TMDB's own way of writing an ID is kept from a peer's index: no
+// duplicates made of leading zeros, nothing that isn't a number.
+func TestCanonicalTMDB(t *testing.T) {
+	for id, want := range map[string]bool{"550": true, "0550": false, "00550": false, "abc": false, "0": false, "": false, "99999999999": false} {
+		if canonicalTMDB(id) != want {
+			t.Errorf("%q: %v", id, !want)
+		}
+	}
+}
+
 func TestSignedRequest(t *testing.T) {
 	k := NewKey()
 	v := &Verifier{Host: "films.example.org"}
@@ -154,6 +185,37 @@ func TestNoncesForgotten(t *testing.T) {
 	n.add("b", now.Add(2*MaxSkew+2*time.Minute))
 	if _, kept := n.seen["a"]; kept {
 		t.Fatal("an old nonce was kept")
+	}
+}
+
+// A request signed with a key this server doesn't hear (a stranger's, made
+// up) is refused without its nonce being remembered: nobody fills the
+// memory that way. The memory has a cap all the same.
+func TestStrangersFillNoMemory(t *testing.T) {
+	known := NewKey()
+	v := &Verifier{Host: "films.example.org", Admit: func(_ *http.Request, key ed25519.PublicKey) bool { return SameKey(key, known.Public()) }}
+	for range 50 {
+		req, _ := request(NewKey(), "POST", "/api/v1/federation/hello", nil, now)
+		if _, err := v.Check(req, nil, now); err == nil {
+			t.Fatal("a stranger's request was heard")
+		}
+	}
+	if v.Seen != nil && len(v.Seen.seen) != 0 {
+		t.Fatalf("%d nonces remembered for strangers", len(v.Seen.seen))
+	}
+	req, _ := request(known, "POST", "/api/v1/federation/hello", nil, now)
+	if _, err := v.Check(req, nil, now); err != nil || len(v.Seen.seen) != 1 {
+		t.Fatalf("a known server refused: %v", err)
+	}
+	var n Nonces
+	for i := range maxNonces {
+		n.add(fmt.Sprint(i), now)
+	}
+	if n.add("one more", now) {
+		t.Fatal("past the cap, a nonce was remembered")
+	}
+	if !n.add("later", now.Add(2*MaxSkew+2*time.Minute)) {
+		t.Fatal("room didn't come back once the old ones went")
 	}
 }
 

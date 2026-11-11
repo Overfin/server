@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -102,13 +103,38 @@ func ParseCode(text string) (Code, error) {
 // checkAddress accepts a site's address: http or https, a host, nothing
 // else (no user, no query, no fragment), and short. Plain http is accepted
 // because every request and answer is signed either way, so a server can't
-// be impersonated over it; the panel says what it exposes.
+// be impersonated over it; the panel says what it exposes. The host is a
+// plain name, IPv4 or bracketed IPv6 address, with an optional port, in
+// lower case, without its scheme's default port: the address becomes an
+// origin in the site's Content-Security-Policy and CORS headers, which
+// must be exactly what browsers send.
 func checkAddress(address string) error {
 	u, err := url.Parse(address)
 	if err != nil || len(address) > maxAddress || (u.Scheme != "https" && u.Scheme != "http") ||
 		u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" ||
-		(u.Path != "" && u.Path != "/") {
+		(u.Path != "" && u.Path != "/") || !hostRe.MatchString(u.Host) || u.Host != strings.ToLower(u.Host) ||
+		(u.Scheme == "https" && u.Port() == "443") || (u.Scheme == "http" && u.Port() == "80") {
 		return errors.New("federation: an address is http(s)://host, with nothing after it")
 	}
 	return nil
+}
+
+// hostRe is a host as an address may name it: a name or an IPv4 address
+// (letters, digits, dots, hyphens), or a bracketed IPv6 address, with an
+// optional port.
+var hostRe = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*|\[[0-9a-f:.]+\])(:[0-9]{1,5})?$`)
+
+// Origin is an address as browsers name its origin: the host in lower case,
+// without its scheme's default port, nor a trailing slash; "" for one
+// that doesn't parse.
+func Origin(address string) string {
+	u, err := url.Parse(address)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	host := strings.ToLower(u.Host)
+	if (u.Scheme == "https" && strings.HasSuffix(host, ":443")) || (u.Scheme == "http" && strings.HasSuffix(host, ":80")) {
+		host = host[:strings.LastIndex(host, ":")]
+	}
+	return strings.ToLower(u.Scheme) + "://" + host + strings.TrimSuffix(u.EscapedPath(), "/")
 }
