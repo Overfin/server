@@ -226,3 +226,21 @@ func TestLRUBounds(t *testing.T) {
 		t.Error("an entry larger than the cache was kept")
 	}
 }
+
+// A 16-bit image is taken up to a quarter of the pixels: decoding and
+// resizing it takes more memory.
+func TestDeepImagesSmaller(t *testing.T) {
+	png16 := func(w, h int) []byte {
+		var b bytes.Buffer
+		if err := png.Encode(&b, image.NewNRGBA64(image.Rect(0, 0, w, h))); err != nil {
+			t.Fatal(err)
+		}
+		return b.Bytes()
+	}
+	if _, err := Reencode(png16(1000, 1000), "image/png"); err != nil {
+		t.Errorf("a small 16-bit image: %v", err)
+	}
+	if _, err := Reencode(png16(2100, 2100), "image/png"); err != ErrUnsafe {
+		t.Errorf("a large 16-bit image: %v", err)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
 	"regexp"
@@ -289,11 +290,21 @@ func decodeChecked(raw []byte) (image.Image, error) {
 		cfg.Width*cfg.Height > maxPixels {
 		return nil, ErrUnsafe
 	}
+	// 16 bits a channel decode to twice the memory, and resizing them takes
+	// more again: a quarter of the pixels, so one fits what a slot allows.
+	if deep(cfg.ColorModel) && cfg.Width*cfg.Height > maxPixels/4 {
+		return nil, ErrUnsafe
+	}
 	img, _, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
 		return nil, ErrUnsafe
 	}
 	return img, nil
+}
+
+// deep says whether a color model has 16 bits a channel.
+func deep(m color.Model) bool {
+	return m == color.RGBA64Model || m == color.NRGBA64Model || m == color.Gray16Model
 }
 
 // encode writes img as contentType: a PNG, else a JPEG.
