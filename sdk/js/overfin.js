@@ -102,7 +102,11 @@ export class Overfin {
   stepUp(error, returnTo = location.pathname + location.search + location.hash) {
     const url = error?.problem?.stepUpUrl;
     if (!url) throw new Error('this server offers no step-up');
-    location.href = `${url}?return=${encodeURIComponent(returnTo)}`;
+    // Only to a page of this site: a step-up never leaves it.
+    const to = new URL(url, location.origin);
+    if (to.origin !== location.origin) throw new Error('this server offers no step-up');
+    to.searchParams.set('return', returnTo);
+    location.href = to.href;
   }
 
   // ---- Account -----------------------------------------------------------
