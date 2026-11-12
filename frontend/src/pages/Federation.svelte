@@ -81,11 +81,18 @@
   let labels = $state<Record<string, string>>({});
   let limits = $state<Limits>({ streams: 2, transcodes: 1, bitrateKbps: 0 });
 
+  // One load at a time: a slow answer doesn't pile up the next ones.
+  let loading = false;
   async function load() {
+    if (loading) return;
+    loading = true;
     try {
       s = await api<State>('GET', '/admin/api/federation');
+      problem = '';
     } catch (err) {
       problem = message(err);
+    } finally {
+      loading = false;
     }
   }
 
