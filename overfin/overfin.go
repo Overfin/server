@@ -437,6 +437,23 @@ func run(logger *slog.Logger) error {
 		site.set(settingUp)
 	}
 
+	// Its Jellyfin and plugin must be the ones this Overfin is made with
+	// (a required dependency): until they are, every page says the server
+	// is being updated.
+	held := false
+	hold := func(h http.Handler) {
+		held = true
+		site.set(h)
+		panel.set(h)
+	}
+	if err := waitForCompanion(ctx, cfg.Jellyfin.URL, cfg.Secrets.JellyfinAdminKey, hold, logger); err != nil {
+		return shutdown()
+	}
+	if held {
+		site.set(settingUp)
+		panel.set(http.NotFoundHandler())
+	}
+
 	sh, err := newShared(cfg, db, moduleDBs, k, logger)
 	if err != nil {
 		return err
