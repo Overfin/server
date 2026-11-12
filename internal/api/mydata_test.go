@@ -1,16 +1,20 @@
 package api_test
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/overfin/server/internal/store"
 )
 
 func TestExportMyData(t *testing.T) {
 	idp := newFakeIdP(t)
-	srv, _ := newServerWith(t, options{provider: idp.provider()})
+	var st *store.Store
+	srv, _ := newServerWith(t, options{provider: idp.provider(), store: &st})
 
 	if code, body := post(t, srv, "/api/v1/me/export", `{}`); code != 403 || !strings.Contains(body, "step-up-required") {
 		t.Fatalf("export without a fresh login: %d %s", code, body)
@@ -18,6 +22,15 @@ func TestExportMyData(t *testing.T) {
 	stepUp(t, srv, idp, subject, time.Now())
 	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+ownerID(t, srv), `{"kidsTitles":true,"theme":"dark"}`); code != 200 {
 		t.Fatalf("settings: %d %s", code, body)
+	}
+
+	// A wish that came is in it too.
+	ctx := context.Background()
+	if err := st.AddWish(ctx, ownerID(t, srv), "movie/tmdb/949"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ArriveWish(ctx, "movie/tmdb/949"); err != nil {
+		t.Fatal(err)
 	}
 
 	req, _ := http.NewRequest("POST", srv.URL+"/api/v1/me/export", strings.NewReader("{}"))
@@ -34,7 +47,7 @@ func TestExportMyData(t *testing.T) {
 		t.Fatalf("export: %d %s", res.StatusCode, res.Header.Get("Content-Disposition"))
 	}
 	for _, want := range []string{`"account":{"id":"acct_`, `"owner":true`, `"watchHistory":[{`, `"titles":[`, `"name":"Movie 0"`, `"sessions":[{`,
-		`"kidsTitles":true`, `"theme":"dark"`} {
+		`"kidsTitles":true`, `"theme":"dark"`, `"wishesArrived":{"movie/tmdb/949":"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("export lacks %s: %s", want, body)
 		}

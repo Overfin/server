@@ -113,6 +113,9 @@ type exportProfileJSON struct {
 	// most; WishesOff, that its owner switched its wishing off.
 	Wishlist  []string `json:"wishlist,omitempty"`
 	WishesOff bool     `json:"wishesOff,omitempty"`
+	// WishesArrived are the wished titles that came (by title key), and
+	// when.
+	WishesArrived map[string]string `json:"wishesArrived,omitempty"`
 	// Tracks are the audio and subtitles it chose while watching a title
 	// (by title key): languages, subtitles "" when turned off.
 	Tracks map[string]exportTracksJSON `json:"tracks,omitempty"`
@@ -284,6 +287,16 @@ func (a Account) export(w http.ResponseWriter, r *http.Request) {
 		for _, wi := range wished {
 			wishlist = append(wishlist, wi.Title)
 		}
+		came, err := a.Sessions.Store.ProfileArrivals(ctx, p.ID)
+		if err != nil {
+			a.Logger.Error("reading what came of a profile's wishes for an export failed", "err", err)
+			problem.Send(w, problem.Internal, "")
+			return
+		}
+		arrived := map[string]string{}
+		for k, at := range came {
+			arrived[k] = at.Format(time.RFC3339)
+		}
 		wishesOff, err := a.Sessions.Store.WishesOff(ctx, p.ID)
 		if err != nil {
 			a.Logger.Error("reading a profile's wishing for an export failed", "err", err)
@@ -304,7 +317,7 @@ func (a Account) export(w http.ResponseWriter, r *http.Request) {
 			MaxAge: p.MaxAge, Categories: p.Categories, Libraries: p.Libraries, BlockedTags: p.BlockedTags,
 			KidsTitles: p.KidsTitles, Theme: p.Theme, HasPIN: p.HasPIN, CreatedAt: p.Created.Format(time.RFC3339),
 			WatchHistory: history, Titles: titles, Modules: mods, OutOfContinue: hidden,
-			Wishlist: wishlist, WishesOff: wishesOff,
+			Wishlist: wishlist, WishesOff: wishesOff, WishesArrived: arrived,
 		})
 	}
 	sessions, err := a.Sessions.Store.Sessions(ctx, c.Account.ID)

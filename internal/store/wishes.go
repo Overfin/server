@@ -427,6 +427,26 @@ func (s *Store) UnseenArrivals(ctx context.Context, profileID string) ([]string,
 	return s.strings(ctx, `SELECT title FROM wish_arrivals WHERE profile_id = ? AND seen = 0 ORDER BY arrived_at DESC, title`, profileID)
 }
 
+// ProfileArrivals lists everything that arrived for a profile's wishes,
+// by title, with when, for its data download.
+func (s *Store) ProfileArrivals(ctx context.Context, profileID string) (map[string]time.Time, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT title, arrived_at FROM wish_arrivals WHERE profile_id = ?`, profileID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var title string
+		var at int64
+		if err := rows.Scan(&title, &at); err != nil {
+			return nil, err
+		}
+		out[title] = time.Unix(at, 0).UTC()
+	}
+	return out, rows.Err()
+}
+
 // SeeArrivals marks what arrived for a profile as told.
 func (s *Store) SeeArrivals(ctx context.Context, profileID string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE wish_arrivals SET seen = 1 WHERE profile_id = ?`, profileID)
