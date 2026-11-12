@@ -352,6 +352,8 @@ type options struct {
 	// federation, when set, receives the server's federation (its address
 	// the test server's).
 	federation **federation.Service
+	// tickets, when set, receives the server's playbacks.
+	tickets **playback.Tickets
 }
 
 func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
@@ -468,6 +470,9 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		*o.store = st
 	}
 	pb := api.Playback{Library: lib, Tickets: playback.NewTickets(time.Hour), MaxTranscodes: o.maxTranscodes, Logger: logger}
+	if o.tickets != nil {
+		*o.tickets = pb.Tickets
+	}
 	// The server listens first: federation needs its address.
 	srv := httptest.NewUnstartedServer(nil)
 	var fed *federation.Service

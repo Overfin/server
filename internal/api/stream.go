@@ -31,8 +31,8 @@ func (Stream) Name() string { return "stream" }
 // Register declares the stream's routes as media routes: they check their
 // ticket themselves. A ticket of this server's own playbacks works only in
 // the session that started it (whose cookie never goes along from another
-// site); one a paired server's viewer plays works from that server's site
-// only (rule 65).
+// site); one a paired server's viewer plays, for that server only, never
+// for a browser (rule 65).
 func (s Stream) Register(r *plugin.Registrar) error {
 	if err := r.HandleMedia("GET /api/v1/stream/{ticket}/{name}", http.HandlerFunc(s.serve)); err != nil {
 		return err
@@ -61,12 +61,12 @@ func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream
 		problem.Send(w, problem.NotFound, "")
 		return nil, nil
 	}
-	// A paired server's viewer, from its site: no session here.
+	// A paired server's viewer, through that server: no session here.
 	if st, ok := s.Playback.Tickets.ByPeerTicket(ticket, time.Now()); ok {
-		// Only from that server's site, when the browser says where it
-		// comes from; and only while the pairing lasts: an ended one ends
-		// its playbacks.
-		if o := r.Header.Get("Origin"); o != "" && o != st.Origin {
+		// Asked by that server, never by a browser (rule 65): a browser
+		// says where a request comes from. And only while the pairing
+		// lasts: an ended one ends its playbacks.
+		if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" || r.Header.Get("Sec-Fetch-Mode") != "" {
 			problem.Send(w, problem.NotFound, "")
 			return nil, nil
 		}
@@ -78,10 +78,6 @@ func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream
 			problem.Send(w, problem.NotFound, "")
 			return nil, nil
 		}
-		h := w.Header()
-		h.Set("Access-Control-Allow-Origin", st.Origin)
-		h.Set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges")
-		h.Add("Vary", "Origin")
 		a := st.Auth
 		return st, &a
 	}
@@ -120,6 +116,10 @@ func (s Stream) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	st, a := s.stream(w, r)
 	if st == nil {
+		return
+	}
+	if st.Remote != nil {
+		s.relay(w, r, st, relayed{path: name, playlist: strings.HasSuffix(name, ".m3u8")})
 		return
 	}
 	dec := st.Decision
@@ -291,6 +291,10 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 	if st == nil {
 		return
 	}
+	if st.Remote != nil {
+		s.relay(w, r, st, relayed{path: "subtitles/" + track, vtt: true})
+		return
+	}
 	if !st.TextSubtitle(index) {
 		problem.Send(w, problem.NotFound, "")
 		return
@@ -337,6 +341,10 @@ func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
 	}
 	st, a := s.stream(w, r)
 	if st == nil {
+		return
+	}
+	if st.Remote != nil {
+		s.relay(w, r, st, relayed{path: "pictures/" + r.PathValue("track"), pgs: true})
 		return
 	}
 	if !st.PictureSubtitle(index) {

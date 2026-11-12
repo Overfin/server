@@ -24,9 +24,10 @@ import (
 // 6): their server asks us, signed, for the title it wants; we check the
 // pairing, that the title is in a library we offer it, and the pairing's
 // limits, pick our copy (one with the viewer's language when we have
-// one), and answer with a playback whose stream the viewer's browser
-// fetches straight from here, with its ticket only. Everything personal
-// (what they watch, where they are) stays on their server.
+// one), and answer with a playback whose stream their server fetches
+// from here, with its ticket only, for the viewer, whose browser never
+// asks here (rule 65). Everything personal (what they watch, where they
+// are, their address) stays on their server.
 
 type peerPlayRequest struct {
 	// Title is the title key: a film's or an episode's.
@@ -425,7 +426,8 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	}
 	// Its URLs are its stream's, on its address, nothing else; its words
 	// are plain text, as every other's (rule 9).
-	if ok := keepPeerURLs(&out, peer.Address); !ok || !cleanPeerText(&out) {
+	base, ok := keepPeerURLs(&out, peer.Address)
+	if !ok || !cleanPeerText(&out) {
 		why := "values Overfin doesn't give"
 		if !ok {
 			why = "other addresses"
@@ -457,7 +459,7 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	}
 	s := &playback.Stream{AccountID: p.AccountID, ProfileID: p.ID, SessionID: caller.Session.ID, Device: device,
 		Decision: playback.Decision{Method: "remote", Source: jellyfin.MediaSource{RunTimeTicks: out.DurationMs * 10_000}},
-		Remote:   &playback.Remote{PeerID: peer.ID, ID: out.ID, Key: key}}
+		Remote:   &playback.Remote{PeerID: peer.ID, ID: out.ID, Key: key, Base: base}}
 	replaced, err := pb.Tickets.Admit(s, req.StartPositionMs*10_000, time.Now(), lim, device)
 	if err != nil {
 		pb.stopRemote(peer, out.ID, 0)
@@ -467,6 +469,8 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	for _, old := range replaced {
 		pb.stopped(old)
 	}
+	// The browser asks this server only (rule 65).
+	relayURLs(&out, base, s.Ticket)
 	out.ID, out.Trickplay, out.Title, out.Next = s.ID, nil, nil, nil
 	if len(titles) == 1 {
 		out.Title = &titles[0]
@@ -485,22 +489,52 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 }
 
 // keepPeerURLs checks a paired server's playback: its stream's and
-// subtitles' URLs must be its own stream's, at its address; segments and
-// previews it may not give.
-func keepPeerURLs(out *sessionJSON, address string) bool {
+// subtitles' URLs must be files of one stream of its own, at its address;
+// segments and previews it may not give. It gives that stream's base, up
+// to its ticket and "/".
+func keepPeerURLs(out *sessionJSON, address string) (string, bool) {
 	prefix := strings.TrimSuffix(address, "/") + "/api/v1/stream/"
-	ok := func(u string) bool { return strings.HasPrefix(u, prefix) && !strings.ContainsAny(u, " \"'<>\\") }
+	ticket, _, found := strings.Cut(strings.TrimPrefix(out.Stream.URL, prefix), "/")
+	if !strings.HasPrefix(out.Stream.URL, prefix) || !found || !ticketRe.MatchString(ticket) {
+		return "", false
+	}
+	base := prefix + ticket + "/"
+	ok := func(u string) bool {
+		rest, in := strings.CutPrefix(u, base)
+		name, track, sub := strings.Cut(rest, "/")
+		if sub {
+			return in && (name == "subtitles" || name == "pictures") && fileNameRe.MatchString(track)
+		}
+		return in && fileNameRe.MatchString(rest)
+	}
 	if !ok(out.Stream.URL) || (out.Stream.Protocol != "hls" && out.Stream.Protocol != "file") || !playIDRe.MatchString(out.ID) {
-		return false
+		return "", false
 	}
 	for _, list := range [][]trackJSON{out.SubtitleTracks, out.ForcedTracks} {
 		for _, t := range list {
 			if t.URL != "" && !ok(t.URL) {
-				return false
+				return "", false
 			}
 		}
 	}
-	return true
+	return base, true
+}
+
+// relayURLs gives a paired server's playback this server's addresses: its
+// files under the ticket this server gave, the paired server's left out.
+func relayURLs(out *sessionJSON, base, ticket string) {
+	local := func(u string) string {
+		if u == "" {
+			return ""
+		}
+		return "/api/v1/stream/" + ticket + "/" + strings.TrimPrefix(u, base)
+	}
+	out.Stream.URL = local(out.Stream.URL)
+	for _, list := range [][]trackJSON{out.SubtitleTracks, out.ForcedTracks} {
+		for i := range list {
+			list[i].URL = local(list[i].URL)
+		}
+	}
 }
 
 // peerLabel is a paired server's label as one line of plain text.

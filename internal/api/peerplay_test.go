@@ -16,6 +16,7 @@ import (
 
 	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/seal"
+	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/store"
 )
 
@@ -79,11 +80,10 @@ func TestPeerPlayback(t *testing.T) {
 	if err != nil || status != 200 || !strings.HasPrefix(s.Stream.URL, srv.URL+"/api/v1/stream/") {
 		t.Fatalf("play: %d %v %+v", status, err, s)
 	}
-	// The viewer's browser, from A's site: no cookie, the ticket alone.
+	// A, for its viewer: no cookie, the ticket alone; no CORS, since no
+	// browser ever asks here (rule 65).
 	fetch := func() *http.Response {
 		req, _ := http.NewRequest("GET", s.Stream.URL, nil)
-		req.Header.Set("Origin", "https://a.example.org")
-		req.Header.Set("Sec-Fetch-Site", "cross-site")
 		res, err := srv.Client().Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -93,8 +93,18 @@ func TestPeerPlayback(t *testing.T) {
 	res := fetch()
 	io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
 	res.Body.Close()
-	if res.StatusCode != 200 || res.Header.Get("Access-Control-Allow-Origin") != "https://a.example.org" {
+	if res.StatusCode != 200 || res.Header.Get("Access-Control-Allow-Origin") != "" {
 		t.Fatalf("stream: %d, allowed origin %q", res.StatusCode, res.Header.Get("Access-Control-Allow-Origin"))
+	}
+	// A browser with the ticket gets nothing, from any site.
+	for _, h := range []map[string]string{{"Origin": "https://a.example.org"}, {"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Mode": "no-cors"}} {
+		req, _ := http.NewRequest("GET", s.Stream.URL, nil)
+		for k, v := range h {
+			req.Header.Set(k, v)
+		}
+		if res, err := srv.Client().Do(req); err != nil || res.StatusCode != http.StatusNotFound {
+			t.Fatalf("a browser (%v): %v %v", h, res, err)
+		}
 	}
 	// One stream for this pairing: a second is refused.
 	st.SetPeerLimits(ctx, aOnB.ID, store.PeerLimits{Streams: 1, Transcodes: 1})
@@ -130,13 +140,14 @@ func TestPeerPlayback(t *testing.T) {
 }
 
 // Someone on A plays a film only B has: A asks B, the stream comes
-// straight from B, A keeps where they are, and stopping on A ends it on
-// B.
+// through A (the browser never asks B), A keeps where they are, and
+// stopping on A ends it on B.
 func TestPlayFromPeer(t *testing.T) {
 	ctx := context.Background()
 	var stB, stA *store.Store
 	var b, a *federation.Service
-	srvB, fakeB := newServerWith(t, options{store: &stB, federation: &b})
+	var onB *playback.Tickets
+	srvB, fakeB := newServerWith(t, options{store: &stB, federation: &b, tickets: &onB})
 	fakeB.setDirect(true)
 	stB.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "Heat", SortName: "heat",
 		TMDB: "949", LibraryID: "films", AudioTags: []string{"fr"}}}, 1)
@@ -176,14 +187,33 @@ func TestPlayFromPeer(t *testing.T) {
 	status, body := post(t, srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{},"audioLanguage":"fr"}`)
 	var s peerSession
 	json.Unmarshal([]byte(body), &s)
-	if status != 201 || !strings.HasPrefix(s.Stream.URL, srvB.URL+"/api/v1/stream/") || !strings.HasPrefix(s.ID, "play_") {
+	if status != 201 || !strings.HasPrefix(s.Stream.URL, "/api/v1/stream/") || strings.Contains(body, srvB.URL) || !strings.HasPrefix(s.ID, "play_") {
 		t.Fatalf("play on A: %d %s", status, body)
 	}
-	// Only from A's site, when the browser says where it comes from.
-	foreign, _ := http.NewRequest("GET", s.Stream.URL, nil)
-	foreign.Header.Set("Origin", "https://elsewhere.example.org")
-	if res, err := srvB.Client().Do(foreign); err != nil || res.StatusCode != http.StatusNotFound {
-		t.Fatalf("from another site: %v %v", res, err)
+	// The viewer's browser asks A, which asks B.
+	viewer := func(path string) (int, string) {
+		req, _ := http.NewRequest("GET", srvA.URL+path, nil)
+		req.Header.Set("Remote-User", subject)
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		res, err := client(srvA, subject).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+		return res.StatusCode, string(b)
+	}
+	if code, got := viewer(s.Stream.URL); code != 200 || got == "" {
+		t.Fatalf("the stream through A: %d %q", code, got)
+	}
+	// B's ticket stays between the servers.
+	onBNow := onB.Where(func(*playback.Stream) bool { return true })
+	if len(onBNow) != 1 {
+		t.Fatalf("playbacks on B: %d", len(onBNow))
+	}
+	bURL := srvB.URL + "/api/v1/stream/" + onBNow[0].Ticket + "/file"
+	if strings.Contains(body, onBNow[0].Ticket) {
+		t.Fatal("the viewer got B's ticket")
 	}
 	if status, body := post(t, srvA, "/api/v1/playback/"+s.ID+"/progress", `{"positionMs":600000}`); status != 204 {
 		t.Fatalf("progress: %d %s", status, body)
@@ -201,13 +231,13 @@ func TestPlayFromPeer(t *testing.T) {
 	if err := stB.DeletePeer(ctx, aOnB.ID); err != nil {
 		t.Fatal(err)
 	}
-	if res, err := srvB.Client().Get(again.Stream.URL); err != nil || res.StatusCode != http.StatusNotFound {
-		t.Fatalf("after the pairing ended: %v %v", res, err)
+	if code, _ := viewer(again.Stream.URL); code != http.StatusNotFound {
+		t.Fatalf("after the pairing ended: %d", code)
 	}
-	// B hears of it in the background.
+	// B hears of the first one's stop in the background.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		res, err := srvB.Client().Get(s.Stream.URL)
+		res, err := srvB.Client().Get(bURL)
 		if err != nil {
 			t.Fatal(err)
 		}

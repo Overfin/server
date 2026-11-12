@@ -105,9 +105,8 @@ func ParseCode(text string) (Code, error) {
 // because every request and answer is signed either way, so a server can't
 // be impersonated over it; the panel says what it exposes. The host is a
 // plain name, IPv4 or bracketed IPv6 address, with an optional port, in
-// lower case, without its scheme's default port: the address becomes an
-// origin in the site's Content-Security-Policy and CORS headers, which
-// must be exactly what browsers send.
+// lower case, without its scheme's default port: one server, one way of
+// writing its address.
 func checkAddress(address string) error {
 	u, err := url.Parse(address)
 	if err != nil || len(address) > maxAddress || (u.Scheme != "https" && u.Scheme != "http") ||

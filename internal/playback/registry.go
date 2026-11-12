@@ -39,9 +39,8 @@ type Stream struct {
 	// its stream fetched from there; this one keeps the profile's side
 	// (where it is, its limits).
 	Remote *Remote
-	// Origin is the site allowed to fetch it from another address: a
-	// paired server's (its viewers play straight from here); "" for this
-	// server's own.
+	// Origin is the site of the paired server whose viewer plays it,
+	// through that server; "" for this server's own.
 	Origin string
 
 	// over: see Over; made when the playback starts.
@@ -291,6 +290,9 @@ type Remote struct {
 	PeerID string // our pairing's
 	ID     string // the playback's there
 	Key    string // the title's key
+	// Base is its stream's address there, up to its ticket and "/": this
+	// server asks it for the viewer, who never sees it.
+	Base string
 	// Told is when the paired server last heard it's still watched (Unix
 	// nanoseconds): it's told now and then, paused or not.
 	Told atomic.Int64

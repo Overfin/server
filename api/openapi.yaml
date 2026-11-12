@@ -3994,9 +3994,9 @@ paths:
         the pairing's limits (streams, transcodes, bitrate) and the
         transcodes it keeps for its own people, and answers with the
         playback as POST /playback does, its stream's URLs on this server:
-        the viewer's browser fetches them straight from here with the ticket
-        alone, from the caller's site only. Nothing about the viewer is
-        kept here.
+        the caller fetches them with the ticket alone, for its viewer, who
+        never asks here (a browser's request with the ticket is refused).
+        Nothing about the viewer is kept here.
       tags: [federation]
       security: []
       requestBody:
