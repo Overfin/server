@@ -660,7 +660,10 @@ anyone. Paired servers are not trusted at all (rule 94).
      checks that the pinned version's advertised checksum is the one
      Overfin knows (Jellyfin checks the download against it), installs it
      and restarts Jellyfin, whose plugin updates stay off. Removing it takes
-     the plugin and its repository off. Overfin installs no other plugin.
+     the plugin and its repository off. Apart from Intro Skipper, Overfin
+     installs nothing on its Jellyfin today. A companion plugin of
+     Overfin's own, only where Jellyfin's API falls short, is planned
+     (ROADMAP.md).
 
 ### Outside data
 
