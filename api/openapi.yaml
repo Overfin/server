@@ -3947,6 +3947,12 @@ paths:
         caller never suggests a source without its viewer's language. Never
         a file, a path or a media server's ID. Anyone else gets the plain
         404.
+
+        With `since` (the `seq` of an earlier answer), only what changed
+        since then: `changes` is set, `titles` are the titles to keep (new
+        or changed) and `gone` the keys no longer held. The whole list comes
+        instead when this server no longer knows that far back (its changes
+        are kept 30 days), or what it offers the caller changed since.
       tags: [federation]
       security: []
       requestBody:
@@ -3959,6 +3965,7 @@ paths:
               properties:
                 libraries: {type: array, items: {type: string}}
                 after: {type: string, description: "The previous page's next"}
+                since: {type: integer, format: int64, description: "Only what changed since this seq"}
       responses:
         "200":
           description: A page of titles, in key order. Signed.
@@ -3980,6 +3987,9 @@ paths:
                         audio: {type: array, items: {type: string}, description: "Language tags, fr-CA"}
                         subtitles: {type: array, items: {type: string}}
                   next: {type: string, description: "Where the next page starts; absent after the last"}
+                  changes: {type: boolean, description: "Only what changed since `since`"}
+                  gone: {type: array, items: {type: string}, description: "With changes: keys no longer held"}
+                  seq: {type: integer, format: int64, description: "This server's last change: the since to ask next"}
         "404": {description: "Not signed, or not a paired server."}
 
   /federation/play:

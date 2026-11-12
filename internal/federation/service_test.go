@@ -5,13 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/seal"
@@ -287,6 +290,82 @@ func TestSyncTitles(t *testing.T) {
 	b.s.Store.SetPeerWants(ctx, aOnB.ID, nil)
 	if n, _ := b.s.SyncTitles(ctx, aOnB); n != 0 {
 		t.Fatalf("still %d", n)
+	}
+}
+
+// Once B has read A's whole list, it asks only what changed since: what
+// came, what left, what changed; the whole list again only when what B
+// wants or what A offers changes.
+func TestSyncTitlesChanges(t *testing.T) {
+	ctx := context.Background()
+	a, b := newServer(t, "A"), newServer(t, "B")
+	libraries(t, a, `{"Id":"films","Name":"Films","CollectionType":"movies"}`, `{"Id":"more","Name":"More","CollectionType":"movies"}`)
+	film := func(n int, tmdb, lib string, audio ...string) store.CatalogItem {
+		return store.CatalogItem{ID: fmt.Sprintf("%032x", n), Kind: "movie", Name: tmdb, SortName: tmdb, TMDB: tmdb, LibraryID: lib, AudioTags: audio}
+	}
+	a.s.Store.PutCatalog(ctx, []store.CatalogItem{film(1, "949", "films", "en"), film(2, "603", "films", "en")}, 1)
+	a.s.Store.RefreshTitleKeys(ctx)
+	code, _, _ := a.s.NewCode(ctx, "")
+	aOnB, _ := b.s.UseCode(ctx, code)
+	bOnA, _ := a.s.Accept(ctx, onlyPeer(t, a).ID)
+	aOnB, _ = b.s.Store.PeerByID(ctx, aOnB.ID)
+	a.s.SetOffers(ctx, bOnA, []string{"films"})
+	b.s.SetWants(ctx, aOnB, []string{"films"})
+	keys := func() string {
+		got, _ := b.s.Store.TitlesOfPeer(ctx, aOnB.ID)
+		var out []string
+		for _, t := range got {
+			out = append(out, t.Key+":"+strings.Join(t.Audio, ","))
+		}
+		slices.Sort(out)
+		return strings.Join(out, " ")
+	}
+	sync := func(want int, what string) {
+		t.Helper()
+		if n, err := b.s.SyncTitles(ctx, aOnB); err != nil || n != want {
+			t.Fatalf("%s: %d titles sent, %v", what, n, err)
+		}
+	}
+	sync(2, "the first, whole")
+	sync(0, "nothing changed")
+	if got := keys(); got != "movie/tmdb/603:en movie/tmdb/949:en" {
+		t.Fatalf("kept: %s", got)
+	}
+	// One comes, one leaves, one gains a language: only those are sent.
+	a.s.Store.PutCatalog(ctx, []store.CatalogItem{film(3, "155", "films", "fr"), film(1, "949", "films", "en", "fr")}, 2)
+	a.s.Store.RefreshTitleKeys(ctx)
+	a.s.Store.DeleteCatalog(ctx, []string{fmt.Sprintf("%032x", 2)})
+	sync(2, "the changes")
+	if got := keys(); got != "movie/tmdb/155:fr movie/tmdb/949:en,fr" {
+		t.Fatalf("after the changes: %s", got)
+	}
+	// A title moved to a library B doesn't get: gone for B.
+	a.s.Store.PutCatalog(ctx, []store.CatalogItem{film(3, "155", "more", "fr")}, 3)
+	sync(0, "moved out")
+	if got := keys(); got != "movie/tmdb/949:en,fr" {
+		t.Fatalf("after the move: %s", got)
+	}
+	// A offers more: the whole list again.
+	a.s.SetOffers(ctx, bOnA, []string{"films", "more"})
+	b.s.SetWants(ctx, aOnB, []string{"films"})
+	sync(1, "after A's offer changed")
+	// B wants more: the whole list again.
+	b.s.SetWants(ctx, aOnB, []string{"films", "more"})
+	sync(2, "after B's wants changed")
+	// Changes forgotten up to now: B is still up to date, so nothing.
+	a.s.Store.TrimTitleChanges(ctx, time.Now().Add(time.Hour))
+	sync(0, "after A trimmed")
+	// A change, then the log trimmed past it: B gets the whole list.
+	a.s.Store.PutCatalog(ctx, []store.CatalogItem{film(4, "27205", "films")}, 4)
+	a.s.Store.RefreshTitleKeys(ctx)
+	sync(1, "one more")
+	a.s.Store.PutCatalog(ctx, []store.CatalogItem{film(5, "680", "films")}, 5)
+	a.s.Store.RefreshTitleKeys(ctx)
+	a.s.Store.TrimTitleChanges(ctx, time.Now().Add(time.Hour))
+	a.s.Store.PutCatalog(ctx, []store.CatalogItem{film(6, "13", "films")}, 6)
+	a.s.Store.RefreshTitleKeys(ctx)
+	if n, _ := b.s.SyncTitles(ctx, aOnB); n < 4 {
+		t.Fatalf("after the log was trimmed past B: %d sent, not the whole list", n)
 	}
 }
 

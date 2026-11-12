@@ -759,12 +759,23 @@ const titlesPage = 5000
 type titlesRequest struct {
 	Libraries []string `json:"libraries"`
 	After     string   `json:"after"`
+	// Since asks only for what changed since that change of our catalog
+	// (the seq a former answer gave); 0, or one we can't answer from,
+	// gets the whole list.
+	Since int64 `json:"since,omitempty"`
 }
 
 type titlesAnswer struct {
 	Titles []store.PeerTitle `json:"titles"`
 	// Next is where the next page starts; empty after the last.
 	Next string `json:"next,omitempty"`
+	// Changes says the answer holds only what changed since Since: Titles
+	// are those to keep (new or changed), Gone those no longer held.
+	// Without it, Titles is the whole list, a page at a time.
+	Changes bool     `json:"changes,omitempty"`
+	Gone    []string `json:"gone,omitempty"`
+	// Seq is the change our catalog was at: what to ask since next time.
+	Seq int64 `json:"seq,omitempty"`
 }
 
 // titles answers a paired peer with a page of the titles in the libraries
@@ -797,14 +808,39 @@ func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
 			libs = append(libs, l)
 		}
 	}
-	page, err := s.Store.TitlesInLibraries(ctx, libs, req.After, titlesPage)
+	head, floor, err := s.Store.TitleChanges(ctx)
 	if err != nil {
 		problem.Send(w, problem.Internal, "")
 		return
 	}
-	answer := titlesAnswer{Titles: page}
-	if len(page) == titlesPage {
-		answer.Next = page[len(page)-1].Key
+	offersSeq, err := s.Store.PeerOffersSeq(ctx, p.ID)
+	if err != nil {
+		problem.Send(w, problem.Internal, "")
+		return
+	}
+	answer := titlesAnswer{Seq: head}
+	// Only what changed, when we still know what changed since then, and
+	// what we offer it hasn't changed since.
+	if req.Since > 0 && req.Since >= floor && req.Since <= head && req.Since >= offersSeq {
+		present, gone, last, err := s.Store.ChangedTitles(ctx, libs, req.Since, req.After, titlesPage)
+		if err != nil {
+			problem.Send(w, problem.Internal, "")
+			return
+		}
+		answer.Changes, answer.Titles, answer.Gone = true, present, gone
+		if len(present)+len(gone) == titlesPage {
+			answer.Next = last
+		}
+	} else {
+		page, err := s.Store.TitlesInLibraries(ctx, libs, req.After, titlesPage)
+		if err != nil {
+			problem.Send(w, problem.Internal, "")
+			return
+		}
+		answer.Titles = page
+		if len(page) == titlesPage {
+			answer.Next = page[len(page)-1].Key
+		}
 	}
 	s.Store.PeerSeen(ctx, p.ID)
 	s.answer(w, v.Nonce, answer)
@@ -836,20 +872,37 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 			return 0, err
 		}
 	}
-	// Each page is kept as it comes (a peer may hold any number); those
-	// the peer no longer has go once the last page is read.
+	// Only what changed since we last read, when the peer can tell: the
+	// whole list after a first pairing, a change of what we want, or when
+	// the peer no longer knows that far back.
+	since, wantsGen, err := s.Store.PeerTitlesRead(ctx, p.ID)
+	if err != nil {
+		return 0, err
+	}
+	// Each page is kept as it comes (a peer may hold any number); with
+	// the whole list, those the peer no longer has go once the last page
+	// is read.
 	reading := store.PeerReading()
 	count := 0
 	after := ""
+	changes, first := false, true
+	var seq int64
 	for len(libs) > 0 {
 		var answer titlesAnswer
-		status, err := s.call(ctx, p.Address, p.PublicKey, "/api/v1/federation/titles", titlesRequest{Libraries: libs, After: after}, &answer)
+		status, err := s.call(ctx, p.Address, p.PublicKey, "/api/v1/federation/titles", titlesRequest{Libraries: libs, After: after, Since: since}, &answer)
 		switch {
 		case err != nil:
 			return 0, err
 		case status == http.StatusNotFound:
 			return 0, ErrUnknown
 		case status != http.StatusOK:
+			return 0, ErrUnreachable
+		}
+		if first {
+			// The first page says which kind of answer this reading is, and
+			// up to which change: later pages are read at the same one.
+			changes, seq, first = answer.Changes, answer.Seq, false
+		} else if answer.Changes != changes {
 			return 0, ErrUnreachable
 		}
 		page := make([]store.PeerTitle, 0, len(answer.Titles))
@@ -868,13 +921,31 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 		if err := s.Store.PutPeerTitles(ctx, p.ID, reading, page); err != nil {
 			return 0, err
 		}
+		if changes {
+			var gone []string
+			for _, k := range answer.Gone {
+				if len(k) <= 128 {
+					gone = append(gone, k)
+				}
+			}
+			if err := s.Store.DropPeerTitles(ctx, p.ID, gone); err != nil {
+				return 0, err
+			}
+		}
 		count += len(page)
 		if answer.Next == "" || answer.Next <= after {
 			break
 		}
 		after = answer.Next
 	}
-	if err := s.Store.EndPeerTitles(ctx, p.ID, reading); err != nil {
+	if !changes {
+		if err := s.Store.EndPeerTitles(ctx, p.ID, reading); err != nil {
+			return 0, err
+		}
+	}
+	// Next time, what changed since; a peer that gives no seq (an older
+	// Overfin) gets asked for the whole list each time.
+	if err := s.Store.SetPeerTitlesRead(ctx, p.ID, seq, wantsGen); err != nil {
 		return 0, err
 	}
 	s.Store.PeerSeen(ctx, p.ID)
@@ -889,7 +960,15 @@ const syncEvery = 30 * time.Minute
 // syncTimeout is how long reading one peer's titles may take.
 const syncTimeout = 5 * time.Minute
 
+// changesKept is how long our catalog's changes are kept for paired
+// servers to ask what changed: one that last read before gets the whole
+// list.
+const changesKept = 30 * 24 * time.Hour
+
 func (s *Service) SyncAll(ctx context.Context) {
+	if err := s.Store.TrimTitleChanges(ctx, s.now().Add(-changesKept)); err != nil {
+		s.Logger.Error("federation: trimming the catalog's changes failed", "error", err)
+	}
 	peers, err := s.Store.Peers(ctx)
 	if err != nil {
 		s.Logger.Error("federation: listing peers failed", "error", err)

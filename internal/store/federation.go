@@ -391,6 +391,11 @@ func (s *Store) SetPeerOffers(ctx context.Context, peerID string, libraryIDs []s
 			return err
 		}
 	}
+	// A peer asking for what changed since before this gets the whole list:
+	// the libraries' titles it gains or loses aren't changes of theirs.
+	if _, err := tx.ExecContext(ctx, `UPDATE peers SET offers_seq = (`+changesHead+`) WHERE id = ?`, peerID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -436,6 +441,11 @@ func (s *Store) SetPeerWants(ctx context.Context, peerID string, libs []PeerLibr
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM peer_wants WHERE peer_id = ? AND library_id NOT IN (SELECT value FROM json_each(?))`,
 		peerID, jsonList(ids)); err != nil {
+		return err
+	}
+	// What we read of it under the former wants no longer counts: the next
+	// reading is a whole one.
+	if _, err := tx.ExecContext(ctx, `UPDATE peers SET titles_seq = 0, wants_gen = wants_gen + 1 WHERE id = ?`, peerID); err != nil {
 		return err
 	}
 	// The titles of a library no longer wanted go with it, at once: not at
@@ -541,6 +551,11 @@ type PeerTitle struct {
 // episodes; files TMDB doesn't know are left out), each once, with one of
 // the libraries holding it.
 func (s *Store) TitlesInLibraries(ctx context.Context, libraries []string, after string, limit int) ([]PeerTitle, error) {
+	return s.titlesIn(ctx, libraries, nil, after, limit)
+}
+
+// titlesIn is TitlesInLibraries, of keys only when keys isn't nil.
+func (s *Store) titlesIn(ctx context.Context, libraries, keys []string, after string, limit int) ([]PeerTitle, error) {
 	out := []PeerTitle{}
 	if len(libraries) == 0 {
 		return out, nil
@@ -554,10 +569,15 @@ func (s *Store) TitlesInLibraries(ctx context.Context, libraries []string, after
 		marks += "?"
 		args = append(args, l)
 	}
+	only := ""
+	if keys != nil {
+		only = ` AND title_key IN (SELECT value FROM json_each(?))`
+		args = append(args, jsonList(keys))
+	}
 	args = append(args, limit)
 	rows, err := s.read.QueryContext(ctx, `SELECT title_key, min(kind), min(library_id) FROM catalog_items
 		WHERE title_key > ? AND library_id IN (`+marks+`) AND kind IN ('movie', 'series', 'season', 'episode')
-			AND title_key NOT LIKE 'item/%'
+			AND title_key NOT LIKE 'item/%'`+only+`
 		GROUP BY title_key ORDER BY title_key LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
@@ -579,7 +599,7 @@ func (s *Store) TitlesInLibraries(ctx context.Context, libraries []string, after
 			continue
 		}
 		langs, err := s.read.QueryContext(ctx, `SELECT audio_tags, subtitle_tags FROM catalog_items
-			WHERE title_key = ? AND library_id IN (`+marks+`)`, append([]any{out[i].Key}, args[1:len(args)-1]...)...)
+			WHERE title_key = ? AND library_id IN (`+marks+`)`, append([]any{out[i].Key}, args[1:1+len(libraries)]...)...)
 		if err != nil {
 			return nil, err
 		}
@@ -866,4 +886,104 @@ func (s *Store) LivePairingCodes(ctx context.Context) (bool, error) {
 	var live bool
 	err := s.read.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pairing_codes WHERE expires_at > ?)`, s.now().Unix()).Scan(&live)
 	return live, err
+}
+
+// changesHead is SQL for the number of the last change noted in the
+// catalog (title_changes): 0 before the first. It holds once old changes
+// are trimmed.
+const changesHead = `SELECT coalesce((SELECT seq FROM sqlite_sequence WHERE name = 'title_changes'), 0)`
+
+// TitleChanges says where the catalog's changes stand: head, the last
+// noted; floor, the last one no longer kept (a peer that read up to floor
+// or later can be told what changed since).
+func (s *Store) TitleChanges(ctx context.Context) (head, floor int64, err error) {
+	err = s.read.QueryRowContext(ctx, `SELECT (`+changesHead+`), coalesce((SELECT min(seq) - 1 FROM title_changes), (`+changesHead+`))`).
+		Scan(&head, &floor)
+	return head, floor, err
+}
+
+// PeerOffersSeq is the change the catalog was at when what we offer a
+// peer last changed.
+func (s *Store) PeerOffersSeq(ctx context.Context, peerID string) (int64, error) {
+	var seq int64
+	err := s.read.QueryRowContext(ctx, `SELECT offers_seq FROM peers WHERE id = ?`, peerID).Scan(&seq)
+	return seq, err
+}
+
+// ChangedTitles lists, in key order after after, at most limit of the
+// title keys changed since change since, as the libraries hold them now:
+// present, those they still hold; gone, those they don't. last is the
+// last key listed ("" when none).
+func (s *Store) ChangedTitles(ctx context.Context, libraries []string, since int64, after string, limit int) (present []PeerTitle, gone []string, last string, err error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT title_key FROM title_changes
+		WHERE seq > ? AND title_key > ? AND title_key NOT LIKE 'item/%' ORDER BY title_key LIMIT ?`, since, after, limit)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	var keys []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			rows.Close()
+			return nil, nil, "", err
+		}
+		keys = append(keys, k)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, nil, "", err
+	}
+	if len(keys) == 0 {
+		return []PeerTitle{}, nil, "", nil
+	}
+	present = []PeerTitle{}
+	if len(libraries) > 0 {
+		if present, err = s.titlesIn(ctx, libraries, keys, "", len(keys)); err != nil {
+			return nil, nil, "", err
+		}
+	}
+	held := map[string]bool{}
+	for _, t := range present {
+		held[t.Key] = true
+	}
+	for _, k := range keys {
+		if !held[k] {
+			gone = append(gone, k)
+		}
+	}
+	return present, gone, keys[len(keys)-1], nil
+}
+
+// TrimTitleChanges forgets the changes noted before a time: a peer that
+// last read before them gets the whole list again.
+func (s *Store) TrimTitleChanges(ctx context.Context, before time.Time) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM title_changes WHERE at < ?`, before.Unix())
+	return err
+}
+
+// PeerTitlesRead says up to which change of a peer's catalog we read its
+// titles (0: none yet, or what we want of it changed since), and the
+// generation of what we want of it.
+func (s *Store) PeerTitlesRead(ctx context.Context, peerID string) (seq, wants int64, err error) {
+	err = s.read.QueryRowContext(ctx, `SELECT titles_seq, wants_gen FROM peers WHERE id = ?`, peerID).Scan(&seq, &wants)
+	return seq, wants, err
+}
+
+// SetPeerTitlesRead keeps up to which change of a peer's catalog we read
+// its titles, unless what we want of it changed since the reading began
+// (wants, its generation then): that reading no longer counts.
+func (s *Store) SetPeerTitlesRead(ctx context.Context, peerID string, seq, wants int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE peers SET titles_seq = ?, titles_at = ? WHERE id = ? AND wants_gen = ?`,
+		seq, s.now().Unix(), peerID, wants)
+	return err
+}
+
+// DropPeerTitles forgets titles a peer no longer holds for us.
+func (s *Store) DropPeerTitles(ctx context.Context, peerID string, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM peer_titles WHERE peer_id = ? AND title_key IN (SELECT value FROM json_each(?))`,
+		peerID, jsonList(keys))
+	return err
 }

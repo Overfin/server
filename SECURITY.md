@@ -348,7 +348,8 @@ anyone. Paired servers are not trusted at all (rule 94).
       account last had its turn;
     - for federation: paired servers (address, key, limits, what each
       offers and wants), the titles they hold, the keys of servers no
-      longer paired, as hashes.
+      longer paired, as hashes, and which title keys of the catalog changed
+      when, for 30 days (so paired servers ask only what changed).
 
     Profile data is deleted with its profile, account data with its
     account.
