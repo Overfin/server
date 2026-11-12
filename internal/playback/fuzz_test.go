@@ -74,7 +74,7 @@ func FuzzSanitizeVTT(f *testing.F) {
 }
 
 // Jellyfin's stream URL is taken only as a relative path on a streaming
-// route of the item asked for (rule 5), whatever it holds.
+// route of the item asked for (rule 10), whatever it holds.
 func FuzzDecide(f *testing.F) {
 	f.Add("/videos/" + item + "/master.m3u8?MediaSourceId=" + source + "&ApiKey=secret-token")
 	f.Add("http://evil.example/videos/" + item + "/master.m3u8")

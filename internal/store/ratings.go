@@ -11,7 +11,7 @@ import (
 
 // Overfin's own content ratings, from TMDB: each country's scales of
 // certifications, each title's certifications, and the rule a kids
-// profile is held to (SECURITY.md rule 28).
+// profile is held to (SECURITY.md rules 40 and 41).
 
 // RatingLevel is one certification of a country's scale.
 type RatingLevel struct {

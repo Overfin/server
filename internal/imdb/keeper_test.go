@@ -180,7 +180,7 @@ func TestInflatedIsCapped(t *testing.T) {
 }
 
 // A redirect is a failed refresh: the files come from IMDb's own address
-// only (rule 68).
+// only (rule 115).
 func TestKeeperRefusesRedirects(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "https://elsewhere.example/x.gz", http.StatusFound)

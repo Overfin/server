@@ -162,7 +162,7 @@ func summaryOf(t *store.TitleInfo) library.TitleSummary {
 // visibleTitles says, for each title, whether the profile may see it: one
 // a library has, when it may see one of its copies (libraries, hidden
 // tags, kids limits); one no library has, never for a profile limited to
-// some libraries (rule 28) or in a genre the panel leaves out, else when
+// some libraries (rule 42) or in a genre the panel leaves out, else when
 // it's out as the panel asks (titles shown) and, for a kids profile, rated
 // within its limits. One a paired server holds for us is judged as one no
 // library has, but counts as out. A file no one identified, only through
@@ -292,7 +292,7 @@ func (l Library) visibility(ctx context.Context, p *store.Profile, titles []*sto
 		if a != nil && a.Ceiling != nil && !rated[k] {
 			continue
 		}
-		// Tags hidden: only what's known to carry none of them (rule 28).
+		// Tags hidden: only what's known to carry none of them (rule 42).
 		if a != nil && len(a.BlockedTags) > 0 && !tagFree[k] {
 			continue
 		}

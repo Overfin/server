@@ -76,7 +76,7 @@ func (pb Playback) Register(r *plugin.Registrar) error {
 const IdleTimeout = 2 * time.Minute
 
 // RunJanitor ends idle playbacks, and their transcodes, until ctx is done.
-// Jellyfin doesn't stop abandoned transcodes by itself (rule 33). current
+// Jellyfin doesn't stop abandoned transcodes by itself (rule 50). current
 // is the Playback in use now (settings reloads make a new one), whole: an
 // abandoned playback's position is kept like any other's.
 func RunJanitor(ctx context.Context, current func() Playback) {
@@ -305,7 +305,7 @@ func (pb Playback) get(w http.ResponseWriter, r *http.Request) {
 
 // current restores this session's latest playback by the active profile, at
 // its last reported position, after a reload. Another profile's playback on
-// the same device stays private (rule 50).
+// the same device stays private (rule 73).
 func (pb Playback) current(w http.ResponseWriter, r *http.Request) {
 	c := pb.Library.Sessions.Current(w, r)
 	if c == nil {
@@ -577,7 +577,7 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The account's stream limit: replace its oldest playback, whose device
-	// is then told who took over, or refuse (rule 32). Another account's
+	// is then told who took over, or refuse (rule 49). Another account's
 	// playback is never touched. With a stream reserved for each profile,
 	// only the profile's own are ever replaced, never another profile's.
 	// When every transcode is taken, refused before anything stops.
@@ -703,7 +703,7 @@ const (
 )
 
 // trickplaySheet serves one sheet of a playback's seek-bar previews, to
-// whoever may see the playback, re-encoded like every image (rule 10).
+// whoever may see the playback, re-encoded like every image (rule 16).
 func (pb Playback) trickplaySheet(w http.ResponseWriter, r *http.Request) {
 	s := pb.find(w, r)
 	if s == nil {
@@ -1132,9 +1132,9 @@ func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*op
 		j := trackJSON{ID: "s" + strconv.Itoa(t.Index), Label: t.Name, Language: t.Language, Default: t.Default,
 			Forced: t.Forced, HearingImpaired: t.HearingImpaired, Pictures: !t.Text}
 		if t.Text {
-			j.URL = base + "subtitles/" + j.ID // sanitized WebVTT (rule 11)
+			j.URL = base + "subtitles/" + j.ID // sanitized WebVTT (rule 17)
 		} else {
-			j.URL = base + "pictures/" + j.ID // PGS, checked whole (rule 11)
+			j.URL = base + "pictures/" + j.ID // PGS, checked whole (rule 17)
 		}
 		return j
 	}

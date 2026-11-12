@@ -170,7 +170,7 @@ func (a Account) create(w http.ResponseWriter, r *http.Request) {
 }
 
 // change changes the account's language, among those offered. It's the
-// whole account's: the owner profile's to change (SECURITY.md rule 25).
+// whole account's: the owner profile's to change (SECURITY.md rule 38).
 func (a Account) change(w http.ResponseWriter, r *http.Request) {
 	c := a.Sessions.Current(w, r)
 	if c == nil {

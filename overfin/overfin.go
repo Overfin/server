@@ -242,7 +242,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("listening", "addr", addr, "https", tlsSrv != nil)
 		errc <- srv.ListenAndServe()
 	}()
-	// The control panel, on its own listener (rule 58).
+	// The control panel, on its own listener (rules 82 and 83).
 	var adminSrv *http.Server
 	if a := cfg.Admin; a.Enabled() {
 		adminSrv = &http.Server{Addr: a.Listen, Handler: panel,
@@ -272,7 +272,7 @@ func run(logger *slog.Logger) error {
 		return nil
 	}
 
-	// Jellyfin: Overfin's own (rule 67), at the address the configuration
+	// Jellyfin: Overfin's own (rule 110), at the address the configuration
 	// sets or the setup page saved. A fresh one is set up at once; any
 	// other waits to be handed over on the setup page, which with managed
 	// sign-in asks for the first admin too.
@@ -283,7 +283,7 @@ func run(logger *slog.Logger) error {
 	}
 	fixedURL := cfg.Jellyfin.URL
 	cfg.Jellyfin.URL, cfg.Secrets.JellyfinAdminKey = url, key
-	// The Jellyfin settings Overfin needs are its own (rule 67): set back
+	// The Jellyfin settings Overfin needs are its own (rule 113): set back
 	// on every start, and as soon as Overfin has its Jellyfin, so the
 	// setup wizard's steps (Intro Skipper restarts Jellyfin) run with them.
 	if haveJellyfin {
@@ -512,7 +512,7 @@ func run(logger *slog.Logger) error {
 	sh.ratings = ratings.NewKeeper(gw.ratingSource, db, logger, 10*time.Minute, 100*time.Millisecond)
 	go sh.ratings.Run(ctx)
 	// IMDb's data, while the operator has it on: downloaded once a day,
-	// beside the database (rule 68).
+	// beside the database (rule 115).
 	imdbData := imdb.NewKeeper(filepath.Join(filepath.Dir(cfg.Storage.Path), "imdb"), db.IMDbOn, logger)
 	go imdbData.Run(ctx)
 	// Discovery's lists, from TMDB: 10 pages (200 titles) per list, every
@@ -670,7 +670,7 @@ func newShared(cfg *config.Config, db *store.Store, moduleDBs map[string]*sql.DB
 
 // runRecovery runs -recover-tokens. It needs Overfin's Jellyfin: Overfin's
 // key for it was sealed with the lost secret key too, so the operator hands
-// it over again, in the terminal (SECURITY.md rule 67).
+// it over again, in the terminal (SECURITY.md rule 110).
 func runRecovery(cfg *config.Config, db *store.Store, moduleDBs map[string]*sql.DB, k *keys.Keys, logger *slog.Logger) error {
 	ctx := context.Background()
 	url, key, saved, err := db.Jellyfin(ctx)

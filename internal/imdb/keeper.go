@@ -67,7 +67,7 @@ type Keeper struct {
 // NewKeeper returns a keeper of the folder dir.
 func NewKeeper(dir string, on func(ctx context.Context) (bool, error), logger *slog.Logger) *Keeper {
 	return &Keeper{Dir: dir, On: on, Logger: logger, Every: time.Hour, BaseURL: DatasetsURL,
-		// From IMDb's own address only (rule 68): a redirect is a failed
+		// From IMDb's own address only (rule 115): a redirect is a failed
 		// refresh, the file in use stays.
 		Client: &http.Client{Timeout: 30 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse

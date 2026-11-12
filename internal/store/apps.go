@@ -88,7 +88,7 @@ func (s *Store) AppKeyFor(ctx context.Context, key string, at time.Time) (*AppKe
 }
 
 // WatchStats is what the profiles did with a film or a series, in total:
-// never anything per person (SECURITY.md rule 40). A series counts its
+// never anything per person (SECURITY.md rule 85). A series counts its
 // episodes.
 type WatchStats struct {
 	Kind             string // movie, series

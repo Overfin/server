@@ -1,5 +1,5 @@
 // Package identity works out who is making each request (SECURITY.md rules
-// 13 and 14).
+// 19, 20 and 22).
 //
 // In forward-auth mode, a reverse proxy authenticates users and passes their
 // identity in headers. Those headers are believed only when the connection

@@ -41,7 +41,7 @@ const maxResponse = 4 << 20
 
 // Client talks to TMDB. Every call is a typed method (SECURITY.md rule
 // 1), the key in a header, never in a URL; it never follows redirects,
-// bounds response sizes and times out (rule 6).
+// bounds response sizes and times out (rules 12 and 13).
 type Client struct {
 	base  *url.URL
 	token string
@@ -300,7 +300,7 @@ func retryAfter(h http.Header) time.Duration {
 }
 
 // get reads path, with its query encoded, never pasted into the path
-// (rule 2). When TMDB answers 429, every request waits as long as it asks,
+// (rule 3). When TMDB answers 429, every request waits as long as it asks,
 // and this one is tried once more.
 func (c *Client) get(ctx context.Context, path string, q url.Values, out any) error {
 	err := c.getOnce(ctx, path, q, out)

@@ -192,7 +192,7 @@ func keywordsOf(t testing.TB, s *Store, kind, tmdb string, words ...string) {
 }
 
 // An upload no edit uses goes an hour after it was sent, without waiting
-// for another edit (rule 39).
+// for another edit (rule 57).
 func TestUnusedUploadsGoHourly(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()

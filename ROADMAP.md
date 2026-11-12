@@ -83,7 +83,7 @@ servers. The apps hold the experience, and nothing else.
   rewritten so no Jellyfin URL or token reaches the client, segments
   mapped back server-side, subtitles rebuilt as plain WebVTT; tickets work
   only for the profile that started the playback.
-- Version names replaced by neutral descriptions (rule 55).
+- Version names replaced by neutral descriptions (rule 77).
 - Playback lifecycle: progress reported to Jellyfin, stop that ends the
   transcode, idle playbacks ended after two minutes by a janitor, stream
   limits that replace the account's oldest playback (or refuse), a total
@@ -171,7 +171,7 @@ gets (see "Wishlists, replacing requests" below).
 **Overfin's own control panel**, built in and the same for every operator:
 the place to run an instance without Jellyfin's dashboard, where Overfin's
 users only appear under pseudonyms. It's served on its own listener, never on
-the internet (SECURITY.md rule 58), and only answers private addresses.
+the internet (SECURITY.md rule 83), and only answers private addresses.
 Browsers keep its login cookie only over HTTPS or on `localhost`, so without
 a certificate it's reached through an SSH tunnel (`http://localhost:…`);
 with one, straight from the operator's LAN or VPN. Admins sign in through
@@ -306,7 +306,7 @@ provider.
 ## 0.4: Overfin's own Jellyfin (done)
 
 Jellyfin is Overfin's backend, not a server it shares (SECURITY.md rule
-67): Overfin sets up a fresh one itself, or takes one only when its
+110): Overfin sets up a fresh one itself, or takes one only when its
 administrator hands it over, keeps the settings it needs there and sets
 them back on every start, and never changes any other Jellyfin. Access to
 Jellyfin itself is closed, and opened from the panel when needed. Also in
@@ -338,7 +338,7 @@ own do), so a title looks the same wherever it is.
    - **A Jellyfin service account**: an ordinary user (never an
      administrator, separate from Jellyfin's own admin account) with every
      library, made once with the admin key (that's provisioning, which rule
-     3 allows), reading the library for the index. Profiles keep their own
+     7 allows), reading the library for the index. Profiles keep their own
      Jellyfin users until step 4, where it serves everyone.
    - **The index** read through it: every title with its TMDB, IMDb and
      TVDB IDs, Jellyfin's metadata and rating, and image references (the
@@ -374,7 +374,7 @@ own do), so a title looks the same wherever it is.
    watched, play counts, last played, favorites) is kept by title (a film
    by its TMDB ID, an episode by its show's and its numbers) and brought
    over from Jellyfin once, with the profile's own token, in the
-   background; it's in the data download, and SECURITY.md rule 40 says
+   background; it's in the data download, and SECURITY.md rule 59 says
    whose it is. ~~Overfin writes it~~ Done: playbacks record where the
    profile stopped (from 5%) and what it watched (past 90%, or played to
    the end), and `PUT`/`DELETE /items/{id}/played|favorite` mark titles
@@ -711,17 +711,17 @@ nothing beyond what that needs.
   page, curated lists, with each title's place in the library (available,
   partly, requested, missing). From TMDB itself, with the operator's own
   read access token, or from Seerr, which also knows what's requested. Images are TMDB paths, fetched from
-  TMDB's fixed image server only (rules 5 and 43). Lists carry no ratings,
+  TMDB's fixed image server only (rules 10 and 64). Lists carry no ratings,
   so a title is shown to a kids profile only once its rating, in the
   operator's country, is read from its details and kept; without one it
-  stays hidden (rule 28).
+  stays hidden (rule 41).
 - ~~**Requests**, through Seerr~~ Done (`/requests`), then replaced by wishlists (2026-11-01). Each Overfin **account** (not profile) has
   its own Seerr user, under the name the panel shows for the account (kept
   up to date), with a unique placeholder address on `.invalid` and a
   random password thrown away (so Seerr never emails one, and nobody signs
   in to Seerr as them), no avatar; Overfin keeps the link and remakes the
   user if it's gone. Seerr approves and counts requests as it does on its
-  own, and is kept private on the network (rule 47). "Ignore quota" is
+  own, and is kept private on the network (rule 70). "Ignore quota" is
   never set for people. Problem reports may come later, through Seerr's
   issues. To be replaced by wishlists (next).
 - **Wishlists, replacing requests** (designed and built 2026-11-01, all 6 steps
@@ -847,7 +847,7 @@ nothing beyond what that needs.
   below 2 are given as 0.
 - ~~**Favorites count on the site.**~~ Removed. A title's page showed how many
   profiles marked it a favourite, from 2 up; it went, since a public
-  response never reveals other users' activity (SECURITY.md rule 44).
+  response never reveals other users' activity (SECURITY.md rule 65).
 - **Picks: missing titles worth having.** *Built*, first version, to
   adjust once we see what it picks. Before, Overfin valued only the
   missing titles someone already watched, kept or asked for, so it had
@@ -908,7 +908,11 @@ nothing beyond what that needs.
   resources are short. It tells Overfin each request's status and what's
   **leaving soon**, which titles then show, so people get a last chance
   to watch them.
-- Profile avatars, profile transfers.
+- Profile avatars, profile transfers. Security conditions, from
+  SECURITY.md before its rewrite: avatars get rule 16's treatment, with
+  stricter size limits and a rate limit, kept by Overfin, never in
+  Jellyfin; transfer codes are long, random, single-use, rate-limited and
+  expire within minutes.
 - ~~Trickplay~~ (done), lyrics, bitrate test.
 
 - ~~**A stream reserved for each profile**~~ Done: an account template's
@@ -958,7 +962,7 @@ nothing beyond what that needs.
   - Subtitles that are pictures (PGS): the track Jellyfin extracts as it
     is (`.sup`), checked whole by Overfin (every segment well-formed, each
     picture's run-length data within its declared size, sizes capped) and
-    refused otherwise (SECURITY.md rule 11), drawn by the player over the
+    refused otherwise (SECURITY.md rule 17), drawn by the player over the
     video; the decoder in the JavaScript SDK, native SDKs their own. About
     0.1 second a track to check. None ever burned in; DVD subtitles may
     follow. Turning them into text (OCR) was tried and set aside: 92% of
@@ -972,7 +976,9 @@ nothing beyond what that needs.
 
 - **Playback extras:** changing quality or version mid-playback (`PATCH`),
   queues and "advance". (Changing tracks is done: `PUT
-  /playback/{id}/tracks`.)
+  /playback/{id}/tracks`.) Every queue entry is checked against the active
+  profile when the queue is set and again when it advances; until then,
+  queues are refused (SECURITY.md rule 44).
 - **Playback info in the player:** `GET /playback/{id}/status`, read from
   the profile's session in the media server and given in Overfin's own
   words: how the playback is served (direct, repackaged, transcoded), why
@@ -986,7 +992,7 @@ nothing beyond what that needs.
   Native apps, including third-party ones, need:
   - signing in through the system browser (OAuth with PKCE), and on TVs a
     short code approved from a phone (done for a browser or a web view, with
-    Overfin's own sign-in, rule 69; with an identity provider, a TV goes
+    Overfin's own sign-in, rules 116 to 118; with an identity provider, a TV goes
     straight to the provider and never sees where a code would show: still
     to design);
   - an Overfin-issued token sent in an `Authorization` header, revocable and
@@ -1110,7 +1116,7 @@ nothing beyond what that needs.
 
 ## Companion projects
 
-Features that need data Overfin doesn't keep (SECURITY.md rule 46) belong in
+Features that need data Overfin doesn't keep (SECURITY.md rules 67 and 69) belong in
 separate projects, with their own storage and their own rules for it. The
 first idea: a reusable **social service** (friends, posts, lists, comments),
 built on Overfin without changing it:
@@ -1142,7 +1148,7 @@ built on Overfin without changing it:
   from external IDs to items: library-wide, in memory only, no user data,
   rebuilt after a restart. Every answer is the item fetched with the
   viewer's own token. Building the index with the Jellyfin admin key needs a
-  narrow exception to SECURITY.md rule 3.
+  narrow exception to SECURITY.md rule 7.
 
 ## Open questions
 

@@ -28,7 +28,7 @@ func init() {
 
 // Access is what a profile may see of the library, when it's limited:
 // titles for its age (kids profiles), in the libraries it
-// gets, and without the tags hidden from it (SECURITY.md rule 28).
+// gets, and without the tags hidden from it (SECURITY.md rules 41 and 42).
 type Access struct {
 	// Ceiling, when set, holds a kids profile to its ratings.
 	Ceiling *Ceiling

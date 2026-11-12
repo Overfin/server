@@ -9,7 +9,7 @@ import (
 )
 
 // Text subtitles reach clients only as sanitized WebVTT (SECURITY.md rule
-// 11; pictures, PGS, as checked in pgs.go).
+// 17; pictures, PGS, as checked in pgs.go).
 // The file is rebuilt from scratch: only cue timings and plain cue text
 // survive. Cue settings, identifiers, styles, regions and notes are dropped.
 

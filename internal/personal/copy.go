@@ -128,7 +128,7 @@ func stateOf(key, itemID string, u jellyfin.UserData) store.Personal {
 }
 
 // External IDs as they're checked before going into a key (SECURITY.md
-// rule 7).
+// rule 2).
 var (
 	numberID = regexp.MustCompile(`^[0-9]{1,12}$`)
 	imdbID   = regexp.MustCompile(`^tt[0-9]{1,12}$`)

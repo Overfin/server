@@ -3,8 +3,8 @@
 //
 // Every call is a typed method here (SECURITY.md rule 1), with the API key
 // in a header, never in a URL. The client never follows redirects, bounds
-// response sizes and times out (rule 6), checks every ID and image path it
-// receives (rules 5 and 7), and keeps only plain text.
+// response sizes and times out (rules 12 and 13), checks every ID and image path it
+// receives (rules 2 and 10), and keeps only plain text.
 package seerr
 
 import (
@@ -53,7 +53,7 @@ func New(baseURL, key string) (*Client, error) {
 }
 
 // get reads path under /api/v1, with its query encoded, never pasted into
-// the path (rule 2).
+// the path (rule 3).
 func (c *Client) get(ctx context.Context, path string, q url.Values, out any) error {
 	u := *c.base
 	u.Path += "/api/v1" + path

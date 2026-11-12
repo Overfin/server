@@ -2,7 +2,7 @@
 //
 // Over HTTPS, a cookie gets the __Host- prefix and the Secure flag, so no
 // other subdomain can set it and it never travels unencrypted (SECURITY.md
-// rule 17). Over plain http, which an operator may choose for a LAN or a
+// rule 26). Over plain http, which an operator may choose for a LAN or a
 // test, browsers refuse both, so the cookie goes without them. A cookie set
 // one way is never read the other way: a plain-http cookie can't stand in
 // for an HTTPS one.

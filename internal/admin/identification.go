@@ -100,7 +100,7 @@ type candidateJSON struct {
 }
 
 // identificationSearch searches TMDB for the title a film or a series
-// really is. The words travel in the body (SECURITY.md rule 48).
+// really is. The words travel in the body (SECURITY.md rule 71).
 func (p *Panel) identificationSearch(w http.ResponseWriter, r *http.Request, _ *session) {
 	var req struct {
 		Query string `json:"query"`
@@ -193,7 +193,7 @@ func (p *Panel) retitled(w http.ResponseWriter, r *http.Request, s *session, id,
 }
 
 // poster serves a TMDB poster to the panel (search results), through
-// Overfin, as everywhere (SECURITY.md rule 43).
+// Overfin, as everywhere (SECURITY.md rule 64).
 func (p *Panel) poster(w http.ResponseWriter, r *http.Request, _ *session) {
 	ref, err := images.ParseArtwork(r.PathValue("id"))
 	if err != nil || ref.Type != "poster" || p.Images == nil {

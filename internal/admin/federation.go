@@ -16,7 +16,7 @@ import (
 const maxLabel = 64
 
 // Federation: pairing this server with others (ROADMAP.md milestone 6,
-// SECURITY.md rule 65): pairing, then sharing library by library.
+// SECURITY.md rules 94 and 96): pairing, then sharing library by library.
 
 type peerJSON struct {
 	ID          string `json:"id"`

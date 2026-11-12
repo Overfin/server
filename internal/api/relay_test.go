@@ -3,7 +3,7 @@ package api
 import "testing"
 
 // A paired server's playlist passes only when it names files of the same
-// stream, by name: no path, no other server (rule 8).
+// stream, by name: no path, no other server (rule 14).
 func TestCheckRelayedPlaylist(t *testing.T) {
 	for _, tc := range []struct {
 		body string

@@ -1384,7 +1384,7 @@ paths:
       operationId: startDeviceCode
       summary: Get a code to sign this screen in from another device
       description: |
-        With managed sign-in only (rule 69). For a screen that's hard to
+        With managed sign-in only (rule 117). For a screen that's hard to
         type on, from the sign-in page: a code (8 letters), the address
         to confirm it at (without its scheme) and a QR code of that
         address with the code in its fragment, as an SVG path in a square
@@ -1762,7 +1762,7 @@ paths:
       operationId: listProfiles
       summary: List the account's profiles
       description: Another profile's limits and preferences are served only
-        to the owner profile (rule 50); others get its `id`, `name`, `kind`,
+        to the owner profile (rule 73); others get its `id`, `name`, `kind`,
         `owner` and `hasPin`.
       tags: [profiles]
       responses:
@@ -3574,7 +3574,7 @@ paths:
       description: >-
         The track as Jellyfin extracts it, sent only once Overfin read it
         whole and found every part of it well-formed and within its limits
-        (SECURITY.md rule 11). The player decodes and draws it. The first
+        (SECURITY.md rule 17). The player decodes and draws it. The first
         time a file's subtitles are asked for, Jellyfin reads the whole file,
         which can take minutes.
       tags: [playback]
@@ -3820,7 +3820,7 @@ paths:
       summary: Another server uses this server's pairing code
       description: |
         Server to server, never for apps (ROADMAP.md milestone 6, SECURITY.md
-        rule 65). The caller signs the request with its federation key
+        rules 94 and 95). The caller signs the request with its federation key
         (headers `Overfin-Key`, `Overfin-Date`, `Overfin-Nonce`,
         `Overfin-Signature`, over the method, this server's host, the path,
         the date, the nonce and the body's SHA-256); the answer is signed by

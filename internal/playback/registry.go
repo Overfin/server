@@ -17,13 +17,13 @@ import (
 )
 
 // Stream is one active playback, as Overfin keeps it. Playback state is
-// short-lived and only kept in memory (rule 40).
+// short-lived and only kept in memory (rule 58).
 type Stream struct {
 	ID            string // play_…, the playback's public ID
 	Ticket        string // secret, in stream URLs only
 	AccountID     string
 	ProfileID     string
-	SessionID     string // the browser session that started it (rule 30)
+	SessionID     string // the browser session that started it (rule 45)
 	Device        string // a readable name, shown when another device takes over
 	ItemID        string // Jellyfin IDs
 	SourceID      string
@@ -66,7 +66,7 @@ type Stream struct {
 }
 
 // Over is closed when the playback ends, however it ends (stopped,
-// replaced, idle), so a response still flowing ends with it (rule 30).
+// replaced, idle), so a response still flowing ends with it (rule 45).
 func (s *Stream) Over() <-chan struct{} { return s.over }
 
 // AddFiles records the real URLs behind a rewritten playlist's names.
@@ -174,7 +174,7 @@ func (t *Tickets) add(s *Stream, startTicks int64, now time.Time) {
 	t.byID[s.ID] = s
 }
 
-// Limits are what a new playback starts under (rules 31 and 32).
+// Limits are what a new playback starts under (rules 47 and 49).
 type Limits struct {
 	MaxStreams int  // the account's stream limit, 0 for none
 	Reserve    bool // a stream reserved for each profile
@@ -258,8 +258,8 @@ func (t *Tickets) live(s *Stream, now time.Time) bool {
 }
 
 // ByTicket finds a live stream by its ticket, for the session and profile
-// that started it only (rule 30). Only such a request counts as activity:
-// a ticket used anywhere else keeps nothing alive (rule 33).
+// that started it only (rule 45). Only such a request counts as activity:
+// a ticket used anywhere else keeps nothing alive (rule 50).
 func (t *Tickets) ByTicket(ticket, sessionID, profileID string, now time.Time) (*Stream, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -321,7 +321,7 @@ func (r *Remote) Due(now time.Time, paused bool, every time.Duration) bool {
 const PeerPrefix = "peer:"
 
 // ByID finds a playback by its public ID, only for the profile that owns it
-// (rule 23). For a playback that ended, it returns why instead.
+// (rule 36). For a playback that ended, it returns why instead.
 func (t *Tickets) ByID(id, profileID string, now time.Time) (*Stream, *Ended, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -414,7 +414,7 @@ func (t *Tickets) forAccount(accountID string) []*Stream {
 }
 
 // Live is a playback as it stands now, for the control panel's live view:
-// read from memory when the page asks, never kept (rule 40).
+// read from memory when the page asks, never kept (rule 60).
 type Live struct {
 	Stream     *Stream
 	Title      string // as Describe set it; "" while starting
@@ -526,7 +526,7 @@ func (t *Tickets) Idle(now time.Time, idle time.Duration) []*Stream {
 }
 
 // random returns n random bytes as URL-safe text. Tickets get 24 bytes, well
-// above the 128-bit minimum (rule 23).
+// above the 128-bit minimum (rule 35).
 func random(n int) string {
 	b := make([]byte, n)
 	rand.Read(b)

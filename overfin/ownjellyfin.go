@@ -29,7 +29,7 @@ var jellyfinStartup = jellyfin.Startup{UICulture: "en-US", Country: "US", Langua
 // moment.
 const jellyfinWait = 2 * time.Minute
 
-// ownJellyfin finds Overfin's own Jellyfin at start (SECURITY.md rule 67):
+// ownJellyfin finds Overfin's own Jellyfin at start (SECURITY.md rule 110):
 // at the configuration file's address, or the one saved, with the key
 // Overfin made on it, as saved. A fresh server is set up at once. ok is
 // false when there's none yet, or when the operator has to hand it over on
@@ -289,7 +289,7 @@ func ownSettings(ctx context.Context, db *store.Store, url, key string, logger *
 	// that failed): said at every start. Overfin can't tell which, so it
 	// doesn't close it by itself.
 	if open, since, err := db.JellyfinAccess(ctx); err == nil && open {
-		logger.Warn("access to Jellyfin itself is open; close it in the control panel when it's no longer needed (SECURITY.md rule 67)",
+		logger.Warn("access to Jellyfin itself is open; close it in the control panel when it's no longer needed (SECURITY.md rule 112)",
 			"since", since.Format(time.RFC3339))
 	}
 	family, device, err := db.Transcoding(ctx)
@@ -311,7 +311,7 @@ func ownSettings(ctx context.Context, db *store.Store, url, key string, logger *
 }
 
 // closeAfterHandOver closes access to a Jellyfin just handed over, as to
-// every Jellyfin of Overfin's (SECURITY.md rule 67), and revokes the keys
+// every Jellyfin of Overfin's (SECURITY.md rule 112), and revokes the keys
 // earlier takeovers made there.
 func closeAfterHandOver(ctx context.Context, db *store.Store, jf *jellyfin.Client, key string, logger *slog.Logger) error {
 	a := jellyfin.Auth{Token: key, DeviceID: "overfin-admin"}

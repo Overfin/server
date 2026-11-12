@@ -11,8 +11,8 @@ import (
 
 // Library listings answered from the catalog's index, which is faster than
 // asking Jellyfin to list and count each time. What the profile may see is
-// Overfin's own rule (its access; Jellyfin sees one account, rule 3): the
-// index keeps only that, and the total counts only that (rule 56).
+// Overfin's own rule (its access; Jellyfin sees one account, rule 4): the
+// index keeps only that, and the total counts only that (rule 43).
 //
 // What the index can't answer goes to Jellyfin as before: personal
 // filters and last played before the profile's data is Overfin's, and item

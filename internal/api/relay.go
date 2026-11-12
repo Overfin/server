@@ -17,7 +17,7 @@ import (
 	"github.com/overfin/server/internal/problem"
 )
 
-// A paired server's title plays through this server (rule 65): the
+// A paired server's title plays through this server (rule 97): the
 // viewer's browser asks this server only, with this server's ticket, and
 // this server asks the paired one with the ticket it gave, which never
 // leaves here. The paired server sees this server, never the viewer.
@@ -74,7 +74,7 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 		return
 	}
 	l := s.Playback.Library
-	// A playback that ends takes its response along (rules 30 and 32).
+	// A playback that ends takes its response along (rules 45 and 49).
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	go func() {
@@ -186,7 +186,7 @@ var playlistURIRe = regexp.MustCompile(`URI="([^"]*)"`)
 
 // checkRelayedPlaylist accepts a paired server's playlist only when every
 // address in it is a file of the same stream, by name (no path, no other
-// server): what the paired server's own rewriting gives (rule 8).
+// server): what the paired server's own rewriting gives (rule 14).
 func checkRelayedPlaylist(body []byte) error {
 	if !bytes.HasPrefix(body, []byte("#EXTM3U")) {
 		return errors.New("not a playlist")

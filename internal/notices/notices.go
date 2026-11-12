@@ -1,7 +1,7 @@
 // Package notices tells the operator about account events: an account
 // made, one whose access ends soon, one whose access ended. By email to the
 // admins, by a webhook, and, before their access ends, by email to the
-// person. Never what anyone watches (SECURITY.md rule 46). All off until
+// person. Never what anyone watches (SECURITY.md rule 68). All off until
 // the operator switches them on (control panel, Notices).
 package notices
 
@@ -55,7 +55,7 @@ type Event struct {
 }
 
 // WebhookClient is the webhook's HTTP client: ten seconds at most, and no
-// redirects followed (rule 46).
+// redirects followed (rule 12).
 func WebhookClient() *http.Client {
 	return &http.Client{Timeout: 10 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}

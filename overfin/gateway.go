@@ -631,7 +631,7 @@ func (g *gateway) Jellyfin() (url string, inFile bool) {
 
 // SetJellyfin changes the address Overfin reaches its Jellyfin at, tested
 // first and applied at once. Only the same server is accepted, answering to
-// Overfin's own key: another one isn't Overfin's (SECURITY.md rule 67).
+// Overfin's own key: another one isn't Overfin's (SECURITY.md rule 111).
 // Errors say what's wrong in plain words.
 func (g *gateway) SetJellyfin(ctx context.Context, url string) (string, error) {
 	g.mu.Lock()
@@ -677,7 +677,7 @@ func (g *gateway) JellyfinAccess(ctx context.Context) (bool, time.Time, error) {
 // SetJellyfinAccess opens access to Jellyfin itself, giving Overfin's
 // administrator account there a new password (returned, shown once, never
 // kept), or closes it: every administrator gets a password nobody knows
-// (SECURITY.md rule 67).
+// (SECURITY.md rule 112).
 func (g *gateway) SetJellyfinAccess(ctx context.Context, open bool) (name, password string, err error) {
 	a := g.adminAuth()
 	if open {

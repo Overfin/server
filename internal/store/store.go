@@ -1,5 +1,5 @@
 // Package store keeps Overfin's own data in SQLite: accounts, profiles and
-// sessions. It holds only what Overfin needs to run (SECURITY.md rule 40).
+// sessions. It holds only what Overfin needs to run (SECURITY.md rule 58).
 //
 // Upstream tokens are sealed before they are written, and sessions are found
 // by the SHA-256 of their cookie value, so the database alone yields neither
@@ -371,7 +371,7 @@ func (s *Store) AccountBySubject(ctx context.Context, subject string) (*Account,
 }
 
 // Profile returns one profile, only if it belongs to accountID (SECURITY.md
-// rule 23): another account's profile is simply not found.
+// rule 36): another account's profile is simply not found.
 func (s *Store) Profile(ctx context.Context, accountID, profileID string) (*Profile, error) {
 	row := s.read.QueryRowContext(ctx, profileSelect+` WHERE id = ? AND account_id = ?`, profileID, accountID)
 	return s.scanProfile(row)
@@ -758,7 +758,7 @@ func scanSession(sc scanner) (*Session, error) {
 // ---- Kids profiles and PINs -------------------------------------------------------
 
 // ErrPINExists is returned when setting a PIN on a profile that has one;
-// changing an existing PIN needs a fresh login (rule 21).
+// changing an existing PIN needs a fresh login (rule 31).
 var ErrPINExists = errors.New("store: profile already has a PIN")
 
 // SetKind changes a profile's kind and age (a kids profile's; nil for
@@ -848,7 +848,7 @@ func (s *Store) SetFreshLogin(ctx context.Context, accountID, sessionID string, 
 }
 
 // UnlockPINs lifts every PIN lock and forgets wrong attempts in an account,
-// after its owner logged in again (rule 22).
+// after its owner logged in again (rule 34).
 func (s *Store) UnlockPINs(ctx context.Context, accountID string) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE profiles SET pin_failures = 0, pin_failed_at = NULL, pin_locked_until = NULL

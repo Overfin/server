@@ -3,7 +3,7 @@
 -- certifications, in every country TMDB has. A kids profile sees a title
 -- only when every certification it has in the server's ratings country is
 -- within the profile's ceiling for its kind; anything else is hidden
--- (SECURITY.md rule 28). Like every TMDB datum, they're kept five months at
+-- (SECURITY.md rule 41). Like every TMDB datum, they're kept five months at
 -- most and deleted with Seerr's connection.
 CREATE TABLE rating_scales (
     kind          TEXT NOT NULL CHECK (kind IN ('movie', 'series')),

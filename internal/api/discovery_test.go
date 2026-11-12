@@ -203,7 +203,7 @@ func TestDiscover(t *testing.T) {
 }
 
 // A profile limited to some libraries sees only what they have: titles no
-// library has are hidden from it everywhere (rule 28), not only titles of
+// library has are hidden from it everywhere (rule 42), not only titles of
 // other libraries.
 func TestLibraryLimitedSeesNoMissingTitles(t *testing.T) {
 	var st *store.Store

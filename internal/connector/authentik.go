@@ -4,7 +4,7 @@
 // provider-specific; Overfin works without them.
 //
 // What a connector reads is shown live in the control panel and never
-// stored (SECURITY.md rule 40).
+// stored (SECURITY.md rule 60).
 package connector
 
 import (

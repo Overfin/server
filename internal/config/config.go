@@ -60,7 +60,7 @@ type Jellyfin struct {
 	// URL is where Overfin reaches Jellyfin, e.g. "http://192.0.2.10:8096".
 	// Optional: without it, the setup page asks for it, and the database
 	// keeps it. Either way, Overfin makes its own key on that Jellyfin and
-	// keeps it in the database (SECURITY.md rule 67).
+	// keeps it in the database (SECURITY.md rule 111).
 	URL string `toml:"url"`
 }
 
@@ -265,7 +265,7 @@ func (c *Config) WithFeatures(f Features) (*Config, error) {
 
 // Admin is Overfin's control panel. With managed sign-in, it's at /admin/
 // on the site's address, for admins; otherwise on its own listener, never
-// on the internet (SECURITY.md rule 58), off unless Listen is set.
+// on the internet (SECURITY.md rule 83), off unless Listen is set.
 type Admin struct {
 	// Listen is the panel's address, e.g. ":8081" in a container whose port
 	// is published on a private address only.
@@ -433,8 +433,8 @@ type Limits struct {
 
 type Secrets struct {
 	// JellyfinAdminKey is the key Overfin made on its Jellyfin (SECURITY.md
-	// rule 67), as the database keeps it; never from the environment. It's
-	// used only for provisioning and administration (rule 3).
+	// rule 111), as the database keeps it; never from the environment. It's
+	// used only for provisioning and administration (rule 7).
 	JellyfinAdminKey string
 	// Key encrypts tokens and keys PIN hashes, cursors and log IDs. It's
 	// nil when none was given and KeyFile doesn't exist yet: Overfin then

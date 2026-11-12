@@ -362,7 +362,7 @@ func (p *Panel) uploadMetadataImage(w http.ResponseWriter, r *http.Request, s *s
 
 // artwork serves a title's image to the panel: one of TMDB's (a poster,
 // backdrop or logo), or an upload, through Overfin, as everywhere
-// (SECURITY.md rule 43).
+// (SECURITY.md rule 64).
 func (p *Panel) artwork(w http.ResponseWriter, r *http.Request, _ *session) {
 	id := r.PathValue("id")
 	var data []byte

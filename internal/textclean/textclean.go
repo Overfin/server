@@ -1,5 +1,5 @@
 // Package textclean turns untrusted metadata into plain text (SECURITY.md
-// rule 9). Metadata comes from internet providers and media files, so it may
+// rule 15). Metadata comes from internet providers and media files, so it may
 // carry markup, control characters or invisible direction overrides. What
 // comes out is plain text, safe to show anywhere, and never longer than asked.
 package textclean

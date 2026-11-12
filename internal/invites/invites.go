@@ -330,7 +330,7 @@ func invitationOf(ctx context.Context, db *sql.DB, r *http.Request) (inv *invite
 	switch {
 	case holdPattern.MatchString(stored):
 		// Someone who registered: their invitation only, never another's
-		// cookie in their browser (rule 63), even once the hold is over.
+		// cookie in their browser (rule 91), even once the hold is over.
 		inv, err = heldBy(ctx, db, hash(stored))
 		return inv, hash(stored), err
 	case stored != "":

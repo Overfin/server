@@ -311,7 +311,7 @@ if (setup && $('setup')) {
   });
 }
 
-// ---- Signing a screen in by a code (rule 69) -------------------------------------
+// ---- Signing a screen in by a code (rules 116 to 118) -------------------------------------
 
 // On the screen: a code and its QR code, then asking every few seconds
 // whether someone confirmed it.

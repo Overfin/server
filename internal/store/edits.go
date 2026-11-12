@@ -177,7 +177,7 @@ func dropUnusedUploads(ctx context.Context, tx *sql.Tx) error {
 }
 
 // DeleteUnusedUploads deletes the artwork uploads no edit uses, an hour
-// after they were sent (rule 39): run every hour, not only at the next
+// after they were sent (rule 57): run every hour, not only at the next
 // edit.
 func (s *Store) DeleteUnusedUploads(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)

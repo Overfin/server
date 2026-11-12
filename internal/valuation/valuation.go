@@ -592,7 +592,7 @@ func (m *Measured) Scored(w map[string]int) []Value {
 
 // Shared is m as an admin may look at it: what people did with a title
 // counts only when at least two accounts did it, so no score points at
-// what one person watched, kept or asked for (SECURITY.md rule 40). The
+// what one person watched, kept or asked for (SECURITY.md rule 61). The
 // rest is as measured.
 func (m *Measured) Shared() *Measured {
 	out := &Measured{Titles: make([]Title, len(m.Titles)), Accounts: m.Accounts}

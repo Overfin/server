@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/overfin/server/internal/federation"
-	"github.com/overfin/server/internal/seal"
 	"github.com/overfin/server/internal/playback"
+	"github.com/overfin/server/internal/seal"
 	"github.com/overfin/server/internal/store"
 )
 
@@ -81,7 +81,7 @@ func TestPeerPlayback(t *testing.T) {
 		t.Fatalf("play: %d %v %+v", status, err, s)
 	}
 	// A, for its viewer: no cookie, the ticket alone; no CORS, since no
-	// browser ever asks here (rule 65).
+	// browser ever asks here (rule 97).
 	fetch := func() *http.Response {
 		req, _ := http.NewRequest("GET", s.Stream.URL, nil)
 		res, err := srv.Client().Do(req)

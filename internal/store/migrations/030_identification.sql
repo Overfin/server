@@ -2,7 +2,7 @@
 -- fixing them by hand.
 --
 -- What the index keeps for telling them: the last names of where each
--- film and series is (never the whole path, SECURITY.md rule 55), a film's
+-- film and series is (never the whole path, SECURITY.md rule 78), a film's
 -- length, and the TMDB ID Jellyfin gave it, apart from the one used.
 ALTER TABLE catalog_items ADD COLUMN folder_name TEXT;
 ALTER TABLE catalog_items ADD COLUMN file_name TEXT;

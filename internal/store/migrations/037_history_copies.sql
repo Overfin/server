@@ -1,5 +1,5 @@
 -- Accounts on another Jellyfin server whose history was copied here
--- (migration, SECURITY.md rule 60): each into one Overfin account only.
+-- (migration, SECURITY.md rule 87): each into one Overfin account only.
 -- Nothing else about them is kept.
 CREATE TABLE history_copies (
     server_id  TEXT NOT NULL,

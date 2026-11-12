@@ -17,12 +17,12 @@ import (
 	"github.com/overfin/server/internal/store"
 )
 
-// publicRoutes are the routes SECURITY.md rule 37 names, in its words.
+// publicRoutes are the routes SECURITY.md rule 55 names, in its words.
 var publicRoutes = map[string]string{
 	"GET /api/v1/health": "health",
-	// The stream's media checks its ticket itself (rule 30), and
+	// The stream's media checks its ticket itself (rules 45 and 46), and
 	// federation's calls answer paired servers' signed requests only (rule
-	// 65).
+	// 95).
 	"GET /api/v1/stream/{ticket}/{name}":            "the stream's media",
 	"GET /api/v1/stream/{ticket}/subtitles/{track}": "the stream's subtitles",
 	"GET /api/v1/stream/{ticket}/pictures/{track}":  "the stream's picture subtitles",
@@ -90,8 +90,8 @@ func (l publicLog) WithAttrs([]slog.Attr) slog.Handler { return l }
 func (l publicLog) WithGroup(string) slog.Handler      { return l }
 
 // Every route that needs no session, in every sign-in mode, is one rule
-// 37 names: a new one is checked against the rule and added to both.
-func TestPublicRoutesAreRule37s(t *testing.T) {
+// 55 names: a new one is checked against the rule and added to both.
+func TestPublicRoutesAreRule55s(t *testing.T) {
 	modes := map[string]string{
 		"managed":     `mode = "managed"`,
 		"forwardauth": "mode = \"forwardauth\"\ntrusted_proxies = [\"127.0.0.1\"]\nuser_header = \"Remote-User\"",
@@ -135,7 +135,7 @@ func TestPublicRoutesAreRule37s(t *testing.T) {
 		}
 		for pattern := range seen {
 			if _, ok := publicRoutes[pattern]; !ok {
-				t.Errorf("%s: %s needs no session but isn't in SECURITY.md rule 37 (and publicRoutes)", name, pattern)
+				t.Errorf("%s: %s needs no session but isn't in SECURITY.md rule 55 (and publicRoutes)", name, pattern)
 			}
 		}
 	}

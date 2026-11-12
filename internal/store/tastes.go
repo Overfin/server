@@ -144,7 +144,7 @@ func (s *Store) SetTastesAsked(ctx context.Context, on bool) error {
 	return err
 }
 
-// IMDbOn is whether the operator has IMDb's data on (rule 68).
+// IMDbOn is whether the operator has IMDb's data on (rule 115).
 func (s *Store) IMDbOn(ctx context.Context) (bool, error) {
 	var v []byte
 	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'imdb'`).Scan(&v)

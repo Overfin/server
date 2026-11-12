@@ -29,7 +29,7 @@ import (
 // carries an Overfin-Signature too, from the server answering, over the
 // request's nonce, the status and the body: an answer can't be forged or
 // swapped for another request's, even by someone who can read and change
-// the traffic (a web certificate alone is never trusted, rule 65).
+// the traffic (a web certificate alone is never trusted, rule 94).
 const (
 	HeaderKey       = "Overfin-Key"
 	HeaderDate      = "Overfin-Date"

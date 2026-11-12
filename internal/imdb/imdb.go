@@ -1,4 +1,4 @@
-// Package imdb keeps what Overfin uses of IMDb's free datasets (rule 68):
+// Package imdb keeps what Overfin uses of IMDb's free datasets (rule 115):
 // each film's, series' and episode's type, years, length and rating, and
 // each season's rating, from its episodes. IMDb publishes the datasets
 // every day for personal and non-commercial use; a server whose operator

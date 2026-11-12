@@ -11,7 +11,7 @@ import (
 // Plain is a failed request's error without its URL. Go's HTTP client
 // writes the whole address into its errors, query included, which can
 // carry a token (Jellyfin's stream URLs) or what someone searched for;
-// logs never get either (SECURITY.md rules 48 and 54). What went wrong
+// logs never get either (SECURITY.md rules 54 and 71). What went wrong
 // stays, and errors.Is still sees through it (a cancelled request, a
 // deadline).
 func Plain(err error) error {

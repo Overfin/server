@@ -25,7 +25,7 @@ import (
 // Setup is the first-run setup wizard, served until Overfin is set up: on
 // the control panel's address, and with managed sign-in on the site's own
 // too. One step per screen, each saved as it's done, for what's missing:
-// the default language; Overfin's own Jellyfin (SECURITY.md rule 67), which
+// the default language; Overfin's own Jellyfin (SECURITY.md rule 110), which
 // it sets up if it's fresh, and otherwise shows, then takes only when its
 // administrator hands it over; TMDB's token; and with managed sign-in the
 // first admin. Only someone with the one-time code from Overfin's log can

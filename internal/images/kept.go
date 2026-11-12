@@ -263,7 +263,7 @@ func (p *Pipeline) stillKept(file string, originals map[string]bool) bool {
 }
 
 // ForgetKept deletes every kept image: Overfin no longer uses TMDB's data,
-// and its terms ask for it to be deleted then (SECURITY.md rule 57).
+// and its terms ask for it to be deleted then (SECURITY.md rule 80).
 func (p *Pipeline) ForgetKept() error {
 	if p == nil || p.ArtworkDir == "" {
 		return nil

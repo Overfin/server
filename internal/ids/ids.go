@@ -1,5 +1,5 @@
 // Package ids makes Overfin's resource IDs: a type prefix and 128 random bits
-// (SECURITY.md rule 23), such as "prof_3kq9x2m8w7v1…".
+// (SECURITY.md rule 35), such as "prof_3kq9x2m8w7v1…".
 package ids
 
 import (

@@ -17,8 +17,8 @@ import (
 )
 
 // Apps: keys the operator gives other apps (Stewarr…), and what they may
-// read with them, on this private listener (SECURITY.md rule 58): totals
-// per title, never anything per person (rule 40).
+// read with them, on this private listener (SECURITY.md rule 85): totals
+// per title, never anything per person (rule 61).
 
 // appScopes are what a key may be for: watch-stats (the older endpoint),
 // on /apps/v1/titles, score, stats and availability, history, on

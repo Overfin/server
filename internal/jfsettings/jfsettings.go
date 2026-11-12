@@ -1,5 +1,5 @@
 // Package jfsettings holds the Jellyfin settings Overfin owns on its own
-// Jellyfin (SECURITY.md rule 67), and sets them back when they differ.
+// Jellyfin (SECURITY.md rule 113), and sets them back when they differ.
 // Only the settings listed here are touched; everything else stays as
 // Jellyfin or the operator left it.
 package jfsettings

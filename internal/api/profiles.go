@@ -97,7 +97,7 @@ func (p Profiles) list(w http.ResponseWriter, r *http.Request) {
 }
 
 // shownProfile is a profile as the caller may see it: another's limits and
-// preferences are for the owner only (rule 50); choosing who's watching takes
+// preferences are for the owner only (rule 73); choosing who's watching takes
 // no more than its name, its kind, and whether it has a PIN.
 func shownProfile(c *Caller, pr *store.Profile) profileJSON {
 	if c.IsOwner() || (c.Profile != nil && c.Profile.ID == pr.ID) {
@@ -588,7 +588,7 @@ func pinAllowed(c *Caller, pr *store.Profile) bool {
 }
 
 // setPIN gives a profile a PIN. Changing an existing one needs a fresh login
-// (rule 21) instead of the owner's PIN.
+// (rule 31) instead of the owner's PIN.
 func (p Profiles) setPIN(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		PIN      string `json:"pin"`
@@ -637,7 +637,7 @@ func (p Profiles) setPIN(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// removePIN needs a fresh login (rule 21).
+// removePIN needs a fresh login (rule 31).
 func (p Profiles) removePIN(w http.ResponseWriter, r *http.Request) {
 	c := p.Sessions.Current(w, r)
 	if c == nil {
@@ -751,7 +751,7 @@ type sessionJSONOut struct {
 }
 
 // sessions lists sessions: all of the account's for the owner profile, and
-// only those currently using their own profile for anyone else (rule 51).
+// only those currently using their own profile for anyone else (rule 74).
 func (p Profiles) sessions(w http.ResponseWriter, r *http.Request) {
 	c := p.Sessions.Current(w, r)
 	if c == nil {

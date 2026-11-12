@@ -50,7 +50,7 @@ type RawItem struct {
 	Status                  string
 	// Path is where the file (or the series' folder) is on Jellyfin's
 	// server. Only the catalog asks for it, keeps only its last names, and
-	// never sends it on (SECURITY.md rule 55).
+	// never sends it on (SECURITY.md rule 78).
 	Path              string
 	ChildCount        *int
 	AlbumId           string
@@ -201,7 +201,7 @@ func (q ItemQuery) values(userID string) url.Values {
 }
 
 // get is do for a GET with query parameters; the parameters are encoded,
-// never pasted into the path (SECURITY.md rule 2).
+// never pasted into the path (SECURITY.md rule 3).
 func (c *Client) get(ctx context.Context, op, path string, a Auth, v url.Values, out any) error {
 	return c.doQuery(ctx, op, http.MethodGet, path, v, a, nil, out)
 }

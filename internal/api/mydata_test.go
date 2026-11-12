@@ -52,7 +52,7 @@ func TestExportMyData(t *testing.T) {
 			t.Errorf("export lacks %s: %s", want, body)
 		}
 	}
-	// Never secrets (rule 52).
+	// Never secrets (rule 75).
 	for _, secret := range []string{token, "pin_hash", "jellyfinToken", "of-test"} {
 		if strings.Contains(body, secret) {
 			t.Errorf("export contains %q", secret)

@@ -14,7 +14,7 @@ import (
 )
 
 // What each profile does with each title is Overfin's to keep (SECURITY.md
-// rule 40): playbacks record where it stopped and what it watched, and the
+// rule 58): playbacks record where it stopped and what it watched, and the
 // profile marks titles watched or favorites itself. Jellyfin keeps none of
 // it: its one account plays for everyone.
 

@@ -11,7 +11,7 @@ import (
 
 // Recommendations: what Overfin knows of the library's films and series
 // to tell which fit a profile, and what the profile watched. What a
-// profile watched is read for the page being shown, never kept (rule 40):
+// profile watched is read for the page being shown, never kept (rule 58):
 // a profile's recommendations are its own. The library's facts, no one's,
 // are kept in memory for half a minute (factsFor).
 

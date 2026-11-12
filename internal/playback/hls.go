@@ -12,7 +12,7 @@ import (
 )
 
 // HLS playlists from Jellyfin are parsed, never searched and replaced
-// (SECURITY.md rule 8). Every URI in them carries Jellyfin's token; each one
+// (SECURITY.md rule 14). Every URI in them carries Jellyfin's token; each one
 // is replaced by a neutral name, and the real URL stays on the server. Tags
 // outside an allow-list are dropped, including any that point to other URIs
 // (alternate renditions, subtitles, keys, I-frame playlists).

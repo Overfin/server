@@ -11,7 +11,7 @@ import (
 	"github.com/overfin/server/internal/store"
 )
 
-// A screen signed in from a phone (rule 69): the screen gets a code, the
+// A screen signed in from a phone (rules 116 to 118): the screen gets a code, the
 // person signed in on the phone confirms it, and the screen, and only it,
 // is signed in once.
 func TestDeviceCode(t *testing.T) {

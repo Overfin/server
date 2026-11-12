@@ -1,5 +1,5 @@
 // Package cursor makes pagination cursors that clients can't tamper with
-// (SECURITY.md rule 38).
+// (SECURITY.md rule 56).
 //
 // A cursor carries a small payload (an offset, a seed, an upstream page
 // token) plus a signature. The signature also covers the query the cursor

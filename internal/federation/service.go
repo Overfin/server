@@ -587,7 +587,7 @@ func (s *Service) CheckSoon(peers []*store.Peer) {
 // Sharing, library by library: each side offers its own libraries to each
 // peer, and wants some of what the peer offers. Only what one offers and
 // the other wants is ever shared; a server only offers what it owns, and
-// never passes on what it receives (rule 65).
+// never passes on what it receives (rule 98).
 
 type librariesAnswer struct {
 	// Name is what this server calls itself now (its branding's name),

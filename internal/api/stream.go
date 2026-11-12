@@ -21,7 +21,7 @@ import (
 // Stream serves what a playback session plays: the media file, rewritten
 // HLS playlists, segments and subtitles. Every response is looked up through
 // the stream ticket; the real Jellyfin URLs, which carry its token, never
-// leave the server (SECURITY.md rules 4, 8, 11 and 12).
+// leave the server (SECURITY.md rules 9, 14, 17 and 18).
 type Stream struct {
 	Playback Playback
 }
@@ -32,7 +32,7 @@ func (Stream) Name() string { return "stream" }
 // ticket themselves. A ticket of this server's own playbacks works only in
 // the session that started it (whose cookie never goes along from another
 // site); one a paired server's viewer plays, for that server only, never
-// for a browser (rule 65).
+// for a browser (rule 46).
 func (s Stream) Register(r *plugin.Registrar) error {
 	if err := r.HandleMedia("GET /api/v1/stream/{ticket}/{name}", http.HandlerFunc(s.serve)); err != nil {
 		return err
@@ -63,7 +63,7 @@ func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream
 	}
 	// A paired server's viewer, through that server: no session here.
 	if st, ok := s.Playback.Tickets.ByPeerTicket(ticket, time.Now()); ok {
-		// Asked by that server, never by a browser (rule 65): a browser
+		// Asked by that server, never by a browser (rule 46): a browser
 		// says where a request comes from. And only while the pairing
 		// lasts: an ended one ends its playbacks.
 		if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" || r.Header.Get("Sec-Fetch-Mode") != "" {
@@ -96,8 +96,8 @@ func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream
 	}
 	p := c.Profile
 	// The ticket works only in the session that started the playback
-	// (rule 30): a copied stream URL is useless anywhere else, and doesn't
-	// keep the playback alive either (rule 33).
+	// (rule 45): a copied stream URL is useless anywhere else, and doesn't
+	// keep the playback alive either (rule 50).
 	st, ok := s.Playback.Tickets.ByTicket(ticket, c.Session.ID, p.ID, time.Now())
 	if !ok {
 		problem.Send(w, problem.NotFound, "")
@@ -178,7 +178,7 @@ func (s Stream) playlist(w http.ResponseWriter, r *http.Request, st *playback.St
 }
 
 // proxy streams bytes from upstream without buffering. Only the headers
-// streaming needs are passed on (rule 12); for direct play the client's
+// streaming needs are passed on (rule 18); for direct play the client's
 // Range header is forwarded so seeking works.
 func (s Stream) proxy(w http.ResponseWriter, r *http.Request, st *playback.Stream, a jellyfin.Auth, up playback.Upstream,
 	allowRange bool, forceType string) {
@@ -195,7 +195,7 @@ func (s Stream) proxy(w http.ResponseWriter, r *http.Request, st *playback.Strea
 	}
 	// A playback that ends takes its response along: stopped by an admin,
 	// taken over or idle, a file already flowing mustn't go on, past the
-	// limits (rules 30 and 32).
+	// limits (rules 45 and 49).
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	go func() {
@@ -326,7 +326,7 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 
 // pictures serves one subtitle track of pictures (PGS) as Jellyfin
 // extracts it, once Overfin read it whole and found every part of it
-// well-formed and within its limits (SECURITY.md rule 11). The player
+// well-formed and within its limits (SECURITY.md rule 17). The player
 // decodes and draws it: sent as opaque bytes, never as anything a browser
 // would render.
 func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {

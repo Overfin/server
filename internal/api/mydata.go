@@ -17,7 +17,7 @@ import (
 // ---- Deleting an account ----------------------------------------------------
 
 // deleteAccount deletes the account and everything Overfin holds about it
-// (rule 45), with the Jellyfin users of its profiles from before Overfin's
+// (rule 66), with the Jellyfin users of its profiles from before Overfin's
 // one Jellyfin account. Owner only, after a fresh login.
 func (a Account) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	c := a.Sessions.Current(w, r)
@@ -160,7 +160,7 @@ type exportSessionJSON struct {
 
 // export answers with what Overfin holds about the account (from the owner
 // profile) or about the active profile only (from any other), plus the watch
-// history read live, never secrets (rule 52). The whole account needs the
+// history read live, never secrets (rule 75). The whole account needs the
 // account holder's fresh login; a profile's own data needs only that
 // profile's PIN, if it has one: the people using other profiles don't know
 // the account's login, and without a PIN the profile is open to anyone at
@@ -331,7 +331,7 @@ func (a Account) export(w http.ResponseWriter, r *http.Request) {
 			active = c.Owner.ID
 		}
 		if _, ours := names[active]; !ours {
-			continue // another profile's session (rule 51)
+			continue // another profile's session (rule 74)
 		}
 		out.Sessions = append(out.Sessions, exportSessionJSON{
 			ID: s.ID, Device: s.Device, ProfileName: names[active],

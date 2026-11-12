@@ -1189,7 +1189,7 @@ func TestUnmarkedAudioIsChecked(t *testing.T) {
 }
 
 // Every transcode taken: a playback that needs one is refused before the
-// account's oldest stream stops, unless stopping it frees one (rule 32).
+// account's oldest stream stops, unless stopping it frees one (rule 49).
 func TestTranscodeLimitStopsNothing(t *testing.T) {
 	srv, fake := newServerWith(t, options{maxStreams: 2, maxTranscodes: 1})
 	fake.setDirect(true)

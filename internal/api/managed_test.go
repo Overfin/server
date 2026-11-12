@@ -262,7 +262,7 @@ func TestManagedRegistration(t *testing.T) {
 	if c, out := signinPost(t, newBrowser(srv), srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "new@example.org", "password": "a long password 1"})); c != 200 || out["unconfirmed"] == true {
 		t.Errorf("signing in after: %d %v", c, out)
 	}
-	// Signed in and "fresh": the password was just typed (rule 21).
+	// Signed in and "fresh": the password was just typed (rule 31).
 	u, _ := url.Parse(srv.URL)
 	found := false
 	for _, ck := range other.Jar.Cookies(u) {
@@ -674,7 +674,7 @@ func TestManagedPassword(t *testing.T) {
 }
 
 // The password is the whole account's: another profile on a browser just
-// signed in can neither change it nor read the email (rule 25).
+// signed in can neither change it nor read the email (rule 38).
 func TestManagedPasswordOwnerOnly(t *testing.T) {
 	var st *store.Store
 	srv, _ := newServerWith(t, options{managed: true, store: &st, freshFor: time.Minute})
@@ -744,7 +744,7 @@ func TestManagedPasswordOwnerOnly(t *testing.T) {
 }
 
 // An admin whose account is disabled loses the control panel at once
-// (rule 16), even signed in and fresh.
+// (rule 24), even signed in and fresh.
 func TestSiteAdminDisabledAccount(t *testing.T) {
 	var st *store.Store
 	var m *api.Managed
@@ -1109,7 +1109,7 @@ func TestSigninEmailLanguage(t *testing.T) {
 	}
 }
 
-// "Download my data" has the email the account signs in with (rule 52).
+// "Download my data" has the email the account signs in with (rule 75).
 func TestManagedExportHasEmail(t *testing.T) {
 	var st *store.Store
 	srv, _ := newServerWith(t, options{managed: true, store: &st, freshFor: time.Minute})

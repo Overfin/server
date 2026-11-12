@@ -1,5 +1,5 @@
 // Package federation holds what servers need to trust each other (ROADMAP.md
-// milestone 6, SECURITY.md rule 65): each server's own key and its
+// milestone 6, SECURITY.md rule 94): each server's own key and its
 // fingerprint, the one-time pairing code, and signed requests and answers.
 //
 // A server proves who it is with its key only, never with a web

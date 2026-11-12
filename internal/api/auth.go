@@ -40,7 +40,7 @@ const (
 
 // Auth talks to the identity provider over OpenID Connect. It always offers
 // step-up: confirming a fresh login before destructive actions (SECURITY.md
-// rule 21). With Login set (identity mode "oidc"), it also logs users in,
+// rule 31). With Login set (identity mode "oidc"), it also logs users in,
 // re-checks their logins with the provider, and serves the gate a reverse
 // proxy consults before serving the site's pages.
 //
@@ -507,7 +507,7 @@ func (a *Auth) finishStepUp(w http.ResponseWriter, r *http.Request, p pendingAut
 		problem.Send(w, problem.Internal, "")
 		return
 	}
-	// The account holder is back: PIN locks lift (rule 22).
+	// The account holder is back: PIN locks lift (rule 34).
 	if err := a.Store.UnlockPINs(ctx, c.Account.ID); err != nil {
 		a.Logger.Error("step-up: unlocking PINs failed", "err", err)
 	}

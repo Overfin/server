@@ -20,7 +20,7 @@ import (
 )
 
 // TMDB's image server: the only host Overfin fetches TMDB images from
-// (SECURITY.md rule 5). Browsers never contact it (rule 43). A variable
+// (SECURITY.md rule 10). Browsers never contact it (rule 64). A variable
 // for tests only.
 var tmdbImageBase = "https://image.tmdb.org/t/p/"
 
@@ -134,7 +134,7 @@ func Smallest(typ string) int {
 
 var tmdbHTTP = &http.Client{
 	Timeout: 15 * time.Second,
-	// Never follow a redirect (rule 6).
+	// Never follow a redirect (rule 12).
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 

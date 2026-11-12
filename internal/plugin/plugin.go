@@ -71,7 +71,7 @@ func (r *Registrar) Handle(pattern string, h http.Handler) error {
 
 // HandlePublic adds a route that needs no identity. Public routes must never
 // reveal anything about users, upstream servers or software versions
-// (SECURITY.md rule 37).
+// (SECURITY.md rule 55).
 func (r *Registrar) HandlePublic(pattern string, h http.Handler) error {
 	return r.add(pattern, h, true)
 }

@@ -73,7 +73,7 @@ func New(logger *slog.Logger, identify func(http.Handler) http.Handler, site htt
 }
 
 // requireIdentity refuses requests that carry no identity (SECURITY.md rule
-// 13). The registrar applies it to every route that isn't public.
+// 21). The registrar applies it to every route that isn't public.
 func requireIdentity(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := identity.FromContext(r.Context()); !ok {
@@ -106,7 +106,7 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// sameOrigin enforces SECURITY.md rule 18. Browsers label every request with
+// sameOrigin enforces SECURITY.md rules 27 and 28. Browsers label every request with
 // Sec-Fetch-Site; only same-origin requests (and "none", for an address typed
 // directly) are accepted, which also shuts out sibling subdomains. Requests
 // that change something must be JSON, which plain HTML forms can't send: that

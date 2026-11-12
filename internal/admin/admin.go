@@ -1,5 +1,5 @@
 // Package admin is Overfin's control panel: a built-in web page and the API
-// behind it, served on their own listener (SECURITY.md rule 58).
+// behind it, served on their own listener (SECURITY.md rule 81).
 //
 // Nothing here is reachable from the public API: the panel has its own
 // listener, its own routes and its own sign-in. It answers only private
@@ -541,7 +541,7 @@ func (p *Panel) current(r *http.Request) *session {
 		return nil
 	}
 	// The panel asking in the background (news) isn't someone here: it
-	// doesn't keep a forgotten tab signed in (rule 58's idle limit).
+	// doesn't keep a forgotten tab signed in (rule 81's idle limit).
 	if r.Header.Get(backgroundHeader) != "1" {
 		s.lastSeen = now
 	}

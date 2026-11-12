@@ -117,7 +117,7 @@ func TestLoadRejects(t *testing.T) {
 			wantErr: "at least 32 bytes",
 		},
 		{
-			// Overfin makes its own key on its Jellyfin (SECURITY.md rule 67).
+			// Overfin makes its own key on its Jellyfin (SECURITY.md rule 111).
 			name:    "a Jellyfin key given",
 			file:    goodFile,
 			env:     map[string]string{"OVERFIN_SECRET_KEY": testKey, "OVERFIN_JELLYFIN_ADMIN_KEY": "admin-key"},

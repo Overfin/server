@@ -5,7 +5,7 @@
 // a Source, and the rest of Overfin doesn't know which it uses.
 //
 // Everything here is checked and in plain text: IDs, image paths (rule
-// 5), names and certifications.
+// 10), names and certifications.
 package tmdb
 
 import (
@@ -107,7 +107,7 @@ type Certification struct {
 // ValidID says whether a TMDB ID can be one.
 func ValidID(id int) bool { return id > 0 && id <= 9_999_999_999 }
 
-// imagePath is what a TMDB image path may look like (rule 5).
+// imagePath is what a TMDB image path may look like (rule 10).
 var imagePath = regexp.MustCompile(`^/[A-Za-z0-9]{8,64}\.(jpg|png)$`)
 
 // MakeTitle checks and cleans a title as TMDB (or Seerr) gives it: kind is

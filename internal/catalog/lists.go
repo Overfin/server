@@ -16,7 +16,7 @@ import (
 // series) and the titles in them, from TMDB (itself, or through Seerr), in
 // Overfin's database, so discovery is answered from there, at once, and
 // TMDB is asked in the background only. While IMDb's data is on, trending
-// and popular are made of IMDb's daily votes instead (rule 68), their
+// and popular are made of IMDb's daily votes instead (rule 115), their
 // titles found on TMDB by IMDb ID, each once.
 type Lists struct {
 	// Source is where TMDB's data comes from, nil when there's none.

@@ -15,7 +15,7 @@ import (
 // Recommendations: the library's films and series the profile hasn't
 // watched, ordered by how well they fit it. Worked out for the page being
 // shown, from the profile's own viewing and its account's tastes, and kept
-// nowhere (rule 40).
+// nowhere (rule 58).
 
 // recentPool is how many of the newest titles "recent" recommendations
 // choose among.

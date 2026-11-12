@@ -313,7 +313,7 @@ func TestTastes(t *testing.T) {
 
 // What an admin sees counts what people did with a title only when two
 // accounts or more did it: one person's favorite, watchlist or viewing
-// can't be read from a score (rule 40). Two profiles of one account are
+// can't be read from a score (rule 61). Two profiles of one account are
 // one account.
 func TestSharedNeedsTwoAccounts(t *testing.T) {
 	f := facts(3, film("1"), film("2"), film("3"))

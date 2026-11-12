@@ -10,7 +10,7 @@ import (
 	"github.com/overfin/server/internal/store"
 )
 
-// What each profile sees is Overfin's to decide (rule 28): kids profiles
+// What each profile sees is Overfin's to decide (rules 41 and 42): kids profiles
 // are held to Overfin's own ratings, from TMDB (each title they see has
 // certifications in the server's ratings country, all within the
 // profile's ceiling for its kind), and any profile may be limited to some
@@ -104,7 +104,7 @@ func (l Library) keep(ctx context.Context, p *store.Profile, items []jellyfin.Ra
 			// Not in the index, so not rated nor in any category: hidden.
 		case len(a.BlockedTags) > 0 && indexedKind(it.Type):
 			// Not in the index yet, so its keywords aren't known: hidden
-			// until they are, as the index hides it (rule 28).
+			// until they are, as the index hides it (rule 42).
 		case a.Libraries == nil:
 			ok = true
 		default:

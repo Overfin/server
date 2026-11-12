@@ -41,7 +41,7 @@ func Refused(err error) bool {
 const keepFor = 2 * time.Minute
 
 // Cache keeps what a directory said for two minutes, in memory only (rule
-// 40), so the control panel and requests don't ask the identity provider
+// 60), so the control panel and requests don't ask the identity provider
 // at every turn. A failure isn't kept: the next call asks again.
 type Cache struct {
 	Directory Directory

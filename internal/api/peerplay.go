@@ -26,7 +26,7 @@ import (
 // limits, pick our copy (one with the viewer's language when we have
 // one), and answer with a playback whose stream their server fetches
 // from here, with its ticket only, for the viewer, whose browser never
-// asks here (rule 65). Everything personal (what they watch, where they
+// asks here (rule 97). Everything personal (what they watch, where they
 // are, their address) stays on their server.
 
 type peerPlayRequest struct {
@@ -425,7 +425,7 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 		return
 	}
 	// Its URLs are its stream's, on its address, nothing else; its words
-	// are plain text, as every other's (rule 9).
+	// are plain text, as every other's (rule 15).
 	base, ok := keepPeerURLs(&out, peer.Address)
 	if !ok || !cleanPeerText(&out) {
 		why := "values Overfin doesn't give"
@@ -469,7 +469,7 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	for _, old := range replaced {
 		pb.stopped(old)
 	}
-	// The browser asks this server only (rule 65).
+	// The browser asks this server only (rule 97).
 	relayURLs(&out, base, s.Ticket)
 	out.ID, out.Trickplay, out.Title, out.Next = s.ID, nil, nil, nil
 	if len(titles) == 1 {

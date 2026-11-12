@@ -3,7 +3,7 @@
 // with its username and password, once: when they set their account up,
 // or later from their account page. It's a copy: their new account
 // gets what they watched, where they stopped and their favorites, and
-// nothing changes on that server (SECURITY.md rule 60).
+// nothing changes on that server (SECURITY.md rule 87).
 package migration
 
 import (

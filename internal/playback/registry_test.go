@@ -52,7 +52,7 @@ func TestDevices(t *testing.T) {
 
 // A ticket used from another session or by another profile finds nothing
 // and keeps nothing alive: a leaked stream URL can't hold a transcode
-// (rules 30 and 33).
+// (rules 45 and 50).
 func TestTicketElsewhere(t *testing.T) {
 	tk := NewTickets(24 * time.Hour)
 	now := time.Now()

@@ -11,7 +11,7 @@ import (
 
 // What the account likes, for the title valuation: asked when the
 // operator chose to, and the owner profile's to answer, like everything
-// account-wide (SECURITY.md rule 25). Never shown to anyone else.
+// account-wide (SECURITY.md rule 38). Never shown to anyone else.
 
 type tastesJSON struct {
 	// Prefer is "series", "movies" or "both"; absent when it didn't say.

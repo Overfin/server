@@ -79,7 +79,7 @@ func (l Library) Register(r *plugin.Registrar) error {
 		"GET /api/v1/collections":      l.collections,
 		"GET /api/v1/collections/{id}": l.collection,
 		"POST /api/v1/search":          l.search,
-		// What the profile does with titles (rule 40).
+		// What the profile does with titles (rule 58).
 		"PUT /api/v1/titles/{id}/played":      l.markTitlePlayed,
 		"DELETE /api/v1/titles/{id}/played":   l.unmarkTitlePlayed,
 		"PUT /api/v1/titles/{id}/favorite":    l.markTitleFavorite,
@@ -193,7 +193,7 @@ func (l Library) libraries(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Then those taken from paired servers (ROADMAP.md milestone 6), but
-	// for a profile limited to some libraries or categories (rule 28).
+	// for a profile limited to some libraries or categories (rule 42).
 	a, err := l.access(r.Context(), p)
 	if err != nil {
 		l.storeError(w, err)
@@ -311,7 +311,7 @@ func (l Library) genres(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, map[string]any{"items": out})
 }
 
-// image serves one image, access-checked and re-encoded (rules 10 and 27).
+// image serves one image, access-checked and re-encoded (rules 16 and 39).
 // Anything wrong, including an item the profile may not see, is "not found".
 func (l Library) image(w http.ResponseWriter, r *http.Request) {
 	if !onlyParams(w, r, "size", "width") {

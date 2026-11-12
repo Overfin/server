@@ -2,7 +2,7 @@
 // Overfin's own: a fresh one by running its first-run setup, any other only
 // when the operator hands it over with an administrator's login. Either way
 // Overfin then works with a key it made for itself. It never changes
-// anything on a server it doesn't take (SECURITY.md rule 67).
+// anything on a server it doesn't take (SECURITY.md rule 110).
 package takeover
 
 import (

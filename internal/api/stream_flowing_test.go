@@ -10,8 +10,8 @@ import (
 )
 
 // A file already flowing ends with its playback: stopping one, or a
-// takeover, mustn't leave it going on, past the account's limits (rules 30
-// and 32).
+// takeover, mustn't leave it going on, past the account's limits (rules 45
+// and 49).
 func TestStreamEndsWithItsPlayback(t *testing.T) {
 	srv, fake := newServerWith(t, options{maxStreams: 2})
 	fake.setDirect(true)

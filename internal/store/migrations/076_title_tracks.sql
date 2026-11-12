@@ -2,7 +2,7 @@
 -- series: the whole series), by language, used for that title from then
 -- on over the profile's preferences. subtitles: NULL, nothing chosen; "",
 -- chosen off. Private to its profile, deleted with it (SECURITY.md rule
--- 40).
+-- 59).
 CREATE TABLE title_tracks (
     profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     title      TEXT NOT NULL,   -- a film's, a series' or an item's title key

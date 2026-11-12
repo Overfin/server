@@ -411,7 +411,7 @@ func TestProfileNameInCharacters(t *testing.T) {
 }
 
 // Another profile's limits and preferences are the owner's to see; choosing
-// who's watching takes its name, kind and PIN's presence (rule 50).
+// who's watching takes its name, kind and PIN's presence (rule 73).
 func TestSiblingProfilesPrivate(t *testing.T) {
 	srv, _ := newServer(t)
 	code, body := post(t, srv, "/api/v1/profiles", `{"name":"Kid","kind":"kids","maxAge":12,"theme":"dark"}`)

@@ -514,7 +514,7 @@ const PeerItemPrefix = "peer:"
 // one row for each of those too (PeerItemPrefix), with what listings read
 // of a row. Only those TMDB's page of is kept: there's nothing else to
 // show of them. Never for a series' seasons or episodes, nor for a profile
-// limited to some libraries or categories (rule 28: only what they have).
+// limited to some libraries or categories (rule 42: only what they have).
 func (s *Store) listedRows(ctx context.Context, q ListQuery) (string, error) {
 	if q.ParentID != "" || q.Access.Limited() || (len(q.Kinds) > 0 && !slices.Contains(q.Kinds, "movie") && !slices.Contains(q.Kinds, "series")) {
 		return "catalog_items", nil

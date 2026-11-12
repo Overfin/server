@@ -49,7 +49,7 @@ address with the code in it. Someone signed in on a phone or a computer opens
 it, sees what it will do, and confirms; the screen is then signed in with
 their account, with a login of its own. A code lasts 10 minutes and works
 once, and only the screen that asked for it can use it. There's nothing to
-set up, and it's in [SECURITY.md](../SECURITY.md) as rule 69.
+set up, and it's in [SECURITY.md](../SECURITY.md) as rules 116 to 118.
 
 With an identity provider or forward auth, there are no codes for now.
 

@@ -2,7 +2,7 @@
 //
 // Every call Overfin makes to Jellyfin is a typed method here (SECURITY.md
 // rule 1). The client never follows redirects, bounds response sizes and
-// times out (rule 6), validates IDs it receives (rule 7), and never passes
+// times out (rules 12 and 13), validates IDs it receives (rule 2), and never passes
 // Jellyfin's error text on to anyone.
 package jellyfin
 
@@ -41,7 +41,7 @@ func New(baseURL, version string) (*Client, error) {
 		version: version,
 		http: &http.Client{
 			Timeout: 15 * time.Second,
-			// Never follow a redirect from upstream (SECURITY.md rule 6).
+			// Never follow a redirect from upstream (SECURITY.md rule 12).
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
@@ -160,7 +160,7 @@ var guidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-
 
 // NormalizeID validates a Jellyfin ID (a GUID, with or without dashes) and
 // returns it as 32 lowercase hex characters. Upstream IDs are checked like
-// client input (SECURITY.md rule 7).
+// client input (SECURITY.md rule 2).
 func NormalizeID(id string) (string, error) {
 	if !guidPattern.MatchString(id) {
 		return "", errors.New("jellyfin: malformed ID")

@@ -15,7 +15,7 @@ import (
 	"github.com/overfin/server/internal/store"
 )
 
-// Signing a screen in from another device (rule 69): a TV's sign-in page
+// Signing a screen in from another device (rules 116 to 118): a TV's sign-in page
 // asks for a code and shows it, with a QR code of the address to confirm
 // it at; someone signed in elsewhere opens that address (/link), types or
 // scans the code, sees what confirming does, and confirms; the screen,
@@ -94,7 +94,7 @@ func (m *Managed) deviceStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A form anyone can send: with its check against scripts, as the others
-	// (rule 66), as each code is a row.
+	// (rule 102), as each code is a row.
 	req, ok := m.read(w, r)
 	if !ok || !m.checked(w, r, req) {
 		return

@@ -7,13 +7,13 @@ import (
 
 // Subtitles that are pictures (PGS, from Blu-rays): the track Jellyfin
 // extracts as it is, served only when every part of it is well-formed and
-// within its limits (SECURITY.md rule 11). The player decodes and draws
+// within its limits (SECURITY.md rule 17). The player decodes and draws
 // it; nothing in it is run, and a browser never renders it as a page.
 
 // The limits of a PGS track Overfin serves.
 const (
 	MaxPGS        = 64 << 20 // bytes, a whole track
-	maxPGSSide    = 4096     // a picture's or the screen's width or height, as rule 10
+	maxPGSSide    = 4096     // a picture's or the screen's width or height, as rule 16
 	maxPGSObjects = 20_000   // pictures in a track
 )
 

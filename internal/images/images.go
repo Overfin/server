@@ -1,4 +1,4 @@
-// Package images serves images safely (SECURITY.md rules 10 and 27).
+// Package images serves images safely (SECURITY.md rules 16 and 39).
 //
 // Every image is checked against the active profile before it is served,
 // even from cache: Jellyfin's own image endpoints don't check permissions.

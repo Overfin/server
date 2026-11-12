@@ -47,12 +47,12 @@ const maxMessage = 16 << 20
 
 // socketSilence is how long the socket may stay silent before Overfin
 // drops it: Jellyfin answers each keep-alive, so silence that long means
-// several went unanswered (rule 6).
+// several went unanswered (rule 13).
 var socketSilence = 3 * keepAliveEvery
 
 // socketHTTP makes the upgrade request: HTTP/1.1 only (HTTP/2 can't
 // upgrade), never a redirect, and time limits on connecting and on the
-// answer as the API client has (rule 6). The connection it hands over has
+// answer as the API client has (rules 12 and 13). The connection it hands over has
 // no overall limit, a socket being meant to last; socketSilence bounds it
 // instead.
 var socketHTTP = &http.Client{

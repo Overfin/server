@@ -1,5 +1,5 @@
 // Package seal encrypts small secrets, such as upstream tokens, before they
-// are stored (SECURITY.md rule 20).
+// are stored (SECURITY.md rule 30).
 //
 // It uses AES-256-GCM, which also detects any change to the ciphertext. Each
 // sealed value is bound to a context string (the ID of the row it belongs

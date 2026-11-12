@@ -11,7 +11,7 @@ import (
 )
 
 // Now playing: the live view. Who's watching what, how it's served, and a
-// way to stop it. Read from memory when the page asks, never kept (rule 40).
+// way to stop it. Read from memory when the page asks, never kept (rule 60).
 
 // Playing gives the playbacks running now, and stops one.
 type Playing interface {

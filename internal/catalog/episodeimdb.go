@@ -22,7 +22,7 @@ type EpisodeIMDbSource interface {
 }
 
 // EpisodeIMDb asks TMDB the IMDb ID of each of the libraries' episodes,
-// while the operator has IMDb's data on (rule 68): a season's rating is
+// while the operator has IMDb's data on (rule 115): a season's rating is
 // then its own episodes', matched by ID whatever order each site numbers
 // them in. TMDB has no way to ask for many episodes at once, so it's one
 // request per episode, once, a while apart; asked again only within

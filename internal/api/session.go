@@ -21,7 +21,7 @@ import (
 // CookieName is Overfin's session cookie, by its base name: over HTTPS,
 // package cookie gives it the __Host- prefix, so browsers require Secure,
 // Path=/ and no Domain, and no other subdomain can set it (SECURITY.md rule
-// 17).
+// 26).
 const CookieName = "overfin"
 
 // Sessions ties each browser or device to an account, its active profile and
@@ -68,7 +68,7 @@ type SignIn interface {
 }
 
 // RequireFresh lets an action through only if the session confirmed a login
-// recently (rule 21). Otherwise it writes step-up-required, with where to
+// recently (rule 31). Otherwise it writes step-up-required, with where to
 // confirm one, and returns false.
 func (s *Sessions) RequireFresh(w http.ResponseWriter, c *Caller) bool {
 	if s.StepUpURL != "" && !c.Session.FreshLogin.IsZero() && time.Since(c.Session.FreshLogin) < s.FreshFor {
@@ -231,7 +231,7 @@ func clearCookie(w http.ResponseWriter, r *http.Request) { cookie.Clear(w, r, Co
 
 // deviceName summarizes a User-Agent as "Browser · System", with no word
 // of any language. Only this summary is stored, never the User-Agent
-// itself (rule 40).
+// itself (rule 58).
 func deviceName(ua string) string {
 	browser := ""
 	switch {

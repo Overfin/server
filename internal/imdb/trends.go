@@ -8,7 +8,7 @@ import (
 
 // Overfin's own trending and popular lists, from how many votes titles
 // gained on IMDb, day to day: what IMDb's people watch now, in place of
-// TMDB's lists (rule 68).
+// TMDB's lists (rule 115).
 const (
 	// TrendingDays and PopularDays are how far back each list looks, at
 	// most: with fewer days of votes kept, as far as they go.

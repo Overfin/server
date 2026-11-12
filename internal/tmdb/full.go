@@ -492,7 +492,7 @@ func (c *Client) Find(ctx context.Context, kind, source, id string) (int, error)
 
 // FindTitle returns the film ("movie") or the series ("series") an IMDb ID
 // names, with what TMDB's lists give of a title; ErrNotFound when TMDB
-// knows none. The IMDb ID is all it sends (rule 68).
+// knows none. The IMDb ID is all it sends (rule 79).
 func (c *Client) FindTitle(ctx context.Context, kind, imdbID string) (Title, error) {
 	if !IMDbID.MatchString(imdbID) || tv(kind) == "" {
 		return Title{}, ErrNotFound

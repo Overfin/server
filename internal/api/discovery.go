@@ -20,7 +20,7 @@ import (
 // answered from Overfin's database, which keeps them from TMDB in the
 // background (catalog.Lists); a title's page is /titles/{id}.
 //
-// Kids profiles see only the titles their ceilings allow (rule 28).
+// Kids profiles see only the titles their ceilings allow (rule 41).
 type Discovery struct {
 	Library Library
 	Store   *store.Store

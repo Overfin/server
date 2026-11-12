@@ -13,7 +13,7 @@ import (
 
 // The wishes, for the app that fetches them (Overtide): the titles people
 // wished for, in the order Overfin's turns give (internal/wishes), never
-// who wished them or how many did (SECURITY.md rule 40). The app says back
+// who wished them or how many did (SECURITY.md rule 85). The app says back
 // what became of each title; a search spends the turn of every account
 // that wished for it.
 

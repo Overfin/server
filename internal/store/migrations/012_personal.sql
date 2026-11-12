@@ -3,7 +3,7 @@
 -- many times and when last, and whether it's a favorite. Keyed by the
 -- title itself (its TMDB ID, an episode by its show's and its numbers),
 -- not by Jellyfin's item, so the same film in two versions has one state.
--- Private to its profile, deleted with it (SECURITY.md rule 40).
+-- Private to its profile, deleted with it (SECURITY.md rule 59).
 CREATE TABLE profile_titles (
     profile_id     TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     title          TEXT NOT NULL,     -- e.g. movie/tmdb/949, series/tmdb/1399/s1/e2, item/<id>

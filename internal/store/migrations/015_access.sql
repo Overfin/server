@@ -1,5 +1,5 @@
 -- What a profile may see beyond its ratings: the libraries it gets and the
--- tags hidden from it, applied by Overfin (SECURITY.md rule 28). Both are
+-- tags hidden from it, applied by Overfin (SECURITY.md rule 42). Both are
 -- JSON arrays: libraries by Jellyfin ID, NULL for every library; tags as
 -- Jellyfin has them, NULL for none.
 ALTER TABLE profiles ADD COLUMN libraries TEXT;

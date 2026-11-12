@@ -1,9 +1,9 @@
 // Package provision creates an account and its owner profile the first
 // time someone logs in. Accounts need no Jellyfin user of their own:
-// Overfin's one Jellyfin account serves everyone (SECURITY.md rule 3).
+// Overfin's one Jellyfin account serves everyone (SECURITY.md rule 4).
 // Profiles from before that may still have one, which goes with them.
 // Only identities in the required group are provisioned, at a limited
-// rate (rule 15).
+// rate (rule 23).
 package provision
 
 import (
@@ -90,7 +90,7 @@ func (p *Provisioner) Find(ctx context.Context, id identity.Identity) (*store.Ac
 	}
 	// The required group is checked on every request, not only at
 	// creation: someone taken out of it is out as soon as Overfin knows
-	// (rule 16).
+	// (rule 25).
 	if p.RequiredGroup != "" && !slices.Contains(id.Groups, p.RequiredGroup) {
 		return nil, nil, ErrNotAllowed
 	}
@@ -175,7 +175,7 @@ func (p *Provisioner) Create(ctx context.Context, id identity.Identity, hooks *H
 	return acct, owner, err
 }
 
-// allowed checks the parts of rule 15 that don't need the database.
+// allowed checks the parts of rule 23 that don't need the database.
 // Allowed reports whether id may use this instance at all: not anonymous,
 // and in the required group if there is one.
 func (p *Provisioner) Allowed(id identity.Identity) error { return p.allowed(id) }
@@ -292,7 +292,7 @@ type History func(ctx context.Context, jf *jellyfin.Client, a jellyfin.Auth, use
 // CopyIn makes a fresh account with the history the visitor had on another
 // Jellyfin server, from: their username and password there prove it's
 // theirs, and are used for that one sign-in, never kept (SECURITY.md rule
-// 60). Overfin signs out again and changes nothing there. An account there
+// 87). Overfin signs out again and changes nothing there. An account there
 // is copied into one Overfin account only. The account gates and modules'
 // hooks apply as to any new account.
 func (p *Provisioner) CopyIn(ctx context.Context, id identity.Identity, from *jellyfin.Client, username, password string,

@@ -252,7 +252,7 @@ func (m *Managed) SiteAdmin(r *http.Request) (email string, admin, fresh bool) {
 	if u == nil || !u.Confirmed || u.MustChange {
 		return "", false, false
 	}
-	// A disabled account is out of the panel too, at once (rule 16).
+	// A disabled account is out of the panel too, at once (rule 24).
 	if a, err := m.Store.AccountBySubject(r.Context(), u.Subject); err == nil && a.Disabled {
 		return u.Email, false, false
 	}
@@ -490,7 +490,7 @@ func (m *Managed) rememberDevice(w http.ResponseWriter, r *http.Request, email s
 func triesKey(email, client string) string { return strings.ToLower(email) + " " + client }
 
 // startLogin signs someone in, here; one with a new password to choose is
-// sent to choose it first. The login counts as fresh (rule 21) only when
+// sent to choose it first. The login counts as fresh (rule 31) only when
 // a password was just typed: not from an emailed link alone.
 func (m *Managed) startLogin(w http.ResponseWriter, r *http.Request, u *store.User, ret string, typed bool) {
 	ctx := r.Context()
@@ -522,7 +522,7 @@ func (m *Managed) confirmFresh(w http.ResponseWriter, r *http.Request, u *store.
 		return
 	}
 	// With an account, its session is confirmed too, and PIN locks lift:
-	// the account holder is back (rule 22). An admin may have no account.
+	// the account holder is back (rule 34). An admin may have no account.
 	id, _ := identity.FromContext(ctx)
 	if _, _, err := m.Provisioner.Find(ctx, id); err == nil {
 		c := m.Sessions.CurrentAccount(w, r)
@@ -881,7 +881,7 @@ func (m *Managed) setPassword(w http.ResponseWriter, r *http.Request) {
 // their account's owner profile (or has no account yet, or no session
 // here): only then does their login open the control panel on its own
 // listener. Whoever uses another profile here shares that login, fresh
-// for a few minutes after each sign-in (rule 25).
+// for a few minutes after each sign-in (rule 82).
 func (m *Managed) SiteOwner(r *http.Request) bool {
 	return m.siteOwner(r, true)
 }
@@ -921,7 +921,7 @@ func (m *Managed) siteOwner(r *http.Request, withoutSession bool) bool {
 
 // ownerHere says whether this browser uses the account owner's profile,
 // answering otherwise: the sign-in is the whole account's (SECURITY.md
-// rule 25), and whoever uses another profile here shares its login, fresh
+// rule 38), and whoever uses another profile here shares its login, fresh
 // for a few minutes after each sign-in. Before there's an account, there's
 // no other profile.
 func (m *Managed) ownerHere(w http.ResponseWriter, r *http.Request) bool {
@@ -1120,7 +1120,7 @@ func (m *Managed) takeLink(w http.ResponseWriter, r *http.Request, purpose, link
 // sendLink sends someone a link: to confirm their address ("verify", to
 // /signin) or to choose a new password ("reset", to /reset). The link is
 // saved in the background too, with the email: saving it takes time only
-// when there's someone to send it to (rule 66).
+// when there's someone to send it to (rule 101).
 func (m *Managed) sendLink(u *store.User, purpose string, validFor time.Duration, lang string) {
 	token := randomToken()
 	// ?confirm=1: someone signed in already (a copied setup link, the

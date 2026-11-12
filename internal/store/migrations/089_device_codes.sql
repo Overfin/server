@@ -1,4 +1,4 @@
--- Codes a screen shows to be signed in from another device (rule 69).
+-- Codes a screen shows to be signed in from another device (rule 116).
 -- Only hashes are kept: the code's, typed elsewhere, and the secret only
 -- the screen holds, which collects the sign-in once someone confirmed.
 CREATE TABLE device_codes (

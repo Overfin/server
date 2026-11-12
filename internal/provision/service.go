@@ -22,7 +22,7 @@ const serviceDevice = "overfin-service"
 // own) that serves everyone, the catalog's reads, browsing and playback
 // alike (milestone 4, step 4). Overfin applies every limit itself. Creating it is provisioning: the admin key
 // is used for that, and to give it a new token if Jellyfin refuses the old
-// one (SECURITY.md rule 3); everything else runs with its own token.
+// one (SECURITY.md rule 7); everything else runs with its own token.
 type Service struct {
 	// Provisioner is the current one: its admin key follows the
 	// configuration.
@@ -215,7 +215,7 @@ func (s *Service) ensurePolicy(ctx context.Context) error {
 		return err
 	}
 	// Every setting of its policy, as Overfin sets it: one changed in
-	// Jellyfin (made an administrator, say) is set back (rule 67).
+	// Jellyfin (made an administrator, say) is set back (rule 113).
 	differ, err := policyDiffers(policy)
 	if err != nil || len(differ) == 0 {
 		return err

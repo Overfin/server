@@ -1,7 +1,7 @@
 // Package ratings keeps Overfin's own content ratings, from TMDB: each
 // country's scales of certifications, and the certifications of every
 // title in the library or in discovery, in Overfin's database, refreshed
-// in the background. Kids profiles are held to them (SECURITY.md rule 28).
+// in the background. Kids profiles are held to them (SECURITY.md rule 41).
 //
 // TMDB's data comes from TMDB itself, with the Overfin project's own key
 // (operators never need one of their own), or through Seerr.

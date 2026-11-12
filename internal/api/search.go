@@ -14,8 +14,8 @@ import (
 )
 
 // Search finds titles, in a library or not, and people (POST /search). The
-// terms travel in the body, never in a URL (SECURITY.md rule 48), and
-// searches are rate-limited per account (rule 31).
+// terms travel in the body, never in a URL (SECURITY.md rule 71), and
+// searches are rate-limited per account (rule 48).
 
 type searchPerson struct {
 	ID         string            `json:"id"`

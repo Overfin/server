@@ -39,7 +39,7 @@ listen = ":8443"
 email = ""                      # optional: Let's Encrypt's contact
 
 [jellyfin]
-# Where Overfin reaches its own Jellyfin (SECURITY.md rule 67), on your
+# Where Overfin reaches its own Jellyfin (SECURITY.md rule 110), on your
 # media; keeping it off the internet is recommended. A fresh Jellyfin,
 # Overfin sets up itself when it starts, and makes its own key there, kept
 # sealed in the database. One already set up, Overfin takes only if you hand

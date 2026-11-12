@@ -109,7 +109,7 @@ func upgraded(talk func(conn net.Conn, r *bufio.Reader)) *httptest.Server {
 }
 
 // A socket that goes silent is dropped; one Jellyfin keeps talking on
-// stays, past the silence allowed (rule 6).
+// stays, past the silence allowed (rule 13).
 func TestWatchSilence(t *testing.T) {
 	was := socketSilence
 	socketSilence = 200 * time.Millisecond

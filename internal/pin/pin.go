@@ -3,7 +3,7 @@
 // A PIN is short, so it is only as strong as the limits on guessing it. Each
 // wrong PIN doubles the wait before the next attempt (1, 2, 4, 8 seconds),
 // and the fifth locks the profile until the account owner logs in again
-// (SECURITY.md rule 22). PINs are stored as
+// (SECURITY.md rule 34). PINs are stored as
 // keyed hashes bound to their profile: a copied database row neither reveals
 // a PIN nor works on another profile.
 package pin

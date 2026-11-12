@@ -5,7 +5,7 @@
 // that into Jellyfin's device profile, lets Jellyfin decide how to serve the
 // item, checks Jellyfin's answer, and hands the client a stream ticket: a
 // random value that maps, inside Overfin only, to the real upstream stream
-// (SECURITY.md rules 4, 5 and 30).
+// (SECURITY.md rules 9, 10 and 45).
 package playback
 
 import (
@@ -151,7 +151,7 @@ func DeviceProfile(c Capabilities, maxBitrate int) jellyfin.DeviceProfile {
 		})
 	}
 	// Subtitles reach clients as files of their own, checked by Overfin
-	// (rule 11): WebVTT, or PGS pictures the client draws. Jellyfin is never
+	// (rule 17): WebVTT, or PGS pictures the client draws. Jellyfin is never
 	// asked for a subtitle track (SubtitleStreamIndex -1), so none is ever
 	// burned into the video, whatever these say.
 	p.SubtitleProfiles = []jellyfin.SubtitleProfile{
@@ -171,7 +171,7 @@ func DeviceProfile(c Capabilities, maxBitrate int) jellyfin.DeviceProfile {
 
 var (
 	// ErrNotPlayable: Jellyfin offered no way to play the item, or only
-	// remote sources, which Overfin refuses (rule 5).
+	// remote sources, which Overfin refuses (rule 11).
 	ErrNotPlayable = errors.New("playback: not playable")
 	// ErrUnsafeUpstream: Jellyfin's stream URL isn't one of its known
 	// streaming routes.
@@ -191,7 +191,7 @@ type Upstream struct {
 var transcodePath = regexp.MustCompile(`(?i)^/(videos|audio)/([0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12})/(master|main)\.m3u8$`)
 
 // playSession checks Jellyfin's play session ID like any upstream value
-// (rule 7) before it is sent back to Jellyfin.
+// (rule 2) before it is sent back to Jellyfin.
 var playSession = regexp.MustCompile(`^[0-9A-Za-z-]{1,64}$`)
 
 // Decision is how one playback will be served.
@@ -206,7 +206,7 @@ type Decision struct {
 // versions, the one that costs the server least wins: direct play, then
 // remux, then transcode; between equals, Jellyfin's order. For direct play,
 // Overfin builds the upstream URL itself; for HLS it accepts Jellyfin's URL
-// only as a relative path on a known streaming route (rule 5).
+// only as a relative path on a known streaming route (rule 10).
 func Decide(info *jellyfin.PlaybackInfo, itemID string, audioItem bool, deviceID string) (*Decision, error) {
 	if info.ErrorCode != "" || !playSession.MatchString(info.PlaySessionId) {
 		return nil, ErrNotPlayable
@@ -364,7 +364,7 @@ func isEncode(v string) bool { return strings.EqualFold(v, "encode") }
 
 // Describe gives a version a neutral name from its streams, such as
 // "2160p HDR · HEVC". Jellyfin's own version names come from file names,
-// which may reveal how files were named; they're never shown (rule 55).
+// which may reveal how files were named; they're never shown (rule 77).
 func Describe(src jellyfin.MediaSource) string {
 	var parts []string
 	for _, ms := range src.MediaStreams {

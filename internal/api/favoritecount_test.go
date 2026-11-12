@@ -11,7 +11,7 @@ import (
 )
 
 // A title's page never says how many others marked it a favorite (rule
-// 44), however many did.
+// 65), however many did.
 func TestNoFavoriteCount(t *testing.T) {
 	var st *store.Store
 	srv, _ := newServerWith(t, options{store: &st})

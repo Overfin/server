@@ -431,7 +431,7 @@ func (s *Sync) Status(ctx context.Context) (Status, error) {
 
 var kinds = map[string]string{"Movie": "movie", "Series": "series", "Season": "season", "Episode": "episode"}
 
-// What an upstream ID may look like (SECURITY.md rule 7): anything else is
+// What an upstream ID may look like (SECURITY.md rule 2): anything else is
 // left out.
 var (
 	tmdbID   = regexp.MustCompile(`^[0-9]{1,10}$`)

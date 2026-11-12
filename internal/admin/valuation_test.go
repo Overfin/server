@@ -63,7 +63,7 @@ func TestValuation(t *testing.T) {
 			t.Fatalf("preview: %d %s", rec.Code, rec.Body)
 		}
 	}
-	// One account's viewing can't be read from the preview (rule 40): the
+	// One account's viewing can't be read from the preview (rule 61): the
 	// film it watched scores as the one nobody watched.
 	ask()
 	if len(preview["most"]) != 2 || preview["most"][0].Score != preview["least"][0].Score {

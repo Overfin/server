@@ -1,7 +1,7 @@
 // Package library translates Jellyfin's items into Overfin's own data model,
 // as defined in the API specification. Only fields the model defines are
-// ever produced; text is cleaned to plain text (SECURITY.md rule 9) and IDs
-// are validated before they become Overfin IDs (rule 7).
+// ever produced; text is cleaned to plain text (SECURITY.md rule 15) and IDs
+// are validated before they become Overfin IDs (rule 2).
 package library
 
 import (
@@ -207,7 +207,7 @@ type TrackPart struct {
 }
 
 // PhotoPart carries no capture time, location or camera data: those are
-// never served (rule 55).
+// never served (rule 77).
 type PhotoPart struct {
 	Width  *int `json:"width,omitempty"`
 	Height *int `json:"height,omitempty"`

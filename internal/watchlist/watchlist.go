@@ -88,7 +88,7 @@ func (Feature) ForgetAccount(context.Context, *sql.DB, string) error { return ni
 
 // Export includes the profile's watchlist in "Download my data".
 func (Feature) Export(ctx context.Context, h feature.Host, c *feature.Caller) (any, error) {
-	// The whole list, as kept (SECURITY.md rule 52).
+	// The whole list, as kept (SECURITY.md rule 75).
 	return items(ctx, h.DB(), c, true)
 }
 
