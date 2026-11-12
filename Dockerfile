@@ -3,7 +3,7 @@
 # docker build -t overfin .
 # The build runs on the builder's own platform and cross-compiles for the
 # target, so images for other architectures build without emulation.
-FROM --platform=$BUILDPLATFORM golang:1.26 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.11@sha256:957952ae74dc010608717144399a59a2c6e82ea03d63be1c7ff6577c5a135f93 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -16,7 +16,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags=
 RUN mkdir /data /secrets
 
 # distroless/static: no shell, no package manager, runs as a non-root user.
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 COPY --from=build /overfin /overfin
 # 65532 is the distroless "nonroot" user the container runs as.
 COPY --from=build --chown=65532:65532 /data /data

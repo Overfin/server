@@ -1,5 +1,5 @@
 # Keeps the dependencies up to date, by pull request: Go modules (overfin-web
-# included) and the workflows' GitHub Actions.
+# included), the workflows' GitHub Actions and the Dockerfile's base images.
 version: 2
 updates:
   - package-ecosystem: gomod
@@ -10,3 +10,7 @@ updates:
     directory: /
     schedule:
       interval: monthly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
