@@ -56,7 +56,7 @@ func TestInstallPlugin(t *testing.T) {
 func TestLoopbackOnly(t *testing.T) {
 	const bind = "<LocalNetworkAddresses><string>127.0.0.1</string></LocalNetworkAddresses>"
 	dir := t.TempDir()
-	if err := loopbackOnly(dir); err != nil {
+	if err := loopbackOnly(dir, false); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, "network.xml")); !strings.Contains(string(b), bind) {
@@ -70,7 +70,7 @@ func TestLoopbackOnly(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "network.xml")
 		os.WriteFile(path, []byte(in), 0o600)
-		if err := loopbackOnly(dir); err != nil {
+		if err := loopbackOnly(dir, false); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		b, _ := os.ReadFile(path)
@@ -78,9 +78,18 @@ func TestLoopbackOnly(t *testing.T) {
 			t.Errorf("%s: %s", name, s)
 		}
 	}
+	// Opened while an admin looks inside: every address again.
+	open := t.TempDir()
+	os.WriteFile(filepath.Join(open, "network.xml"), []byte("<NetworkConfiguration>\n  <LocalNetworkAddresses><string>127.0.0.1</string></LocalNetworkAddresses>\n</NetworkConfiguration>"), 0o600)
+	if err := loopbackOnly(open, true); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(open, "network.xml")); strings.Contains(string(b), "127.0.0.1") || !strings.Contains(string(b), "<LocalNetworkAddresses />") {
+		t.Errorf("opened: %s", b)
+	}
 	bad := t.TempDir()
 	os.WriteFile(filepath.Join(bad, "network.xml"), []byte("<Something/>"), 0o600)
-	if err := loopbackOnly(bad); err == nil {
+	if err := loopbackOnly(bad, false); err == nil {
 		t.Error("a file that isn't Jellyfin's network settings, changed")
 	}
 }

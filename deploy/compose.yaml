@@ -1,10 +1,12 @@
-# Overfin and its own Jellyfin, on one machine. Set where your media is on
-# the media line below (.env holds optional settings, see .env.example),
-# then: docker compose up -d. Open this machine's address in a browser, and
-# the setup wizard takes it from there. See README.md.
+# Overfin and its own Jellyfin, on one machine, in one container (Overfin's
+# image carries its Jellyfin and Overfin's plugin for it, at versions made
+# for each other). Set where your media is on the media line below (.env
+# holds optional settings, see .env.example), then: docker compose up -d.
+# Open this machine's address in a browser, and the setup wizard takes it
+# from there. See README.md.
 #
-# Overfin reaches Jellyfin on this project's network only; nothing else
-# does. Nothing gets the Docker socket.
+# Jellyfin listens inside the container only: Overfin is the only one that
+# talks to it. Nothing gets the Docker socket.
 name: overfin
 
 services:
@@ -15,8 +17,13 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp
     environment:
-      OVERFIN_JELLYFIN_URL: http://jellyfin:8096
+      # Overfin and its Jellyfin together (gateway and jellyfin split them
+      # over two machines: see README.md).
+      OVERFIN_ROLE: all
+      TZ: ${TZ:-UTC}
       # With a domain pointed at this machine, Overfin gets its own HTTPS
       # certificate; without one, it serves plain http (keep that to your
       # LAN).
@@ -27,23 +34,7 @@ services:
       - overfin-data:/data
       # Overfin's secret key, made on its first start.
       - overfin-secrets:/secrets
-    ports:
-      - "80:8080"
-      - "443:8443"
-    depends_on:
-      jellyfin:
-        condition: service_healthy
-
-  jellyfin:
-    container_name: jellyfin
-    # The version Overfin was tested with; newer ones come with Overfin's
-    # releases.
-    image: docker.io/jellyfin/jellyfin:${JELLYFIN_TAG:-12.2.20261005-225228}
-    restart: unless-stopped
-    security_opt: ["no-new-privileges:true"]
-    environment:
-      TZ: ${TZ:-UTC}
-    volumes:
+      # Jellyfin's own data and cache.
       - jellyfin-config:/config
       - jellyfin-cache:/cache
       # Your films and series, read only: change /srv/media to where they
@@ -54,19 +45,9 @@ services:
       # one line each, then docker compose up -d. In the control panel, a
       # library's folders are the paths after the colon.
       # - /mnt/nas/films:/nas/films:ro
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8096/health"]
-      interval: 10s
-      timeout: 5s
-      start_period: 60s
-      retries: 6
-    # Jellyfin itself is closed: Overfin is the only one that talks to it.
-    # To look inside while access is open (control panel, Server), publish
-    # it on this machine only, then recreate it (docker compose up -d):
-    # ports:
-    #   - "127.0.0.1:8096:8096"
-    # For your LAN instead, put this machine's LAN address before :8096.
-    #
+    ports:
+      - "80:8080"
+      - "443:8443"
     # A GPU for converting videos, then choose it in the control panel
     # (Server, Transcoding). Intel or AMD:
     # devices:

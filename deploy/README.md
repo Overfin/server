@@ -1,8 +1,11 @@
 # Overfin and its Jellyfin, on one machine
 
-This folder runs Overfin with a Jellyfin of its own: Overfin sets that
-Jellyfin up on its first start, keeps the settings it needs there, and is
-the only one that talks to it. Nobody signs in to Jellyfin itself.
+This folder runs Overfin with a Jellyfin of its own, in one container:
+Overfin's image carries its Jellyfin and Overfin's plugin for it, at
+versions made for each other. Overfin starts that Jellyfin, sets it up on
+its first start, keeps the settings it needs there, and is the only one
+that talks to it: Jellyfin listens inside the container only. Nobody signs
+in to Jellyfin itself.
 
 ## Before you start
 
@@ -27,7 +30,7 @@ Then:
 docker compose up -d
 ```
 
-On Fedora, RHEL and other SELinux systems, Jellyfin can't read the media
+On Fedora, RHEL and other SELinux systems, the container can't read the media
 folder until it's labeled for containers: add `,z` after `:ro` on the media
 line of `compose.yaml`.
 
@@ -60,22 +63,39 @@ Then, in the control panel (`/admin/`):
 
 ## A GPU for converting videos
 
-Uncomment the lines for yours under `jellyfin` in `compose.yaml` (Intel or
+Uncomment the lines for yours in `compose.yaml` (Intel or
 AMD: `/dev/dri`; NVIDIA: the `deploy` block, with the NVIDIA Container
 Toolkit installed), run `docker compose up -d`, then choose it in the
 control panel and test it on your own videos.
 
 ## Looking inside Jellyfin
 
-Jellyfin publishes no port: only Overfin reaches it, on this project's own
-network. To look inside, open access in the control panel (Server,
-Jellyfin), which gives Overfin's administrator account there a new
-password, shown once. Then uncomment Jellyfin's `ports:` line and run
-`docker compose up -d`: it publishes Jellyfin on this machine only (reach
-it with `ssh -L 8096:localhost:8096 <the machine>`), or on your LAN if you
-put the machine's LAN address instead. Changes made there may break
-Overfin, or be undone by it. Close access again from the panel when you're
-done.
+Jellyfin listens inside the container only. To look inside, open access in
+the control panel (Server, Jellyfin), which gives Overfin's administrator
+account there a new password, shown once. Then, in `compose.yaml`, add
+`OVERFIN_JELLYFIN_LISTEN: all` under `environment:` and
+`- "127.0.0.1:8096:8096"` under `ports:`, and run `docker compose up -d`:
+Jellyfin is on this machine only (reach it with
+`ssh -L 8096:localhost:8096 <the machine>`). Changes made there may break
+Overfin, or be undone by it. When you're done, close access again from the
+panel, remove both lines, and run `docker compose up -d`.
+
+## Two machines
+
+Overfin can run on a front machine (the one the internet reaches) and its
+Jellyfin on the machine with the media and the GPU, from the same image at
+the same version on both:
+
+- on the media machine, the image with `OVERFIN_ROLE: jellyfin`, its
+  `jellyfin-config` and `jellyfin-cache` volumes, the media, the GPU, and
+  port 8096 published to the front machine only (a firewall rule, or a
+  private network between the two);
+- on the front machine, the image with `OVERFIN_ROLE: gateway` (or no
+  role: it's the default), its `overfin-data` and `overfin-secrets`
+  volumes, and `OVERFIN_JELLYFIN_URL: http://<the media machine>:8096`.
+
+Update both together: Overfin serves nothing until its Jellyfin and plugin
+are the versions it's made with.
 
 ## Updating
 
@@ -86,8 +106,27 @@ way back.
 
 Then take the release's `compose.yaml` (keep your `.env`, and copy over
 any lines you added, such as more media folders or a GPU), and
-`docker compose pull && docker compose up -d`. Jellyfin's version comes
-with Overfin's releases: keep the one the compose file names.
+`docker compose pull && docker compose up -d`. Jellyfin and Overfin's
+plugin come with Overfin's image: there's no other version to choose.
+
+### From Overfin and Jellyfin in two containers
+
+Up to 0.9, this compose file ran Jellyfin's own image beside Overfin.
+Overfin now serves nothing until its Jellyfin comes from its own image
+(every page says the server is being updated, and its log says why).
+Back up first (below), then:
+
+```sh
+docker compose down
+# Jellyfin's files were root's; Overfin's image runs as user 65532.
+for v in jellyfin-config jellyfin-cache; do
+  docker run --rm -v overfin_$v:/v alpine chown -R 65532:65532 /v
+done
+```
+
+Take the release's `compose.yaml` (copy over your media lines and your
+GPU, now under `overfin`), and `docker compose up -d`. The volumes keep
+their names: Jellyfin keeps everything it had.
 
 ## Backups
 

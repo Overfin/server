@@ -135,11 +135,16 @@ var (
 
 // loopbackOnly has Jellyfin listen on 127.0.0.1 only, in its network
 // settings, before it starts: in the all role, nothing outside the
-// container reaches it. A Jellyfin set up for the first time gets the
-// settings file with only that.
-func loopbackOnly(confDir string) error {
+// container reaches it. With open (OVERFIN_JELLYFIN_LISTEN=all, while an
+// admin looks inside Jellyfin), it listens on the container's addresses,
+// for its port to be published. A Jellyfin set up for the first time gets
+// the settings file with only that.
+func loopbackOnly(confDir string, open bool) error {
 	path := filepath.Join(confDir, "network.xml")
-	const bind = `<LocalNetworkAddresses><string>127.0.0.1</string></LocalNetworkAddresses>`
+	bind := `<LocalNetworkAddresses><string>127.0.0.1</string></LocalNetworkAddresses>`
+	if open {
+		bind = `<LocalNetworkAddresses />`
+	}
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		if err := os.MkdirAll(confDir, 0o700); err != nil {
@@ -181,7 +186,12 @@ func prepareJellyfin(r string, getenv func(string) string, logger *slog.Logger) 
 	}
 	logger.Info("Overfin's plugin is in place for Jellyfin", "version", version)
 	if r == roleAll {
-		return loopbackOnly(conf)
+		open := strings.TrimSpace(getenv("OVERFIN_JELLYFIN_LISTEN")) == "all"
+		if open {
+			logger.Warn("Jellyfin listens on the container's addresses (OVERFIN_JELLYFIN_LISTEN=all): " +
+				"remove the setting once you're done looking inside it")
+		}
+		return loopbackOnly(conf, open)
 	}
 	return nil
 }

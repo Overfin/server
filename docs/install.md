@@ -1,9 +1,11 @@
 # Installing and running Overfin
 
 Run it on the machine that has your films and series, or can reach them through a mounted network share. It needs **Docker** with Compose.
-Overfin needs a **Jellyfin of its own** (Jellyfin 12): the compose file
-runs one, which Overfin sets up by itself on its first start, and manages
-from then on. A Jellyfin you already use stays yours and untouched: see
+Overfin needs a **Jellyfin of its own**, and brings it: its image carries
+its Jellyfin and Overfin's plugin for it, at versions made for each other.
+The compose file runs both in one container; Overfin sets its Jellyfin up
+by itself on its first start, and manages it from then on. A Jellyfin you
+already use stays yours and untouched: see
 [Your own Jellyfin](#your-own-jellyfin). Each release comes as an image
 with a signed attestation of how it was built, for x86 and ARM (`ghcr.io/overfin/overfin`).
 
@@ -18,14 +20,14 @@ docker compose up -d
 ```
 
 Your films and series are on the media line of `compose.yaml` (`/srv/media:/media:ro`: the part before
-the colon is where they are on this machine; Jellyfin only reads them).
+the colon is where they are on this machine; they're only read).
 [.env](../deploy/.env.example) is optional: `OVERFIN_DOMAIN` (see below), and
 your TMDB token as `OVERFIN_TMDB_TOKEN`, or give it in the wizard. On Fedora, RHEL and
 other SELinux systems, add `,z` after `:ro` on the media line of
-`compose.yaml`, so Jellyfin may read the folder.
+`compose.yaml`, so the container may read the folder.
 
 Films and series in more than one place (another disk, a NAS share
-mounted on the machine): add a line for each under Jellyfin's `volumes`
+mounted on the machine): add a line for each under `volumes`
 in `compose.yaml`, then `docker compose up -d`. In the control panel, a
 library's folders are then the paths after the colon:
 
@@ -61,7 +63,7 @@ connect an email server (Server,
 Email), make invitations (People, Registration: links anyone can register
 with, confirming their email; they need the site's address too: `OVERFIN_DOMAIN`,
 or `site.url` in the file below), choose your GPU (Server, Transcoding; the
-compose file says how to give Jellyfin one). Without an email server,
+compose file says how to give the container one). Without an email server,
 there are no invitations or forgotten-password emails: you add people
 yourself, and copy their setup links (also for a forgotten password).
 
@@ -69,30 +71,27 @@ Overfin keeps its secret key in `overfin-secrets` and everything else in
 `overfin-data`: back both up, apart. Jellyfin's data is in
 `jellyfin-config`.
 
-**Jellyfin itself** is closed: nobody signs in to it, and the compose file
-publishes no port for it. To look inside, open access in the control panel
-(Server, Jellyfin), and uncomment its `ports:` lines, which publishes it on
-the machine itself only (reach it through an SSH tunnel), or on your LAN
-address. Changes made there may break Overfin, or be undone by it.
+**Jellyfin itself** is closed: nobody signs in to it, and it listens
+inside the container only. To look inside, open access in the control
+panel (Server, Jellyfin), then follow
+[Looking inside Jellyfin](../deploy/README.md#looking-inside-jellyfin).
+Changes made there may break Overfin, or be undone by it.
 
 ## Your own Jellyfin
 
-To run Overfin alone, next to a Jellyfin you run yourself:
+Overfin works only with the Jellyfin its image brings, at the version it's
+made with, with Overfin's plugin: until then, every page says the server is
+being updated, and the log says why. A Jellyfin you already use stays
+yours: Overfin never touches it. Run Overfin's beside it, on the same media
+folders.
 
-```sh
-docker run -d --name overfin -p 8080:8080 \
-  -v overfin-data:/data -v overfin-secrets:/secrets \
-  ghcr.io/overfin/overfin:0.9.0
-```
-
-and give the wizard Jellyfin's address (or set `OVERFIN_JELLYFIN_URL`).
-That Jellyfin must be **Overfin's alone**: Overfin sets the settings it
-needs there, and sets them back on every start. A fresh Jellyfin, Overfin
-sets up itself. One already set up, it takes only if you hand it over: the
-wizard asks for one of its administrators' login, used once, shows what
-that server holds, and waits for you to confirm it's dedicated to Overfin.
-A Jellyfin people use directly is never a good fit: run a second one for
-Overfin, on the same media folders.
+Overfin's Jellyfin can be on another machine than Overfin (the one with
+the media and the GPU, say): see
+[Two machines](../deploy/README.md#two-machines). There too, Overfin sets a
+fresh Jellyfin up itself; one already set up, it takes only if you hand it
+over: the wizard asks for one of its administrators' login, used once,
+shows what that server holds, and waits for you to confirm it's dedicated
+to Overfin.
 
 ## On the internet, with HTTPS
 
