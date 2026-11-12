@@ -45,11 +45,14 @@ type fakeIdP struct {
 	srv   *httptest.Server
 	key   *rsa.PrivateKey
 	codes map[string]map[string]any
+	// refresh is what a refresh token is answered with: its groups; a
+	// token it doesn't know is refused.
+	refresh map[string][]string
 }
 
 func newFakeIdP(t *testing.T) *fakeIdP {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
-	f := &fakeIdP{key: key, codes: map[string]map[string]any{}}
+	f := &fakeIdP{key: key, codes: map[string]map[string]any{}, refresh: map[string][]string{}}
 	f.srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/.well-known/openid-configuration":
@@ -61,6 +64,17 @@ func newFakeIdP(t *testing.T) *fakeIdP {
 				"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes())}}})
 		case "/token":
 			claims, ok := f.codes[r.FormValue("code")]
+			if r.FormValue("grant_type") == "refresh_token" {
+				groups, known := f.refresh[r.FormValue("refresh_token")]
+				if !known {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(`{"error":"invalid_grant"}`))
+					return
+				}
+				now := time.Now()
+				claims, ok = map[string]any{"iss": f.srv.URL, "aud": "overfin", "sub": "me", "exp": now.Add(time.Minute).Unix(),
+					"iat": now.Unix(), "auth_time": now.Unix(), "groups": groups}, true
+			}
 			if !ok {
 				w.WriteHeader(http.StatusBadRequest)
 				return
@@ -69,7 +83,12 @@ func newFakeIdP(t *testing.T) *fakeIdP {
 			signed := enc(map[string]string{"alg": "RS256", "kid": "k"}) + "." + enc(claims)
 			sum := sha256.Sum256([]byte(signed))
 			sig, _ := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, sum[:])
-			json.NewEncoder(w).Encode(map[string]string{"id_token": signed + "." + base64.RawURLEncoding.EncodeToString(sig)})
+			answer := map[string]string{"id_token": signed + "." + base64.RawURLEncoding.EncodeToString(sig)}
+			if rt, _ := claims["_refresh"].(string); rt != "" {
+				answer["refresh_token"] = rt
+				delete(claims, "_refresh")
+			}
+			json.NewEncoder(w).Encode(answer)
 		}
 	}))
 	t.Cleanup(f.srv.Close)
@@ -166,6 +185,40 @@ func TestOnlyPrivateAddresses(t *testing.T) {
 		if (rec.Code == 200) != tc.ok {
 			t.Errorf("%s %v: %d", tc.peer, tc.headers, rec.Code)
 		}
+	}
+}
+
+// Signed in with the identity provider, an admin it no longer counts in
+// the admin group loses the panel at the next check, not hours later.
+func TestAdminGroupRechecked(t *testing.T) {
+	p, idp, _ := newPanel(t)
+	start := time.Now()
+	at := start
+	p.now = func() time.Time { return at }
+	b := &browser{h: p.Handler(), cookies: map[string]string{}}
+	rec := b.do("GET", "/admin/login?return=/admin/", "", nil)
+	loc, _ := url.Parse(rec.Header().Get("Location"))
+	q := loc.Query()
+	code := oidc.Random(8)
+	idp.codes[code] = map[string]any{"iss": idp.srv.URL, "aud": "overfin", "sub": "me", "nonce": q.Get("nonce"),
+		"exp": start.Add(time.Minute).Unix(), "iat": start.Unix(), "auth_time": start.Unix(),
+		"groups": []string{"overfin-admins"}, "preferred_username": "alice", "_refresh": "r1"}
+	idp.refresh["r1"] = []string{"overfin-admins"}
+	ret := url.Values{"code": {code}, "state": {q.Get("state")}}.Encode()
+	b.do("GET", "/admin/auth/callback?"+ret, "", map[string]string{"Sec-Fetch-Site": "cross-site"})
+	b.do("GET", "/admin/auth/finish?"+ret, "", map[string]string{"Sec-Fetch-Site": "same-origin"})
+	ask := func() int { return b.do("GET", "/admin/api/features", "", nil).Code }
+	if c := ask(); c != 200 {
+		t.Fatalf("signed in: %d", c)
+	}
+	at = start.Add(6 * time.Minute)
+	if c := ask(); c != 200 {
+		t.Fatalf("still an admin: %d", c)
+	}
+	idp.refresh["r1"] = []string{"others"}
+	at = start.Add(12 * time.Minute)
+	if c := ask(); c != 401 {
+		t.Fatalf("out of the group: %d", c)
 	}
 }
 

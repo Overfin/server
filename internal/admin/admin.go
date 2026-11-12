@@ -14,6 +14,7 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
+	"errors"
 	"html"
 	"io/fs"
 	"log/slog"
@@ -221,6 +222,12 @@ type session struct {
 	logID    string // how logs name the admin (rule 54)
 	lastSeen time.Time
 	expires  time.Time
+	// With an identity provider: who signed in, and how to ask it again
+	// whether they're still in the admin group (checked, when last).
+	subject string
+	refresh string
+	checked time.Time
+	asking  sync.Mutex // one question to the provider at a time
 }
 
 type pending struct {
@@ -562,6 +569,13 @@ func (p *Panel) signedIn(h func(http.ResponseWriter, *http.Request, *session)) h
 				s = nil
 			}
 		}
+		if s != nil && !p.stillInGroup(r, s) {
+			c, _ := cookie.Get(r, cookieName)
+			p.mu.Lock()
+			delete(p.sessions, hashToken(c.Value))
+			p.mu.Unlock()
+			s = nil
+		}
 		if s == nil {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"type": "not-authenticated", "loginUrl": "/admin/login"})
 			return
@@ -574,6 +588,48 @@ func (p *Panel) signedIn(h func(http.ResponseWriter, *http.Request, *session)) h
 		w.Header().Set("Overfin-Session-Left", strconv.Itoa(max(0, int(left.Seconds()))))
 		h(w, r, s)
 	}
+}
+
+// groupRecheck is how often the identity provider is asked again whether
+// a panel session's admin is still in the admin group; groupGrace, how
+// long the provider may fail to answer before the session ends.
+const (
+	groupRecheck = 5 * time.Minute
+	groupGrace   = 30 * time.Minute
+)
+
+// stillInGroup reports whether a panel session signed in with the identity
+// provider is still its admin group's: asked again every groupRecheck.
+// Refused, or out of the group, the session ends at once; the provider out
+// of reach, it lasts groupGrace. Sessions from the site are checked there.
+func (p *Panel) stillInGroup(r *http.Request, s *session) bool {
+	if s.refresh == "" || p.Provider == nil {
+		return true
+	}
+	s.asking.Lock()
+	defer s.asking.Unlock()
+	now := p.clock()
+	if now.Sub(s.checked) < groupRecheck {
+		return true
+	}
+	got, err := p.Provider.Refresh(r.Context(), s.refresh, s.subject)
+	switch {
+	case errors.Is(err, oidc.ErrRevoked):
+		p.Logger.Info("admin session ended: the identity provider refused it", "by", s.logID)
+		return false
+	case err != nil || got.Groups == nil:
+		if now.Sub(s.checked) < groupGrace {
+			p.Logger.Warn("asking the identity provider about an admin session failed; still accepting it for now", "err", err)
+			return true
+		}
+		p.Logger.Warn("admin session ended: the identity provider couldn't confirm its admin group", "err", err)
+		return false
+	case !slices.Contains(got.Groups, p.Group):
+		p.Logger.Info("admin session ended: no longer in the admin group", "by", s.logID)
+		return false
+	}
+	s.refresh, s.checked = got.RefreshToken, now
+	return true
 }
 
 // safeReturn accepts only a path inside the panel.
@@ -677,7 +733,12 @@ func (p *Panel) finish(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "The identity provider didn't ask for a new login", http.StatusForbidden)
 		return
 	}
-	p.startSession(w, r, login.Name, login.Subject)
+	s := p.startSession(w, r, login.Name, login.Subject)
+	if login.RefreshToken != "" {
+		p.mu.Lock()
+		s.subject, s.refresh, s.checked = login.Subject, login.RefreshToken, p.clock()
+		p.mu.Unlock()
+	}
 	http.Redirect(w, r, pd.ret, http.StatusSeeOther)
 }
 
@@ -715,7 +776,7 @@ func (p *Panel) siteLogin(w http.ResponseWriter, r *http.Request) {
 
 // startSession signs an admin in to the panel. name is shown in the panel;
 // logs name the admin by a keyed hash of their subject.
-func (p *Panel) startSession(w http.ResponseWriter, r *http.Request, name, subject string) {
+func (p *Panel) startSession(w http.ResponseWriter, r *http.Request, name, subject string) *session {
 	token := oidc.Random(32)
 	now := p.clock()
 	p.mu.Lock()
@@ -727,10 +788,12 @@ func (p *Panel) startSession(w http.ResponseWriter, r *http.Request, name, subje
 			delete(p.sessions, k)
 		}
 	}
-	p.sessions[hashToken(token)] = &session{name: name, logID: p.logID(subject), lastSeen: now, expires: now.Add(sessionFor)}
+	s := &session{name: name, logID: p.logID(subject), lastSeen: now, expires: now.Add(sessionFor)}
+	p.sessions[hashToken(token)] = s
 	p.mu.Unlock()
 	cookie.Set(w, r, &http.Cookie{Name: cookieName, Value: token, MaxAge: int(sessionFor.Seconds())})
-	p.Logger.Info("admin signed in", "by", p.logID(subject))
+	p.Logger.Info("admin signed in", "by", s.logID)
+	return s
 }
 
 // logID is how the panel's logs name a user, an account or the admin: the
