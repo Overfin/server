@@ -634,16 +634,23 @@ func (m *Managed) verify(w http.ResponseWriter, r *http.Request) {
 		m.fail(w, r, err)
 		return
 	}
-	// Its invitation's use stays held while they set up the account.
-	if hold, err := m.Store.UserInvitation(ctx, u.Subject); err == nil && hold != "" {
-		if inviter, h := inviterOf(m.Mounts); inviter != nil {
-			if err := inviter.Keep(ctx, h, hold, time.Now().Add(keptFor)); err != nil {
-				m.Logger.Error("keeping an invitation's use held failed", "err", err)
-			}
-		}
-	}
+	m.keepHold(ctx, u.Subject)
 	u.Confirmed = true
 	m.startLogin(w, r, u, "/", hash != "")
+}
+
+// keepHold keeps a just-confirmed registrant's invitation use held while
+// they set up the account, whichever link confirmed the address.
+func (m *Managed) keepHold(ctx context.Context, subject string) {
+	hold, err := m.Store.UserInvitation(ctx, subject)
+	if err != nil || hold == "" {
+		return
+	}
+	if inviter, h := inviterOf(m.Mounts); inviter != nil {
+		if err := inviter.Keep(ctx, h, hold, time.Now().Add(keptFor)); err != nil {
+			m.Logger.Error("keeping an invitation's use held failed", "err", err)
+		}
+	}
 }
 
 // verifyLook says which address a confirming link is for, and whether
@@ -747,7 +754,9 @@ func (m *Managed) reset(w http.ResponseWriter, r *http.Request) {
 		err = m.Store.SetMustChange(ctx, u.Subject, false)
 	}
 	if err == nil && !u.Confirmed {
-		err = m.Store.ConfirmUser(ctx, u.Subject)
+		if err = m.Store.ConfirmUser(ctx, u.Subject); err == nil {
+			m.keepHold(ctx, u.Subject)
+		}
 	}
 	// The emailed link proved the address, and the password is theirs now:
 	// an account an admin made is set up.

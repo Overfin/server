@@ -543,6 +543,49 @@ func TestManagedMustChange(t *testing.T) {
 
 // A forgotten password: a link by email, a new password, every other login
 // ended.
+// A registrant who lost the confirming email and confirms with "forgot
+// password" instead keeps the invitation's use held a month too.
+func TestManagedRegistrantConfirmsByReset(t *testing.T) {
+	box := &mailbox{}
+	var m *api.Managed
+	var tmpl string
+	var dbs map[string]*sql.DB
+	panel := http.NewServeMux()
+	srv, _ := newServerWith(t, options{managed: true, mailbox: box, signIn: &m, template: &tmpl, admin: panel, dbs: &dbs,
+		modules: []feature.Feature{invites.Feature{}}, settings: map[string]map[string]string{"invites": {"required": "on"}}})
+	admin := func(method, path string, body any) map[string]any {
+		raw, _ := json.Marshal(body)
+		rec := httptest.NewRecorder()
+		panel.ServeHTTP(rec, httptest.NewRequest(method, "/admin/api/modules/invites"+path, bytes.NewReader(raw)))
+		var out map[string]any
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	it := admin("POST", "/templates", map[string]any{"name": "Once", "accountTemplate": tmpl, "accessDays": 0, "validDays": 0, "maxUses": 1})
+	link := strings.TrimPrefix(admin("POST", "/invites", map[string]any{"template": it["id"], "label": "Ann"})["link"].(string), "https://media.example.org")
+	b := newBrowser(srv)
+	openPage(t, b, srv, link)
+	if c, out := signinPost(t, b, srv, "/api/v1/register", checked(t, srv, map[string]any{"email": "ann@example.org"})); c != 200 {
+		t.Fatalf("registering: %d %v", c, out)
+	}
+	m.Wait()
+	other := newBrowser(srv)
+	if c, out := signinPost(t, other, srv, "/api/v1/reset", checked(t, srv, map[string]any{"email": "ann@example.org"})); c != 200 {
+		t.Fatalf("asking a reset: %d %v", c, out)
+	}
+	m.Wait()
+	mails := box.all()
+	token := linkIn(mails[len(mails)-1].body, "reset")
+	if c, out := signinPost(t, other, srv, "/api/v1/reset/password", map[string]any{"link": token, "password": "a long password 1"}); c != 200 {
+		t.Fatalf("the password: %d %v", c, out)
+	}
+	var until int64
+	if err := dbs["invites"].QueryRow(`SELECT held_until FROM invites_uses WHERE hold_hash IS NOT NULL`).Scan(&until); err != nil ||
+		time.Until(time.Unix(until, 0)) < 29*24*time.Hour {
+		t.Errorf("the hold after confirming by reset: %v, %v", time.Unix(until, 0), err)
+	}
+}
+
 func TestManagedReset(t *testing.T) {
 	box := &mailbox{}
 	var st *store.Store
