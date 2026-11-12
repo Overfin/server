@@ -19,6 +19,7 @@ type Keys struct {
 	PIN             []byte // keyed hash of profile PINs
 	EmailLink       []byte // keyed hash of the links sent by email
 	Proof           []byte // signs the pages' checks against scripts
+	Device          []byte // signs the cookie of a browser that signed in
 	// Check identifies the secret key without revealing it: stored in the
 	// database, it tells a wrong key at startup.
 	Check []byte
@@ -35,6 +36,7 @@ const (
 	labelPIN    = "overfin pin v1"
 	labelLink   = "overfin signin-code v1" // its first use kept its name
 	labelProof  = "overfin proof v1"
+	labelDevice = "overfin device v1"
 	labelCheck  = "overfin key-check v1"
 )
 
@@ -65,6 +67,9 @@ func Derive(secret []byte) (*Keys, error) {
 		return nil, err
 	}
 	if k.Proof, err = derive(labelProof); err != nil {
+		return nil, err
+	}
+	if k.Device, err = derive(labelDevice); err != nil {
 		return nil, err
 	}
 	if k.Check, err = derive(labelCheck); err != nil {

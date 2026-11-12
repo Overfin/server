@@ -210,7 +210,7 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	}
 	var managed *api.Managed
 	if cfg.Identity.Mode == "managed" {
-		managed = &api.Managed{Sessions: sessions, Store: db, Provisioner: prov, CodeKey: k.EmailLink,
+		managed = &api.Managed{Sessions: sessions, Store: db, Provisioner: prov, CodeKey: k.EmailLink, DeviceKey: k.Device,
 			Proof: sh.proof, Mail: sh.mailer, Emails: sh.emails, SiteURL: siteURL(cfg),
 			LoginLifetime: 30 * 24 * time.Hour, FreshFor: 5 * time.Minute, Logger: logger}
 		sessions.StepUpURL, sessions.FreshFor, sessions.SignIn = api.StepUpPath, managed.FreshFor, managed

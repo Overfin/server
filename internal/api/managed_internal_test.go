@@ -2,8 +2,10 @@ package api
 
 import (
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 )
@@ -131,5 +133,48 @@ func TestLimiterFlood(t *testing.T) {
 	m.byIP.allow("192.0.2.1", now.Add(time.Minute))
 	if len(m.byIP.keys) != 1 {
 		t.Errorf("%d keys after a quiet window", len(m.byIP.keys))
+	}
+}
+
+// A browser that signed in with an email isn't locked out by guesses from
+// elsewhere: its tries are counted by themselves (OWASP's device cookies).
+func TestKnownDeviceNotLockedOut(t *testing.T) {
+	m := &Managed{DeviceKey: []byte("0123456789abcdef0123456789abcdef")}
+	m.init()
+	rec := httptest.NewRecorder()
+	m.rememberDevice(rec, httptest.NewRequest("POST", "/api/v1/signin", nil), "Ann@example.org")
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].MaxAge < 300*24*3600 || !cookies[0].HttpOnly {
+		t.Fatalf("device cookie: %+v", cookies)
+	}
+	req := httptest.NewRequest("POST", "/api/v1/signin", nil)
+	req.AddCookie(cookies[0])
+	id, ok := m.knownDevice(req, "ann@example.org")
+	if !ok {
+		t.Fatal("the browser that signed in isn't known")
+	}
+	if _, ok := m.knownDevice(req, "bob@example.org"); ok {
+		t.Error("known for another email")
+	}
+	forged := httptest.NewRequest("POST", "/api/v1/signin", nil)
+	forged.AddCookie(&http.Cookie{Name: cookies[0].Name, Value: strings.Repeat("A", 22) + ".x"})
+	if _, ok := m.knownDevice(forged, "ann@example.org"); ok {
+		t.Error("a forged cookie is known")
+	}
+	now := time.Now()
+	for i := range passwordTriesAll {
+		m.mayTry("ann@example.org", fmt.Sprintf("198.51.%d.%d", i/250, i%250), now)
+	}
+	if m.mayTry("ann@example.org", "203.0.113.1", now) {
+		t.Fatal("the email isn't locked for new browsers")
+	}
+	if !m.mayTry("ann@example.org", "device "+id, now) {
+		t.Error("the known browser is locked out")
+	}
+	for range passwordTries {
+		m.mayTry("ann@example.org", "device "+id, now)
+	}
+	if m.mayTry("ann@example.org", "device "+id, now) {
+		t.Error("the known browser's own tries aren't limited")
 	}
 }

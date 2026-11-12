@@ -82,6 +82,9 @@ type Managed struct {
 	Mounts []Mount
 	// CodeKey hashes the links sent by email (keys.EmailLink).
 	CodeKey []byte
+	// DeviceKey signs the cookie a browser gets once it signed in
+	// (keys.Device); nil, browsers aren't told apart.
+	DeviceKey []byte
 	// Proof checks the pages' forms against scripts.
 	Proof *proof.Checker
 	// Mail is the SMTP server; nil (or a nil result) when there's none:
@@ -374,6 +377,14 @@ func (m *Managed) signIn(w http.ResponseWriter, r *http.Request) {
 	} else if !m.checked(w, r, req) || !m.cleanEmail(w, r, &req) {
 		return
 	}
+	known := false
+	if !req.Fresh {
+		// A browser that signed in with this email before: its tries are
+		// its own, so guesses from elsewhere never lock it out.
+		if id, ok := m.knownDevice(r, req.Email); ok {
+			client, known = "device "+id, true
+		}
+	}
 	if !m.mayTry(req.Email, client, time.Now()) {
 		m.refuse(w, r, problem.RateLimited, "tooManyTries")
 		return
@@ -412,6 +423,9 @@ func (m *Managed) signIn(w http.ResponseWriter, r *http.Request) {
 		m.confirmFresh(w, r, u, req.Return)
 		return
 	}
+	if !known {
+		m.rememberDevice(w, r, req.Email)
+	}
 	m.startLogin(w, r, u, req.Return, true)
 }
 
@@ -421,10 +435,55 @@ func (m *Managed) mayTry(email, client string, now time.Time) bool {
 	if !m.tries.allow(triesKey(email, client), now) {
 		return false
 	}
-	if strings.HasPrefix(client, "login ") {
-		return true // a signed-in person confirming: counted by login alone
+	if strings.HasPrefix(client, "login ") || strings.HasPrefix(client, "device ") {
+		// A signed-in person confirming, or a browser that signed in with
+		// this email before: counted by itself alone.
+		return true
 	}
 	return m.triesAll.allow(strings.ToLower(email), now)
+}
+
+// deviceCookie is what a browser that signed in keeps, for deviceFor: a
+// random ID, signed with the email it signed in with. It names no one
+// (the email is only in the signature) and signs no one in; it only lets
+// that browser's password tries be counted apart (OWASP's device cookies).
+const (
+	deviceCookie = "overfin-device"
+	deviceFor    = 365 * 24 * time.Hour
+)
+
+func (m *Managed) deviceMAC(email, id string) string {
+	mac := hmac.New(sha256.New, m.DeviceKey)
+	mac.Write([]byte(strings.ToLower(email) + "\n" + id))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// knownDevice gives the ID of the browser's device cookie, when it signed
+// in with email.
+func (m *Managed) knownDevice(r *http.Request, email string) (string, bool) {
+	if m.DeviceKey == nil {
+		return "", false
+	}
+	c, err := cookie.Get(r, deviceCookie)
+	if err != nil {
+		return "", false
+	}
+	id, sig, ok := strings.Cut(c.Value, ".")
+	if !ok || len(id) != 22 || !hmac.Equal([]byte(sig), []byte(m.deviceMAC(email, id))) {
+		return "", false
+	}
+	return id, true
+}
+
+// rememberDevice gives the browser a device cookie for email.
+func (m *Managed) rememberDevice(w http.ResponseWriter, r *http.Request, email string) {
+	if m.DeviceKey == nil {
+		return
+	}
+	b := make([]byte, 16)
+	rand.Read(b)
+	id := base64.RawURLEncoding.EncodeToString(b)
+	cookie.Set(w, r, &http.Cookie{Name: deviceCookie, Value: id + "." + m.deviceMAC(email, id), MaxAge: int(deviceFor.Seconds())})
 }
 
 // triesKey is the key of an email's tries from one client address.
