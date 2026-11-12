@@ -162,14 +162,16 @@ comes from the internet, and media files can be written by anyone.
     link, a screen's code, an identity provider's return), which act on nothing but their own code
     and query, the gate a reverse proxy asks (rule 13), and the site's own
     pages and files (any GET or HEAD outside `/api/`, which change nothing;
-    rule 64). A request
+    rule 64), and the stream routes, which check for themselves (rule 23).
+    A request
     without `Sec-Fetch-Site` (older browsers, some TVs' and apps' web views,
     apps) is let through this check; for those, the JSON rule is what rules
     out cross-site writes. State-changing requests must be JSON, except
     the control panel's image uploads, which must carry an image content
-    type (plain HTML forms can send neither), and there is no CORS at all:
-    a cross-site page can't send JSON without a preflight Overfin never
-    answers.
+    type (plain HTML forms can send neither), and Overfin answers no
+    preflight, so a cross-site page can't send JSON. The one CORS answer
+    is on streams a paired server's viewer plays (rule 65): they allow
+    that server's site alone, and only for reading.
 19. After a login or step-up, users are sent back only to a path on the same
     origin, never to an address taken unchecked from the request.
 20. Upstream tokens are encrypted at rest, with the key kept outside the
@@ -202,7 +204,12 @@ comes from the internet, and media files can be written by anyone.
     tickets, invitations, app keys, and the planned transfer codes)
     is random, at least 128 bits, and every lookup checks that it belongs to
     the current account (for playbacks and tickets, its profile; for
-    invitations and app keys, that an admin asks). Catalog IDs (titles,
+    invitations and app keys, that an admin asks). A stream ticket for a
+    paired server's viewer belongs to no account here: it works only for
+    that playback, only from that server's site when the browser names
+    where it comes from, and only while the pairing lasts. This server's
+    own tickets are refused when a browser says another site asked.
+    Catalog IDs (titles,
     people) are built from TMDB's and name nothing private.
 24. Anything the caller may not see returns 404, never 403. A 403 only ever
     means the caller may not do this: an owner-only action, a missing step-up
@@ -557,7 +564,8 @@ comes from the internet, and media files can be written by anyone.
 ### Between servers
 65. Servers never trust each other by default, and nothing here is a secure
     default: these hold whatever either operator chose for their own
-    server. When servers share with each other (federation, planned), each
+    server. When servers share with each other (federation: two servers
+    paired by hand, with a code one operator gives the other), each
     peer is untrusted, proves who it is with keys exchanged when the two
     were paired (never with a web certificate alone, nor a name or an
     address), and gets only what was shared with it, under the sharing
