@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/overfin/server/internal/jellyfin"
@@ -31,26 +32,32 @@ func checkCompanion(ctx context.Context, url, key string) error {
 	}
 	pub, err := jf.Public(ctx)
 	if err != nil {
-		return fmt.Errorf("Overfin's Jellyfin doesn't answer: %w", err)
+		return fmt.Errorf("the Jellyfin doesn't answer: %w", err)
 	}
 	if pub.Version != JellyfinVersion {
-		return fmt.Errorf("Overfin's Jellyfin is version %s, and this Overfin is made for %s: run its Jellyfin from Overfin's image "+
-			"(OVERFIN_ROLE=jellyfin beside a gateway, or OVERFIN_ROLE=all)", pub.Version, JellyfinVersion)
+		return fmt.Errorf("the Jellyfin is version %s, and this Overfin is made for %s: run its Jellyfin from the image "+
+			"%s", pub.Version, JellyfinVersion, jellyfinImage())
 	}
 	admin := jellyfin.Auth{Token: key, DeviceID: "overfin-admin"}
 	sum := sha256.Sum256([]byte(key))
 	if err := jf.SetPluginKey(ctx, admin, pluginID, hex.EncodeToString(sum[:])); err != nil {
-		return fmt.Errorf("Overfin's plugin isn't on its Jellyfin (run its Jellyfin from Overfin's image): %w", err)
+		return fmt.Errorf("the plugin isn't on Overfin's Jellyfin (run its Jellyfin from the image %s): %w", jellyfinImage(), err)
 	}
 	plugin, _, err := jf.PluginInfo(ctx, admin)
 	if err != nil {
-		return fmt.Errorf("Overfin's plugin doesn't answer: %w", err)
+		return fmt.Errorf("the plugin on Overfin's Jellyfin doesn't answer: %w", err)
 	}
 	if plugin != PluginVersion {
-		return fmt.Errorf("Overfin's plugin is version %s, and this Overfin is made for %s: run its Jellyfin from the same Overfin image",
-			plugin, PluginVersion)
+		return fmt.Errorf("the plugin on Overfin's Jellyfin is version %s, and this Overfin is made for %s: run its Jellyfin from the image "+
+			"%s", plugin, PluginVersion, jellyfinImage())
 	}
 	return nil
+}
+
+// jellyfinImage is the image of Overfin's Jellyfin made with this Overfin:
+// the same version, tagged without its "v".
+func jellyfinImage() string {
+	return "ghcr.io/overfin/overfin-jellyfin:" + strings.TrimPrefix(Version, "v")
 }
 
 // companionEvery is how often a Jellyfin or plugin that isn't right is

@@ -1,13 +1,17 @@
 # Installing and running Overfin
 
 Run it on the machine that has your films and series, or can reach them through a mounted network share. It needs **Docker** with Compose.
-Overfin needs a **Jellyfin of its own**, and brings it: its image carries
-its Jellyfin and Overfin's plugin for it, at versions made for each other.
-The compose file runs both in one container; Overfin sets its Jellyfin up
-by itself on its first start, and manages it from then on. A Jellyfin you
+Overfin needs a **Jellyfin of its own**, and brings it: each release comes
+as two images of the same version, Overfin's (`ghcr.io/overfin/overfin`)
+and its Jellyfin's, with Overfin's plugin for it
+(`ghcr.io/overfin/overfin-jellyfin`), each with a signed attestation of how
+it was built, for x86 and ARM. They're apart so a flaw in Overfin, the part
+facing the internet, doesn't reach your media, and so updating Overfin
+leaves Jellyfin running ([why](../deploy/README.md#why-two-images)). The
+compose file runs both on one machine; Overfin sets its Jellyfin up by
+itself on its first start, and manages it from then on. A Jellyfin you
 already use stays yours and untouched: see
-[Your own Jellyfin](#your-own-jellyfin). Each release comes as an image
-with a signed attestation of how it was built, for x86 and ARM (`ghcr.io/overfin/overfin`).
+[Your own Jellyfin](#your-own-jellyfin).
 
 **1. Start it:**
 
@@ -71,15 +75,15 @@ Overfin keeps its secret key in `overfin-secrets` and everything else in
 `overfin-data`: back both up, apart. Jellyfin's data is in
 `jellyfin-config`.
 
-**Jellyfin itself** is closed: nobody signs in to it, and it listens
-inside the container only. To look inside, open access in the control
+**Jellyfin itself** is closed: nobody signs in to it, and only Overfin
+reaches it, on the compose project's own network. To look inside, open access in the control
 panel (Server, Jellyfin), then follow
 [Looking inside Jellyfin](../deploy/README.md#looking-inside-jellyfin).
 Changes made there may break Overfin, or be undone by it.
 
 ## Your own Jellyfin
 
-Overfin works only with the Jellyfin its image brings, at the version it's
+Overfin works only with the Jellyfin of its `overfin-jellyfin` image, at the version it's
 made with, with Overfin's plugin: until then, every page says the server is
 being updated, and the log says why. A Jellyfin you already use stays
 yours: Overfin never touches it. Run Overfin's beside it, on the same media
@@ -87,7 +91,7 @@ folders.
 
 Overfin's Jellyfin can be on another machine than Overfin (the one with
 the media and the GPU, say): see
-[Two machines](../deploy/README.md#two-machines). There too, Overfin sets a
+[On two machines](../deploy/README.md#on-two-machines). There too, Overfin sets a
 fresh Jellyfin up itself; one already set up, it takes only if you hand it
 over: the wizard asks for one of its administrators' login, used once,
 shows what that server holds, and waits for you to confirm it's dedicated

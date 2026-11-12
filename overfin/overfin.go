@@ -114,50 +114,15 @@ func run(logger *slog.Logger) error {
 		"test the configuration, the secret key, Jellyfin and the identity provider, say what's wrong, then exit; changes nothing")
 	flag.Parse()
 
-	r, err := role(os.Getenv)
-	if err != nil {
-		return err
-	}
-	if r == roleJellyfin {
-		return runJellyfinOnly(logger)
-	}
-	getenv := os.Getenv
-	if r == roleAll {
-		// Its Jellyfin is beside it, in the container.
-		getenv = func(k string) string {
-			if v := os.Getenv(k); v != "" || k != "OVERFIN_JELLYFIN_URL" {
-				return v
-			}
-			return "http://127.0.0.1:8096"
-		}
-		oneShot := *recoverTokens || *importFlag || *passwordFor != "" || *check
-		if !oneShot {
-			if err := prepareJellyfin(r, os.Getenv, logger); err != nil {
-				return err
-			}
-			// When Overfin stops, Jellyfin stops first, cleanly.
-			ctx, stop := context.WithCancel(context.Background())
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				superviseJellyfin(ctx, logger)
-			}()
-			defer func() {
-				stop()
-				<-done
-			}()
-		}
-	}
-
 	// Without a file at the default place, the defaults: a start needs no
 	// configuration at all. A file named on purpose must exist.
 	if *configPath == defaultPath && !fileExists(defaultPath) {
 		*configPath = ""
 	}
 	if *check {
-		return checkSetup(*configPath, getenv, os.Stdout)
+		return checkSetup(*configPath, os.Getenv, os.Stdout)
 	}
-	cfg, err := config.Load(*configPath, getenv)
+	cfg, err := config.Load(*configPath, os.Getenv)
 	if err != nil {
 		return err
 	}

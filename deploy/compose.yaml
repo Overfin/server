@@ -1,28 +1,25 @@
-# Overfin and its own Jellyfin, on one machine, in one container (Overfin's
-# image carries its Jellyfin and Overfin's plugin for it, at versions made
-# for each other). Set where your media is on the media line below (.env
-# holds optional settings, see .env.example), then: docker compose up -d.
-# Open this machine's address in a browser, and the setup wizard takes it
-# from there. See README.md.
+# Overfin and its own Jellyfin, on one machine, in two containers from two
+# images of the same version (Overfin's, and its Jellyfin's with Overfin's
+# plugin). Set where your media is on the media line below (.env holds
+# optional settings, see .env.example), then: docker compose up -d. Open
+# this machine's address in a browser, and the setup wizard takes it from
+# there. See README.md, also for two machines (compose.overfin.yaml and
+# compose.jellyfin.yaml).
 #
-# Jellyfin listens inside the container only: Overfin is the only one that
-# talks to it. Nothing gets the Docker socket.
+# Overfin reaches Jellyfin on this project's network only; nothing else
+# does. Nothing gets the Docker socket.
 name: overfin
 
 services:
   overfin:
     container_name: overfin
-    image: ${OVERFIN_IMAGE:-ghcr.io/overfin/overfin:0.9.0}
+    image: ${OVERFIN_IMAGE:-ghcr.io/overfin/overfin:${OVERFIN_VERSION:-0.9.0}}
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    tmpfs:
-      - /tmp
     environment:
-      # Overfin and its Jellyfin together (gateway and jellyfin split them
-      # over two machines: see README.md).
-      OVERFIN_ROLE: all
+      OVERFIN_JELLYFIN_URL: http://jellyfin:8096
       TZ: ${TZ:-UTC}
       # With a domain pointed at this machine, Overfin gets its own HTTPS
       # certificate; without one, it serves plain http (keep that to your
@@ -34,7 +31,27 @@ services:
       - overfin-data:/data
       # Overfin's secret key, made on its first start.
       - overfin-secrets:/secrets
-      # Jellyfin's own data and cache.
+    ports:
+      - "80:8080"
+      - "443:8443"
+    depends_on:
+      jellyfin:
+        condition: service_healthy
+
+  jellyfin:
+    container_name: jellyfin
+    # Always the same version as Overfin's: it carries the Jellyfin and the
+    # plugin this Overfin is made with.
+    image: ${OVERFIN_JELLYFIN_IMAGE:-ghcr.io/overfin/overfin-jellyfin:${OVERFIN_VERSION:-0.9.0}}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
       - jellyfin-config:/config
       - jellyfin-cache:/cache
       # Your films and series, read only: change /srv/media to where they
@@ -45,9 +62,12 @@ services:
       # one line each, then docker compose up -d. In the control panel, a
       # library's folders are the paths after the colon.
       # - /mnt/nas/films:/nas/films:ro
-    ports:
-      - "80:8080"
-      - "443:8443"
+    # Jellyfin itself is closed: Overfin is the only one that talks to it.
+    # To look inside while access is open (control panel, Server), publish
+    # it on this machine only, then recreate it (docker compose up -d):
+    # ports:
+    #   - "127.0.0.1:8096:8096"
+    #
     # A GPU for converting videos, then choose it in the control panel
     # (Server, Transcoding). Intel or AMD:
     # devices:

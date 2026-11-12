@@ -26,7 +26,7 @@ func TestCheckCompanion(t *testing.T) {
 		{"right", JellyfinVersion, PluginVersion, ""},
 		{"another Jellyfin", "12.1.0", PluginVersion, "version 12.1.0"},
 		{"no plugin", JellyfinVersion, "", "plugin isn't on"},
-		{"another plugin", JellyfinVersion, "0.0.9", "plugin is version 0.0.9"},
+		{"another plugin", JellyfinVersion, "0.0.9", "plugin on Overfin's Jellyfin is version 0.0.9"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var gotHash string
@@ -69,7 +69,7 @@ func TestUpdatingPage(t *testing.T) {
 	}
 }
 
-// Against a real Jellyfin from Overfin's image, when one is given
+// Against a real Jellyfin from the overfin-jellyfin image, when one is given
 // (OVERFIN_LIVE_JELLYFIN_URL, and the key's file in
 // OVERFIN_LIVE_JELLYFIN_KEY_FILE): skipped otherwise.
 func TestCheckCompanionLive(t *testing.T) {
