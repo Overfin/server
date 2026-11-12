@@ -67,6 +67,8 @@ type Service struct {
 	// origins: MediaOrigins', read at originsAt.
 	origins   []string
 	originsAt time.Time
+	// readings holds a lock per peer ID, for SyncTitles.
+	readings sync.Map
 }
 
 // NewHTTPClient is the client for talking to peers: short timeouts, and
@@ -813,10 +815,15 @@ func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
 // SyncTitles reads again which titles a paired peer holds in the
 // libraries we want of it, and keeps them, replacing what we knew. With
 // nothing wanted, we know of nothing.
+// Readings of one peer go one after the other, so one started later (its
+// wants just changed) never mixes with an earlier one still paging.
 func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 	if p.State != store.PeerPaired {
 		return 0, ErrNotPaired
 	}
+	l, _ := s.readings.LoadOrStore(p.ID, &sync.Mutex{})
+	l.(*sync.Mutex).Lock()
+	defer l.(*sync.Mutex).Unlock()
 	wants, err := s.Store.PeerWants(ctx, p.ID)
 	if err != nil {
 		return 0, err

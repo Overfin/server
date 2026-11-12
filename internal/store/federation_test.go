@@ -221,6 +221,15 @@ func TestPeerTitles(t *testing.T) {
 	if n, _ := s.PeerTitleCounts(ctx); n[p.ID] != 3 {
 		t.Fatalf("whole: %v", n)
 	}
+	// An earlier reading writing late never makes a title look unseen by
+	// a later one.
+	earlier, later := PeerReading(), PeerReading()
+	s.PutPeerTitles(ctx, p.ID, later, films(3, 5))
+	s.PutPeerTitles(ctx, p.ID, earlier, films(3, 5))
+	s.EndPeerTitles(ctx, p.ID, later)
+	if n, _ := s.PeerTitleCounts(ctx); n[p.ID] != 2 {
+		t.Fatalf("an earlier reading late: %v", n)
+	}
 }
 
 // TMDB's data is kept for what paired servers hold too: a series with the

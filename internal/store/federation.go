@@ -655,7 +655,7 @@ func (s *Store) PutPeerTitles(ctx context.Context, peerID string, reading int64,
 	stmt, err := tx.PrepareContext(ctx, `INSERT INTO peer_titles (peer_id, title_key, kind, library_id, audio, subtitles, added_at, seen)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (peer_id, title_key) DO UPDATE SET kind = excluded.kind, library_id = excluded.library_id,
-			audio = excluded.audio, subtitles = excluded.subtitles, seen = excluded.seen`)
+			audio = excluded.audio, subtitles = excluded.subtitles, seen = max(seen, excluded.seen)`)
 	if err != nil {
 		return err
 	}
