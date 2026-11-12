@@ -477,10 +477,15 @@ comes from the internet, and media files can be written by anyone.
     the libraries lack is listed only when two accounts or more want it
     (watched, marked, asked for or kept for later), or when it's one of
     Overfin's picks from TMDB's lists. So no title and no time points at
-    one person. The one exception is the fetcher's key (`wishes`, for
+    one person. One exception is the fetcher's key (`wishes`, for
     Overtide): to fetch what people wish for, it reads the wished titles
     in turn order, one person's wish included, but never who wished a
     title nor how many did, and it says back only what became of each.
+    The other is scores (`score`): a title's score may count what fewer
+    than two people did with it, since a score is one number mixing
+    several inputs and the key is the operator's own; without it, a
+    server with one user would value titles without anyone's watching.
+    Watch statistics keep the two-people rule.
 
 ### Code supply
 59. No code copied or ported from other projects. Dependencies are few, chosen
