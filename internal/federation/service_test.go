@@ -304,14 +304,14 @@ func TestForgedRefusal(t *testing.T) {
 	ctx := context.Background()
 	a, b := newServer(t, "A"), newServer(t, "B")
 	code, _, _ := a.s.NewCode(ctx, "")
-	pa, err := b.s.UseCode(ctx, code)
+	_, err := b.s.UseCode(ctx, code)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.s.Accept(ctx, onlyPeer(t, a).ID); err != nil {
 		t.Fatal(err)
 	}
-	pa = onlyPeer(t, b)
+	pa := onlyPeer(t, b)
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/problem+json")
 		w.WriteHeader(http.StatusNotFound)
