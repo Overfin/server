@@ -242,16 +242,15 @@ func (pb Playback) peerProgress(w http.ResponseWriter, r *http.Request) {
 // still watched here: well within its IdleTimeout.
 const tellEvery = 45 * time.Second
 
-// tellRemote tells a paired server, in the background and at most every
-// tellEvery, that a playback there is still watched here.
+// tellRemote tells a paired server, in the background, where a playback
+// there is watched here: at most every tellEvery, and at once when it was
+// paused or resumed.
 func (pb Playback) tellRemote(rm *playback.Remote, positionMs int64, paused bool) {
 	fed := pb.fed()
 	if fed == nil {
 		return
 	}
-	now := time.Now().UnixNano()
-	last := rm.Told.Load()
-	if now-last < int64(tellEvery) || !rm.Told.CompareAndSwap(last, now) {
+	if !rm.Due(time.Now(), paused, tellEvery) {
 		return
 	}
 	go func() {

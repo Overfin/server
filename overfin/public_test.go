@@ -31,7 +31,7 @@ var publicRoutes = map[string]string{
 	"POST /api/v1/federation/libraries":             "federation: the libraries offered",
 	"POST /api/v1/federation/titles":                "federation: the titles offered",
 	"POST /api/v1/federation/play":                  "federation: a paired server's viewer plays",
-	"POST /api/v1/federation/progress":              "federation: and stops",
+	"POST /api/v1/federation/progress":              "federation: where a viewer is",
 	"POST /api/v1/federation/stop":                  "federation: and stops",
 	"GET /signin":                                   "the sign-in page",
 	"GET /invite/{code}":                            "the invitation page",

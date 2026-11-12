@@ -70,7 +70,9 @@ func (pb Playback) Register(r *plugin.Registrar) error {
 }
 
 // IdleTimeout ends a playback with neither progress reports nor stream
-// requests for this long. Clients report every few seconds, paused or not.
+// requests for this long. The site's player reports while playing and when
+// paused; a longer pause frees the playback, and the player starts it
+// again when it's resumed.
 const IdleTimeout = 2 * time.Minute
 
 // RunJanitor ends idle playbacks, and their transcodes, until ctx is done.
@@ -258,7 +260,7 @@ func (pb Playback) progress(w http.ResponseWriter, r *http.Request) {
 	pb.record(r.Context(), s, req.PositionMs, false)
 	if rm := s.Remote; rm != nil {
 		// Played on a paired server: its stream's use keeps it alive
-		// there, and, paused, this does.
+		// there; this tells it where the viewer is, and pauses at once.
 		pb.tellRemote(rm, req.PositionMs, req.Paused)
 		w.WriteHeader(http.StatusNoContent)
 		return

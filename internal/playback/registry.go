@@ -294,6 +294,24 @@ type Remote struct {
 	// Told is when the paired server last heard it's still watched (Unix
 	// nanoseconds): it's told now and then, paused or not.
 	Told atomic.Int64
+	// Paused is what the paired server last heard: a pause or a resume
+	// is told at once.
+	Paused atomic.Bool
+}
+
+// Due reports whether the paired server should be told now: every
+// interval, and at once on a pause or a resume. A true answer counts as
+// told, so of calls at the same time only one gets it.
+func (r *Remote) Due(now time.Time, paused bool, every time.Duration) bool {
+	last := r.Told.Load()
+	if now.UnixNano()-last < int64(every) && r.Paused.Load() == paused {
+		return false
+	}
+	if !r.Told.CompareAndSwap(last, now.UnixNano()) {
+		return false
+	}
+	r.Paused.Store(paused)
+	return true
 }
 
 // PeerPrefix starts the account, profile and session IDs of a paired

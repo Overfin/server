@@ -160,3 +160,29 @@ func TestAdmit(t *testing.T) {
 		t.Errorf("refusing: %v", err)
 	}
 }
+
+// A paired server hears where its viewer is every interval, and at once
+// when they pause or resume.
+func TestRemoteDue(t *testing.T) {
+	var r Remote
+	t0 := time.Unix(1_800_000_000, 0)
+	every := 45 * time.Second
+	steps := []struct {
+		at     time.Duration
+		paused bool
+		want   bool
+	}{
+		{0, false, true},                 // the first report
+		{10 * time.Second, false, false}, // too soon
+		{20 * time.Second, true, true},   // paused: at once
+		{30 * time.Second, true, false},  // still paused, too soon
+		{35 * time.Second, false, true},  // resumed: at once
+		{79 * time.Second, false, false},
+		{80 * time.Second, false, true}, // the interval
+	}
+	for _, s := range steps {
+		if got := r.Due(t0.Add(s.at), s.paused, every); got != s.want {
+			t.Errorf("at %v, paused %v: %v", s.at, s.paused, got)
+		}
+	}
+}
