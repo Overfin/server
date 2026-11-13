@@ -1774,6 +1774,7 @@ paths:
 
   /logout:
     post:
+      security: []
       operationId: logout
       summary: End the current session
       tags: [account]
@@ -3513,6 +3514,7 @@ paths:
           maxLength: 64
           pattern: "^[A-Za-z0-9._-]{1,64}$"
     get:
+      security: []
       operationId: getStream
       summary: Playlists, segments or the media file
       description: |
@@ -3574,6 +3576,7 @@ paths:
           maxLength: 4
           pattern: "^s[0-9]{1,3}$"
     get:
+      security: []
       operationId: getSubtitles
       summary: A subtitle track as sanitized WebVTT
       tags: [playback]
@@ -3605,6 +3608,7 @@ paths:
           maxLength: 4
           pattern: "^s[0-9]{1,3}$"
     get:
+      security: []
       operationId: getPictureSubtitles
       summary: A subtitle track of pictures (PGS), checked whole
       description: >-
