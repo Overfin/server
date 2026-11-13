@@ -362,7 +362,9 @@ export function capabilities() {
   // Desktop Chromium browsers (Chrome, Edge…) and Safari map HDR video onto
   // the screen themselves, whatever the screen; Firefox does only on macOS.
   // Elsewhere, the screen says.
-  const hdr = matchMedia('(dynamic-range: high)').matches || chromium || safari || (firefox && mac);
+  // In Overfin's Android app, the app says (WebView doesn't tell pages).
+  const app = appHdr();
+  const hdr = app ? app.length > 0 : matchMedia('(dynamic-range: high)').matches || chromium || safari || (firefox && mac);
   return {
     containers,
     videoCodecs: pick({
@@ -384,10 +386,21 @@ export function capabilities() {
     // Browsers decode 4K whatever the screen: scaling it down on the server
     // means re-encoding it. The bitrate limits still apply.
     maxHeight: 2160,
-    hdr: hdr ? ['hdr10', 'hlg'] : [],
+    hdr: app ?? (hdr ? ['hdr10', 'hlg'] : []),
     subtitles: ['vtt'],
     maxAudioChannels: 2,
   };
+}
+
+// appHdr is what Overfin's Android app says the screen shows in HDR
+// (OverfinApp.hdr(), JSON names), or null outside the app.
+function appHdr() {
+  try {
+    const names = JSON.parse(globalThis.OverfinApp?.hdr?.() ?? 'null');
+    return Array.isArray(names) ? names.filter((n) => n === 'hdr10' || n === 'hlg') : null;
+  } catch {
+    return null;
+  }
 }
 
 // browserFamily tells the browsers apart where what they say they play
