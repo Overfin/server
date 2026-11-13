@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/overfin/server/internal/outbound"
 	"io"
-	"net"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -25,7 +25,7 @@ import (
 // relayTransport asks paired servers for their streams: no proxy from
 // the environment, a minute to answer, then as long as the stream lasts.
 var relayTransport = &http.Transport{
-	DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+	DialContext:           outbound.DialContext, // on the backend: through its gateway
 	TLSHandshakeTimeout:   10 * time.Second,
 	ResponseHeaderTimeout: 60 * time.Second,
 	MaxIdleConnsPerHost:   8,

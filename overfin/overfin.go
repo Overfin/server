@@ -41,6 +41,7 @@ import (
 	"github.com/overfin/server/internal/link"
 	"github.com/overfin/server/internal/notices"
 	"github.com/overfin/server/internal/oidc"
+	"github.com/overfin/server/internal/outbound"
 	"github.com/overfin/server/internal/personal"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/proof"
@@ -345,6 +346,9 @@ func run(logger *slog.Logger) error {
 			return err
 		}
 		edgeSigner = lb.SignEdge
+		// Paired servers are reached through the gateway only: peers see
+		// the gateway, never this machine (internal/outbound).
+		outbound.Through(lb.DialEgress)
 		version, err := jf.InstallPlugin()
 		if err != nil {
 			return err

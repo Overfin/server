@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
@@ -361,5 +362,45 @@ func TestClientAddr(t *testing.T) {
 	resp.Body.Close()
 	if got := <-seen; got[0] == "not an address" || got[1] != "" {
 		t.Errorf("with a bad header: %q", got)
+	}
+}
+
+// The backend reaches another server through its gateway: TLS end to end,
+// the traffic counted at the gateway; an address the backend didn't ask
+// for is refused there.
+func TestEgress(t *testing.T) {
+	code := ""
+	g, addr := gatewayOn(t, t.TempDir(), "1.0", &code)
+	b, _ := runBackend(t, t.TempDir(), "1.0")
+	code = pairNow(t, b, addr)
+	waitConnected(t, g, true)
+
+	peer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "a paired server says hello")
+	}))
+	defer peer.Close()
+	peerAddr := strings.TrimPrefix(peer.URL, "https://")
+	tr := peer.Client().Transport.(*http.Transport).Clone()
+	tr.DialContext = b.DialEgress
+	resp, err := (&http.Client{Transport: tr}).Get(peer.URL + "/hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(body) != "a paired server says hello" {
+		t.Fatalf("through the gateway: %q", body)
+	}
+	tr.CloseIdleConnections()
+	deadline := time.Now().Add(5 * time.Second)
+	for g.EgressUsage()[peerAddr].Received == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if u := g.EgressUsage()[peerAddr]; u.Sent == 0 || u.Received == 0 {
+		t.Errorf("not counted: %+v", u)
+	}
+
+	if _, err := b.dialEgress(context.Background(), "tcp", "192.0.2.1:443", false); err == nil || !strings.Contains(err.Error(), "not-allowed") {
+		t.Errorf("an address the backend didn't ask for: %v", err)
 	}
 }

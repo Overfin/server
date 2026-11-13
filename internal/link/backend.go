@@ -18,6 +18,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -34,6 +35,9 @@ type Backend struct {
 	handler http.Handler
 	logger  *slog.Logger
 	id      *Identity
+
+	egressMu sync.Mutex
+	egress   map[string]time.Time // addresses the backend asked to reach, when
 }
 
 // pairing is the backend's side of the pairing, in its folder.
@@ -50,7 +54,9 @@ func NewBackend(dir, version string, handler http.Handler, logger *slog.Logger) 
 	if err != nil {
 		return nil, err
 	}
-	return &Backend{dir: dir, version: version, handler: withClientAddr(handler), logger: logger, id: id}, nil
+	b := &Backend{dir: dir, version: version, logger: logger, id: id}
+	b.handler = b.linkRoutes(withClientAddr(handler))
+	return b, nil
 }
 
 // Public is the backend's own key.

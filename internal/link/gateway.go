@@ -41,7 +41,8 @@ type Gateway struct {
 	backend  ed25519.PublicKey // pinned once paired
 	cc       *http.ClientConn  // the backend's connection, nil while none
 	status   Status
-	failures int // wrong codes in a row, for the log
+	failures int              // wrong codes in a row, for the log
+	usage    map[string]Usage // egress traffic, by address
 }
 
 // Status is what the gateway knows of its backend.
@@ -103,7 +104,7 @@ func (g *Gateway) tlsConfig() *tls.Config {
 	return &tls.Config{
 		Certificates: []tls.Certificate{g.id.cert},
 		ClientAuth:   tls.RequireAnyClientCert,
-		NextProtos:   []string{ALPN},
+		NextProtos:   []string{ALPN, EgressALPN},
 		MinVersion:   tls.VersionTLS13,
 	}
 }
@@ -115,7 +116,7 @@ func (g *Gateway) Share(srv *http.Server) {
 	base := srv.TLSConfig
 	prev := base.GetConfigForClient
 	base.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
-		if slices.Contains(hello.SupportedProtos, ALPN) {
+		if slices.Contains(hello.SupportedProtos, ALPN) || slices.Contains(hello.SupportedProtos, EgressALPN) {
 			return g.tlsConfig(), nil
 		}
 		if prev != nil {
@@ -127,6 +128,7 @@ func (g *Gateway) Share(srv *http.Server) {
 		srv.TLSNextProto = map[string]func(*http.Server, *tls.Conn, http.Handler){}
 	}
 	srv.TLSNextProto[ALPN] = func(_ *http.Server, c *tls.Conn, _ http.Handler) { g.Serve(c) }
+	srv.TLSNextProto[EgressALPN] = func(_ *http.Server, c *tls.Conn, _ http.Handler) { g.Serve(c) }
 }
 
 // Listen takes the backend's connections on a listener of their own (a
@@ -159,11 +161,16 @@ func (g *Gateway) Serve(c *tls.Conn) {
 		return
 	}
 	cs := c.ConnectionState()
-	if cs.NegotiatedProtocol != ALPN {
-		return
-	}
 	pub, err := peerKey(cs)
 	if err != nil {
+		return
+	}
+	switch cs.NegotiatedProtocol {
+	case EgressALPN:
+		g.serveEgress(c, pub)
+		return
+	case ALPN:
+	default:
 		return
 	}
 	reply, ok := g.preamble(c, pub)

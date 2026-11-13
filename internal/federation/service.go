@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/overfin/server/internal/outbound"
 	"io"
 	"log/slog"
 	"net/http"
@@ -73,7 +74,8 @@ type Service struct {
 // redirects never followed (a request is signed for one server only).
 func NewHTTPClient() *http.Client {
 	return &http.Client{
-		Timeout: 15 * time.Second,
+		Transport: outbound.Transport(),
+		Timeout:   15 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
