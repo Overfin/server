@@ -54,10 +54,10 @@ func checkCompanion(ctx context.Context, url, key string) error {
 	return nil
 }
 
-// jellyfinImage is the image of Overfin's Jellyfin made with this Overfin:
+// jellyfinImage is the image of the backend (with its Jellyfin) made with this Overfin:
 // the same version, tagged without its "v".
 func jellyfinImage() string {
-	return "ghcr.io/overfin/overfin-jellyfin:" + strings.TrimPrefix(Version, "v")
+	return "ghcr.io/overfin/overfin-backend:" + strings.TrimPrefix(Version, "v")
 }
 
 // companionEvery is how often a Jellyfin or plugin that isn't right is
