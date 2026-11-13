@@ -81,11 +81,11 @@ var localPage = template.Must(template.New("login").Parse(`<!doctype html>
 // localCSS is the sign-in form's look (the panel's policy allows no
 // inline style).
 const localCSS = `body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:system-ui,sans-serif;background:var(--bg,#f4f5f8);color:var(--text,#1c1d22)}
-form{width:min(22rem,calc(100vw - 2rem));display:grid;gap:.9rem;padding:1.5rem;border-radius:12px;background:var(--surface,#fff);box-shadow:0 1px 3px #0002}
+form{width:min(22rem,calc(100vw - 2rem));display:grid;gap:.9rem;padding:1.5rem;border-radius:12px;background:var(--panel,#fff);border:1px solid var(--border,#e2e5eb);box-shadow:var(--shadow-s,0 1px 3px #0002)}
 h1{margin:0 0 .3rem;font-size:1.3rem}label{display:grid;gap:.3rem;font-size:.95rem}
-input{font:inherit;padding:.55rem .7rem;border:1px solid #8884;border-radius:8px}
-button{font:inherit;font-weight:600;padding:.6rem;border:0;border-radius:8px;background:var(--accent,#3b6fd8);color:#fff;cursor:pointer}
-.error{margin:0;color:#c0392b}
+input{font:inherit;color:inherit;background:var(--bg,#fff);padding:.55rem .7rem;border:1px solid var(--border-strong,#8884);border-radius:8px}
+button{font:inherit;font-weight:600;padding:.6rem;border:0;border-radius:8px;background:var(--accent,#3b6fd8);color:var(--on-accent,#fff);cursor:pointer}
+.error{margin:0;color:var(--danger,#c0392b)}
 `
 
 func serveLocalCSS(w http.ResponseWriter, _ *http.Request) {

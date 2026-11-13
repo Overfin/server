@@ -32,8 +32,8 @@ var downPage = template.Must(template.New("down").Parse(`<!doctype html>
 <meta http-equiv="refresh" content="20"><title>{{.Title}}</title>
 <style>
 body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:system-ui,sans-serif;background:#f4f5f8;color:#1c1d22}
-@media (prefers-color-scheme:dark){body{background:#16171b;color:#e8e9ee}main{background:#202228}}
 main{max-width:min(28rem,calc(100vw - 2rem));padding:1.6rem;border-radius:12px;background:#fff;box-shadow:0 1px 3px #0002}
+@media (prefers-color-scheme:dark){body{background:#16171b;color:#e8e9ee}main{background:#202228}}
 h1{margin:0 0 .6rem;font-size:1.3rem}p{margin:.4rem 0;line-height:1.5}small{opacity:.7}
 </style></head><body><main><h1>{{.Title}}</h1><p>{{.Body}}</p><p><small>{{.Retry}}</small></p></main></body></html>`))
 
