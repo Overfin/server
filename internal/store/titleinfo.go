@@ -155,6 +155,9 @@ type TitleInfo struct {
 	// Images are TMDB paths: a season or an episode has its series'
 	// backdrop and logo.
 	Poster, Backdrop, Logo, Still string
+	// Frame is an episode's frame of its video (EpisodeFrames), by its
+	// image ID, when TMDB has no still for it; "" otherwise.
+	Frame string
 	// Textless is a film's or a series' poster without text (TMDB's
 	// without a language), "" when it has none: for tall screens.
 	Textless string
@@ -397,6 +400,11 @@ func (s *Store) titleInfo(ctx context.Context, r TitleRef, today string, b *info
 	}
 	if r.Kind == "series" || r.Kind == "season" {
 		if err := s.countEpisodes(ctx, t, today); err != nil {
+			return nil, err
+		}
+	}
+	if t.Still == "" && (r.Kind == "episode" || t.ItemKind == "episode") {
+		if t.Frame, err = s.frameOf(ctx, key); err != nil {
 			return nil, err
 		}
 	}

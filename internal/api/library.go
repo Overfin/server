@@ -344,6 +344,12 @@ func (l Library) image(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if id, ok := strings.CutPrefix(r.PathValue("id"), frameImage); ok {
+		if p := l.active(w, r); p != nil {
+			l.frame(w, r, p, id)
+		}
+		return
+	}
 	if id, ok := strings.CutPrefix(r.PathValue("id"), uploadImage); ok {
 		// Its width comes with its kind, once it's read (uploadedImage).
 		if p := l.active(w, r); p != nil {

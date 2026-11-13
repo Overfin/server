@@ -778,6 +778,14 @@ func run(logger *slog.Logger) error {
 	}
 	// The library's artwork, kept on disk next to the database.
 	go (&catalog.LibraryArtwork{Store: db, Images: sh.images, Logger: logger, Every: time.Hour}).Run(ctx)
+	// Episodes TMDB has no picture for: a frame of their video, from
+	// Overfin's plugin.
+	go (&catalog.EpisodeFrames{Store: db, Jellyfin: sh.jf, Images: sh.images, Logger: logger, Every: time.Hour,
+		Admin: sh.service.Admin,
+		Service: func(ctx context.Context) (jellyfin.Auth, error) {
+			a, _, err := sh.service.Auth(ctx)
+			return a, err
+		}}).Run(ctx)
 	go (&personal.Importer{Jellyfin: sh.jf, Store: db, Logger: logger, Every: 10 * time.Minute}).Run(ctx)
 	go sh.notices.Run(ctx)
 

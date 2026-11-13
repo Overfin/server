@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/problem"
@@ -237,4 +238,68 @@ func (l Library) PrefetchArtwork(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	_, _ = w.Write(data)
+}
+
+// frameImage starts the image ID of an episode's frame of its video
+// (catalog.EpisodeFrames), for episodes TMDB has no picture for.
+const frameImage = "epframe_"
+
+// frame serves an episode's frame, to profiles that may see the episode,
+// at the width asked as a still would be.
+func (l Library) frame(w http.ResponseWriter, r *http.Request, p *store.Profile, id string) {
+	ctx := r.Context()
+	if len(id) != 32 {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	data, key, ok, err := l.Provisioner.Store.Frame(ctx, id)
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	if !ok {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	infos, err := l.Provisioner.Store.TitleInfos(ctx, []string{key}, time.Now().Format(time.DateOnly), "")
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	t := infos[key]
+	if t == nil {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	visible, err := l.visibleTitles(ctx, p, []*store.TitleInfo{t})
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	if !slices.Contains(visible, true) {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	q := r.URL.Query()
+	width, ok := images.NamedWidth("still", cmp.Or(q.Get("size"), "medium"))
+	if asked := q.Get("width"); asked != "" {
+		n, err := strconv.Atoi(asked)
+		width, ok = images.Width("still", n)
+		ok = ok && err == nil && q.Get("size") == ""
+	}
+	if !ok {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	out, err := l.Images.Resized(ctx, frameImage+id, data, "image/jpeg", width)
+	if err != nil {
+		l.Logger.Error("an episode frame failed", "err", err)
+		problem.Send(w, problem.Internal, "")
+		return
+	}
+	// A frame never changes: a new one has a new ID.
+	w.Header().Set("Cache-Control", "private, max-age=604800, immutable")
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Content-Length", strconv.Itoa(len(out)))
+	_, _ = w.Write(out)
 }

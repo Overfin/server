@@ -36,3 +36,19 @@ func (c *Client) SubtitleStretch(ctx context.Context, admin Auth, item, source s
 	q.Set("to", strconv.FormatFloat(to, 'f', -1, 64))
 	return c.readSmall(ctx, streamClient, admin, "/Overfin/Subtitles/"+item+"/"+source+"/"+strconv.Itoa(index), q, max)
 }
+
+// MaxFrame is the most a frame from Overfin's plugin may weigh.
+const MaxFrame = 10 << 20
+
+// Frame fetches one frame of an item's video at a moment (seconds) from
+// Overfin's plugin: a JPEG at most 1920 pixels wide, HDR mapped to standard
+// range. Its main version: the one whose ID is the item's.
+func (c *Client) Frame(ctx context.Context, admin Auth, item string, at float64) ([]byte, error) {
+	id, err := NormalizeID(item)
+	if err != nil {
+		return nil, err
+	}
+	q := url.Values{}
+	q.Set("at", strconv.FormatFloat(at, 'f', 3, 64))
+	return c.readSmall(ctx, streamClient, admin, "/Overfin/Frame/"+id+"/"+id, q, MaxFrame)
+}

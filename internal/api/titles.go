@@ -140,9 +140,12 @@ func summaryOf(t *store.TitleInfo) library.TitleSummary {
 		return nil
 	}
 	im := library.Images{Logo: ref("logo", t.Logo, nil)}
-	if t.Ref.Kind == "episode" {
-		// An episode's picture is its still.
+	if t.Ref.Kind == "episode" || t.ItemKind == "episode" {
+		// An episode's picture is its still, else a frame of its video.
 		im.Primary = ref("still", t.Still, &wideAspect)
+		if im.Primary == nil && t.Frame != "" {
+			im.Primary = &library.ImageRef{URL: "/api/v1/images/" + frameImage + t.Frame, AspectRatio: &wideAspect}
+		}
 		im.Thumb = im.Primary
 	} else {
 		im.Primary = ref("poster", t.Poster, &posterAspect)
