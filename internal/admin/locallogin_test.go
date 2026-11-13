@@ -93,12 +93,12 @@ func TestLocalLogin(t *testing.T) {
 func TestLocalLoginTries(t *testing.T) {
 	h := localPanel(t)
 	for i := 0; i < localPerAddress; i++ {
-		localSignInTry(h, "10.0.0.7:1", "operator", "nope-nope-2026!", "")
+		localSignInTry(h, "10.20.30.7:1", "operator", "nope-nope-2026!", "")
 	}
-	if rec := localSignInTry(h, "10.0.0.7:1", "operator", "Panel-pass-2026!", ""); rec.Code != http.StatusTooManyRequests {
+	if rec := localSignInTry(h, "10.20.30.7:1", "operator", "Panel-pass-2026!", ""); rec.Code != http.StatusTooManyRequests {
 		t.Errorf("after %d wrong tries: %d", localPerAddress, rec.Code)
 	}
-	if rec := localSignInTry(h, "10.0.0.8:1", "operator", "Panel-pass-2026!", ""); rec.Code != http.StatusSeeOther {
+	if rec := localSignInTry(h, "10.20.30.8:1", "operator", "Panel-pass-2026!", ""); rec.Code != http.StatusSeeOther {
 		t.Errorf("another address: %d", rec.Code)
 	}
 }
