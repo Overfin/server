@@ -225,14 +225,14 @@ func (p *Pipeline) sized(ctx context.Context, original []byte, contentType strin
 	}
 	defer func() { <-slots }()
 	// An original is Overfin's own encoding, checked when it arrived.
-	img, err := decodeChecked(original)
+	outs, w, err := transform(original, []int{width}, contentType)
 	if err != nil {
 		return nil, err
 	}
-	if img.Bounds().Dx() <= width {
+	if w <= width {
 		return original, nil
 	}
-	return encode(Shrink(img, width), contentType)
+	return outs[0], nil
 }
 
 // contentTypeOf is what an image of type typ is encoded as: logos keep
@@ -263,17 +263,18 @@ func (p *Pipeline) fetchOriginal(ctx context.Context, ref TMDBRef, slots chan st
 		return nil, ctx.Err()
 	}
 	defer func() { <-slots }()
-	img, err := decodeChecked(raw)
+	largest := ladder[len(ladder)-1]
+	outs, _, err := transform(raw, []int{largest}, contentTypeOf(ref.Type))
 	if errors.Is(err, ErrUnsafe) {
 		if raw, err = p.download(ctx, ref, originals[ref.Type].fallback); err != nil {
 			return nil, err
 		}
-		img, err = decodeChecked(raw)
+		outs, _, err = transform(raw, []int{largest}, contentTypeOf(ref.Type))
 	}
 	if err != nil {
 		return nil, err
 	}
-	return encode(Shrink(img, ladder[len(ladder)-1]), contentTypeOf(ref.Type))
+	return outs[0], nil
 }
 
 // download fetches a TMDB image at one of TMDB's sizes, as it is: at most

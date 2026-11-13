@@ -15,11 +15,17 @@ import (
 	"os"
 
 	"github.com/overfin/server/internal/backend"
+	"github.com/overfin/server/internal/images"
 	overfin "github.com/overfin/server/overfin"
 	web "github.com/overfin/web"
 )
 
 func main() {
+	// An image worker: this same program, started by the backend to decode
+	// images apart from it (internal/images).
+	if images.RunWorker() {
+		return
+	}
 	if code, ran := backend.Init(); ran {
 		os.Exit(code)
 	}

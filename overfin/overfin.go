@@ -334,6 +334,15 @@ func run(logger *slog.Logger) error {
 			<-jellyfinDone
 		}()
 		go lb.Run(linkCtx)
+		// Images from outside (TMDB, Jellyfin, uploads) are decoded in
+		// worker processes of the backend's own, with memory and time
+		// limits: a picture made to harm takes a worker down, not Overfin.
+		pool, err := images.Workers(images.DecodeSlots, logger)
+		if err != nil {
+			return err
+		}
+		images.SetTransformer(pool.Transform)
+		defer pool.Close()
 	} else {
 		// The link: the backend connects out to this gateway and answers its
 		// requests (internal/link). It shares the HTTPS listener below, told
