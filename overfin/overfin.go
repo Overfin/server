@@ -37,6 +37,7 @@ import (
 	"github.com/overfin/server/internal/introskipper"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/keys"
+	"github.com/overfin/server/internal/link"
 	"github.com/overfin/server/internal/notices"
 	"github.com/overfin/server/internal/oidc"
 	"github.com/overfin/server/internal/personal"
@@ -71,6 +72,21 @@ func Run(site fs.FS) {
 		logger.Error("fatal", "err", err)
 		os.Exit(1)
 	}
+}
+
+// pairingCode is the code the operator gave the gateway to pair with its
+// backend: OVERFIN_PAIRING, or the file OVERFIN_PAIRING_FILE names (the
+// one-machine compose file's shared volume, written by the backend).
+func pairingCode() string {
+	if c := strings.TrimSpace(os.Getenv("OVERFIN_PAIRING")); c != "" {
+		return c
+	}
+	if f := os.Getenv("OVERFIN_PAIRING_FILE"); f != "" {
+		if b, err := os.ReadFile(f); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+	return ""
 }
 
 // firstKey generates the secret key when none was given and none was
@@ -218,7 +234,23 @@ func run(logger *slog.Logger) error {
 		IdleTimeout:       2 * time.Minute,
 		// No WriteTimeout: video streams can legitimately run for hours.
 	}
-	errc := make(chan error, 3)
+	errc := make(chan error, 4)
+	// The link: the backend connects out to this gateway and answers its
+	// requests (internal/link). It shares the HTTPS listener below, told
+	// apart by its ALPN name, and/or takes a listener of its own
+	// (OVERFIN_LINK_LISTEN), for a gateway whose HTTPS a proxy handles.
+	gwLink, err := link.NewGateway(filepath.Join(filepath.Dir(cfg.Storage.Path), "link"), Version, pairingCode, logger)
+	if err != nil {
+		return err
+	}
+	linkCtx, stopLink := context.WithCancel(context.Background())
+	defer stopLink()
+	if a := os.Getenv("OVERFIN_LINK_LISTEN"); a != "" {
+		go func() {
+			logger.Info("listening for the backend", "addr", a)
+			errc <- gwLink.Listen(linkCtx, a)
+		}()
+	}
 	// HTTPS by Overfin itself: the site on its own listener, with a
 	// certificate from Let's Encrypt; the main one answers Let's Encrypt's
 	// checks and sends everyone else to HTTPS.
@@ -232,6 +264,7 @@ func run(logger *slog.Logger) error {
 		// Failed handshakes, Let's Encrypt's refusals among them, in the
 		// log like everything else.
 		tlsSrv.ErrorLog = slog.NewLogLogger(logger.Handler(), slog.LevelWarn)
+		gwLink.Share(tlsSrv)
 		srv.Handler = certs.HTTPHandler(nil)
 		go func() {
 			logger.Info("listening, HTTPS", "addr", h.Listen, "domain", h.Domain)
@@ -263,6 +296,8 @@ func run(logger *slog.Logger) error {
 		if adminSrv != nil {
 			_ = adminSrv.Shutdown(shutdownCtx)
 		}
+		stopLink()
+		gwLink.Close()
 		if tlsSrv != nil {
 			_ = tlsSrv.Shutdown(shutdownCtx)
 		}

@@ -36,10 +36,11 @@ LABEL org.opencontainers.image.source="https://github.com/Overfin/server" \
       org.opencontainers.image.description="Overfin's backend, with Jellyfin (github.com/jellyfin/jellyfin) and Overfin's plugin for it (github.com/Overfin/jellyfin-plugin)"
 COPY --from=build /overfin-backend /overfin-backend
 COPY --from=plugin /out /usr/lib/overfin/jellyfin-plugin
-# Jellyfin's data and cache: folders of the user the container runs as
-# (65532, not root), volumes of their own.
-RUN mkdir -p /config /cache && chown 65532:65532 /config /cache
+# Overfin's data (its link to the gateway for now), and Jellyfin's data and
+# cache: folders of the user the container runs as (65532, not root),
+# volumes of their own.
+RUN mkdir -p /data /config /cache && chown 65532:65532 /data /config /cache
 USER 65532:65532
-VOLUME /config /cache
+VOLUME /data /config /cache
 # Nothing to publish yet: Jellyfin listens inside the container only.
 ENTRYPOINT ["/overfin-backend"]
