@@ -8,6 +8,7 @@ package tracks
 
 import (
 	"cmp"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -72,6 +73,12 @@ func Audio(s jellyfin.MediaStream) Track {
 // it's the file's default.
 func track(s jellyfin.MediaStream) Track {
 	language := lang.Tag(s.Language)
+	// A track Jellyfin found no language for may carry it as its title: a
+	// separate subtitle file named "Film.es-MX.srt" comes with no language
+	// and the title "es-MX". Only a title that's a code and nothing else.
+	if language == "" && codeTitle.MatchString(strings.TrimSpace(s.Title)) {
+		language = lang.Tag(s.Title)
+	}
 	if r := region(language, s.Title); r != "" {
 		language = r
 	}
@@ -95,6 +102,9 @@ var markers = []struct {
 
 // region is a language's variant as the title says it ("VFQ" → fr-CA);
 // "" when it says none, or the language already has one.
+// codeTitle is a title that's a language code alone: "es-MX", "fra", "pt_BR".
+var codeTitle = regexp.MustCompile(`^[A-Za-z]{2,3}(?:[-_](?:[A-Za-z]{2}|[0-9]{3}))?$`)
+
 func region(language, title string) string {
 	if language == "" || strings.Contains(language, "-") {
 		return ""

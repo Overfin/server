@@ -144,3 +144,23 @@ func TestPick(t *testing.T) {
 		t.Error("find")
 	}
 }
+
+// Inception's separate "….es-MX.srt": Jellyfin gives it no language, and
+// "es-MX" as its title. A title that's more than a code says nothing.
+func TestLanguageFromTitle(t *testing.T) {
+	_, subs, _ := Read([]jellyfin.MediaStream{
+		{Index: 0, Type: "Subtitle", Title: "es-MX", IsTextSubtitleStream: true},
+		{Index: 5, Type: "Subtitle", Language: "eng", Title: "ENG Full", IsTextSubtitleStream: true},
+		{Index: 9, Type: "Subtitle", Title: "FR Full", IsTextSubtitleStream: true},
+	})
+	langs := map[int]string{}
+	for _, s := range subs {
+		langs[s.Index] = s.Language
+	}
+	if langs[0] != "es-MX" || langs[5] != "en" || langs[9] != "" {
+		t.Errorf("languages %v", langs)
+	}
+	if got := Audio(jellyfin.MediaStream{Index: 1, Type: "Audio", Title: "fra"}).Language; got != "fr" {
+		t.Errorf("audio titled fra: %q", got)
+	}
+}
