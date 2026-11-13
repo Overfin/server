@@ -105,6 +105,33 @@ func pairBackend(dir, address, serverName string) error {
 	return nil
 }
 
+// autoPair pairs the backend with the gateway beside it, on one machine
+// (the one-machine compose file): OVERFIN_GATEWAY_ADDRESS names the gateway,
+// OVERFIN_PAIRING_FILE a file on a volume only the two share. Unpaired and
+// with no code waiting, the backend makes one and writes it there; the
+// gateway reads it; once they're paired, the file goes.
+func autoPair(lb *link.Backend, logger *slog.Logger) error {
+	addr, file := os.Getenv("OVERFIN_GATEWAY_ADDRESS"), os.Getenv("OVERFIN_PAIRING_FILE")
+	if addr == "" || file == "" {
+		return nil
+	}
+	lb.OnPaired = func() {
+		if err := os.Remove(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			logger.Warn("link: the shared pairing code couldn't be deleted", "err", err)
+		}
+	}
+	paired, pending, err := lb.State()
+	if err != nil || paired || pending {
+		return err
+	}
+	code, err := lb.Pair(addr, os.Getenv("OVERFIN_GATEWAY_SERVER_NAME"))
+	if err != nil {
+		return err
+	}
+	logger.Info("link: pairing with the gateway beside it, through the shared volume", "address", addr)
+	return os.WriteFile(file, []byte(code+"\n"), 0o600)
+}
+
 // pairingCode is the code the operator gave the gateway to pair with its
 // backend: OVERFIN_PAIRING, or the file OVERFIN_PAIRING_FILE names (the
 // one-machine compose file's shared volume, written by the backend).
@@ -312,6 +339,9 @@ func run(logger *slog.Logger) error {
 		// runs beside it, with Overfin's plugin, on 127.0.0.1 only.
 		lb, err := link.NewBackend(linkDir, Version, siteHandler, logger)
 		if err != nil {
+			return err
+		}
+		if err := autoPair(lb, logger); err != nil {
 			return err
 		}
 		version, err := jf.InstallPlugin()
@@ -804,6 +834,10 @@ func run(logger *slog.Logger) error {
 				p.People, p.Mail = gw, gw
 			}
 			panel.set(p.Handler())
+			// Made by the wizard meanwhile, perhaps: asked again.
+			if _, _, havePanelLogin, err = db.PanelAccount(ctx); err != nil {
+				return err
+			}
 			if !havePanelLogin {
 				logger.Warn("the control panel has no login yet: make one with overfin-backend -set-panel-password (docker exec -it <backend> /overfin-backend -set-panel-password)")
 			}

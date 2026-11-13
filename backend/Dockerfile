@@ -39,7 +39,7 @@ COPY --from=plugin /out /usr/lib/overfin/jellyfin-plugin
 # Overfin's data and its secret key (apart, so a copy of the data never
 # carries its key), and Jellyfin's data and cache: folders of the user the
 # container runs as (65532, not root), volumes of their own.
-RUN mkdir -p /data /secrets /config /cache && chown 65532:65532 /data /secrets /config /cache
+RUN mkdir -p /data /secrets /config /cache /pairing && chown 65532:65532 /data /secrets /config /cache /pairing
 USER 65532:65532
 VOLUME /data /secrets /config /cache
 # 8081: the control panel and the setup wizard, for private addresses only.

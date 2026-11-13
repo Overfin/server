@@ -1,28 +1,36 @@
 // Command overfin-gateway is Overfin's gateway, the entrypoint of the
 // overfin-gateway image: the only part the internet reaches. Its backend
 // connects out to it (internal/link); the gateway passes visitors'
-// requests to it over that link.
+// requests to it over that link, the routes the API specification lists
+// and the site's pages only (internal/gateway). It holds no data and no
+// secret of Overfin's.
 //
-// For now (step 3 of the gateway/backend split) it passes every request
-// on, with the visitor's address; the route allowlist, HTTPS, limits, the
-// cache and its pages come in step 4.
+// Settings, from the environment (all optional but the pairing, once):
 //
-// Settings, from the environment:
-//
-//	OVERFIN_GATEWAY_DATA   its folder (key, pairing): /data by default
-//	OVERFIN_GATEWAY_LISTEN the site's address: :8080 by default
-//	OVERFIN_LINK_LISTEN    where the backend connects: :8443 by default
-//	OVERFIN_PAIRING        the code the backend made, to pair once
-//	OVERFIN_PAIRING_FILE   or a file holding it (one machine, shared volume)
+//	OVERFIN_DOMAIN               the site's domain: HTTPS with Let's Encrypt
+//	                             (on :8443, the link shares it; :8080 then
+//	                             answers Let's Encrypt and sends visitors to
+//	                             HTTPS). Without it, plain http on :8080.
+//	OVERFIN_EMAIL                for Let's Encrypt (optional)
+//	OVERFIN_LINK_LISTEN          a listener of the link's own (default :8444
+//	                             without a domain; none with one)
+//	OVERFIN_PAIRING              the code the backend made, to pair once
+//	OVERFIN_PAIRING_FILE         or a file holding it (one machine)
+//	OVERFIN_PROXY_PROTOCOL_FROM  TCP proxies in front that send the PROXY
+//	                             protocol (addresses or ranges)
+//	OVERFIN_TRUSTED_PROXIES      HTTP proxies in front whose X-Forwarded-For
+//	                             names the visitor
+//	OVERFIN_GATEWAY_DATA         its folder: /data by default
 package main
 
 import (
 	"cmp"
 	"context"
+	"crypto/tls"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
-	"net/http/httputil"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -30,9 +38,15 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/crypto/acme/autocert"
+
+	"github.com/overfin/server/internal/gateway"
 	"github.com/overfin/server/internal/link"
-	overfin "github.com/overfin/server/overfin"
 )
+
+// Version is the gateway's version, set at build time: the same as its
+// backend's, or the link refuses it.
+var Version = "dev"
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -44,53 +58,96 @@ func main() {
 
 func run(logger *slog.Logger) error {
 	dir := cmp.Or(os.Getenv("OVERFIN_GATEWAY_DATA"), "/data")
-	g, err := link.NewGateway(filepath.Join(dir, "link"), overfin.Version, pairingCode, logger)
+	proxyFrom, err := gateway.ParsePrefixes(os.Getenv("OVERFIN_PROXY_PROTOCOL_FROM"))
+	if err != nil {
+		return errors.New("OVERFIN_PROXY_PROTOCOL_FROM: " + err.Error())
+	}
+	if gateway.HTTPProxies, err = gateway.ParsePrefixes(os.Getenv("OVERFIN_TRUSTED_PROXIES")); err != nil {
+		return errors.New("OVERFIN_TRUSTED_PROXIES: " + err.Error())
+	}
+	g, err := link.NewGateway(filepath.Join(dir, "link"), Version, pairingCode, logger)
 	if err != nil {
 		return err
 	}
+	logger.Info("Overfin's gateway starting", "version", Version)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
-	errc := make(chan error, 2)
-	linkAddr := cmp.Or(os.Getenv("OVERFIN_LINK_LISTEN"), ":8443")
-	go func() {
-		logger.Info("listening for the backend", "addr", linkAddr)
-		errc <- g.Listen(ctx, linkAddr)
-	}()
-
-	proxy := &httputil.ReverseProxy{
-		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.Out.URL.Scheme, pr.Out.URL.Host = "http", "backend"
-			// Only the gateway says who the visitor is.
-			pr.Out.Header.Del("X-Forwarded-For")
-			pr.Out.Header.Del("Forwarded")
-			pr.Out.Header.Set(link.ClientAddr, pr.In.RemoteAddr)
-		},
-		Transport:     g,
-		FlushInterval: -1, // streams pass as they come
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			if errors.Is(err, link.ErrNoBackend) {
-				http.Error(w, "The server can't be reached right now. Try again in a moment.", http.StatusServiceUnavailable)
-				return
-			}
-			http.Error(w, "The server didn't answer.", http.StatusBadGateway)
-		},
+	errc := make(chan error, 4)
+	site := gateway.Handler(g, Version, logger)
+	listen := func(addr string) (net.Listener, error) {
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			return nil, err
+		}
+		if len(proxyFrom) > 0 {
+			return &gateway.ProxyListener{Listener: ln, From: proxyFrom}, nil
+		}
+		return ln, nil
 	}
-	addr := cmp.Or(os.Getenv("OVERFIN_GATEWAY_LISTEN"), ":8080")
-	srv := &http.Server{Addr: addr, Handler: proxy, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+
+	domain := strings.TrimSpace(os.Getenv("OVERFIN_DOMAIN"))
+	var servers []*http.Server
+	plain := &http.Server{Handler: site, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	linkAddr := os.Getenv("OVERFIN_LINK_LISTEN")
+	if domain != "" {
+		certs := &autocert.Manager{Prompt: autocert.AcceptTOS, HostPolicy: autocert.HostWhitelist(domain),
+			Cache: autocert.DirCache(filepath.Join(dir, "certificates")), Email: os.Getenv("OVERFIN_EMAIL")}
+		secure := &http.Server{Handler: hsts(site), TLSConfig: certs.TLSConfig(),
+			ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute,
+			ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelDebug)}
+		secure.TLSConfig.MinVersion = tls.VersionTLS12
+		g.Share(secure) // the backend's connection on the same port, by ALPN
+		ln, err := listen(":8443")
+		if err != nil {
+			return err
+		}
+		go func() {
+			logger.Info("listening, HTTPS", "addr", ":8443", "domain", domain)
+			errc <- secure.ServeTLS(ln, "", "")
+		}()
+		servers = append(servers, secure)
+		// :8080: Let's Encrypt's checks, and visitors sent to HTTPS.
+		plain.Handler = certs.HTTPHandler(nil)
+	} else {
+		linkAddr = cmp.Or(linkAddr, ":8444")
+	}
+	ln, err := listen(":8080")
+	if err != nil {
+		return err
+	}
 	go func() {
-		logger.Info("listening", "addr", addr)
-		errc <- srv.ListenAndServe()
+		logger.Info("listening", "addr", ":8080", "https", domain != "")
+		errc <- plain.Serve(ln)
 	}()
+	servers = append(servers, plain)
+	if linkAddr != "" {
+		go func() {
+			logger.Info("listening for the backend", "addr", linkAddr)
+			errc <- g.Listen(ctx, linkAddr)
+		}()
+	}
+
 	select {
 	case err := <-errc:
 		return err
 	case <-ctx.Done():
 	}
+	logger.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	g.Close()
-	_ = srv.Shutdown(shutdownCtx)
+	for _, s := range servers {
+		_ = s.Shutdown(shutdownCtx)
+	}
 	return nil
+}
+
+// hsts tells browsers to come back over HTTPS only.
+func hsts(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Strict-Transport-Security", "max-age=63072000")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // pairingCode is the code the operator gave the gateway: OVERFIN_PAIRING,

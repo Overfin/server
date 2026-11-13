@@ -24,6 +24,10 @@ import (
 // gateway, keeps the connection open (connecting again whenever it ends),
 // and answers the gateway's requests with handler.
 type Backend struct {
+	// OnPaired, when set, runs once a pairing succeeds (the one-machine
+	// setup deletes the code it shared).
+	OnPaired func()
+
 	dir     string
 	version string
 	handler http.Handler
@@ -96,6 +100,13 @@ func (b *Backend) Pair(address, serverName string) (string, error) {
 	}
 	p.Address, p.ServerName, p.Code = address, serverName, code
 	return code, b.save(p)
+}
+
+// State says whether the backend is paired with a gateway, and whether a
+// pairing code waits to be used.
+func (b *Backend) State() (paired, pending bool, err error) {
+	p, err := b.load()
+	return p.Gateway != "", p.Code != "", err
 }
 
 // errRefused is the gateway's refusal: no point trying again soon.
@@ -222,6 +233,9 @@ func (b *Backend) connect(ctx context.Context, p pairing) error {
 			return err
 		}
 		b.logger.Info("link: paired with the gateway", "address", p.Address, "key", Fingerprint(gw))
+		if b.OnPaired != nil {
+			b.OnPaired()
+		}
 	}
 	c.SetDeadline(time.Time{})
 	b.logger.Info("link: connected to the gateway", "address", p.Address)

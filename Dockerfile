@@ -1,6 +1,7 @@
-# Build a static binary, then ship it alone in a minimal image.
+# Overfin's gateway: the only part the internet reaches (see
+# cmd/overfin-gateway). A static binary alone in a minimal image.
 #
-# docker build -t overfin .
+# docker build -t overfin-gateway .
 # The build runs on the builder's own platform and cross-compiles for the
 # target, so images for other architectures build without emulation.
 FROM --platform=$BUILDPLATFORM golang:1.26.11@sha256:957952ae74dc010608717144399a59a2c6e82ea03d63be1c7ff6577c5a135f93 AS build
@@ -10,22 +11,24 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X github.com/overfin/server/overfin.Version=${VERSION}" -o /overfin ./cmd/overfin
-# The final image has no shell, so the data and secrets folders are
-# prepared here.
-RUN mkdir /data /secrets
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o /overfin-gateway ./cmd/overfin-gateway
+# The final image has no shell, so its folders are prepared here: its data,
+# and the one-machine setup's pairing volume.
+RUN mkdir /data /pairing
 
 # distroless/static: no shell, no package manager, runs as a non-root user.
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
-COPY --from=build /overfin /overfin
-# 65532 is the distroless "nonroot" user the container runs as.
+LABEL org.opencontainers.image.source="https://github.com/Overfin/server" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.description="Overfin's gateway: the only part of Overfin the internet reaches"
+COPY --from=build /overfin-gateway /overfin-gateway
+# 65532 is the distroless "nonroot" user the container runs as. Its folder:
+# its own key, its backend's, its certificates (nothing personal).
 COPY --from=build --chown=65532:65532 /data /data
-# The secret key Overfin generates on its first start, when none is given:
-# a volume of its own, so a copy of the data never carries its key.
-COPY --from=build --chown=65532:65532 /secrets /secrets
-VOLUME /data /secrets
-# 8080: the site (plain http, or Let's Encrypt's checks with https.domain);
-# 8443: the site over HTTPS, with https.domain; 8081: the control panel's own
-# listener, with an identity provider.
-EXPOSE 8080 8443 8081
-ENTRYPOINT ["/overfin"]
+COPY --from=build --chown=65532:65532 /pairing /pairing
+VOLUME /data
+# 8080: the site (plain http, or Let's Encrypt's checks and a redirect with
+# OVERFIN_DOMAIN); 8443: the site over HTTPS, the backend's link sharing
+# it; 8444: the link's own listener, without a domain.
+EXPOSE 8080 8443 8444
+ENTRYPOINT ["/overfin-gateway"]
