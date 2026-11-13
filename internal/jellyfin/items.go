@@ -30,10 +30,7 @@ type RawItem struct {
 	Overview                string
 	OriginalTitle           string
 	Taglines                []string
-	Genres                  []string
 	Tags                    []string
-	Studios                 []NameID
-	People                  []Person
 	Chapters                []Chapter
 	ProviderIds             map[string]string
 	ImageTags               map[string]string
@@ -75,14 +72,6 @@ type NameID struct {
 	Id   string
 }
 
-type Person struct {
-	Name            string
-	Id              string
-	Role            string
-	Type            string
-	PrimaryImageTag string
-}
-
 // Chapter deliberately has no ImagePath: Jellyfin sends the file's location
 // on the server there.
 type Chapter struct {
@@ -112,7 +101,9 @@ type ItemPage struct {
 // Fields asked for in lists, and additionally on detail pages.
 const (
 	summaryFields = "PrimaryImageAspectRatio,ChildCount,OriginalTitle,Tags"
-	detailFields  = summaryFields + ",Overview,Genres,Studios,People,Chapters,ProviderIds,Taglines,Width,Height"
+	// Never Genres, Studios or People: Overfin's are TMDB's, and its
+	// Jellyfin keeps none (removed 2026-11-13).
+	detailFields = summaryFields + ",Overview,Chapters,ProviderIds,Taglines,Width,Height"
 )
 
 // ItemQuery is a validated item listing. Values are already checked by the
@@ -121,10 +112,7 @@ type ItemQuery struct {
 	ParentID   string
 	Recursive  bool
 	Types      []string // Jellyfin type names
-	Genres     []string
-	PersonID   string
-	Studios    []string
-	MinDate    string // YYYY-MM-DD
+	MinDate    string   // YYYY-MM-DD
 	MaxDate    string
 	IsPlayed   *bool
 	IsFavorite *bool
@@ -164,15 +152,6 @@ func (q ItemQuery) values(userID string) url.Values {
 	}
 	if len(q.Types) > 0 {
 		v.Set("includeItemTypes", strings.Join(q.Types, ","))
-	}
-	if len(q.Genres) > 0 {
-		v.Set("genres", strings.Join(q.Genres, "|"))
-	}
-	if q.PersonID != "" {
-		v.Set("personIds", q.PersonID)
-	}
-	if len(q.Studios) > 0 {
-		v.Set("studios", strings.Join(q.Studios, "|"))
 	}
 	if q.MinDate != "" {
 		v.Set("minPremiereDate", q.MinDate+"T00:00:00Z")

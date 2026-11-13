@@ -474,8 +474,8 @@ var sorts = map[string]string{
 	"lastPlayed":      "DatePlayed",
 }
 
-// nameValue accepts genre and studio names: printable, short, and without the
-// "|" Jellyfin uses to separate them.
+// nameValue accepts genre names: printable, short, and without "|" or
+// control characters.
 var nameValue = regexp.MustCompile(`^[^|\x00-\x1f\x7f]{1,128}$`)
 
 func parseItemQuery(q url.Values) (jellyfin.ItemQuery, bool) {
@@ -503,20 +503,10 @@ func parseItemQuery(q url.Values) (jellyfin.ItemQuery, bool) {
 	if g := q["genre"]; len(g) > 10 {
 		return jq, false
 	}
+	// Genres are TMDB's, filtered by the index (indexQuery): only checked
+	// here.
 	for _, g := range q["genre"] {
 		if !nameValue.MatchString(g) {
-			return jq, false
-		}
-		jq.Genres = append(jq.Genres, g)
-	}
-	if s := q.Get("studio"); s != "" {
-		if !nameValue.MatchString(s) {
-			return jq, false
-		}
-		jq.Studios = []string{s}
-	}
-	if p := q.Get("person"); p != "" {
-		if jq.PersonID, ok = library.Unwrap(library.PersonPrefix, p); !ok {
 			return jq, false
 		}
 	}

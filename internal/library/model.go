@@ -27,7 +27,6 @@ const (
 const (
 	ItemPrefix    = "item_"
 	LibraryPrefix = "lib_"
-	PersonPrefix  = "pers_"
 )
 
 var hex32 = regexp.MustCompile(`^[0-9a-f]{32}$`)

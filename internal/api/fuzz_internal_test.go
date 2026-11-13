@@ -88,10 +88,10 @@ func FuzzItemQuery(f *testing.F) {
 		if !ok {
 			return
 		}
-		if len(jq.Genres) > 10 || len(jq.Types) > 10*4 || (jq.ParentID != "" && len(jq.ParentID) != 32) {
+		if len(q["genre"]) > 10 || len(jq.Types) > 10*4 || (jq.ParentID != "" && len(jq.ParentID) != 32) {
 			t.Fatalf("%q -> %+v", raw, jq)
 		}
-		for _, g := range append(jq.Genres, jq.Studios...) {
+		for _, g := range q["genre"] {
 			if g == "" || utf8.RuneCountInString(g) > 128 || strings.ContainsAny(g, "|\x00\r\n") {
 				t.Fatalf("%q -> name %q", raw, g)
 			}
@@ -106,7 +106,7 @@ func FuzzItemQuery(f *testing.F) {
 			return
 		}
 		if (lq.YearFrom != 0 && (lq.YearFrom < 1800 || lq.YearFrom > 9999)) || (lq.YearTo != 0 && (lq.YearTo < 1800 || lq.YearTo > 9999)) ||
-			len(lq.Genres) != len(jq.Genres) {
+			len(lq.Genres) != len(q["genre"]) {
 			t.Fatalf("%q -> %+v", raw, lq)
 		}
 	})
