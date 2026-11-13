@@ -25,6 +25,7 @@ var (
 type Operation struct {
 	Method, Path string
 	Planned      bool // listed, not served yet (x-status: planned)
+	Public       bool // needs no session (security: [])
 }
 
 // Operations are the routes the specification lists.
@@ -47,6 +48,8 @@ func Operations() []Operation {
 			ops = append(ops, Operation{Method: strings.ToUpper(specMethod.FindStringSubmatch(line)[1]), Path: "/api/v1" + path})
 		case len(ops) > 0 && strings.TrimSpace(line) == "x-status: planned":
 			ops[len(ops)-1].Planned = true
+		case len(ops) > 0 && line == "      security: []":
+			ops[len(ops)-1].Public = true
 		}
 	}
 	return ops

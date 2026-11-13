@@ -344,6 +344,7 @@ func run(logger *slog.Logger) error {
 		if err := autoPair(lb, logger); err != nil {
 			return err
 		}
+		edgeSigner = lb.SignEdge
 		version, err := jf.InstallPlugin()
 		if err != nil {
 			return err

@@ -79,6 +79,14 @@ func NewGateway(dir, version string, code func() string, logger *slog.Logger) (*
 	return g, nil
 }
 
+// BackendKey is the paired backend's key, nil while unpaired: the gateway
+// checks the backend's edge signatures with it (package edge).
+func (g *Gateway) BackendKey() ed25519.PublicKey {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.backend
+}
+
 // Public is the gateway's own key.
 func (g *Gateway) Public() ed25519.PublicKey { return g.id.Public() }
 

@@ -19,3 +19,15 @@ func TestOperations(t *testing.T) {
 		}
 	}
 }
+
+func TestPublic(t *testing.T) {
+	public := map[string]bool{}
+	for _, op := range Operations() {
+		public[op.Method+" "+op.Path] = op.Public
+	}
+	for k, want := range map[string]bool{"GET /api/v1/health": true, "POST /api/v1/signin": true, "GET /api/v1/me": false, "POST /api/v1/playback": false} {
+		if public[k] != want {
+			t.Errorf("%s: public %v", k, public[k])
+		}
+	}
+}

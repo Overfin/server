@@ -309,6 +309,11 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	if err != nil {
 		return nil, err
 	}
+	if edgeSigner != nil {
+		// The backend: signed-in visitors get the gateway's first check.
+		inner := identityMiddleware
+		identityMiddleware = func(h http.Handler) http.Handler { return inner(issueEdge(h)) }
+	}
 	h, err := server.New(logger, identityMiddleware, siteHandler, plugins...)
 	if err != nil {
 		return nil, err

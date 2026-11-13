@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/binary"
 	"io"
 	"log/slog"
@@ -13,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/overfin/server/internal/edge"
 	"github.com/overfin/server/internal/link"
 )
 
@@ -21,7 +24,10 @@ type fakeBackend struct {
 	connected bool
 	mismatch  string
 	seen      []string
+	pub       ed25519.PublicKey
 }
+
+func (f *fakeBackend) BackendKey() ed25519.PublicKey { return f.pub }
 
 func (f *fakeBackend) RoundTrip(r *http.Request) (*http.Response, error) {
 	if !f.connected {
@@ -50,8 +56,10 @@ func do(h http.Handler, method, path, from string, header ...string) *httptest.R
 }
 
 func TestAllowlist(t *testing.T) {
-	b := &fakeBackend{connected: true}
+	pub, key, _ := ed25519.GenerateKey(rand.Reader)
+	b := &fakeBackend{connected: true, pub: pub}
 	h := Handler(b, "1.0", quiet)
+	signedIn := "overfin-login=L; overfin-edge=" + edge.Sign(key, "L")
 	for _, c := range []struct {
 		method, path string
 		passes       bool
@@ -77,7 +85,7 @@ func TestAllowlist(t *testing.T) {
 		{"PUT", "/", false},
 	} {
 		b.seen = nil
-		rec := do(h, c.method, c.path, "203.0.113.5:4000")
+		rec := do(h, c.method, c.path, "203.0.113.5:4000", "Cookie", signedIn)
 		if passed := len(b.seen) == 1; passed != c.passes {
 			t.Errorf("%s %s: passed %v (%d)", c.method, c.path, passed, rec.Code)
 		}
@@ -114,7 +122,7 @@ func TestDownPages(t *testing.T) {
 		t.Errorf("unreachable, French: %d %s", rec.Code, rec.Body.String())
 	}
 	b.mismatch = "0.9"
-	rec = do(h, "GET", "/api/v1/titles", "203.0.113.5:4000")
+	rec = do(h, "GET", "/api/v1/health", "203.0.113.5:4000")
 	if rec.Code != 503 || !strings.Contains(rec.Body.String(), "server-updating") {
 		t.Errorf("updating, API: %d %s", rec.Code, rec.Body.String())
 	}
@@ -207,5 +215,47 @@ func TestLimits(t *testing.T) {
 	}
 	if l.allow(a) {
 		t.Error("past a second's refill, allowed")
+	}
+}
+
+// Routes that need a session: refused at the gateway without the
+// backend's signature of the login cookie; public routes don't need it.
+func TestSessionFilter(t *testing.T) {
+	pub, key, _ := ed25519.GenerateKey(rand.Reader)
+	_, otherKey, _ := ed25519.GenerateKey(rand.Reader)
+	b := &fakeBackend{connected: true, pub: pub}
+	h := Handler(b, "1.0", quiet)
+	for name, c := range map[string]struct {
+		cookie string
+		passes bool
+	}{
+		"nothing":               {"", false},
+		"a login alone":         {"overfin-login=L", false},
+		"a forged signature":    {"overfin-login=L; overfin-edge=" + edge.Sign(otherKey, "L"), false},
+		"another login's":       {"overfin-login=M; overfin-edge=" + edge.Sign(key, "L"), false},
+		"the real pair":         {"overfin-login=L; overfin-edge=" + edge.Sign(key, "L"), true},
+		"the real pair, secure": {"__Host-overfin-login=L; __Host-overfin-edge=" + edge.Sign(key, "L"), true},
+	} {
+		b.seen = nil
+		rec := do(h, "GET", "/api/v1/me", "203.0.113.5:1", "Cookie", c.cookie)
+		if passed := len(b.seen) == 1; passed != c.passes {
+			t.Errorf("%s: passed %v (%d)", name, passed, rec.Code)
+		}
+		if !c.passes && rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s: %d", name, rec.Code)
+		}
+	}
+	// Public routes and pages pass without one.
+	for _, path := range []string{"/api/v1/health", "/signin", "/"} {
+		b.seen = nil
+		do(h, "GET", path, "203.0.113.5:1")
+		if len(b.seen) != 1 {
+			t.Errorf("%s without a session: refused", path)
+		}
+	}
+	b.seen = nil
+	do(h, "POST", "/api/v1/federation/titles", "203.0.113.5:1")
+	if len(b.seen) != 1 {
+		t.Error("a paired server's request (signed, no session) refused")
 	}
 }

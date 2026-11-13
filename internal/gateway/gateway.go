@@ -8,6 +8,7 @@
 package gateway
 
 import (
+	"crypto/ed25519"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/overfin/server/api"
+	"github.com/overfin/server/internal/edge"
 	"github.com/overfin/server/internal/link"
 )
 
@@ -22,6 +24,8 @@ import (
 type Backend interface {
 	http.RoundTripper
 	Status() link.Status
+	// BackendKey checks the backend's edge signatures (package edge).
+	BackendKey() ed25519.PublicKey
 }
 
 // Handler passes visitors' requests to the backend: the API's routes the
@@ -63,7 +67,11 @@ func Handler(b Backend, version string, logger *slog.Logger) http.Handler {
 		if op.Planned {
 			continue
 		}
-		mux.Handle(op.Method+" "+op.Path, proxy)
+		var h http.Handler = proxy
+		if !op.Public {
+			h = requireSession(b, proxy)
+		}
+		mux.Handle(op.Method+" "+op.Path, h)
 	}
 	// The site's pages: GET (and HEAD) only, never the control panel, the
 	// apps' API, nor an API route the specification doesn't list.
@@ -76,6 +84,24 @@ func Handler(b Backend, version string, logger *slog.Logger) http.Handler {
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { notFound(w) })
 	return withClientAddr(Limit(mux))
+}
+
+// requireSession lets through only a request that carries a login cookie
+// and the backend's signature of it (package edge): without one, the
+// visitor isn't signed in, and the backend isn't asked. A filter only: the
+// backend checks the session itself.
+func requireSession(b Backend, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		login, token, ok := edge.Pair(r)
+		key := b.BackendKey()
+		if !ok || key == nil || !edge.Verify(key, login, token) {
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"type":"not-authenticated","title":"Not logged in","status":401}` + "\n"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // refused are the paths the gateway never passes on as pages.

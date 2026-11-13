@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/overfin/server/internal/edge"
 	"io"
 	"log/slog"
 	"net"
@@ -54,6 +55,10 @@ func NewBackend(dir, version string, handler http.Handler, logger *slog.Logger) 
 
 // Public is the backend's own key.
 func (b *Backend) Public() ed25519.PublicKey { return b.id.Public() }
+
+// SignEdge signs a visitor's login cookie for the gateway's first check
+// (package edge), with the backend's link key, which the gateway pinned.
+func (b *Backend) SignEdge(login string) string { return edge.Sign(b.id.key, login) }
 
 func (b *Backend) pairingPath() string { return filepath.Join(b.dir, "pairing.json") }
 
