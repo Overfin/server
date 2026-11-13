@@ -420,12 +420,12 @@ func run(logger *slog.Logger) error {
 		}()
 
 	}
-	// The control panel, on its own listener (rules 82 and 83).
+	// The control panel, on its own listener (rules 82 and 129).
 	var adminSrv *http.Server
 	if a := cfg.Admin; a.Enabled() {
 		var h http.Handler = panel
 		if backendMode {
-			h = admin.PrivateOnly(panel) // never the internet (rule 83's check)
+			h = admin.PrivateOnly(panel) // never the internet (rule 129)
 		}
 		adminSrv = &http.Server{Addr: a.Listen, Handler: h,
 			ReadHeaderTimeout: 10 * time.Second, WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute}

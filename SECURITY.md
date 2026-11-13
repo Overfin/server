@@ -26,9 +26,10 @@ network security expert. So the rules come in two kinds:
     or none, for a LAN or a test. Off until configured.
   - **Cookies** (rule 26) follow HTTPS: `__Host-` and `Secure` with it,
     without both without it, since browsers refuse them there.
-  - **The control panel** (rules 82, 83): on the site for admins, by
-    default with Overfin's own sign-in; `admin.private` keeps it to private
-    addresses, `admin.listen` moves it to a private listener of its own.
+  - **Where the gateway runs** (rule 119): beside the backend, by
+    default, or on another machine; its settings are environment
+    variables: its domain, the proxies in front of it (rule 126), its
+    cache's size (rule 128).
   - **Access to Jellyfin itself** (rule 112): closed; an admin can open it
     from the control panel, and close it again.
   - **What the operator may share or allow**, each off or at its strictest
@@ -141,7 +142,7 @@ anyone. Paired servers are not trusted at all (rule 94).
     else are ignored.
     - Exception, stricter only: `X-Forwarded-Proto` is believed from
       anyone, as it can only make that client's cookies stricter.
-    - Exception, stricter only: the panel's private-address check (rule 83)
+    - Exception, stricter only: the backend listener's private-address check (rule 129)
       reads forwarded headers from anyone, and refuses if any of them names
       a public address.
 23. With an identity provider or forward auth, only identities in the
@@ -233,7 +234,7 @@ anyone. Paired servers are not trusted at all (rule 94).
     profile.
 39. An image is served only once the active profile may see what it
     belongs to (a library item, a catalog title, a collection), from
-    Overfin's cache too. A person's photo goes to any profile: people carry
+    Overfin's caches too, the gateway's included (rule 128). A person's photo goes to any profile: people carry
     no rating, library or tag.
 40. A title's age is Overfin's own, from TMDB's ratings, never the media
     server's: its rating in the operator's ratings country when it has one,
@@ -449,30 +450,18 @@ anyone. Paired servers are not trusted at all (rule 94).
     minutes without use (what the panel asks by itself in the background
     doesn't count) and after 12 hours at most. Admins can't take the admin
     mark from themselves, remove themselves or disable their own account.
-82. With Overfin's own sign-in, the panel is at `/admin/` on the site, for
-    people marked admin who confirmed a fresh login in the last five
-    minutes, from the account's owner profile only (without a session, only
-    when no PIN protects that profile). Their panel session ends as soon as
-    they sign out of the site, stop being admins or switch profiles.
-    `admin.private` keeps it to private addresses (rule 83's check);
-    `admin.listen` puts it, with its sign-in and the setup page, on a
-    listener of its own instead, and the site has none.
-83. With an identity provider, the panel is on a listener of its own, off
-    by default, which answers only private addresses (loopback, link-local,
-    private ranges, 100.64.0.0/10, unique-local IPv6) and refuses whatever
-    a proxy relays for a public address. Admins sign in there with a new
-    login every time, in the admin group; the provider is asked again every
-    5 minutes whether they still are: out of the group or refused, the
-    session ends at once; the provider out of reach, it lasts 30 minutes.
-    - Exception: a provider that gives no refresh token can't be asked
-      again; the session lasts until it ends (rule 81).
-84. Until Overfin is set up, it serves only the setup page: on the panel's
-    listener, and with Overfin's own sign-in on the site too. Nothing is
-    saved without the one-time code from Overfin's log; after 10 wrong
-    codes it stops answering until a restart; each step is checked before
-    it's saved; Jellyfin's key is kept sealed.
-85. Other apps (Stewarr, Overtide…) read under `/apps/`, where the panel
-    is and behind the same address limits, each with a key an admin made
+82. The panel is the backend's, on its own listener (rule 129), never on
+    the site, never through the gateway, whatever sign-in the site uses.
+    It signs in with its own login (rule 130), not the site's accounts.
+83. (Folded into rules 129 and 130: the panel's own listener and login
+    replace its place on the site and its identity provider's group.)
+84. Until Overfin is set up, it serves only the setup page, on the
+    backend's own listener (rule 129), which answers private addresses
+    only: no one-time code is needed. Each step is checked before it's
+    saved; the control panel's login is made there (rule 130); Jellyfin's
+    key is kept sealed.
+85. Other apps (Overtide…) read under `/apps/`, on the backend's own
+    listener with the panel (rule 129), never through the gateway, each with a key an admin made
     for what they ticked (values, watch statistics, in the libraries or
     not, what came and went, wishes to fetch, categories, episode orders),
     shown once, kept as a hash, revocable. What they read:
@@ -567,7 +556,8 @@ anyone. Paired servers are not trusted at all (rule 94).
 97. A browser never connects to another server: a paired server's title
     plays through the viewer's own server, which asks the other with a
     ticket the browser never sees. The other server sees that server only,
-    never the viewer's address, browser or identity.
+    never the viewer's address, browser or identity; and of that server,
+    only its gateway (rule 132).
 98. A server never acts for another beyond what was shared, and never
     hands one paired server's data to another.
 99. A pairing over plain `http://` is signed but not encrypted: titles and
@@ -653,6 +643,8 @@ anyone. Paired servers are not trusted at all (rule 94).
      - Exception: when closing fails, access stays open. Overfin says so in
        its log at every start and in the panel; it closes again only from
        the panel.
+     - While access is open, Jellyfin's own pages are on the backend's
+       listener, for private addresses only (rule 131).
 113. The settings Overfin needs on its Jellyfin are Overfin's: it sets
      them, and sets them back at every start.
 114. Overfin installs Intro Skipper only when the operator asks (setup
@@ -661,9 +653,10 @@ anyone. Paired servers are not trusted at all (rule 94).
      Overfin knows (Jellyfin checks the download against it), installs it
      and restarts Jellyfin, whose plugin updates stay off. Removing it takes
      the plugin and its repository off. Apart from Intro Skipper, Overfin
-     installs nothing on its Jellyfin today. A companion plugin of
-     Overfin's own, only where Jellyfin's API falls short, is planned
-     (ROADMAP.md).
+     installs nothing else on its Jellyfin but Overfin's own plugin, which
+     the backend's image carries at the version made with that release
+     and puts in place at every start: only where Jellyfin's API falls
+     short.
 
 ### Outside data
 
@@ -695,6 +688,93 @@ anyone. Paired servers are not trusted at all (rule 94).
 118. New codes are limited per address; wrong codes per person and per
      address.
 
+### Gateway and backend
+
+119. Overfin runs as a gateway, the only part the internet reaches, and a
+     backend, with Overfin's data and secrets, its control panel and its
+     own Jellyfin. The backend opens no port to the gateway: it connects
+     out to it, and that connection, the link, is the only way in from
+     outside.
+120. The backend and the gateway pair once, with a one-time code the
+     backend makes (160 random bits): each side proves it knows the code,
+     bound to both sides' keys, then keeps the other's key and accepts no
+     other. A code pairs once. On one machine, the code goes through a
+     volume only the two containers share, and is deleted once used.
+121. The link is TLS 1.3, each side's Ed25519 key checked against the
+     pinned one on every connection, with no certificate authority; over
+     it, the gateway asks and the backend answers. It shares the gateway's
+     HTTPS port, told apart by its ALPN name: visitors' connections never
+     reach the link's code.
+122. The gateway refuses a backend of another release before anything
+     else, pairing included, and shows visitors the server is being
+     updated.
+123. The backend checks every request's session itself, as if the gateway
+     weren't there: the gateway never tells the backend who a request
+     comes from, the session cookie does. A compromised gateway can only
+     pass along what real visitors send, while it lasts.
+124. The gateway passes on only the API routes the API specification of
+     the same release lists, with their methods, and GET for the site's
+     pages; everything else gets a 404 at the gateway: the control panel,
+     the setup page, the apps' API, the link's own routes, any route the
+     specification doesn't list.
+125. On the API routes that need a session, the gateway lets through only
+     a login cookie with the backend's signature of it (made with the
+     backend's link key, which the gateway pinned), and refuses a login the
+     backend tells it, over the link, has ended. A visitor without the
+     signature gets it from the backend on their next page.
+126. The gateway passes each request's address in a header only it sets:
+     from the connection, the PROXY protocol of a TCP proxy named in its
+     settings, or the `X-Forwarded-For` of an HTTP proxy named there; it
+     drops whatever a visitor sends in its own name. The backend trusts
+     that header only on the link.
+     - Exception: a compromised gateway could lie about addresses; the
+       backend's per-account and per-email limits don't depend on them.
+127. Nothing personal at the gateway. Its disk holds its key, its
+     backend's, its certificates and a cache of images, never anyone's
+     account, progress, favorites, wishes, email or pages. Its logs hold
+     its own state only: no visitor's address, email or title. What it
+     keeps about sessions (its cache's answers, ended logins, per-address
+     limits) is in memory only. It holds no secret of Overfin's: no
+     secret key, Jellyfin key, identity provider's secret or federation
+     key; its settings are environment variables.
+128. The gateway caches only images, which change URL when they change.
+     Before serving one from its cache, it asks the backend whether this
+     session may have it (the backend runs its usual check, rule 39, and
+     answers without the bytes), and keeps the answer five minutes, in
+     memory.
+     - Exception: new titles' artwork is fetched ahead into the cache
+       without a session; it's served only after the same check.
+129. The backend's own listener serves the control panel, the setup page,
+     the apps' API, and Jellyfin's own pages while access to it is open;
+     it answers only private addresses (loopback, link-local, private
+     ranges, 100.64.0.0/10, unique-local IPv6) and refuses anything else,
+     saying so in its log. Plain http: the LAN or a VPN carries it.
+130. The control panel has its own login: one account, a username and a
+     password made on the setup page (or with `-set-panel-password`),
+     hashed at the backend, nothing in common with the site's accounts.
+     Five wrong tries from an address, or twenty from everyone, within 15
+     minutes, and it waits.
+131. Jellyfin is reachable only from inside the backend: the backend has
+     it listen on 127.0.0.1 only, set before each start, and runs it.
+     Looking inside goes through the backend's listener (rule 129) while
+     access is open (rule 112), never a published port.
+132. The backend's connections to paired servers (federation's calls,
+     their streams) go through its gateway, which connects only to an
+     address the backend asked for in the last minute and passes the
+     bytes; TLS runs end to end between the backend and the other server.
+     Paired servers see the gateway only. The federation key stays at the
+     backend.
+133. With an identity provider, its callback reaches the gateway and
+     passes over the link; the code exchange, the client secret and the
+     provider's tokens stay at the backend.
+134. Images from outside (TMDB, Jellyfin, uploads) are decoded on the
+     backend in worker processes, each capped at 1 GiB of memory and 30
+     seconds an image; a worker that fails is replaced and its image
+     refused.
+135. When the backend is out of reach or being updated, the gateway says
+     so to visitors in its own page, in their language, without naming
+     what's behind it.
+
 ## Deployment
 
 Advice for operators. These aren't promises of Overfin's: they're what
@@ -707,15 +787,18 @@ keeps the promises above meaningful.
 - Keep Jellyfin and Seerr off the internet: ideally, reachable only from
   Overfin's host and the operator's admin network. Overfin's rules protect
   only what goes through Overfin.
-- With an identity provider, publish the panel's listener only on the LAN
-  or a VPN, never through the reverse proxy that serves the site.
-- When access to Jellyfin is open (rule 112), reach its dashboard
-  privately (LAN, VPN, SSH tunnel).
-- HTTPS is recommended for any server reachable from the internet:
-  Overfin gets its own certificate with `https.domain` (or
-  `OVERFIN_DOMAIN`), or a reverse proxy provides it. Behind a proxy, set
-  `site.url` to the site's `https://` address, and
-  `identity.trusted_proxies`, so the client address is the proxy's to give.
+- Publish the backend's listener (the panel, the setup page, Jellyfin's
+  pages while access is open) on the LAN or a VPN only, never through the
+  reverse proxy that serves the site: it refuses public addresses anyway
+  (rule 129).
+- HTTPS is recommended for any server reachable from the internet: the
+  gateway gets its own certificate with `OVERFIN_DOMAIN` (Let's Encrypt's
+  check runs over port 443, so a proxy routing TLS by name in front of it
+  works), or a reverse proxy provides it. Behind a proxy, set `site.url`
+  (the backend's) to the site's `https://` address, and tell the gateway
+  the proxy's address (`OVERFIN_TRUSTED_PROXIES`, or
+  `OVERFIN_PROXY_PROTOCOL_FROM` for the PROXY protocol), so the visitor's
+  address is the proxy's to give.
   Without HTTPS, everything, passwords and emailed links included, travels
   in clear: keep that to a LAN or a test.
 - With Overfin's own sign-in or login, the simplest is for the proxy to
@@ -725,8 +808,7 @@ keeps the promises above meaningful.
   the proxy's authentication.
 - On every route, the proxy must remove client-sent forwarded headers, and
   with forward auth identity headers too, before adding its own (rules 20
-  and 22), and must add the client's address to `X-Forwarded-For` (rule
-  83's check relies on it).
+  and 22), and must add the client's address to `X-Forwarded-For`.
 
 ## Reporting a vulnerability
 
