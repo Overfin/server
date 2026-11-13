@@ -480,23 +480,32 @@ test('real PGS tracks', { skip: !process.env.PGS_SAMPLES }, async () => {
   }
 });
 
-test('subtitles: forced ones whenever none are chosen; a choice shows at once, never restarts, kept for the title', async () => {
+test('subtitles: forced ones whenever none are chosen; a choice shows at once, in stretches, never restarts, kept for the title', async () => {
   const calls = fakeServer({
     'POST /api/v1/playback': (_, body) => [201, {
       id: 'pb1', title: { id: body.titleId, name: 'Film' }, method: 'direct', stream: { url: '/x', protocol: 'file' },
       positionMs: 0, audioTrack: 'a1',
       subtitleTracks: [{ id: 's3', label: 'English', url: '/vtt3' }, { id: 's4', label: 'Français', pictures: true, url: '/pgs4' }],
       forcedTracks: [{ id: 's5', label: 'Français', forced: true, url: '/vtt5' }], forcedTrack: 's5',
+      subtitleStretchSeconds: 120,
     }],
     'PUT /api/v1/playback/pb1/tracks': () => [204, null],
     'POST /api/v1/playback/pb1/stop': () => [204, null],
   });
   const api = globalThis.fetch;
-  globalThis.fetch = async (url, init) => url === '/pgs4'
-    ? { ok: true, status: 200, arrayBuffer: async () => new Uint8Array(displaySet(0, RUNS)).buffer }
-    : api(url, init);
+  const stretches = [];
+  globalThis.fetch = async (url, init) => {
+    if (/^\/(vtt|pgs)\d\//.test(url)) stretches.push(url);
+    if (url.startsWith('/pgs4/')) return { ok: true, status: 200, arrayBuffer: async () => new Uint8Array(displaySet(0, RUNS)).buffer };
+    // Each stretch starts a little early: the line at 1 s comes twice.
+    if (url.startsWith('/vtt')) return { ok: true, status: 200, text: async () => 'WEBVTT\n\n00:01.000 --> 00:02.000\nHi\n' };
+    return api(url, init);
+  };
+  globalThis.VTTCue = class { constructor(start, end, text) { Object.assign(this, { start, end, text }); } };
   const realDocument = globalThis.document;
-  globalThis.document = { createElement: () => ({ dataset: {}, track: { mode: 'disabled' } }) };
+  globalThis.document = {
+    createElement: () => ({ dataset: {}, track: { mode: 'disabled', cues: [], addCue(c) { this.cues.push(c); } }, dispatchEvent() {} }),
+  };
   globalThis.requestAnimationFrame = () => 0;
   globalThis.cancelAnimationFrame = () => {};
   const video = fakeVideo();
@@ -506,21 +515,26 @@ test('subtitles: forced ones whenever none are chosen; a choice shows at once, n
   const mode = () => Object.fromEntries(els.map((el) => [el.dataset.overfin, el.track.mode]));
   const canvas = { style: {}, width: 0, height: 0, getContext: () => ({ clearRect() {}, putImageData() {} }) };
   const player = await new Overfin().play(video, 'title_movie_tmdb_1', { startMs: 0, capabilities: {}, pictureCanvas: canvas });
-  // Text tracks join the video once they're loaded: playback never waits
-  // for them.
-  assert.deepEqual(mode(), {});
-  await settle();
-  // None chosen: the forced ones, in the audio's language.
+  // Text tracks are there at once, their cues coming in stretches: none
+  // chosen, the forced ones, in the audio's language, the stretch playing
+  // and the next, each line once.
   assert.equal(player.subtitleTrack, null);
   assert.equal(player.forcedTrack, 's5');
   assert.deepEqual(mode(), { s3: 'disabled', s5: 'showing' });
+  await settle();
+  assert.deepEqual(stretches, ['/vtt5/0', '/vtt5/1']);
+  assert.equal(els.find((el) => el.dataset.overfin === 's5').track.cues.length, 1);
   await player.setSubtitleTrack('s3');
+  await settle();
   assert.deepEqual(mode(), { s3: 'showing', s5: 'disabled' });
   assert.equal(player.forcedTrack, null);
-  // Pictures: drawn on the canvas, the text tracks off.
+  assert.deepEqual(stretches.slice(2), ['/vtt3/0', '/vtt3/1']);
+  // Pictures: drawn on the canvas, the text tracks off; overlapping
+  // stretches merge.
   await player.setSubtitleTrack('s4');
   await settle();
   assert.deepEqual(mode(), { s3: 'disabled', s5: 'disabled' });
+  assert.deepEqual(stretches.slice(4), ['/pgs4/0', '/pgs4/1']);
   assert.equal(player.pictures.cues.length, 1);
   await player.setSubtitleTrack(null);
   assert.deepEqual(mode(), { s3: 'disabled', s5: 'showing' });

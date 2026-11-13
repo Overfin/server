@@ -471,7 +471,8 @@ export class Player {
         if (this.pausedAt && Date.now() - this.pausedAt > LONG_PAUSE) this.check();
         this.pausedAt = 0;
       },
-      timeupdate: () => this.settled(),
+      timeupdate: () => { this.settled(); this.fillSubtitles(); },
+      seeking: () => this.fillSubtitles(),
       seeked: () => { this.settled(); this.report(); },
       ended: () => { this.report({ ended: true }); this.close(); this.options.onEnded?.(); },
     };
@@ -535,21 +536,16 @@ export class Player {
     const remote = here ? new URL(pb.stream.url, here).origin !== new URL(here).origin : false;
     if (remote) video.crossOrigin = 'anonymous';
     else video.removeAttribute('crossorigin');
-    // A track shown holds the video back until it's loaded, and a title's
-    // first subtitles can take long (the server reads the whole file for
-    // them): each track joins the video once it's here, playback never
-    // waits for it.
+    // Text tracks come in stretches (fillSubtitles): each is a track of
+    // the video without a file of its own, its cues added as they come.
+    this.texts = new Map();
     for (const t of [...(pb.subtitleTracks || []), ...(pb.forcedTracks || [])]) {
-      if (!t.url || t.pictures) continue;
-      const add = () => {
-        if (this.playback !== pb || this.video !== video) return; // another title by now
-        const el = document.createElement('track');
-        Object.assign(el, { kind: 'subtitles', src: t.url, srclang: t.language || 'und', label: t.label });
-        el.dataset.overfin = t.id;
-        video.append(el);
-        this.showSubtitles();
-      };
-      fetch(t.url, { credentials: 'same-origin' }).then(add, add);
+      if (!t.url || t.pictures || this.texts.has(t.id)) continue;
+      const el = document.createElement('track');
+      Object.assign(el, { kind: 'subtitles', srclang: t.language || 'und', label: t.label });
+      el.dataset.overfin = t.id;
+      video.append(el);
+      this.texts.set(t.id, { el, url: t.url, parts: new Map(), seen: new Set() });
     }
     const startAt = (pb.positionMs || 0) / 1000;
     const Hls = this.options.Hls || globalThis.Hls;
@@ -624,14 +620,48 @@ export class Player {
     }
     if (track?.pictures && track.url) {
       if (!this.pictures) this.pictures = new PictureSubtitles(this.video, this.pictureCanvas());
-      if (this.pictures.url !== track.url) {
-        this.pictures.url = track.url;
-        this.pictures.load(track.url).catch(() => {}); // subtitles are a bonus: playback goes on
-      }
+      if (this.pictures.url !== track.url) this.pictures.show(track.url);
     } else if (this.pictures) {
-      this.pictures.url = '';
       this.pictures.hide();
     }
+    this.fillSubtitles();
+  }
+
+  // fillSubtitles fetches the stretches of the subtitles shown around where
+  // the video is: the one playing and the next, each once. Subtitles are a
+  // bonus: one that fails is tried again later, and playback goes on.
+  fillSubtitles() {
+    const pb = this.playback;
+    const len = pb?.subtitleStretchSeconds;
+    const id = this.subtitleTrack || this.forcedTrack;
+    if (!pb || !len || !id) return;
+    const at = Math.floor(this.positionMs / 1000 / len);
+    const text = this.texts?.get(id);
+    for (const part of [at, at + 1]) {
+      if (text) this.textPart(pb, text, part);
+      else if (this.pictures?.url) this.pictures.part(part);
+    }
+  }
+
+  // textPart adds one stretch of a text track's cues to its track, those it
+  // doesn't have yet: stretches overlap a little.
+  textPart(pb, text, part) {
+    if (!wanted(text.parts, part)) return;
+    text.parts.set(part, LOADING);
+    fetch(`${text.url}/${part}`, { credentials: 'same-origin' })
+      .then((res) => (res.ok ? res.text() : Promise.reject(new Error(`subtitles: HTTP ${res.status}`))))
+      .then((vtt) => {
+        if (this.playback !== pb) return;
+        for (const c of parseVTT(vtt)) {
+          const key = `${c.start}|${c.end}|${c.text}`;
+          if (text.seen.has(key)) continue;
+          text.seen.add(key);
+          text.el.track.addCue(new VTTCue(c.start, c.end, c.text));
+        }
+        text.parts.set(part, LOADED);
+        text.el.dispatchEvent(new Event('load')); // what a track's file does once it's here
+      })
+      .catch(() => text.parts.set(part, Date.now() + SUBTITLE_RETRY));
   }
 
   // pictureCanvas is where pictures are drawn: the one given in the
@@ -776,9 +806,11 @@ const PGS_MAX_SIDE = 4096;
  * Reads a PGS track (the bytes Overfin serves) into cues, in order: each
  * { startMs, endMs, width, height, forced, pictures: [{ x, y, width,
  * height, crop?, palette, data }] }, width and height being the screen's.
- * The last cue ends at Infinity. Throws on a malformed track.
+ * The last cue ends at Infinity. With clears, the moments the screen is
+ * cleared are cues too, with no picture (for stretches of a track, merged
+ * later). Throws on a malformed track.
  */
-export function decodePGS(bytes) {
+export function decodePGS(bytes, { clears = false } = {}) {
   const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   const u16 = (i) => (b[i] << 8) | b[i + 1];
   const bad = () => { throw new Error('not a well-formed PGS track'); };
@@ -863,7 +895,7 @@ export function decodePGS(bytes) {
           if (!obj?.data || !palette) continue;
           pictures.push({ x: ref.x, y: ref.y, width: obj.width, height: obj.height, crop: ref.crop, palette, data: obj.data });
         }
-        if (pictures.length) {
+        if (pictures.length || clears) {
           cues.push({ startMs: shown.ms, endMs: Infinity, width: shown.width, height: shown.height, forced: shown.forced, pictures });
         }
         shown = null;
@@ -925,25 +957,57 @@ export class PictureSubtitles {
     this.current = null;
     this.frame = 0;
     this.loads = 0;
+    this.url = '';
+    this.parts = new Map(); // stretch → LOADING, LOADED or when to try again
   }
 
-  /** Loads a track (its URL); resolves once its cues are read. */
-  async load(url) {
+  /**
+   * Shows a track from its URL, its stretches after it ("/0", "/1"…),
+   * fetched with part(); nothing on screen until they come.
+   */
+  show(url) {
     this.hide();
-    const run = ++this.loads;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`picture subtitles: HTTP ${res.status}`);
-    const cues = decodePGS(new Uint8Array(await res.arrayBuffer()));
-    if (run !== this.loads) return;
-    this.cues = cues;
+    this.url = url;
     this.tick();
   }
 
-  /** Stops drawing and clears the canvas; load() starts again. */
+  /**
+   * Fetches one stretch of the track shown, once, and adds its cues; one
+   * that fails is tried again later.
+   */
+  part(n) {
+    if (!this.url || !wanted(this.parts, n)) return;
+    this.parts.set(n, LOADING);
+    const run = this.loads;
+    fetch(`${this.url}/${n}`)
+      .then((res) => (res.ok ? res.arrayBuffer() : Promise.reject(new Error(`picture subtitles: HTTP ${res.status}`))))
+      .then((bytes) => {
+        if (run !== this.loads) return;
+        this.add(decodePGS(new Uint8Array(bytes), { clears: true }));
+        this.parts.set(n, LOADED);
+      })
+      .catch(() => { if (run === this.loads) this.parts.set(n, Date.now() + SUBTITLE_RETRY); });
+  }
+
+  // add merges a stretch's cues with those already here: one per start,
+  // each lasting until the next starts (a clear, between lines, is a cue
+  // with no picture), so a line whose clear came in the next stretch
+  // leaves the screen on time.
+  add(cues) {
+    const byStart = new Map(this.cues.map((c) => [c.startMs, c]));
+    for (const c of cues) if (!byStart.has(c.startMs)) byStart.set(c.startMs, c);
+    const all = [...byStart.values()].sort((a, b) => a.startMs - b.startMs);
+    for (let i = 0; i < all.length; i++) all[i].endMs = i + 1 < all.length ? all[i + 1].startMs : Infinity;
+    this.cues = all;
+  }
+
+  /** Stops drawing and clears the canvas; show() starts again. */
   hide() {
     this.loads++;
     cancelAnimationFrame(this.frame);
     this.frame = 0;
+    this.url = '';
+    this.parts = new Map();
     this.cues = [];
     this.draw(null);
   }
@@ -1006,6 +1070,37 @@ function concat(parts) {
 }
 
 // ---- Helpers ---------------------------------------------------------------
+
+// A stretch of subtitles is being fetched, or is here; else the map holds
+// when to try a failed one again.
+const LOADING = 'loading', LOADED = 'loaded';
+const SUBTITLE_RETRY = 10_000;
+
+// wanted says whether a stretch should be fetched now.
+function wanted(parts, n) {
+  const v = parts.get(n);
+  return v === undefined || (typeof v === 'number' && Date.now() >= v);
+}
+
+/**
+ * Reads WebVTT, as Overfin rebuilds it (timings and plain text), into
+ * cues: { start, end, text }, in seconds.
+ */
+export function parseVTT(vtt) {
+  const cues = [];
+  for (const block of vtt.replace(/\r/g, '').split(/\n\n+/)) {
+    const lines = block.split('\n');
+    const i = lines.findIndex((l) => l.includes('-->'));
+    const m = i < 0 ? null : /^((?:\d+:)?\d{2}:\d{2}\.\d{3})\s+-->\s+((?:\d+:)?\d{2}:\d{2}\.\d{3})/.exec(lines[i]);
+    const text = m ? lines.slice(i + 1).join('\n') : '';
+    if (text) cues.push({ start: vttSeconds(m[1]), end: vttSeconds(m[2]), text });
+  }
+  return cues;
+}
+
+function vttSeconds(t) {
+  return t.split(':').reduce((s, part) => s * 60 + Number(part), 0);
+}
 
 const enc = encodeURIComponent;
 
