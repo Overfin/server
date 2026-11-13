@@ -62,7 +62,7 @@ func do(h http.Handler, method, path, from string, header ...string) *httptest.R
 func TestAllowlist(t *testing.T) {
 	pub, key, _ := ed25519.GenerateKey(rand.Reader)
 	b := &fakeBackend{connected: true, pub: pub}
-	h := Handler(b, "1.0", nil, quiet)
+	h := Handler(b, "1.0", nil, nil, quiet)
 	signedIn := "overfin-login=L; overfin-edge=" + edge.Sign(key, "L")
 	for _, c := range []struct {
 		method, path string
@@ -101,7 +101,7 @@ func TestAllowlist(t *testing.T) {
 
 func TestClientAddress(t *testing.T) {
 	b := &fakeBackend{connected: true}
-	h := Handler(b, "1.0", nil, quiet)
+	h := Handler(b, "1.0", nil, nil, quiet)
 
 	// A visitor naming someone else: ignored.
 	rec := do(h, "GET", "/", "203.0.113.5:4000", "X-Forwarded-For", "198.51.100.9", "X-Real-Ip", "198.51.100.9")
@@ -120,7 +120,7 @@ func TestClientAddress(t *testing.T) {
 
 func TestDownPages(t *testing.T) {
 	b := &fakeBackend{}
-	h := Handler(b, "1.0", nil, quiet)
+	h := Handler(b, "1.0", nil, nil, quiet)
 	rec := do(h, "GET", "/", "203.0.113.5:4000", "Accept-Language", "fr-CA,fr;q=0.9")
 	if rec.Code != 503 || !strings.Contains(rec.Body.String(), "Hors d’atteinte") || rec.Header().Get("Retry-After") == "" {
 		t.Errorf("unreachable, French: %d %s", rec.Code, rec.Body.String())
@@ -228,7 +228,7 @@ func TestSessionFilter(t *testing.T) {
 	pub, key, _ := ed25519.GenerateKey(rand.Reader)
 	_, otherKey, _ := ed25519.GenerateKey(rand.Reader)
 	b := &fakeBackend{connected: true, pub: pub}
-	h := Handler(b, "1.0", nil, quiet)
+	h := Handler(b, "1.0", nil, nil, quiet)
 	for name, c := range map[string]struct {
 		cookie string
 		passes bool
@@ -290,7 +290,7 @@ func TestRevocations(t *testing.T) {
 	for !rv.Revoked("ended") && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
-	h := Handler(b, "1.0", rv, quiet)
+	h := Handler(b, "1.0", rv, nil, quiet)
 	if rec := do(h, "GET", "/api/v1/me", "203.0.113.5:1", "Cookie", "overfin-login=ended; overfin-edge="+edge.Sign(key, "ended")); rec.Code != http.StatusUnauthorized {
 		t.Errorf("an ended login with its signature: %d", rec.Code)
 	}

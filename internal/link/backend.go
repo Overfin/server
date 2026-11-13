@@ -56,7 +56,7 @@ func NewBackend(dir, version string, handler http.Handler, logger *slog.Logger) 
 		return nil, err
 	}
 	b := &Backend{dir: dir, version: version, logger: logger, id: id}
-	b.handler = b.linkRoutes(withClientAddr(handler))
+	b.handler = b.linkRoutes(withClientAddr(checkOnly(handler)))
 	return b, nil
 }
 
@@ -300,4 +300,49 @@ func withClientAddr(next http.Handler) http.Handler {
 		r.Header.Del(ClientAddr)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// CheckOnly is the header with which the gateway asks whether a visitor may
+// have what they asked for, without the bytes (its cache has them): the
+// backend runs the request as usual, its access checks included, and
+// answers its status and headers only, 204 for 200. The gateway sets it
+// only on its own questions, never passes a visitor's.
+const CheckOnly = "Overfin-Check"
+
+// checkOnly answers a gateway's check without the body.
+func checkOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(CheckOnly) == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		r.Header.Del(CheckOnly)
+		next.ServeHTTP(&headersOnly{ResponseWriter: w}, r)
+	})
+}
+
+// headersOnly keeps a response's status and headers, drops its body, and
+// turns a 200 into a 204.
+type headersOnly struct {
+	http.ResponseWriter
+	wrote bool
+}
+
+func (h *headersOnly) WriteHeader(status int) {
+	if h.wrote {
+		return
+	}
+	h.wrote = true
+	h.Header().Del("Content-Length")
+	if status == http.StatusOK {
+		status = http.StatusNoContent
+	}
+	h.ResponseWriter.WriteHeader(status)
+}
+
+func (h *headersOnly) Write(b []byte) (int, error) {
+	if !h.wrote {
+		h.WriteHeader(http.StatusOK)
+	}
+	return len(b), nil
 }

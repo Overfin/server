@@ -31,7 +31,7 @@ type Backend interface {
 // Handler passes visitors' requests to the backend: the API's routes the
 // specification lists, and GET for the site's pages; every other request
 // gets a plain 404 here, without reaching the backend.
-func Handler(b Backend, version string, revoked *Revocations, logger *slog.Logger) http.Handler {
+func Handler(b Backend, version string, revoked *Revocations, cache *Cache, logger *slog.Logger) http.Handler {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Scheme, pr.Out.URL.Host = "http", "backend"
@@ -68,8 +68,11 @@ func Handler(b Backend, version string, revoked *Revocations, logger *slog.Logge
 			continue
 		}
 		var h http.Handler = proxy
+		if cache != nil && strings.HasPrefix(op.Path, "/api/v1/images/") {
+			h = cache.Wrap(proxy)
+		}
 		if !op.Public {
-			h = requireSession(b, revoked, proxy)
+			h = requireSession(b, revoked, h)
 		}
 		mux.Handle(op.Method+" "+op.Path, h)
 	}
@@ -83,7 +86,17 @@ func Handler(b Backend, version string, revoked *Revocations, logger *slog.Logge
 		proxy.ServeHTTP(w, r)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { notFound(w) })
-	return withClientAddr(Limit(mux))
+	return stripInternal(withClientAddr(Limit(mux)))
+}
+
+// stripInternal takes off what only the gateway itself may send the
+// backend: its cache's check (link.CheckOnly) and the visitor's address.
+func stripInternal(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Del(link.CheckOnly)
+		r.Header.Del(link.ClientAddr)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // requireSession lets through only a request that carries a login cookie

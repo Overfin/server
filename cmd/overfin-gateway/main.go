@@ -20,6 +20,7 @@
 //	                             protocol (addresses or ranges)
 //	OVERFIN_TRUSTED_PROXIES      HTTP proxies in front whose X-Forwarded-For
 //	                             names the visitor
+//	OVERFIN_CACHE_MAX            the image cache's size at most (10GB)
 //	OVERFIN_GATEWAY_DATA         its folder: /data by default
 package main
 
@@ -34,6 +35,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -75,7 +77,13 @@ func run(logger *slog.Logger) error {
 	errc := make(chan error, 4)
 	revoked := &gateway.Revocations{}
 	go revoked.Follow(ctx, g, logger)
-	site := gateway.Handler(g, Version, revoked, logger)
+	cacheMax, err := parseBytes(cmp.Or(os.Getenv("OVERFIN_CACHE_MAX"), "10GB"))
+	if err != nil {
+		return errors.New("OVERFIN_CACHE_MAX: " + err.Error())
+	}
+	cache := &gateway.Cache{Dir: filepath.Join(dir, "cache"), Limit: cacheMax, Margin: 0.10, Logger: logger}
+	cache.Load()
+	site := gateway.Handler(g, Version, revoked, cache, logger)
 	listen := func(addr string) (net.Listener, error) {
 		ln, err := net.Listen("tcp", addr)
 		if err != nil {
@@ -142,6 +150,23 @@ func run(logger *slog.Logger) error {
 		_ = s.Shutdown(shutdownCtx)
 	}
 	return nil
+}
+
+// parseBytes reads a size: a number of bytes, or with MB, GB or TB.
+func parseBytes(s string) (int64, error) {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	mult := int64(1)
+	for suffix, m := range map[string]int64{"KB": 1 << 10, "MB": 1 << 20, "GB": 1 << 30, "TB": 1 << 40} {
+		if strings.HasSuffix(s, suffix) {
+			s, mult = strings.TrimSpace(strings.TrimSuffix(s, suffix)), m
+			break
+		}
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n < 0 {
+		return 0, errors.New("a size like 10GB")
+	}
+	return n * mult, nil
 }
 
 // hsts tells browsers to come back over HTTPS only.
