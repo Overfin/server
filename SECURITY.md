@@ -299,8 +299,6 @@ anyone. Paired servers are not trusted at all (rule 94).
     stay in the server's log.
 54. Logs never contain tokens, cookies, passwords, PINs or query strings,
     and name users only by a keyed hash of their ID.
-    - Exception: the one-time setup code is printed in the log, on
-      purpose: it proves the operator can read it (rule 84).
 55. Only these routes need no identity, and they reveal no software
     version, no upstream server and nothing about anyone. A test fails on
     any other route that needs none.
