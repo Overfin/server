@@ -96,8 +96,6 @@ anyone. Paired servers are not trusted at all (rule 94).
 13. Answers from upstream have size and time limits.
     - Exception: media streams, Jellyfin's or a paired server's, must start
       within a minute, then have no limit, so a film is never cut off.
-    - Exception: Jellyfin's event socket has no overall limit; it's dropped
-      after 90 seconds of silence.
 14. HLS playlists are parsed, never searched and replaced. Only entries
     matching Jellyfin's known segment addresses are kept, and unknown tags
     are dropped. A paired server's playlists pass only when every address
@@ -425,6 +423,8 @@ anyone. Paired servers are not trusted at all (rule 94).
     - Exception: owners see the list of the libraries' tags, to hide some
       from a profile.
 78. File paths, server internals and permission flags are never served.
+    File paths never reach Overfin: its index gets a film's file and
+    folder names, and a series' folder name, from its plugin.
     - Exception, control panel only: Identification shows a film's or a
       series' folder and file names (never the whole path), to tell a title
       Jellyfin matched wrong; Libraries shows each library's folders, and
