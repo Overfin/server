@@ -576,6 +576,12 @@ func cleanPeerText(out *sessionJSON) bool {
 		return kept
 	}
 	out.AudioTracks, out.SubtitleTracks, out.ForcedTracks = clean(out.AudioTracks), clean(out.SubtitleTracks), clean(out.ForcedTracks)
+	// Its subtitles go in stretches of this server's length: both run the
+	// same version.
+	out.SubtitleStretchSeconds = 0
+	if len(out.SubtitleTracks)+len(out.ForcedTracks) > 0 {
+		out.SubtitleStretchSeconds = StretchSeconds
+	}
 	versions := out.Versions[:0]
 	for _, v := range out.Versions {
 		if v.Name = peerLabel(v.Name); v.Name != "" {

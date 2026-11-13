@@ -64,6 +64,7 @@ type fakeJellyfin struct {
 	calls     []string       // playstate and encoding calls, in order
 	lastToken string         // the token of the last library call
 	pgs       []byte         // the PGS track it extracts (subtitle 4)
+	stretches []string       // subtitle stretches asked of the plugin: "track from to token"
 	policy    map[string]any // the last policy set by the admin
 	// partnerSeesAll gives the second profile the same library as the
 	// first, instead of an empty one.
@@ -120,6 +121,23 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			id = partnerJF
 		}
 		json.NewEncoder(w).Encode(map[string]any{"AccessToken": partnerToken, "User": map[string]string{"Id": id}})
+		return
+	case strings.HasPrefix(r.URL.Path, "/Overfin/Subtitles/"+fmt.Sprintf("%032x", 1)+"/"+fmt.Sprintf("%032x", 1)+"/"):
+		track := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		// Overfin's plugin answers Overfin's own key alone.
+		if !strings.Contains(authz, `Token="admin"`) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		f.stretches = append(f.stretches, track+" "+r.URL.Query().Get("from")+" "+r.URL.Query().Get("to"))
+		switch track {
+		case "3":
+			fmt.Fprint(w, "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<b>Hi</b>\n")
+		case "4":
+			w.Write(f.pgs)
+		default:
+			http.NotFound(w, r)
+		}
 		return
 	case strings.Contains(authz, `Token="admin"`):
 		switch r.Method + " " + r.URL.Path {
@@ -258,10 +276,6 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/videos/"+fmt.Sprintf("%032x", 1)+"/hls1/main/0.mp4":
 		w.Header().Set("Content-Type", "video/mp4")
 		fmt.Fprint(w, "SEGMENT-ZERO")
-	case r.URL.Path == "/Videos/"+fmt.Sprintf("%032x", 1)+"/"+fmt.Sprintf("%032x", 1)+"/Subtitles/3/Stream.vtt":
-		fmt.Fprint(w, "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<b>Hi</b>\n")
-	case r.URL.Path == "/Videos/"+fmt.Sprintf("%032x", 1)+"/"+fmt.Sprintf("%032x", 1)+"/Subtitles/4/Stream.pgssub":
-		w.Write(f.pgs)
 	case r.URL.Path == "/MediaSegments/"+fmt.Sprintf("%032x", 1):
 		json.NewEncoder(w).Encode(map[string]any{"Items": []map[string]any{
 			{"Type": "Intro", "StartTicks": 50000000, "EndTicks": 900000000},
@@ -923,27 +937,41 @@ func TestStreamingThroughRewrittenPlaylists(t *testing.T) {
 		}
 	}
 
-	// Subtitles: text track 3, rebuilt as plain WebVTT.
-	code, vtt := getAs(t, srv, subject, s.SubtitleTracks[0].URL)
+	// Subtitles: text track 3, in stretches from Overfin's plugin, asked
+	// with Overfin's own key, each 10 s early; rebuilt as plain WebVTT.
+	code, vtt := getAs(t, srv, subject, s.SubtitleTracks[0].URL+"/0")
 	if code != 200 || vtt != "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n" {
 		t.Errorf("subtitles: %d %q", code, vtt)
 	}
-	// Track 4 is pictures (PGS): no WebVTT, but the track itself, checked
+	if code, _ := getAs(t, srv, subject, s.SubtitleTracks[0].URL+"/1"); code != 200 {
+		t.Errorf("subtitles, part 1: %d", code)
+	}
+	fake.mu.Lock()
+	if got := strings.Join(fake.stretches, ", "); got != "3 0 120, 3 110 240" {
+		t.Errorf("stretches asked: %s", got)
+	}
+	fake.mu.Unlock()
+	for _, part := range []string{"", "/-1", "/x", "/01", "/10000", "/1/2"} {
+		if code, _ := getAs(t, srv, subject, s.SubtitleTracks[0].URL+part); code != http.StatusNotFound {
+			t.Errorf("subtitles part %q: status %d, want 404", part, code)
+		}
+	}
+	// Track 4 is pictures (PGS): no WebVTT, but the stretch itself, checked
 	// whole; one that isn't well-formed is refused; text track 3 has no
 	// pictures.
-	if code, _ := getAs(t, srv, subject, base+"subtitles/s4"); code != http.StatusNotFound {
+	if code, _ := getAs(t, srv, subject, base+"subtitles/s4/0"); code != http.StatusNotFound {
 		t.Errorf("image subtitles as WebVTT: status %d", code)
 	}
 	fake.mu.Lock()
 	fake.pgs = pgsTrack()
 	fake.mu.Unlock()
-	if code, body := getAs(t, srv, subject, base+"pictures/s4"); code != 200 || body != string(fake.pgs) {
+	if code, body := getAs(t, srv, subject, base+"pictures/s4/3"); code != 200 || body != string(fake.pgs) {
 		t.Errorf("picture subtitles: %d, %d bytes", code, len(body))
 	}
 	fake.mu.Lock()
 	fake.pgs = append(pgsTrack(), "PX"...)
 	fake.mu.Unlock()
-	for _, p := range []string{base + "pictures/s4", base + "pictures/s3", base + "pictures/s9", base + "pictures/s4?x=1"} {
+	for _, p := range []string{base + "pictures/s4/0", base + "pictures/s3/0", base + "pictures/s9/0", base + "pictures/s4/0?x=1", base + "pictures/s4"} {
 		if code, _ := getAs(t, srv, subject, p); code != http.StatusNotFound {
 			t.Errorf("%s: status %d, want 404", p, code)
 		}

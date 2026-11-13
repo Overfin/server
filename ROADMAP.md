@@ -959,8 +959,9 @@ nothing beyond what that needs.
     their region, the same language from elsewhere when a file lacks it.
     What's chosen while watching is kept for the title (an episode's: its
     series), on any device, over the profile's preferences.
-  - Subtitles that are pictures (PGS): the track Jellyfin extracts as it
-    is (`.sup`), checked whole by Overfin (every segment well-formed, each
+  - Subtitles that are pictures (PGS): the track as the file has it
+    (`.sup`), in stretches Overfin's plugin copies, each checked whole by
+    Overfin (every segment well-formed, each
     picture's run-length data within its declared size, sizes capped) and
     refused otherwise (SECURITY.md rule 17), drawn by the player over the
     video; the decoder in the JavaScript SDK, native SDKs their own. About
@@ -1015,6 +1016,11 @@ nothing beyond what that needs.
 - **Casting** to Chromecast and similar devices, using stream tickets.
 - **Downloads** for offline viewing in apps.
 - **Jellyfin companion plugin**, only where the Jellyfin API falls short.
+  Started: it's required and shipped in the backend's image. First:
+  subtitles in stretches of two minutes, read from that point of the file
+  (text and PGS), so the first ones come in about a second instead of
+  after Jellyfin read the whole file. Next: episode frames, a change feed
+  for the index.
 - **Example clients**, beside overfin-web: small sites in common
   frameworks, showing how to build on the API and the SDK.
 - ~~**Custom categories**~~ Done, first step (0.6): the operator makes

@@ -25,18 +25,6 @@ var streamClient = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
-// subtitlesClient waits for subtitles Jellyfin extracts first: it reads the
-// whole file for them, minutes for a large one, and gives up after its
-// SubtitleExtractionTimeoutMinutes (30 by default).
-var subtitlesClient = &http.Client{
-	Transport: &http.Transport{
-		DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
-		ResponseHeaderTimeout: 31 * time.Minute,
-		IdleConnTimeout:       90 * time.Second,
-	},
-	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-}
-
 // Open starts fetching a stream: a media file, a playlist or a segment. path
 // and query come from Overfin's own stream state, never from the client;
 // rangeHeader is the client's Range header, already checked. The caller
@@ -74,13 +62,6 @@ func (c *Client) open(ctx context.Context, client *http.Client, a Auth, path str
 // refusing anything larger than max bytes.
 func (c *Client) ReadSmall(ctx context.Context, a Auth, path string, query url.Values, max int) ([]byte, error) {
 	return c.readSmall(ctx, streamClient, a, path, query, max)
-}
-
-// ReadSubtitles fetches a subtitle track whole, refusing anything larger
-// than max bytes. A track Jellyfin hasn't extracted yet is waited for: it
-// reads the whole file for it the first time.
-func (c *Client) ReadSubtitles(ctx context.Context, a Auth, path string, max int) ([]byte, error) {
-	return c.readSmall(ctx, subtitlesClient, a, path, nil, max)
 }
 
 func (c *Client) readSmall(ctx context.Context, client *http.Client, a Auth, path string, query url.Values, max int) ([]byte, error) {

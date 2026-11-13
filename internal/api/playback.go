@@ -454,11 +454,14 @@ type sessionJSON struct {
 	// ForcedTracks are subtitles for the lines in another language only;
 	// ForcedTrack, the one in the audio's language, shown whenever no
 	// other subtitles are.
-	ForcedTracks   []trackJSON    `json:"forcedTracks,omitempty"`
-	ForcedTrack    string         `json:"forcedTrack,omitempty"`
-	MaxBitrateKbps int            `json:"maxBitrateKbps,omitempty"`
-	Segments       []segmentJSON  `json:"segments,omitempty"`
-	Trickplay      *trickplayJSON `json:"trickplay,omitempty"`
+	ForcedTracks []trackJSON `json:"forcedTracks,omitempty"`
+	ForcedTrack  string      `json:"forcedTrack,omitempty"`
+	// SubtitleStretchSeconds is how long each part of a subtitle track
+	// is: part n, at its url + "/n", covers the n-th stretch of the video.
+	SubtitleStretchSeconds int            `json:"subtitleStretchSeconds,omitempty"`
+	MaxBitrateKbps         int            `json:"maxBitrateKbps,omitempty"`
+	Segments               []segmentJSON  `json:"segments,omitempty"`
+	Trickplay              *trickplayJSON `json:"trickplay,omitempty"`
 	// Next is the episode after this one, when it's one the profile may
 	// see: the rest of the season, then the next season's.
 	Next *library.TitleSummary `json:"next,omitempty"`
@@ -1132,9 +1135,9 @@ func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*op
 		j := trackJSON{ID: "s" + strconv.Itoa(t.Index), Label: t.Name, Language: t.Language, Default: t.Default,
 			Forced: t.Forced, HearingImpaired: t.HearingImpaired, Pictures: !t.Text}
 		if t.Text {
-			j.URL = base + "subtitles/" + j.ID // sanitized WebVTT (rule 17)
+			j.URL = base + "subtitles/" + j.ID // sanitized WebVTT (rule 17), "/<part>" after it
 		} else {
-			j.URL = base + "pictures/" + j.ID // PGS, checked whole (rule 17)
+			j.URL = base + "pictures/" + j.ID // PGS, each stretch checked whole (rule 17), "/<part>" after it
 		}
 		return j
 	}
@@ -1143,6 +1146,9 @@ func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*op
 	}
 	for _, t := range forcedTracks {
 		out.ForcedTracks = append(out.ForcedTracks, subtitle(t))
+	}
+	if len(out.SubtitleTracks)+len(out.ForcedTracks) > 0 {
+		out.SubtitleStretchSeconds = StretchSeconds
 	}
 	playing := defaultAudio(dec.Source)
 	if pr.AudioStreamIndex != nil {

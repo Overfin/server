@@ -34,6 +34,12 @@ type Service struct {
 	checked bool
 }
 
+// Admin returns Overfin's administrator key on its Jellyfin, for Overfin's
+// plugin, which answers that key alone.
+func (s *Service) Admin() jellyfin.Auth {
+	return jellyfin.Auth{Token: s.Provisioner().AdminKey, DeviceID: "overfin-admin"}
+}
+
 // Auth returns the service account's credentials, making the account on
 // first use.
 func (s *Service) Auth(ctx context.Context) (jellyfin.Auth, string, error) {

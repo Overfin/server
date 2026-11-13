@@ -37,10 +37,10 @@ func (s Stream) Register(r *plugin.Registrar) error {
 	if err := r.HandleMedia("GET /api/v1/stream/{ticket}/{name}", http.HandlerFunc(s.serve)); err != nil {
 		return err
 	}
-	if err := r.HandleMedia("GET /api/v1/stream/{ticket}/subtitles/{track}", http.HandlerFunc(s.subtitles)); err != nil {
+	if err := r.HandleMedia("GET /api/v1/stream/{ticket}/subtitles/{track}/{part}", http.HandlerFunc(s.subtitles)); err != nil {
 		return err
 	}
-	return r.HandleMedia("GET /api/v1/stream/{ticket}/pictures/{track}", http.HandlerFunc(s.pictures))
+	return r.HandleMedia("GET /api/v1/stream/{ticket}/pictures/{track}/{part}", http.HandlerFunc(s.pictures))
 }
 
 const (
@@ -275,7 +275,50 @@ func subtitleSlot(r *http.Request) (func(), bool) {
 	}
 }
 
-// subtitles serves one text subtitle track as sanitized WebVTT.
+// Subtitles go to the player in stretches of StretchSeconds, part n
+// covering [n*StretchSeconds, (n+1)*StretchSeconds) of the video: the
+// plugin reads each from there, never the whole file. Each starts
+// stretchLead earlier, so a subtitle already on screen when its stretch
+// begins comes with it; the player drops the doubles.
+const (
+	StretchSeconds = 120
+	stretchLead    = 10
+	// maxPart bounds a part's number: 10,000 stretches of 2 minutes is
+	// over 13 days of video.
+	maxPart = 10000
+)
+
+// subtitlePart reads the {part} of a subtitle route.
+func subtitlePart(r *http.Request) (int, bool) {
+	v := r.PathValue("part")
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 || n >= maxPart || strconv.Itoa(n) != v {
+		return 0, false
+	}
+	return n, true
+}
+
+// stretch fetches one stretch of a subtitle track of this server's own
+// playback from Overfin's plugin, or answers the error itself (nil). The
+// caller holds a subtitle slot.
+func (s Stream) stretch(w http.ResponseWriter, r *http.Request, st *playback.Stream, index, part, limit int) []byte {
+	l := s.Playback.Library
+	if l.Service == nil {
+		problem.Send(w, problem.Internal, "")
+		return nil
+	}
+	from := max(float64(part*StretchSeconds-stretchLead), 0)
+	to := float64((part + 1) * StretchSeconds)
+	body, err := l.Jellyfin.SubtitleStretch(r.Context(), l.Service.Admin(), st.ItemID, st.SourceID, index, from, to, limit)
+	if err != nil {
+		l.upstreamError(w, err)
+		return nil
+	}
+	return body
+}
+
+// subtitles serves one stretch of a text subtitle track as sanitized
+// WebVTT.
 func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 	track := r.PathValue("track")
 	if len(r.URL.Query()) > 0 {
@@ -283,38 +326,36 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	index, ok := trackIndex(track, 's')
-	if !ok {
+	part, okPart := subtitlePart(r)
+	if !ok || !okPart {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	st, a := s.stream(w, r)
+	st, _ := s.stream(w, r)
 	if st == nil {
 		return
 	}
 	if st.Remote != nil {
-		s.relay(w, r, st, relayed{path: "subtitles/" + track, vtt: true})
+		s.relay(w, r, st, relayed{path: "subtitles/" + track + "/" + strconv.Itoa(part), vtt: true})
 		return
 	}
 	if !st.TextSubtitle(index) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	l := s.Playback.Library
-	path := "/Videos/" + st.ItemID + "/" + st.SourceID + "/Subtitles/" + strconv.Itoa(index) + "/Stream.vtt"
 	free, ok := subtitleSlot(r)
 	if !ok {
 		return
 	}
 	free = sync.OnceFunc(free)
 	defer free()
-	body, err := l.Jellyfin.ReadSubtitles(r.Context(), *a, path, maxSubtitles)
-	if err != nil {
-		l.upstreamError(w, err)
+	body := s.stretch(w, r, st, index, part, maxSubtitles)
+	if body == nil {
 		return
 	}
 	vtt, ok := playback.SanitizeVTT(body)
 	if !ok {
-		l.Logger.Warn("refused upstream subtitles", "playback", st.ID)
+		s.Playback.Library.Logger.Warn("refused upstream subtitles", "playback", st.ID)
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -324,48 +365,47 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(vtt)
 }
 
-// pictures serves one subtitle track of pictures (PGS) as Jellyfin
-// extracts it, once Overfin read it whole and found every part of it
-// well-formed and within its limits (SECURITY.md rule 17). The player
-// decodes and draws it: sent as opaque bytes, never as anything a browser
-// would render.
+// pictures serves one stretch of a subtitle track of pictures (PGS) as
+// Overfin's plugin copies it, once Overfin read it whole and found every
+// part of it well-formed and within its limits (SECURITY.md rule 17). The
+// player decodes and draws it: sent as opaque bytes, never as anything a
+// browser would render.
 func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
+	track := r.PathValue("track")
 	if len(r.URL.Query()) > 0 {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	index, ok := trackIndex(r.PathValue("track"), 's')
-	if !ok {
+	index, ok := trackIndex(track, 's')
+	part, okPart := subtitlePart(r)
+	if !ok || !okPart {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	st, a := s.stream(w, r)
+	st, _ := s.stream(w, r)
 	if st == nil {
 		return
 	}
 	if st.Remote != nil {
-		s.relay(w, r, st, relayed{path: "pictures/" + r.PathValue("track"), pgs: true})
+		s.relay(w, r, st, relayed{path: "pictures/" + track + "/" + strconv.Itoa(part), pgs: true})
 		return
 	}
 	if !st.PictureSubtitle(index) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	l := s.Playback.Library
-	path := "/Videos/" + st.ItemID + "/" + st.SourceID + "/Subtitles/" + strconv.Itoa(index) + "/Stream.pgssub"
 	free, ok := subtitleSlot(r)
 	if !ok {
 		return
 	}
 	free = sync.OnceFunc(free)
 	defer free()
-	body, err := l.Jellyfin.ReadSubtitles(r.Context(), *a, path, playback.MaxPGS)
-	if err != nil {
-		l.upstreamError(w, err)
+	body := s.stretch(w, r, st, index, part, playback.MaxPGS)
+	if body == nil {
 		return
 	}
 	if err := playback.CheckPGS(body); err != nil {
-		l.Logger.Warn("refused upstream picture subtitles", "playback", st.ID)
+		s.Playback.Library.Logger.Warn("refused upstream picture subtitles", "playback", st.ID)
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
