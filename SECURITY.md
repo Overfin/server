@@ -96,8 +96,6 @@ anyone. Paired servers are not trusted at all (rule 94).
 13. Answers from upstream have size and time limits.
     - Exception: media streams, Jellyfin's or a paired server's, must start
       within a minute, then have no limit, so a film is never cut off.
-    - Exception: subtitles are waited for up to 31 minutes, Jellyfin's own
-      limit: the first time, Jellyfin reads the whole file to extract them.
     - Exception: Jellyfin's event socket has no overall limit; it's dropped
       after 90 seconds of silence.
 14. HLS playlists are parsed, never searched and replaced. Only entries
@@ -112,11 +110,12 @@ anyone. Paired servers are not trusted at all (rule 94).
     that fails to decode are never served. Trickplay sheets are re-encoded
     as JPEG, never resized.
 17. Subtitles are served only as sanitized WebVTT, or, for subtitles that
-    are pictures (PGS), as the track read whole and refused unless every
-    part of it is well-formed and within its limits. A paired server's are
-    checked again here. Fonts and other attached files are never served on
-    their own. Overfin asks Jellyfin for no subtitle track inside remuxed
-    and transcoded streams, and drops subtitle entries from playlists.
+    are pictures (PGS), as each stretch of the track read whole and
+    refused unless every part of it is well-formed and within its limits.
+    A paired server's are checked again here. Fonts and other attached
+    files are never served on their own. Overfin asks Jellyfin for no
+    subtitle track inside remuxed and transcoded streams, and drops
+    subtitle entries from playlists.
     - Exception: a file played as it is (direct play) is sent unchanged,
       with the subtitles, attached files and tags inside it; rules 15, 16
       and 77 don't apply to its contents.
