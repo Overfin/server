@@ -18,7 +18,7 @@ import (
 // plugin: a required dependency.
 const (
 	JellyfinVersion = "12.2.0"
-	PluginVersion   = "0.2.0"
+	PluginVersion   = "0.2.1"
 	pluginID        = "33809b90-8925-4df0-93fd-d9b06f14ca0a"
 )
 
