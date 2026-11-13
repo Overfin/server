@@ -836,7 +836,8 @@ func run(logger *slog.Logger) error {
 		case backendMode:
 			// The backend: the panel's own login, on its own listener,
 			// private addresses only; the site's accounts never open it.
-			p.Provider, p.PanelAccount, p.Directory = nil, db.PanelAccount, admin.Users{Store: db}
+			p.Provider, p.PanelAccount, p.Directory, p.JellyfinBeside = nil, db.PanelAccount, admin.Users{Store: db}, true
+			go jellyfinWindow(ctx, gw.JellyfinAccess, cfg.Jellyfin.URL, logger)
 			if managed {
 				p.People, p.Mail = gw, gw
 			}

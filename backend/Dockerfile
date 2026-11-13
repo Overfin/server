@@ -42,8 +42,10 @@ COPY --from=plugin /out /usr/lib/overfin/jellyfin-plugin
 RUN mkdir -p /data /secrets /config /cache /pairing && chown 65532:65532 /data /secrets /config /cache /pairing
 USER 65532:65532
 VOLUME /data /secrets /config /cache
-# 8081: the control panel and the setup wizard, for private addresses only.
+# 8081: the control panel and the setup wizard, for private addresses only;
+# 8082: Jellyfin's own pages, only while access to it is open in the
+# panel, for private addresses only.
 # Nothing else listens outside the container: the site goes to the gateway
 # over the link the backend opens, and Jellyfin listens inside only.
-EXPOSE 8081
+EXPOSE 8081 8082
 ENTRYPOINT ["/overfin-backend"]

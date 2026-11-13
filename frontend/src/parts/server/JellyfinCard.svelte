@@ -28,7 +28,7 @@
     {#snippet badge()}<Badge kind="ok">Connected</Badge>{/snippet}
     <div class="box">
       <div>{j.url}</div>
-      <div class="hint">Set in Overfin's configuration (its file, or OVERFIN_JELLYFIN_URL): change it there.</div>
+      <div class="hint">{j.beside ? "Overfin's own, in the backend's container, reached on 127.0.0.1 only: nothing to set." : "Set in Overfin's configuration (its file, or OVERFIN_JELLYFIN_URL): change it there."}</div>
     </div>
     <JellyfinAccess access={j.access} />
   </Card>

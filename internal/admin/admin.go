@@ -183,6 +183,9 @@ type Panel struct {
 	// browser uses the admin's own account's owner profile (or they have
 	// no account): another profile here shares their login.
 	SiteOwner func(r *http.Request) bool
+	// JellyfinBeside, on the backend: its Jellyfin runs beside it, in the
+	// same container, and its address is nothing to set.
+	JellyfinBeside bool
 	// PanelAccount, on the backend, is the panel's own login: admins sign
 	// in with it, not Provider nor the site's accounts.
 	PanelAccount PanelAccountFunc
@@ -937,7 +940,7 @@ func (p *Panel) jellyfin(w http.ResponseWriter, r *http.Request, s *session) {
 	if open {
 		access["since"] = since
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"url": url, "inFile": inFile, "access": access})
+	writeJSON(w, http.StatusOK, map[string]any{"url": url, "inFile": inFile, "beside": p.JellyfinBeside, "access": access})
 }
 
 func (p *Panel) catalog(w http.ResponseWriter, r *http.Request, s *session) {

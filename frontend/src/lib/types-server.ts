@@ -8,6 +8,7 @@ export interface JellyfinAccess {
 export interface Jellyfin {
   url: string;
   inFile?: boolean;
+  beside?: boolean;
   access?: JellyfinAccess;
 }
 
