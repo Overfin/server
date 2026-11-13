@@ -15,7 +15,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X github.com/overfin/server/internal/backend.Version=${VERSION}" -o /overfin-backend ./cmd/overfin-backend
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X github.com/overfin/server/overfin.Version=${VERSION}" -o /overfin-backend ./cmd/overfin-backend
 
 # Overfin's plugin for Jellyfin (github.com/Overfin/jellyfin-plugin, GPL),
 # at the commit this Overfin was made with, built against the Jellyfin
@@ -36,11 +36,14 @@ LABEL org.opencontainers.image.source="https://github.com/Overfin/server" \
       org.opencontainers.image.description="Overfin's backend, with Jellyfin (github.com/jellyfin/jellyfin) and Overfin's plugin for it (github.com/Overfin/jellyfin-plugin)"
 COPY --from=build /overfin-backend /overfin-backend
 COPY --from=plugin /out /usr/lib/overfin/jellyfin-plugin
-# Overfin's data (its link to the gateway for now), and Jellyfin's data and
-# cache: folders of the user the container runs as (65532, not root),
-# volumes of their own.
-RUN mkdir -p /data /config /cache && chown 65532:65532 /data /config /cache
+# Overfin's data and its secret key (apart, so a copy of the data never
+# carries its key), and Jellyfin's data and cache: folders of the user the
+# container runs as (65532, not root), volumes of their own.
+RUN mkdir -p /data /secrets /config /cache && chown 65532:65532 /data /secrets /config /cache
 USER 65532:65532
-VOLUME /data /config /cache
-# Nothing to publish yet: Jellyfin listens inside the container only.
+VOLUME /data /secrets /config /cache
+# 8081: the control panel and the setup wizard, for private addresses only.
+# Nothing else listens outside the container: the site goes to the gateway
+# over the link the backend opens, and Jellyfin listens inside only.
+EXPOSE 8081
 ENTRYPOINT ["/overfin-backend"]

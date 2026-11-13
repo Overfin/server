@@ -26,6 +26,7 @@ import (
 
 	"github.com/overfin/server/internal/admin"
 	"github.com/overfin/server/internal/api"
+	"github.com/overfin/server/internal/backend"
 	"github.com/overfin/server/internal/catalog"
 	"github.com/overfin/server/internal/config"
 	"github.com/overfin/server/internal/connector"
@@ -72,6 +73,36 @@ func Run(site fs.FS) {
 		logger.Error("fatal", "err", err)
 		os.Exit(1)
 	}
+}
+
+// backendMode is set by RunBackend: Overfin runs as the backend (see
+// run).
+var backendMode bool
+
+// RunBackend runs Overfin as its backend, in the overfin-backend image:
+// with its Jellyfin beside it, serving the site to its gateway over the
+// link, the control panel on its own listener for private addresses only.
+func RunBackend(site fs.FS) {
+	backendMode = true
+	Run(site)
+}
+
+// pairBackend starts pairing the backend with its gateway, and prints the
+// code to give the gateway.
+func pairBackend(dir, address, serverName string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	b, err := link.NewBackend(dir, Version, http.NotFoundHandler(), slog.New(slog.DiscardHandler))
+	if err != nil {
+		return err
+	}
+	code, err := b.Pair(address, serverName)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Pairing code for the gateway at %s:\n\n  %s\n\nSet it on the gateway as OVERFIN_PAIRING and start it again; this backend pairs at its next attempt.\n", address, code)
+	return nil
 }
 
 // pairingCode is the code the operator gave the gateway to pair with its
@@ -128,7 +159,25 @@ func run(logger *slog.Logger) error {
 		"set a new password for this email (managed sign-in), read from the terminal, then exit; for an admin locked out")
 	check := flag.Bool("check", false,
 		"test the configuration, the secret key, Jellyfin and the identity provider, say what's wrong, then exit; changes nothing")
+	var pair, serverName *string
+	if backendMode {
+		pair = flag.String("pair", "", "pair with the gateway at this host:port: prints a one-time code to set on the gateway (OVERFIN_PAIRING), then exits")
+		serverName = flag.String("server-name", "", "with -pair: the name sent to the gateway in TLS, when a proxy in front of it routes on names (default: the address's host)")
+	}
 	flag.Parse()
+
+	// The backend: its Jellyfin is in the same container, reached on
+	// 127.0.0.1 (internal/backend).
+	getenv := os.Getenv
+	jf := backend.FromEnv(os.Getenv)
+	if backendMode {
+		getenv = func(k string) string {
+			if v := os.Getenv(k); v != "" || k != "OVERFIN_JELLYFIN_URL" {
+				return v
+			}
+			return jf.LocalURL()
+		}
+	}
 
 	// Without a file at the default place, the defaults: a start needs no
 	// configuration at all. A file named on purpose must exist.
@@ -136,13 +185,24 @@ func run(logger *slog.Logger) error {
 		*configPath = ""
 	}
 	if *check {
-		return checkSetup(*configPath, os.Getenv, os.Stdout)
+		return checkSetup(*configPath, getenv, os.Stdout)
 	}
-	cfg, err := config.Load(*configPath, os.Getenv)
+	cfg, err := config.Load(*configPath, getenv)
 	if err != nil {
 		return err
 	}
 	addr := cfg.Listen
+	linkDir := filepath.Join(filepath.Dir(cfg.Storage.Path), "link")
+	if backendMode {
+		// The panel and the setup wizard are on the backend's own
+		// listener, for private addresses only, never on the site.
+		if cfg.Admin.Listen == "" {
+			cfg.Admin.Listen = ":8081"
+		}
+		if *pair != "" {
+			return pairBackend(linkDir, *pair, *serverName)
+		}
+	}
 	if cfg.Secrets.Key == nil {
 		if err := firstKey(cfg, *recoverTokens, logger); err != nil {
 			return err
@@ -235,50 +295,87 @@ func run(logger *slog.Logger) error {
 		// No WriteTimeout: video streams can legitimately run for hours.
 	}
 	errc := make(chan error, 4)
-	// The link: the backend connects out to this gateway and answers its
-	// requests (internal/link). It shares the HTTPS listener below, told
-	// apart by its ALPN name, and/or takes a listener of its own
-	// (OVERFIN_LINK_LISTEN), for a gateway whose HTTPS a proxy handles.
-	gwLink, err := link.NewGateway(filepath.Join(filepath.Dir(cfg.Storage.Path), "link"), Version, pairingCode, logger)
-	if err != nil {
-		return err
-	}
 	linkCtx, stopLink := context.WithCancel(context.Background())
 	defer stopLink()
-	if a := os.Getenv("OVERFIN_LINK_LISTEN"); a != "" {
-		go func() {
-			logger.Info("listening for the backend", "addr", a)
-			errc <- gwLink.Listen(linkCtx, a)
-		}()
-	}
-	// HTTPS by Overfin itself: the site on its own listener, with a
-	// certificate from Let's Encrypt; the main one answers Let's Encrypt's
-	// checks and sends everyone else to HTTPS.
 	var tlsSrv *http.Server
-	if h := cfg.HTTPS; h.Enabled() {
-		certs := &autocert.Manager{Prompt: autocert.AcceptTOS, HostPolicy: autocert.HostWhitelist(h.Domain),
-			Cache: autocert.DirCache(filepath.Join(filepath.Dir(cfg.Storage.Path), "certificates")), Email: h.Email}
-		tlsSrv = &http.Server{Addr: h.Listen, Handler: hsts(siteHandler), TLSConfig: certs.TLSConfig(),
-			ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
-		tlsSrv.TLSConfig.MinVersion = tls.VersionTLS12
-		// Failed handshakes, Let's Encrypt's refusals among them, in the
-		// log like everything else.
-		tlsSrv.ErrorLog = slog.NewLogLogger(logger.Handler(), slog.LevelWarn)
-		gwLink.Share(tlsSrv)
-		srv.Handler = certs.HTTPHandler(nil)
+	var gwLink *link.Gateway
+	var jellyfinDone chan struct{}
+	if backendMode {
+		// The backend: the site is served to its gateway over the link
+		// (internal/link), never on a listener of its own; its Jellyfin
+		// runs beside it, with Overfin's plugin, on 127.0.0.1 only.
+		lb, err := link.NewBackend(linkDir, Version, siteHandler, logger)
+		if err != nil {
+			return err
+		}
+		version, err := jf.InstallPlugin()
+		if err != nil {
+			return err
+		}
+		logger.Info("Overfin's plugin is in place for Jellyfin", "version", version)
+		if err := jf.LoopbackOnly(); err != nil {
+			return err
+		}
+		jfCtx, stopJellyfin := context.WithCancel(context.Background())
+		jellyfinDone = make(chan struct{})
 		go func() {
-			logger.Info("listening, HTTPS", "addr", h.Listen, "domain", h.Domain)
-			errc <- tlsSrv.ListenAndServeTLS("", "")
+			defer close(jellyfinDone)
+			jf.Supervise(jfCtx, logger)
 		}()
+		// Jellyfin stops after Overfin, cleanly.
+		defer func() {
+			stopJellyfin()
+			<-jellyfinDone
+		}()
+		go lb.Run(linkCtx)
+	} else {
+		// The link: the backend connects out to this gateway and answers its
+		// requests (internal/link). It shares the HTTPS listener below, told
+		// apart by its ALPN name, and/or takes a listener of its own
+		// (OVERFIN_LINK_LISTEN), for a gateway whose HTTPS a proxy handles.
+		gwLink, err = link.NewGateway(linkDir, Version, pairingCode, logger)
+		if err != nil {
+			return err
+		}
+		if a := os.Getenv("OVERFIN_LINK_LISTEN"); a != "" {
+			go func() {
+				logger.Info("listening for the backend", "addr", a)
+				errc <- gwLink.Listen(linkCtx, a)
+			}()
+		}
+		// HTTPS by Overfin itself: the site on its own listener, with a
+		// certificate from Let's Encrypt; the main one answers Let's Encrypt's
+		// checks and sends everyone else to HTTPS.
+		if h := cfg.HTTPS; h.Enabled() {
+			certs := &autocert.Manager{Prompt: autocert.AcceptTOS, HostPolicy: autocert.HostWhitelist(h.Domain),
+				Cache: autocert.DirCache(filepath.Join(filepath.Dir(cfg.Storage.Path), "certificates")), Email: h.Email}
+			tlsSrv = &http.Server{Addr: h.Listen, Handler: hsts(siteHandler), TLSConfig: certs.TLSConfig(),
+				ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+			tlsSrv.TLSConfig.MinVersion = tls.VersionTLS12
+			// Failed handshakes, Let's Encrypt's refusals among them, in the
+			// log like everything else.
+			tlsSrv.ErrorLog = slog.NewLogLogger(logger.Handler(), slog.LevelWarn)
+			gwLink.Share(tlsSrv)
+			srv.Handler = certs.HTTPHandler(nil)
+			go func() {
+				logger.Info("listening, HTTPS", "addr", h.Listen, "domain", h.Domain)
+				errc <- tlsSrv.ListenAndServeTLS("", "")
+			}()
+		}
+		go func() {
+			logger.Info("listening", "addr", addr, "https", tlsSrv != nil)
+			errc <- srv.ListenAndServe()
+		}()
+
 	}
-	go func() {
-		logger.Info("listening", "addr", addr, "https", tlsSrv != nil)
-		errc <- srv.ListenAndServe()
-	}()
 	// The control panel, on its own listener (rules 82 and 83).
 	var adminSrv *http.Server
 	if a := cfg.Admin; a.Enabled() {
-		adminSrv = &http.Server{Addr: a.Listen, Handler: panel,
+		var h http.Handler = panel
+		if backendMode {
+			h = admin.PrivateOnly(panel) // never the internet (rule 83's check)
+		}
+		adminSrv = &http.Server{Addr: a.Listen, Handler: h,
 			ReadHeaderTimeout: 10 * time.Second, WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute}
 		go func() {
 			logger.Info("control panel listening", "addr", a.Listen, "https", a.TLSCert != "")
@@ -297,9 +394,14 @@ func run(logger *slog.Logger) error {
 			_ = adminSrv.Shutdown(shutdownCtx)
 		}
 		stopLink()
-		gwLink.Close()
+		if gwLink != nil {
+			gwLink.Close()
+		}
 		if tlsSrv != nil {
 			_ = tlsSrv.Shutdown(shutdownCtx)
+		}
+		if backendMode {
+			return nil
 		}
 		if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return err
@@ -311,6 +413,12 @@ func run(logger *slog.Logger) error {
 	// sets or the setup page saved. A fresh one is set up at once; any
 	// other waits to be handed over on the setup page, which with managed
 	// sign-in asks for the first admin too.
+	if backendMode {
+		// Its own Jellyfin, just started beside it: ready first.
+		if err := backend.WaitHealthy(ctx, cfg.Jellyfin.URL, logger); err != nil {
+			return shutdown()
+		}
+	}
 	jellyfinSaved := cfg.Jellyfin.URL == ""
 	url, key, haveJellyfin, err := ownJellyfin(ctx, cfg, db, logger)
 	if err != nil {

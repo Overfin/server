@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"time"
@@ -44,7 +45,7 @@ func NewBackend(dir, version string, handler http.Handler, logger *slog.Logger) 
 	if err != nil {
 		return nil, err
 	}
-	return &Backend{dir: dir, version: version, handler: handler, logger: logger, id: id}, nil
+	return &Backend{dir: dir, version: version, handler: withClientAddr(handler), logger: logger, id: id}, nil
 }
 
 // Public is the backend's own key.
@@ -253,4 +254,24 @@ func refusal(f []string, version string) error {
 	default:
 		return errRefused{"the gateway refused: " + f[1]}
 	}
+}
+
+// ClientAddr is the header in which the gateway gives the backend each
+// request's visitor address (host:port). The backend trusts it because it
+// comes over the link, which only the paired gateway can use; it's taken
+// off before the backend's own code sees the request.
+const ClientAddr = "Overfin-Client-Addr"
+
+// withClientAddr makes the visitor's address the request's own, for the
+// backend's limits and logs.
+func withClientAddr(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if v := r.Header.Get(ClientAddr); v != "" {
+			if ap, err := netip.ParseAddrPort(v); err == nil {
+				r.RemoteAddr = ap.String()
+			}
+		}
+		r.Header.Del(ClientAddr)
+		next.ServeHTTP(w, r)
+	})
 }

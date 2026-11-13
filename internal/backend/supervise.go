@@ -2,9 +2,12 @@ package backend
 
 import (
 	"context"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -56,5 +59,34 @@ func (j Jellyfin) Supervise(ctx context.Context, logger *slog.Logger) {
 			return
 		}
 		wait = min(2*wait, 30*time.Second)
+	}
+}
+
+// WaitHealthy waits until Jellyfin at url is really up: its /health says
+// "Healthy". While it starts, Jellyfin first answers from a temporary
+// server ("Degraded", even its public information), then "loading" (503):
+// anything before "Healthy" can vanish the next second. It returns
+// ctx.Err() when ctx ends first.
+func WaitHealthy(ctx context.Context, url string, logger *slog.Logger) error {
+	client := &http.Client{Timeout: 5 * time.Second}
+	said := time.Time{}
+	for {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url+"/health", nil)
+		if resp, err := client.Do(req); err == nil {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 64))
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK && strings.TrimSpace(string(b)) == "Healthy" {
+				return nil
+			}
+		}
+		if time.Since(said) > time.Minute {
+			logger.Info("waiting for Jellyfin to be ready")
+			said = time.Now()
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
 	}
 }

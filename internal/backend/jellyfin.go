@@ -157,3 +157,18 @@ func (j Jellyfin) LoopbackOnly() error {
 
 // Version is the backend's version, set at build time.
 var Version = "dev"
+
+var portRe = regexp.MustCompile(`<InternalHttpPort>\s*(\d+)\s*</InternalHttpPort>`)
+
+// LocalURL is where the backend reaches its Jellyfin: on 127.0.0.1, at the
+// port its network settings name (8096, Jellyfin's own default, when they
+// name none).
+func (j Jellyfin) LocalURL() string {
+	port := "8096"
+	if b, err := os.ReadFile(filepath.Join(j.ConfigDir, "network.xml")); err == nil {
+		if m := portRe.FindSubmatch(b); m != nil {
+			port = string(m[1])
+		}
+	}
+	return "http://127.0.0.1:" + port
+}

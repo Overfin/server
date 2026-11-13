@@ -323,3 +323,43 @@ func TestCodes(t *testing.T) {
 		t.Error("a short code accepted")
 	}
 }
+
+// The visitor's address the gateway gives becomes the request's own at the
+// backend, and the header is gone before the backend's code sees it.
+func TestClientAddr(t *testing.T) {
+	code := ""
+	g, addr := gatewayOn(t, t.TempDir(), "1.0", &code)
+	seen := make(chan [2]string, 2)
+	b, err := NewBackend(t.TempDir(), "1.0", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- [2]string{r.RemoteAddr, r.Header.Get(ClientAddr)}
+	}), quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	code = pairNow(t, b, addr)
+	go b.Run(ctx)
+	waitConnected(t, g, true)
+
+	req, _ := http.NewRequest("GET", "https://backend/x", nil)
+	req.Header.Set(ClientAddr, "203.0.113.7:51234")
+	resp, err := g.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := <-seen; got[0] != "203.0.113.7:51234" || got[1] != "" {
+		t.Errorf("with the header: %q", got)
+	}
+	// Not an address: ignored, and still taken off.
+	req.Header.Set(ClientAddr, "not an address")
+	resp, err = g.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := <-seen; got[0] == "not an address" || got[1] != "" {
+		t.Errorf("with a bad header: %q", got)
+	}
+}
