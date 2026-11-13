@@ -2,6 +2,7 @@ package overfin
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -119,5 +120,44 @@ func setPassword(ctx context.Context, cfg *config.Config, db *store.Store, email
 		return err
 	}
 	fmt.Fprintln(w, "\nDone: sign in with it.")
+	return nil
+}
+
+// setPanelPassword makes or changes the control panel's own login on the
+// backend, from the terminal: a username (the current one kept when none is
+// typed) and a password.
+func setPanelPassword(ctx context.Context, db *store.Store, in io.Reader, w io.Writer) error {
+	current, _, _, err := db.PanelAccount(ctx)
+	if err != nil {
+		return err
+	}
+	r := bufio.NewReader(in)
+	if current != "" {
+		fmt.Fprintf(w, "Control panel username [%s]: ", current)
+	} else {
+		fmt.Fprint(w, "Control panel username: ")
+	}
+	line, _ := r.ReadString('\n')
+	username := cmp.Or(strings.TrimSpace(line), current)
+	if username == "" || len(username) > 64 {
+		return errors.New("a username of 1 to 64 characters is needed")
+	}
+	fmt.Fprintf(w, "New password (%d characters at least, with a digit and a special character): ", password.MinLength)
+	line, err = r.ReadString('\n')
+	if err != nil && line == "" {
+		return errors.New("no password given")
+	}
+	pw := strings.TrimRight(line, "\r\n")
+	if lacks := password.DefaultRules.Lacks(pw); lacks != "" {
+		return fmt.Errorf("that password lacks: %s", lacks)
+	}
+	hash, err := password.Hash(pw)
+	if err != nil {
+		return err
+	}
+	if err := db.SetPanelAccount(ctx, username, hash); err != nil {
+		return err
+	}
+	fmt.Fprintln(w, "The control panel's login is saved. Restart the backend to end the panel sessions already open.")
 	return nil
 }

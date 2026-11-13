@@ -183,6 +183,9 @@ type Panel struct {
 	// browser uses the admin's own account's owner profile (or they have
 	// no account): another profile here shares their login.
 	SiteOwner func(r *http.Request) bool
+	// PanelAccount, on the backend, is the panel's own login: admins sign
+	// in with it, not Provider nor the site's accounts.
+	PanelAccount PanelAccountFunc
 	// People, with managed sign-in, sends invitations by email; the People view
 	// lists who may sign in.
 	People People
@@ -209,10 +212,11 @@ type Panel struct {
 	appCalls appLimiter
 	stats    statsCache
 
-	mu       sync.Mutex
-	sessions map[string]*session // by token hash
-	pending  map[string]pending  // by state
-	now      func() time.Time
+	mu         sync.Mutex
+	sessions   map[string]*session // by token hash
+	localTries localTries          // the panel's own login: failed tries
+	pending    map[string]pending  // by state
+	now        func() time.Time
 }
 
 // session is a signed-in admin. Kept in memory only: a restart signs
@@ -278,6 +282,8 @@ func (p *Panel) handler() http.Handler {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
 	})
 	mux.HandleFunc("GET /admin/login", p.login)
+	mux.HandleFunc("POST /admin/login", p.localSignIn)
+	mux.HandleFunc("GET /admin/login.css", serveLocalCSS)
 	mux.HandleFunc("GET /admin/auth/callback", p.callback)
 	mux.HandleFunc("GET /admin/auth/finish", p.finish)
 	mux.HandleFunc("GET /admin/api/session", p.signedIn(p.whoami))
@@ -475,7 +481,8 @@ func relayedPrivately(h http.Header) bool {
 }
 
 // sameOrigin accepts only same-origin requests, except the identity
-// provider's return to the callback; changes must be JSON.
+// provider's return to the callback; changes must be JSON (the panel's own
+// sign-in form aside).
 func sameOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Header.Get("Sec-Fetch-Site") {
@@ -495,6 +502,11 @@ func sameOrigin(next http.Handler) http.Handler {
 			switch {
 			case mt == "application/json":
 				r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+			case mt == "application/x-www-form-urlencoded" && r.Method == http.MethodPost && r.URL.Path == "/admin/login":
+				// The panel's own sign-in form (on the backend): it opens a
+				// session, changes nothing; cross-site posts are refused
+				// above, and by its own Origin check.
+				r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 			case strings.HasPrefix(mt, "image/") && r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, brandingFiles):
 				r.Body = http.MaxBytesReader(w, r.Body, maxBrandingFile)
 			case strings.HasPrefix(mt, "image/") && r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, metadataUploads):
@@ -643,6 +655,10 @@ func safeReturn(s string) string {
 // login sends the browser to the identity provider for a new login, every
 // time: signing in to the panel is always a fresh login.
 func (p *Panel) login(w http.ResponseWriter, r *http.Request) {
+	if p.PanelAccount != nil {
+		p.localLogin(w, r)
+		return
+	}
 	if p.SiteAdmin != nil {
 		p.siteLogin(w, r)
 		return

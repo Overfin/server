@@ -33,6 +33,10 @@ import (
 type Setup struct {
 	// Code is the one-time code Overfin printed in its log (NewSetupCode).
 	Code string
+	// NoCode leaves the code out: the backend serves the wizard to private
+	// addresses only, never to the internet, so nobody else can reach it
+	// first (SECURITY.md, the backend's listener).
+	NoCode bool
 	// Language, when set, asks for the default language (a lang.Choices
 	// tag), and saves it.
 	Language func(ctx context.Context, tag string) error
@@ -56,6 +60,10 @@ type Setup struct {
 	// FirstAdmin, when set, asks for the first admin's email and password,
 	// and makes them (with the password's hash).
 	FirstAdmin func(ctx context.Context, email, passwordHash string) error
+	// PanelLogin, when set, asks for the control panel's own login (a
+	// username and a password, nothing in common with the site's
+	// accounts), and makes it (with the password's hash).
+	PanelLogin func(ctx context.Context, username, passwordHash string) error
 	// Done runs once the wizard is finished; Overfin then finishes
 	// starting.
 	Done   func()
@@ -77,6 +85,7 @@ const (
 	stepSkipper  = "introskipper"
 	stepSeerr    = "seerr"
 	stepAdmin    = "admin"
+	stepPanel    = "panel"
 	stepDone     = "done"
 )
 
@@ -204,6 +213,7 @@ func (s *Setup) handler(public bool) http.Handler {
 	mux.HandleFunc("POST /admin/api/setup/introskipper", s.step(s.introSkipper))
 	mux.HandleFunc("POST /admin/api/setup/seerr", s.step(s.seerr))
 	mux.HandleFunc("POST /admin/api/setup/admin", s.step(s.admin))
+	mux.HandleFunc("POST /admin/api/setup/panel", s.step(s.panelLogin))
 	mux.HandleFunc("POST /admin/api/setup/finish", s.step(s.finish))
 	return sameOrigin(headers(mux))
 }
@@ -213,12 +223,15 @@ func (s *Setup) handler(public bool) http.Handler {
 // Callers hold mu.
 func (s *Setup) stepList() []string {
 	if s.steps == nil {
-		s.steps = []string{stepCode}
+		s.steps = nil
+		if !s.NoCode {
+			s.steps = []string{stepCode}
+		}
 		for _, st := range []struct {
 			id  string
 			ask bool
 		}{{stepLanguage, s.Language != nil}, {stepJellyfin, s.Jellyfin != nil},
-			{stepTMDB, s.TMDB != nil}, {stepSkipper, s.IntroSkipper != nil}, {stepSeerr, s.Seerr != nil}, {stepAdmin, s.FirstAdmin != nil}} {
+			{stepTMDB, s.TMDB != nil}, {stepSkipper, s.IntroSkipper != nil}, {stepSeerr, s.Seerr != nil}, {stepPanel, s.PanelLogin != nil}, {stepAdmin, s.FirstAdmin != nil}} {
 			if st.ask {
 				s.steps = append(s.steps, st.id)
 			}
@@ -253,7 +266,7 @@ func (s *Setup) step(next func(w http.ResponseWriter, r *http.Request, body json
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{
 				"error": "Too many wrong codes: restart Overfin, and use the new code in its log."})
 			return
-		case subtle.ConstantTimeCompare([]byte(normalizeCode(req.Code)), []byte(normalizeCode(s.Code))) != 1:
+		case !s.NoCode && subtle.ConstantTimeCompare([]byte(normalizeCode(req.Code)), []byte(normalizeCode(s.Code))) != 1:
 			s.failures++
 			s.Logger.Warn("setup page: wrong code", "attempts", s.failures)
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "That isn't the code in Overfin's log."})
@@ -467,6 +480,46 @@ func (s *Setup) admin(w http.ResponseWriter, r *http.Request, body json.RawMessa
 	}
 	s.Logger.Info("setup page: the first admin is made")
 	s.saved[stepAdmin] = true
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// panelLogin makes the control panel's own login.
+func (s *Setup) panelLogin(w http.ResponseWriter, r *http.Request, body json.RawMessage) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if !decodeStep(w, body, &req) {
+		return
+	}
+	if s.PanelLogin == nil {
+		http.NotFound(w, r)
+		return
+	}
+	username := strings.TrimSpace(req.Username)
+	if username == "" || len(username) > 64 || strings.ContainsAny(username, "\r\n\t") {
+		unusable(w, "The control panel's username: 1 to 64 characters, on one line.")
+		return
+	}
+	if lacks := password.DefaultRules.Lacks(req.Password); lacks != "" {
+		unusable(w, map[string]string{
+			"length":  fmt.Sprintf("The control panel's password needs %d to %d characters.", password.MinLength, password.MaxLength),
+			"digit":   "The control panel's password needs a digit.",
+			"special": "The control panel's password needs a special character.",
+		}[lacks])
+		return
+	}
+	hash, err := password.Hash(req.Password)
+	if err != nil {
+		unusable(w, fmt.Sprintf("The control panel's password needs %d to %d characters.", password.MinLength, password.MaxLength))
+		return
+	}
+	if err := s.PanelLogin(r.Context(), username, hash); err != nil {
+		s.failed(w, err, "making the control panel's login")
+		return
+	}
+	s.Logger.Info("setup page: the control panel's login is made")
+	s.saved[stepPanel] = true
 	w.WriteHeader(http.StatusNoContent)
 }
 

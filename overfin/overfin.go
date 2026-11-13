@@ -160,7 +160,10 @@ func run(logger *slog.Logger) error {
 	check := flag.Bool("check", false,
 		"test the configuration, the secret key, Jellyfin and the identity provider, say what's wrong, then exit; changes nothing")
 	var pair, serverName *string
+	panelPassword := new(bool)
 	if backendMode {
+		panelPassword = flag.Bool("set-panel-password", false,
+			"make or change the control panel's own login (a username and a password, read from the terminal), then exit")
 		pair = flag.String("pair", "", "pair with the gateway at this host:port: prints a one-time code to set on the gateway (OVERFIN_PAIRING), then exits")
 		serverName = flag.String("server-name", "", "with -pair: the name sent to the gateway in TLS, when a proxy in front of it routes on names (default: the address's host)")
 	}
@@ -268,6 +271,9 @@ func run(logger *slog.Logger) error {
 	}
 	if *passwordFor != "" {
 		return setPassword(context.Background(), cfg, db, *passwordFor, os.Stdin, os.Stdout)
+	}
+	if *panelPassword {
+		return setPanelPassword(context.Background(), db, os.Stdin, os.Stdout)
 	}
 
 	// Stop cleanly on Ctrl+C or `docker stop`; reload the configuration on
@@ -439,6 +445,14 @@ func run(logger *slog.Logger) error {
 			return err
 		}
 	}
+	// On the backend, the control panel has its own login, made by the
+	// setup wizard (or -set-panel-password).
+	havePanelLogin := true
+	if backendMode {
+		if _, _, havePanelLogin, err = db.PanelAccount(ctx); err != nil {
+			return err
+		}
+	}
 	// Intro Skipper's installs: on the Jellyfin the setup wizard has, then
 	// on the gateway's.
 	skipper := &introskipper.Installer{Logger: logger, Jellyfin: func() (*jellyfin.Client, jellyfin.Auth, bool) {
@@ -455,6 +469,13 @@ func run(logger *slog.Logger) error {
 		}
 		done := make(chan struct{})
 		setup := &admin.Setup{Code: admin.NewSetupCode(), Logger: logger, Done: func() { close(done) }}
+		if backendMode {
+			// Private addresses only (the panel's listener): no code.
+			setup.Code, setup.NoCode = "", true
+			if !havePanelLogin {
+				setup.PanelLogin = db.SetPanelAccount
+			}
+		}
 		if !haveJellyfin {
 			setup.FixedURL = fixedURL
 			setup.Jellyfin = func(ctx context.Context, req admin.JellyfinRequest) (admin.JellyfinAnswer, error) {
@@ -520,6 +541,10 @@ func run(logger *slog.Logger) error {
 			}
 		}
 		where := []any{"code", setup.Code}
+		if backendMode {
+			where = []any{"panel", cfg.Admin.Listen}
+			logger.Warn("Overfin isn't set up yet: open the control panel's address from your LAN or VPN (port 8081 by default) and finish setting it up", where...)
+		}
 		if adminSrv != nil {
 			panel.set(setup.Handler())
 			where = append(where, "panel", cfg.Admin.Listen)
@@ -534,7 +559,9 @@ func run(logger *slog.Logger) error {
 			}
 			where = append(where, "site", cmp.Or(cfg.Site.URL, addr))
 		}
-		logger.Warn("Overfin isn't set up yet: open its address (/admin/) and finish setting it up with this one-time code", where...)
+		if !backendMode {
+			logger.Warn("Overfin isn't set up yet: open its address (/admin/) and finish setting it up with this one-time code", where...)
+		}
 		select {
 		case <-done:
 		case err := <-errc:
@@ -760,6 +787,17 @@ func run(logger *slog.Logger) error {
 			return c.TitleImages(ctx, kind, tmdbID)
 		}
 		switch {
+		case backendMode:
+			// The backend: the panel's own login, on its own listener,
+			// private addresses only; the site's accounts never open it.
+			p.Provider, p.PanelAccount, p.Directory = nil, db.PanelAccount, admin.Users{Store: db}
+			if managed {
+				p.People, p.Mail = gw, gw
+			}
+			panel.set(p.Handler())
+			if !havePanelLogin {
+				logger.Warn("the control panel has no login yet: make one with overfin-backend -set-panel-password (docker exec -it <backend> /overfin-backend -set-panel-password)")
+			}
 		case managed && a.Enabled():
 			// Only on its own listener, private, which serves the site's
 			// sign-in too: admins sign in there, on that address.
