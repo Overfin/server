@@ -29,12 +29,18 @@ curl -fsSL -o .env https://raw.githubusercontent.com/overfin/server/v0.9.0/deplo
 docker compose up -d
 ```
 
-Open `http://<the machine>`: a setup wizard takes it from there, including
-a free TMDB token, which Overfin needs for titles' names and pictures (the
-wizard shows how to get one). Overfin comes with a Jellyfin of its own and
-sets it up by itself. The
-[install guide](docs/install.md) covers HTTPS, reverse proxies, more media
-folders and a Jellyfin you run yourself.
+From your LAN, open `http://<the machine>:8081`: a setup wizard takes it
+from there, including a free TMDB token, which Overfin needs for titles'
+names and pictures (the wizard shows how to get one). The site is then at
+`http://<the machine>`. Overfin comes with a Jellyfin of its own and sets it
+up by itself. The [install guide](docs/install.md) covers HTTPS, reverse
+proxies and more media folders.
+
+Overfin runs as two parts: a small **gateway**, the only part the internet
+reaches, and a **backend** with your data, the control panel and Jellyfin,
+next to your media. They can share a machine, or the gateway can sit on a
+VPS while nothing is opened at home. Nothing worth taking faces the
+internet: [how it's built, and why](docs/architecture.md).
 
 ## What you get
 
@@ -92,7 +98,9 @@ has reviewed them yet.
 ## Guides
 
 - [Installing and running Overfin](docs/install.md): setup, HTTPS, reverse
-  proxies, your own Jellyfin, backups.
+  proxies, backups.
+- [How Overfin is built](docs/architecture.md): the gateway and the
+  backend, and why.
 - [Sign-in and the control panel](docs/sign-in.md): identity providers,
   where the panel answers, getting back in.
 - [Your brand, and your emails](docs/branding-and-emails.md)

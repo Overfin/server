@@ -38,7 +38,7 @@ choose one with "Forgot your password?", or you set one in the panel.
 
 **Locked out?** `overfin -set-password you@example.org` asks for a new
 password and ends that account's other logins (with Docker: `docker exec
--it overfin /overfin -set-password you@example.org`).
+-it overfin-backend /overfin-backend -set-password you@example.org`).
 
 ## Signing a TV in with a code
 
@@ -55,23 +55,15 @@ With an identity provider or forward auth, there are no codes for now.
 
 ## The control panel
 
-With Overfin's own sign-in, it's at `/admin/` on the site, for admins, who
-confirm it's them before going in. `[admin] private = true` keeps it to
-private addresses (LAN, VPN); `[admin] listen = ":8081"` takes it off the
-site entirely, onto a listener of its own for private addresses only
-(publish that port on your LAN address only), where admins sign in at
-`http://<that address>:8081/admin/`.
+The control panel is the backend's, on its own port (8081), whatever sign-in
+the site uses, and answers only private addresses (your LAN, a VPN): never
+the internet, and never through the gateway. It has its own login, a
+username and a password made in the setup wizard, apart from the site's
+accounts: an admin on the site, or a stolen site account, doesn't open it.
+A forgotten password:
 
-With an identity provider, it has a listener of its own instead, never on
-the internet: publish its port on the server's `127.0.0.1` only, and reach
-it through an SSH tunnel (`ssh -L 8081:localhost:8081 server`, then
-`http://localhost:8081`), or on your LAN or VPN over HTTPS:
-
-```toml
-[admin]
-listen = ":8081"
-group = "overfin-admins"   # who may sign in, at your identity provider
-redirect_url = "http://localhost:8081/admin/auth/callback"
+```sh
+docker exec -it overfin-backend /overfin-backend -set-panel-password
 ```
 
 For real names, add a `[connector]`. With Pocket ID (`kind = "pocketid"`,

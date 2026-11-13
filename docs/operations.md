@@ -1,6 +1,6 @@
 # Useful to know when running Overfin
 
-- **`overfin -check`** (with Docker: `docker exec overfin /overfin -check`) tests the configuration and what it points to (the
+- **`overfin -check`** (with Docker: `docker exec overfin-backend /overfin-backend -check`) tests the configuration and what it points to (the
   secret key, Jellyfin, the identity provider) and says in plain words
   what's wrong, changing nothing.
 - **`SIGHUP`** reloads the configuration without dropping playbacks. Changing
@@ -10,7 +10,7 @@
   logged (`a slow request`, with the route's pattern, the time and, for
   images, how each was made, never who asked or for what), to see where speed is lost.
 - **`-recover-tokens`** (with Docker the container won't start without its
-  key: `docker compose run --rm -it overfin -recover-tokens`) gets you going again if the secret key is lost
+  key: `docker compose run --rm -it backend -recover-tokens`) gets you going again if the secret key is lost
   (PINs and logins are reset, history is kept; TMDB's token, Seerr's key
   and the SMTP password set in the panel are given again there, a new webhook
   key is made in Notices, and
@@ -24,7 +24,7 @@
   password. `-recover-tokens` prints these steps too.
 - **Locked out?** `overfin -set-password you@example.org` asks for a new
   password and ends that account's other logins (with Docker: `docker exec
-  -it overfin /overfin -set-password you@example.org`).
+  -it overfin-backend /overfin-backend -set-password you@example.org`).
 
 ---
 
