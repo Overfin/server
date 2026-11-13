@@ -73,7 +73,9 @@ func run(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 	errc := make(chan error, 4)
-	site := gateway.Handler(g, Version, logger)
+	revoked := &gateway.Revocations{}
+	go revoked.Follow(ctx, g, logger)
+	site := gateway.Handler(g, Version, revoked, logger)
 	listen := func(addr string) (net.Listener, error) {
 		ln, err := net.Listen("tcp", addr)
 		if err != nil {

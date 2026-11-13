@@ -121,8 +121,10 @@ func (b *Backend) meant(addr string) bool {
 
 // linkRoutes are the backend's answers to its gateway's own questions,
 // before its site: the gateway passes no visitor's request under /link/.
+// More are added with Handle.
 func (b *Backend) linkRoutes(site http.Handler) http.Handler {
 	mux := http.NewServeMux()
+	b.mux = mux
 	mux.HandleFunc("GET "+egressPath, func(w http.ResponseWriter, r *http.Request) {
 		if b.meant(r.URL.Query().Get("addr")) {
 			w.WriteHeader(http.StatusNoContent)
@@ -133,6 +135,10 @@ func (b *Backend) linkRoutes(site http.Handler) http.Handler {
 	mux.Handle("/", site)
 	return mux
 }
+
+// Handle adds an answer to the gateway's own questions (a pattern under
+// /link/v1/), before Run.
+func (b *Backend) Handle(pattern string, h http.Handler) { b.mux.Handle(pattern, h) }
 
 // serveEgress runs one egress connection on the gateway's side, once its
 // TLS handshake is done.

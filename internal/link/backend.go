@@ -36,6 +36,7 @@ type Backend struct {
 	logger  *slog.Logger
 	id      *Identity
 
+	mux      *http.ServeMux // the gateway's own questions (linkRoutes)
 	egressMu sync.Mutex
 	egress   map[string]time.Time // addresses the backend asked to reach, when
 }

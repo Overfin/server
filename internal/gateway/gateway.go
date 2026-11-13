@@ -31,7 +31,7 @@ type Backend interface {
 // Handler passes visitors' requests to the backend: the API's routes the
 // specification lists, and GET for the site's pages; every other request
 // gets a plain 404 here, without reaching the backend.
-func Handler(b Backend, version string, logger *slog.Logger) http.Handler {
+func Handler(b Backend, version string, revoked *Revocations, logger *slog.Logger) http.Handler {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Scheme, pr.Out.URL.Host = "http", "backend"
@@ -69,7 +69,7 @@ func Handler(b Backend, version string, logger *slog.Logger) http.Handler {
 		}
 		var h http.Handler = proxy
 		if !op.Public {
-			h = requireSession(b, proxy)
+			h = requireSession(b, revoked, proxy)
 		}
 		mux.Handle(op.Method+" "+op.Path, h)
 	}
@@ -90,11 +90,11 @@ func Handler(b Backend, version string, logger *slog.Logger) http.Handler {
 // and the backend's signature of it (package edge): without one, the
 // visitor isn't signed in, and the backend isn't asked. A filter only: the
 // backend checks the session itself.
-func requireSession(b Backend, next http.Handler) http.Handler {
+func requireSession(b Backend, revoked *Revocations, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		login, token, ok := edge.Pair(r)
 		key := b.BackendKey()
-		if !ok || key == nil || !edge.Verify(key, login, token) {
+		if !ok || key == nil || !edge.Verify(key, login, token) || revoked.Revoked(login) {
 			w.Header().Set("Content-Type", "application/problem+json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"type":"not-authenticated","title":"Not logged in","status":401}` + "\n"))

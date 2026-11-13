@@ -346,6 +346,7 @@ func run(logger *slog.Logger) error {
 			return err
 		}
 		edgeSigner = lb.SignEdge
+		lb.Handle("GET "+eventsPath, eventsHandler(db))
 		// Paired servers are reached through the gateway only: peers see
 		// the gateway, never this machine (internal/outbound).
 		outbound.Through(lb.DialEgress)
@@ -1005,6 +1006,9 @@ func purgeExpired(ctx context.Context, db *store.Store, logger *slog.Logger) {
 		}
 		if _, err := db.DeleteExpiredLogins(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("purging expired logins failed", "err", err)
+		}
+		if err := db.TrimRevokedLogins(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("purging old revocations failed", "err", err)
 		}
 		if err := db.DeleteOldEmailLinks(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("purging old links failed", "err", err)
