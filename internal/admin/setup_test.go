@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"github.com/overfin/server/internal/password"
 	"io"
 	"log/slog"
 	"net/http"
@@ -354,5 +355,34 @@ func TestSetupSeerr(t *testing.T) {
 	rec := post(h, local, "seerr", `{"code":"K7QM-2XRP","url":"http://seerr:5055","key":"good"}`)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "No default Sonarr") || got != "http://seerr:5055" {
 		t.Errorf("good: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// On the backend: no code (the wizard answers private addresses only), and
+// the control panel's own login is a step.
+func TestSetupBackendNoCodePanelLogin(t *testing.T) {
+	var made [2]string
+	s := &Setup{NoCode: true, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		PanelLogin: func(_ context.Context, user, hash string) error { made = [2]string{user, hash}; return nil }}
+	h := s.Handler()
+	steps := get(h, local)
+	if strings.Contains(steps, `"id":"code"`) || !strings.Contains(steps, `"id":"panel"`) {
+		t.Fatalf("steps: %s", steps)
+	}
+	if rec := post(h, local, "panel", `{"username":"operator","password":"short"}`); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("a weak password: %d", rec.Code)
+	}
+	if rec := post(h, local, "panel", `{"username":"","password":"Panel-pass-2026!"}`); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("no username: %d", rec.Code)
+	}
+	if rec := post(h, local, "panel", `{"username":"operator","password":"Panel-pass-2026!"}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("the panel's login: %d %s", rec.Code, rec.Body.String())
+	}
+	if made[0] != "operator" || !password.Check(made[1], "Panel-pass-2026!") {
+		t.Errorf("saved %q", made[0])
+	}
+	// The internet still can't reach it.
+	if rec := post(h, "203.0.113.9:1", "panel", `{"username":"x","password":"Panel-pass-2026!"}`); rec.Code != http.StatusNotFound {
+		t.Errorf("from a public address: %d", rec.Code)
 	}
 }

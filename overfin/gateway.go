@@ -225,6 +225,9 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	}
 	lib := api.Library{Sessions: sessions, Provisioner: prov, Jellyfin: sh.jf, Images: sh.images, CursorKey: k.Cursor,
 		Folders: sh.folders, Service: sh.service, Titles: sh.titles, Texts: sh.texts, Searches: sh.searches, Lookups: sh.lookups, Logger: logger}
+	// The gateway's prefetch of new titles' artwork (backend only).
+	prefetch := http.HandlerFunc(lib.PrefetchArtwork)
+	prefetchArtwork.Store(&prefetch)
 	// Discovery, when there's a source for TMDB's data.
 	var disc *api.Discovery
 	if sh.source() != nil {
@@ -308,6 +311,11 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	siteHandler, err := newSite(cfg.Site, api.SiteGate(sessions.SignIn, prov))
 	if err != nil {
 		return nil, err
+	}
+	if edgeSigner != nil {
+		// The backend: signed-in visitors get the gateway's first check.
+		inner := identityMiddleware
+		identityMiddleware = func(h http.Handler) http.Handler { return inner(issueEdge(h)) }
 	}
 	h, err := server.New(logger, identityMiddleware, siteHandler, plugins...)
 	if err != nil {

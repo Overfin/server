@@ -265,7 +265,7 @@ func (c *Config) WithFeatures(f Features) (*Config, error) {
 
 // Admin is Overfin's control panel. With managed sign-in, it's at /admin/
 // on the site's address, for admins; otherwise on its own listener, never
-// on the internet (SECURITY.md rule 83), off unless Listen is set.
+// on the internet (SECURITY.md rule 129), off unless Listen is set.
 type Admin struct {
 	// Listen is the panel's address, e.g. ":8081" in a container whose port
 	// is published on a private address only.

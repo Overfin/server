@@ -206,19 +206,15 @@ func (p *Pipeline) keepSizes(ctx context.Context, ref TMDBRef, file string) (mad
 		return 0, deleted, ctx.Err()
 	}
 	defer func() { <-p.background }()
-	img, err := decodeChecked(original)
+	outs, _, err := transform(original, missing, contentTypeOf(ref.Type))
 	if err != nil {
 		return 0, deleted, err
 	}
-	for _, w := range missing {
+	for i, w := range missing {
 		if ctx.Err() != nil {
 			return made, deleted, ctx.Err()
 		}
-		data, err := encode(Shrink(img, w), contentTypeOf(ref.Type))
-		if err == nil {
-			err = writeKept(p.keptFile(ref, strconv.Itoa(w)), data)
-		}
-		if err != nil {
+		if err := writeKept(p.keptFile(ref, strconv.Itoa(w)), outs[i]); err != nil {
 			return made, deleted, err
 		}
 		made++

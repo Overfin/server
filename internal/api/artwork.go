@@ -206,3 +206,35 @@ func (l Library) uploadedImage(w http.ResponseWriter, r *http.Request, p *store.
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	_, _ = w.Write(data)
 }
+
+// PrefetchArtwork answers the gateway's prefetch of TMDB artwork (the
+// link only, never a visitor: the gateway passes no request under /link/):
+// the image at the width asked, as the image route makes it, without a
+// profile's access check. It goes into the gateway's cache only, which
+// still asks the backend, for each session, before serving it (rule 39).
+func (l Library) PrefetchArtwork(w http.ResponseWriter, r *http.Request) {
+	ref, err := images.ParseArtwork(r.PathValue("id"))
+	width, ok := 0, false
+	if err == nil {
+		if asked := r.URL.Query().Get("width"); asked != "" {
+			n, convErr := strconv.Atoi(asked)
+			width, ok = images.Width(ref.Type, n)
+			ok = ok && convErr == nil
+		} else {
+			width, ok = images.NamedWidth(ref.Type, cmp.Or(r.URL.Query().Get("size"), "medium"))
+		}
+	}
+	if !ok {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	data, contentType, err := l.Images.TMDB(r.Context(), ref, width, func(context.Context) error { return nil })
+	if err != nil {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	w.Header().Set("Cache-Control", "private, max-age=604800, immutable")
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	_, _ = w.Write(data)
+}

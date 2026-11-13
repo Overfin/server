@@ -1,45 +1,18 @@
-# Overfin and its Jellyfin
+# Running Overfin
 
-Overfin runs with a Jellyfin of its own, and comes as two images of the
-same version:
-
-- `ghcr.io/overfin/overfin`: Overfin alone, about 25 MB, on a base with no
-  shell and no system packages;
-- `ghcr.io/overfin/overfin-jellyfin`: Jellyfin's official image, at the
-  version Overfin is made for, with Overfin's plugin for it built in, about
-  1.7 GB (Jellyfin's ffmpeg and GPU libraries).
-
-Overfin sets that Jellyfin up on its first start, keeps the settings it
-needs there, and is the only one that talks to it. Nobody signs in to
-Jellyfin itself. Overfin starts only beside the Jellyfin and plugin it's
-made with: until then, every page says the server is being updated, and its
-log says which image it needs.
-
-## Why two images
-
-- **Overfin faces the internet; Jellyfin holds your media.** Apart, a flaw
-  in Overfin doesn't reach your media folders, the GPU or Jellyfin's files,
-  and Overfin runs on a base with nothing in it to use.
-- **Updating Overfin leaves Jellyfin running.** Most releases change only
-  Overfin: playback and conversions in progress go on, and Jellyfin's image,
-  unchanged, isn't downloaded again.
-- **Two machines when you want them.** Jellyfin beside the media and the
-  GPU (a home server, a NAS), Overfin on the machine the internet reaches (a
-  VPS, a gateway), with nothing on that one it doesn't use.
-
-One setting, `OVERFIN_VERSION`, picks the version of both, so they always
-match.
+Overfin runs as two containers from two images of the same version: its
+**gateway**, the only part the internet reaches, and its **backend**,
+with Overfin's data, its control panel, and its own Jellyfin with Overfin's
+plugin. [How it's built, and why](../docs/architecture.md).
 
 ## Before you start
 
 - A machine with Docker and Docker Compose, with your films and series on
   it (or mounted on it).
 - For the internet: a domain pointing to the machine, and ports **80 and
-  443** open to it. Without one, Overfin serves plain http, for your LAN.
+  443** open to it. Without one, the site is plain http, for your LAN.
 
-## On one machine
-
-`compose.yaml` runs both containers on one machine.
+## Starting it
 
 ```sh
 mkdir overfin && cd overfin
@@ -55,148 +28,100 @@ Then:
 docker compose up -d
 ```
 
-On Fedora, RHEL and other SELinux systems, the container can't read the media
-folder until it's labeled for containers: add `,z` after `:ro` on the media
-line of `compose.yaml`.
+On Fedora, RHEL and other SELinux systems, the container can't read the
+media folder until it's labeled for containers: add `,z` after `:ro` on the
+media line.
+
+The two containers pair by themselves, through a volume only they share.
 
 ## Setting it up
 
-Open the machine's address in a browser. The setup wizard asks first for a
-one-time code from Overfin's log, so nobody else can set your server up
-before you do. This prints it:
+From your LAN, open `http://<the machine>:8081`: the setup wizard asks, one
+step at a time, for the default language, a TMDB token (it says how to get
+one; for now the site can't be used without it), Intro Skipper (optional),
+Seerr (optional), a username and a password for the control panel, and
+your email and a password as the site's first admin. The wizard and the
+control panel answer only private addresses (your LAN, a VPN), never the
+internet.
 
-```sh
-docker logs overfin | grep -o '"code":"[^"]*' | tail -1 | cut -d'"' -f4
-```
+Then, in the control panel (`http://<the machine>:8081`):
 
-("permission denied": put `sudo` in front of `docker`, as for any Docker
-command when your user isn't in the `docker` group.) The code changes each
-time Overfin restarts. Then the wizard asks, one step
-at a time: the default language, a TMDB token (it says how to get one;
-for now the site can't be used without it), Intro Skipper (skippable), Seerr (skippable), and your email
-and a password, as the first admin.
-
-Then, in the control panel (`/admin/`):
-
-- **Libraries**: add yours, with folders under `/media`, where the compose
-  file puts your media folder.
+- **Libraries**: add yours, with folders under `/media`.
 - **Server, Email**: an SMTP server, so people can register with an
-  invitation and choose a new password by email. Without one, you add
-  people with a password, and set forgotten ones.
+  invitation and choose a new password by email.
 - **Server, Transcoding**: your GPU, once Jellyfin has it (below).
 - **People**: add them, or send invitations.
 
+The site is at `http://<the machine>`, or your domain.
+
+A forgotten control panel password:
+
+```sh
+docker exec -it overfin-backend /overfin-backend -set-panel-password
+```
+
 ## A GPU for converting videos
 
-Uncomment the lines for yours in `compose.yaml` (Intel or
+Uncomment the lines for yours under `backend` in `compose.yaml` (Intel or
 AMD: `/dev/dri`; NVIDIA: the `deploy` block, with the NVIDIA Container
 Toolkit installed), run `docker compose up -d`, then choose it in the
 control panel and test it on your own videos.
 
 ## Looking inside Jellyfin
 
-Jellyfin is closed. To look inside, open access in the control panel
-(Server, Jellyfin), which gives Overfin's administrator account there a new
-password, shown once. Then uncomment the `ports:` lines under `jellyfin` in
-`compose.yaml` and run `docker compose up -d`: Jellyfin is on this machine
-only (reach it with `ssh -L 8096:localhost:8096 <the machine>`). Changes
-made there may break Overfin, or be undone by it. When you're done, close
-access again from the panel, comment the lines again, and run
-`docker compose up -d`.
+Jellyfin listens inside the backend's container only. Open access in the
+control panel (Server, Jellyfin): it gives Overfin's administrator account
+there a new password, shown once, and Jellyfin's own pages are at
+`http://<the machine>:8082`, from your LAN, until you close access again.
+Changes made there may break Overfin, or be undone by it.
 
 ## On two machines
 
-Jellyfin on the machine with the media and the GPU, Overfin on the one the
-internet reaches. Each gets its compose file and a `.env` with the same
-`OVERFIN_VERSION`.
-
-On the **media machine**:
-
-```sh
-mkdir overfin && cd overfin
-curl -fsSLO https://raw.githubusercontent.com/overfin/server/v0.9.0/deploy/compose.jellyfin.yaml
-curl -fsSL -o .env https://raw.githubusercontent.com/overfin/server/v0.9.0/deploy/.env.example
-```
-
-In `compose.jellyfin.yaml`, change `/srv/media` to your media folder, and
-put this machine's address on the network between the two before the port
-(`192.168.1.20:8096:8096`, a VPN address). Keep that port closed to
-everything but Overfin's machine, with a firewall rule: Overfin's plugin
-answers only Overfin, but Jellyfin's own sign-in page answers whoever
-reaches it. Then:
+The gateway can run on another machine, a small server facing the
+internet (a VPS, say), with the backend at home: no port to open at home,
+the backend connects out to its gateway. Run the `gateway` service there,
+and the `backend` service at home, each without the `pairing` volume and
+the settings that name it (`OVERFIN_PAIRING_FILE`, `OVERFIN_GATEWAY_ADDRESS`),
+then pair them once:
 
 ```sh
-docker compose -f compose.jellyfin.yaml up -d
+docker exec overfin-backend /overfin-backend -pair <gateway's host:port>
 ```
 
-On the **front machine**:
+and set the code it prints as `OVERFIN_PAIRING` on the gateway: the backend
+pairs at its next attempt, and the code is used up (remove it from the
+gateway's settings). Pair with the address the backend
+will reach the gateway at, by the site's name when a proxy in front of the
+gateway routes TLS by name (or add `-server-name <the site's domain>`).
 
-```sh
-mkdir overfin && cd overfin
-curl -fsSLO https://raw.githubusercontent.com/overfin/server/v0.9.0/deploy/compose.overfin.yaml
-curl -fsSL -o .env https://raw.githubusercontent.com/overfin/server/v0.9.0/deploy/.env.example
-```
-
-In `.env`, set `OVERFIN_JELLYFIN_URL` to Jellyfin's address
-(`http://192.168.1.20:8096`), and `OVERFIN_DOMAIN` if you have one. Then:
-
-```sh
-docker compose -f compose.overfin.yaml up -d
-```
-
-and set it up in your browser, as below. A GPU goes on the media machine;
-libraries' folders are the ones in `compose.jellyfin.yaml`.
-
-To update, set the new `OVERFIN_VERSION` on both, the media machine first:
-
-```sh
-docker compose -f compose.jellyfin.yaml pull && docker compose -f compose.jellyfin.yaml up -d
-```
-
-then the same with `compose.overfin.yaml` on the front machine. Between the
-two, or if one is forgotten, the site says it's being updated, and
-Overfin's log names the image the media machine needs.
+Behind a TCP proxy that sends the PROXY protocol, give the gateway
+`OVERFIN_PROXY_PROTOCOL_FROM` (its address); behind an HTTP proxy,
+`OVERFIN_TRUSTED_PROXIES`. With the proxy on the same machine and the
+gateway's ports published by Docker, that address is the Docker network's
+own (its gateway, such as 172.18.0.1), not 127.0.0.1: give the network a
+fixed subnet so it doesn't change. Publish the gateway's ports on 127.0.0.1
+only, then: ports Docker publishes bypass firewalls such as ufw.
 
 ## Updating
 
 Back up first (below): Overfin migrates its database by itself when it
-starts, and a migrated database doesn't go back to an older Overfin: an
-older one refuses to start on it, saying so in its log. The backup is the
-way back.
+starts, and a migrated database doesn't go back to an older Overfin. The
+backup is the way back.
 
-Then take the release's `compose.yaml` (keep your `.env`, and copy over
-any lines you added, such as more media folders or a GPU), and
-`docker compose pull && docker compose up -d`. Both images come at the
-release's version: there's no Jellyfin version to choose. Two machines:
-see [On two machines](#on-two-machines).
-
-### From 0.9 and before
-
-Up to 0.9, Jellyfin ran from Jellyfin's own image, as root. It now comes
-from `overfin-jellyfin`, as user 65532, and Overfin serves nothing until it
-does (every page says the server is being updated, and its log says why).
-Back up first (below), then:
-
-```sh
-docker compose down
-for v in jellyfin-config jellyfin-cache; do
-  docker run --rm -v overfin_$v:/v alpine chown -R 65532:65532 /v
-done
-```
-
-Take the release's `compose.yaml` (copy over your media lines and your
-GPU), and `docker compose up -d`. The volumes keep their names: Jellyfin
-keeps everything it had.
+Set the new `OVERFIN_VERSION` (or take the release's `compose.yaml`,
+copying over your media lines and your GPU), then
+`docker compose pull && docker compose up -d`. Both images come at that
+version: there's no Jellyfin version to choose. Until both run it, the
+site says it's being updated.
 
 ## Backups
 
-`overfin-secrets` holds Overfin's secret key, `overfin-data` everything
-else; `jellyfin-config` is Jellyfin's. `jellyfin-cache` needs no backup:
-Jellyfin makes it again. Keep the secret key apart from the rest: with
-it, anyone can read the tokens sealed in Overfin's database. On two
-machines, Overfin's volumes are on the front machine and Jellyfin's on the
-media machine: the same commands on each, with `-f` and its compose file,
-and only its own volumes in the list.
+The backend's volumes: `secrets` holds Overfin's secret key, `data`
+everything else; `jellyfin-config` is Jellyfin's. `jellyfin-cache` needs no
+backup: Jellyfin makes it again. The gateway has nothing to back up (its
+certificates come again, its pairing is made again). Keep the secret key
+apart from the rest: with it, anyone can read the tokens sealed in
+Overfin's database.
 
 Stop the stack first, so the databases are copied whole, then start it
 again. From the folder with `compose.yaml` (it names the project `overfin`, so
@@ -205,7 +130,7 @@ the volumes' names start with `overfin_`, whatever the folder is called):
 ```sh
 docker compose stop
 mkdir -p backup
-for v in overfin-data overfin-secrets jellyfin-config; do
+for v in data secrets jellyfin-config; do
   docker run --rm -v overfin_$v:/v:ro -v "$PWD/backup":/b alpine tar czf /b/$v.tgz -C /v .
 done
 cp compose.yaml .env backup/
@@ -216,13 +141,10 @@ To restore, into empty volumes (after `docker compose down` and
 `docker volume rm` of the three, or on a new machine):
 
 ```sh
-for v in overfin-data overfin-secrets jellyfin-config; do
+for v in data secrets jellyfin-config; do
   docker volume create overfin_$v
   docker run --rm -v overfin_$v:/v -v "$PWD/backup":/b:ro alpine tar xzf /b/$v.tgz -C /v
 done
 cp backup/compose.yaml backup/.env .
 docker compose up -d
 ```
-
-Both were tested end to end: a backup of 0.4.0, an update to 0.5 and back
-to 0.4.0 from the backup, accounts, libraries and settings intact.

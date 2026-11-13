@@ -49,6 +49,8 @@
   let seerrKey = $state('');
   let email = $state('');
   let password = $state('');
+  let panelUser = $state('');
+  let panelPassword = $state('');
   let notes = $state<Record<string, string>>({});
   // The Jellyfin found: its administrator's login is asked, then (survey)
   // what it holds is shown for confirmation.
@@ -197,6 +199,12 @@
       seerrKey = '';
       notes.seerr = ans.summary;
       return 'stay';
+    },
+    panel: async () => {
+      if ((await post('panel', { username: panelUser, password: panelPassword })) === null) return false;
+      panelPassword = '';
+      notes.panel = 'The control panel\'s login is made.';
+      return true;
     },
     admin: async () => {
       if ((await post('admin', { email, password })) === null) return false;
@@ -394,10 +402,20 @@
         </div>
         <p class="hint">You can connect it later in the control panel.</p>
         {#if notes.seerr}<p class="notice">{notes.seerr}</p>{/if}
+      {:else if step.id === 'panel'}
+        <div class="card-head"><div>
+          <h2>The control panel's login</h2>
+          <p>What you sign in to this control panel with. It's its own login, apart from the site's accounts: it opens the control panel only, from your LAN or VPN.</p>
+        </div></div>
+        <div class="fields">
+          <label class="field"><span>A username</span><input bind:value={panelUser} disabled={locked} autocomplete="username" spellcheck="false" /></label>
+          <label class="field"><span>A password</span><input type="password" bind:value={panelPassword} disabled={locked} autocomplete="new-password" /><span class="hint">At least 10 characters, with a digit and a special character.</span></label>
+        </div>
+        {#if notes.panel}<p class="notice">{notes.panel}</p>{/if}
       {:else if step.id === 'admin'}
         <div class="card-head"><div>
           <h2>You, the first admin</h2>
-          <p>The account you sign in with, to the site and to the control panel.</p>
+          <p>{setup.steps.some((s) => s.id === 'panel') ? 'The account you sign in with on the site, as its first admin.' : 'The account you sign in with, to the site and to the control panel.'}</p>
         </div></div>
         <div class="fields">
           <label class="field"><span>Your email</span><input type="email" bind:value={email} disabled={locked} autocomplete="username" spellcheck="false" /><span class="hint">You sign in with it.</span></label>

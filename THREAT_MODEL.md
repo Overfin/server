@@ -8,18 +8,22 @@ each other. Numbers in brackets refer to the rules in
 ## Trust boundaries
 
 ```
-internet ──▶ reverse proxy ──▶ Overfin ──▶ Jellyfin / Seerr / TMDB
- untrusted     operator's,        the        trusted code,
-               optional           boundary   untrusted data
-               (TLS, identity)
+internet ──▶ reverse proxy ──▶ gateway ◀══ link ══ backend ──▶ Jellyfin / Seerr / TMDB
+ untrusted     operator's,      the first   (opened   the        trusted code,
+               optional         boundary    by the    boundary   untrusted data
+               (TLS, identity)              backend)
 ```
+
+The gateway faces the internet and holds nothing worth taking; the backend
+holds the data and the secrets, and checks everything itself [119, 123, 127].
 
 | Party | Trusted? |
 |---|---|
 | Visitors, logged in or not | No |
 | The website built on Overfin | Partly: it may have bugs, so Overfin limits what a broken site can do |
 | The reverse proxy and identity provider, when there are | Yes, for the identity and client IP they assert |
-| Other Overfin servers (federation, planned) | No: each proves who it is and gets only what was shared with it [94, 96] |
+| Overfin's gateway, to its backend | Partly: it may be compromised, so the backend checks every session itself and trusts only the client address it gives [123, 126] |
+| Other Overfin servers (federation) | No: each proves who it is and gets only what was shared with it [94, 96] |
 | Other sites on the same domain (sibling subdomains) | No |
 | Jellyfin, Seerr and TMDB as services | Yes |
 | Data from Jellyfin, Seerr and TMDB (metadata, files, subtitles, images) | No |
@@ -119,6 +123,26 @@ subtitles and attachments) from anywhere.
 - **Oversized or malformed data:** size limits and timeouts, upstream IDs
   validated like client input, and image dimensions checked before decoding,
   so a small file claiming to be enormous can't exhaust memory [2, 13, 16].
+
+## Case 4: a compromised gateway
+
+The gateway is the part the internet reaches, possibly on a rented
+server the operator doesn't fully trust. Suppose an attacker controls it.
+
+- **People's data:** the gateway holds none, on its disk or in its logs
+  [127]: no accounts, progress, emails, secrets, or the keys to Jellyfin,
+  the identity provider or federation.
+- **Acting as a user or an admin:** the backend checks every session
+  itself; the gateway can only pass along what real visitors send while
+  it's compromised, never make up a session or reach the control panel,
+  which isn't behind it [123, 124, 129, 130].
+- **Lying about addresses:** possible, so the backend's per-account and
+  per-email limits don't depend on addresses [126].
+- **Using the federation key:** it stays at the backend; the gateway only
+  passes the bytes of TLS that runs end to end [132].
+- **Getting in at home:** the backend opens no port; the link only lets
+  the gateway ask what visitors may ask [119, 124]. Once the gateway is
+  cleaned and paired again, nothing has to change elsewhere [120].
 
 ## Identity edge cases
 

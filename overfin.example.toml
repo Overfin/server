@@ -1,11 +1,14 @@
-# Overfin configuration example.
+# Overfin's backend: configuration example.
 #
-# Overfin runs without any file: everything has a default, and the setup page
-# in the browser asks for the rest. Copy to /etc/overfin/overfin.toml only to
-# change them (with compose, mount it there: see the install guide). Changes apply on restart, or live on SIGHUP (docker kill -s
-# HUP overfin) except listen, storage.path, jellyfin.url, [https], [admin],
-# site.url, [connector] and the secret key: changing one of those refuses the
-# reload, and what's running stays. Secrets never go in this file;
+# The backend runs without any file: everything has a default, and the setup
+# wizard (on the backend's port 8081, from your LAN) asks for the rest. Copy
+# to /etc/overfin/overfin.toml in the backend's container only to change
+# them (with compose, mount it there: see the install guide). The gateway has
+# no file: its settings are environment variables (deploy/README.md).
+# Changes apply on restart, or live on SIGHUP (docker kill -s HUP
+# overfin-backend) except storage.path, [admin], site.url, [connector] and
+# the secret key: changing one of those refuses the reload, and what's
+# running stays. Secrets never go in this file;
 # set them as environment variables (or NAME_FILE pointing to a file, for
 # Docker secrets):
 #
@@ -24,31 +27,10 @@
 # OVERFIN_CONFIG, when set, is where Overfin looks for this file (the
 # -config flag wins).
 
-# Address Overfin listens on: the site, over plain http. With [https], only
-# Let's Encrypt's checks, and a redirect to HTTPS for everyone else.
-listen = ":8080"
-
-[https]
-# Overfin serves HTTPS itself, with a certificate it gets from Let's Encrypt
-# and renews: set the site's domain, pointed at this server, with ports 80
-# and 443 reachable from the internet (in Docker: -p 80:8080 -p 443:8443).
-# Or set OVERFIN_DOMAIN in the environment instead. Leave it empty behind
-# your own reverse proxy, or for plain http on a LAN.
-domain = ""                     # e.g. "media.example.org"
-listen = ":8443"
-email = ""                      # optional: Let's Encrypt's contact
-
-[jellyfin]
-# Where Overfin reaches its own Jellyfin (SECURITY.md rule 110), on your
-# media; keeping it off the internet is recommended. A fresh Jellyfin,
-# Overfin sets up itself when it starts, and makes its own key there, kept
-# sealed in the database. One already set up, Overfin takes only if you hand
-# it over in the setup wizard, with its administrator's login. Without an
-# address here (or in OVERFIN_JELLYFIN_URL), the wizard asks for it. The
-# wizard needs the one-time code from Overfin's log; it's at /admin/ on the
-# site's own address with managed sign-in (where it also makes the first
-# admin), and on the control panel's.
-url = "http://192.0.2.10:8096"
+# There's no listen address and no HTTPS here: the gateway serves the site
+# (and gets its certificate, with OVERFIN_DOMAIN), and the backend reaches it
+# over the link it opens. Jellyfin is the one inside the backend's
+# container, which the backend runs and sets up itself: nothing to set.
 
 [identity]
 # How users log in:
@@ -64,9 +46,10 @@ url = "http://192.0.2.10:8096"
 # This example fills in [oidc] below, so it says "oidc"; leave mode out for
 # the default.
 mode = "oidc"
-# The reverse proxies in front of Overfin: the client address is taken from
-# them, and in forwardauth mode the identity headers too.
-trusted_proxies = ["198.51.100.7"]
+# forwardauth mode only: the reverse proxies whose identity headers are
+# trusted. (Visitors' addresses come from the gateway, which is told about
+# a proxy in front of it in its own settings.)
+# trusted_proxies = ["198.51.100.7"]
 # oidc and forwardauth modes only: only members of this group get an
 # account. Leave empty to allow everyone who can log in.
 required_group = "media-users"
@@ -126,39 +109,28 @@ host = ""                       # e.g. "smtp.example.org"
 # username = ""                 # with OVERFIN_MAIL_PASSWORD
 
 [admin]
-# With managed sign-in, the control panel is at /admin/ on the site's own
-# address, for admins, who confirm it's them before going in; nothing to set
-# here, except, to keep it to private addresses (LAN, VPN):
-# private = true
-# or, to take it off the site entirely, onto a listener of its own that
-# answers private addresses only (admins sign in there, at
-# http://<that address>/admin/):
-# listen = ":8081"
-#
-# With an identity provider (oidc or forwardauth mode):
-# Overfin's control panel, on its own listener: never on the internet. It
-# answers only private addresses (LAN, VPN, an SSH tunnel), and only members
-# of `group` may sign in, through the [oidc] provider. Register
-# `redirect_url` there too. Off when `listen` is empty.
-#
-# Through an SSH tunnel (no certificate needed): publish the port on the
-# server's 127.0.0.1 only, run `ssh -L 8081:localhost:8081 server`, and open
-# http://localhost:8081.
-# On a LAN or VPN instead: an https:// redirect_url, with tls_cert and
-# tls_key for that name.
+# The control panel and the setup wizard: the backend's own listener, ":8081"
+# unless set here, answering private addresses only (LAN, VPN), never the
+# internet, never through the gateway. The panel has its own login (made in
+# the setup wizard; overfin-backend -set-panel-password), whatever sign-in
+# the site uses: nothing else to set.
 listen = ""                     # e.g. ":8081"
-group = ""                      # e.g. "overfin-admins"
-redirect_url = ""               # e.g. "http://localhost:8081/admin/auth/callback"
+# Plain http by default (the LAN or a VPN carries it); a certificate and its
+# key here serve it over HTTPS.
 tls_cert = ""
 tls_key = ""
+# With an identity provider and a [connector]: the group whose members were
+# the panel's admins, for overfin-backend -import-people (they stay admins
+# on the site), and that Pocket ID keeps set up.
+group = ""                      # e.g. "overfin-admins"
 
 [connector]
 # Optional: the identity provider's own API, so the control panel shows who's
 # behind each account (live, never stored). Set OVERFIN_CONNECTOR_TOKEN.
 # With Pocket ID: its STATIC_API_KEY. Overfin then also sets up, at each
 # start, its login client there ([oidc]'s client ID and secret, the site's
-# and the panel's return addresses) and the groups named in [admin] and
-# [identity]; invitation links lead to a one-person sign-up link (set
+# return address) and the groups named in [admin] and [identity];
+# invitation links lead to a one-person sign-up link (set
 # ALLOW_USER_SIGNUPS=withToken in Pocket ID).
 # With Authentik: a service account with the global permission "Can view
 # User", and a token for it made in Tokens and App passwords with intent
@@ -183,8 +155,7 @@ serve = "builtin"
 # the built-in client, whose pages have real paths (/title/…).
 spa_fallback = false
 # The site's public address, for the links in emails (confirming an
-# address, a new password, invitations): emails with a link need it. With
-# [https], it's https://<domain> already.
+# address, a new password, invitations): emails with a link need it.
 # url = "https://example.org"
 
 # ---- Feature settings --------------------------------------------------------

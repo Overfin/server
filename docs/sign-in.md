@@ -13,7 +13,6 @@ issue refresh tokens (usually the `offline_access` scope), then:
 ```toml
 [identity]
 mode = "oidc"
-trusted_proxies = ["198.51.100.7"]   # your reverse proxy
 
 [oidc]
 issuer = "https://auth.example.org/application/o/site/"
@@ -21,24 +20,36 @@ client_id = "overfin"
 redirect_url = "https://media.example.org/api/v1/auth/callback"
 ```
 
-with the client secret in `OVERFIN_OIDC_CLIENT_SECRET`. Anyone who can log
+with the client secret in `OVERFIN_OIDC_CLIENT_SECRET`, in the backend's
+settings (the provider has to be reachable from the backend: it exchanges
+the code; the browser comes back through the gateway). Anyone who can log
 in at your provider gets an account, unless you set
 `identity.required_group`, or make invitations required.
 
-With a required group or a panel admin group, let your provider send an ID
-token with the groups claim on refresh too: Overfin takes a claim that's
-missing to mean no groups, and without an ID token logins end within 12 hours.
+With a required group, let your provider send an ID token with the groups
+claim on refresh too: Overfin takes a claim that's missing to mean no
+groups, and without an ID token logins end within 12 hours.
+
+For real names in the control panel, add a `[connector]`. With Pocket ID
+(`kind = "pocketid"`, `url = "https://auth.example.org"`), set
+`OVERFIN_CONNECTOR_TOKEN` to its `STATIC_API_KEY`: Overfin then also sets
+up its own login client and the groups named in the settings there, and
+invitation links lead to a one-person sign-up link (Pocket ID needs
+`ALLOW_USER_SIGNUPS=withToken`). With Authentik (`kind = "authentik"`),
+set it to an Authentik token of intent **API Token** (not an app
+password), for a user allowed only to **view users**.
 
 **Leaving your identity provider for Overfin's own sign-in?** While it's
-still configured (with its `[connector]`), run `overfin -import-people`
-once: everyone it has, with an email, can then sign in with that email,
-keeping their account, and the panel's admins stay admins. Then switch to
-`identity.mode = "managed"`. Imported people have no password yet: they
-choose one with "Forgot your password?", or you set one in the panel.
+still configured (with its `[connector]`), run
+`overfin-backend -import-people` once: everyone it has, with an email, can then sign in
+with that email, keeping their account, and the members of `admin.group`
+stay admins on the site. Then switch to `identity.mode = "managed"`.
+Imported people have no password yet: they choose one with "Forgot your
+password?", or you set one in the panel.
 
-**Locked out?** `overfin -set-password you@example.org` asks for a new
-password and ends that account's other logins (with Docker: `docker exec
--it overfin /overfin -set-password you@example.org`).
+**Locked out?** `overfin-backend -set-password you@example.org` asks for a
+new password and ends that account's other logins (with Docker:
+`docker exec -it overfin-backend /overfin-backend -set-password you@example.org`).
 
 ## Signing a TV in with a code
 
@@ -55,32 +66,16 @@ With an identity provider or forward auth, there are no codes for now.
 
 ## The control panel
 
-With Overfin's own sign-in, it's at `/admin/` on the site, for admins, who
-confirm it's them before going in. `[admin] private = true` keeps it to
-private addresses (LAN, VPN); `[admin] listen = ":8081"` takes it off the
-site entirely, onto a listener of its own for private addresses only
-(publish that port on your LAN address only), where admins sign in at
-`http://<that address>:8081/admin/`.
+The control panel is the backend's, on its own port (8081), whatever sign-in
+the site uses, and answers only private addresses (your LAN, a VPN): never
+the internet, and never through the gateway. It has its own login, a
+username and a password made in the setup wizard, apart from the site's
+accounts: an admin on the site, or a stolen site account, doesn't open it.
+A forgotten password:
 
-With an identity provider, it has a listener of its own instead, never on
-the internet: publish its port on the server's `127.0.0.1` only, and reach
-it through an SSH tunnel (`ssh -L 8081:localhost:8081 server`, then
-`http://localhost:8081`), or on your LAN or VPN over HTTPS:
-
-```toml
-[admin]
-listen = ":8081"
-group = "overfin-admins"   # who may sign in, at your identity provider
-redirect_url = "http://localhost:8081/admin/auth/callback"
+```sh
+docker exec -it overfin-backend /overfin-backend -set-panel-password
 ```
-
-For real names, add a `[connector]`. With Pocket ID (`kind = "pocketid"`,
-`url = "https://auth.example.org"`), set `OVERFIN_CONNECTOR_TOKEN` to its
-`STATIC_API_KEY`: Overfin then also sets up its own login client and the
-admin group there, and invitation links lead to a one-person sign-up link
-(Pocket ID needs `ALLOW_USER_SIGNUPS=withToken`). With Authentik
-(`kind = "authentik"`), set it to an Authentik token of intent **API Token**
-(not an app password), for a user allowed only to **view users**.
 
 
 ---

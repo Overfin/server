@@ -8,9 +8,13 @@ mkdir -p dev && printf '[storage]\npath = "dev/overfin.db"\n' > dev/overfin.toml
 OVERFIN_SECRET_KEY=$(openssl rand -hex 32) go run ./cmd/overfin -config dev/overfin.toml
 ```
 
-Your own build in the compose stack: `docker build -t overfin:dev .` in the
-repository, then `OVERFIN_IMAGE=overfin:dev` in the .env beside compose.yaml and
-`docker compose up -d`.
+Your own build in the compose stack: in the repository,
+`docker build -t overfin-gateway:dev .` and
+`docker build -f backend/Dockerfile -t overfin-backend:dev .` (the same
+`--build-arg VERSION=…` for both: the link refuses two versions), then
+`OVERFIN_GATEWAY_IMAGE=overfin-gateway:dev` and
+`OVERFIN_BACKEND_IMAGE=overfin-backend:dev` in the .env beside compose.yaml,
+and `docker compose up -d`.
 
 Go with the standard library and three dependencies (a TOML parser, a
 pure-Go SQLite, and the Go team's golang.org/x/crypto for getting

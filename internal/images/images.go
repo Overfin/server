@@ -237,11 +237,11 @@ func imageTags(it *jellyfin.RawItem) map[string]string {
 // before anything is decoded. Nothing from the original file survives except
 // its pixels.
 func Reencode(raw []byte, contentType string) ([]byte, error) {
-	img, err := decodeChecked(raw)
+	outs, _, err := transform(raw, []int{0}, contentType)
 	if err != nil {
 		return nil, err
 	}
-	return encode(img, contentType)
+	return outs[0], nil
 }
 
 var prepareSlots = make(chan struct{}, 2)
@@ -256,11 +256,11 @@ var prepareSlots = make(chan struct{}, 2)
 func Prepare(raw []byte, maxWidth int, contentType string) ([]byte, error) {
 	prepareSlots <- struct{}{}
 	defer func() { <-prepareSlots }()
-	img, err := decodeChecked(raw)
+	outs, _, err := transform(raw, []int{maxWidth}, contentType)
 	if err != nil {
 		return nil, err
 	}
-	return encode(Shrink(img, maxWidth), contentType)
+	return outs[0], nil
 }
 
 // Resized returns an image Overfin holds the original of (an upload, say)

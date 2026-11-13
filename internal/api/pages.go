@@ -22,9 +22,9 @@ import (
 // stylesheet and its script, in the site's brand.
 
 const (
-	pagesJS        = "/api/v1/pages/page.js"
-	pagesCSS       = "/api/v1/pages/page.css"
-	pagesLogo      = "/api/v1/pages/logo.svg"
+	pagesJSPath    = "/api/v1/pages/page.js"
+	pagesCSSPath   = "/api/v1/pages/page.css"
+	pagesLogoPath  = "/api/v1/pages/logo.svg"
 	challengePath  = "/api/v1/pages/challenge"
 	invitePage     = "/invite/"
 	signinPagePath = "/signin"
@@ -47,9 +47,9 @@ func (Pages) Name() string { return "pages" }
 
 func (p Pages) Register(r *plugin.Registrar) error {
 	for pattern, h := range map[string]http.HandlerFunc{
-		"GET " + pagesJS:       pageFile("pages/page.js", "text/javascript; charset=utf-8"),
-		"GET " + pagesCSS:      pageFile("pages/page.css", "text/css; charset=utf-8"),
-		"GET " + pagesLogo:     pageFile("pages/logo.svg", "image/svg+xml"),
+		"GET " + pagesJSPath:   pageFile("pages/page.js", "text/javascript; charset=utf-8"),
+		"GET " + pagesCSSPath:  pageFile("pages/page.css", "text/css; charset=utf-8"),
+		"GET " + pagesLogoPath: pageFile("pages/logo.svg", "image/svg+xml"),
 		"GET " + challengePath: p.challenge,
 	} {
 		if err := r.HandlePublic(pattern, h); err != nil {
@@ -135,7 +135,7 @@ func renderPage(w http.ResponseWriter, r *http.Request, st *store.Store, logger 
 	lang := pageLang(r, st)
 	t := signinTexts[lang]
 	data := map[string]any{
-		"Lang": lang, "T": t, "P": p, "JS": pagesJS, "CSS": pagesCSS, "Icon": pagesLogo,
+		"Lang": lang, "T": t, "P": p, "JS": pagesJSPath, "CSS": pagesCSSPath, "Icon": pagesLogoPath,
 		"Banner": template.HTML(theme.Banner), "Name": "Overfin",
 		"Rules": rulesText(t, p.Rules), "Min": p.Rules.MinLength,
 	}
