@@ -88,10 +88,19 @@ then pair them once:
 docker exec overfin-backend /overfin-backend -pair <gateway's host:port>
 ```
 
-and set the code it prints as `OVERFIN_PAIRING` on the gateway. Behind a
-TCP proxy that sends the PROXY protocol, give the gateway
+and set the code it prints as `OVERFIN_PAIRING` on the gateway: the backend
+pairs at its next attempt, and the code is used up (remove it from the
+gateway's settings). Pair with the address the backend
+will reach the gateway at, by the site's name when a proxy in front of the
+gateway routes TLS by name (or add `-server-name <the site's domain>`).
+
+Behind a TCP proxy that sends the PROXY protocol, give the gateway
 `OVERFIN_PROXY_PROTOCOL_FROM` (its address); behind an HTTP proxy,
-`OVERFIN_TRUSTED_PROXIES`.
+`OVERFIN_TRUSTED_PROXIES`. With the proxy on the same machine and the
+gateway's ports published by Docker, that address is the Docker network's
+own (its gateway, such as 172.18.0.1), not 127.0.0.1: give the network a
+fixed subnet so it doesn't change. Publish the gateway's ports on 127.0.0.1
+only, then: ports Docker publishes bypass firewalls such as ufw.
 
 ## Updating
 

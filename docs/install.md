@@ -91,7 +91,11 @@ certificate still works: it's checked over 443 itself.
 everything to the gateway on port 8080. Tell the gateway the proxy's
 address, so the visitor's address comes from it: `OVERFIN_TRUSTED_PROXIES`
 for an HTTP proxy (its `X-Forwarded-For`), `OVERFIN_PROXY_PROTOCOL_FROM`
-for a TCP proxy that sends the PROXY protocol. Tell the backend the site's
+for a TCP proxy that sends the PROXY protocol. On the same machine, with
+the gateway's ports published by Docker, the proxy's connections arrive
+from the Docker network's own address (its gateway, such as 172.18.0.1),
+not from 127.0.0.1: name that one, or give the network a fixed subnet in
+the compose file so the address doesn't change. Tell the backend the site's
 address (with an `https://` address, Overfin's cookies are HTTPS ones, and
 it tells browsers to come back over HTTPS only), in
 `/etc/overfin/overfin.toml` ([overfin.example.toml](../overfin.example.toml)
