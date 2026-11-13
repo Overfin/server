@@ -344,8 +344,10 @@ own do), so a title looks the same wherever it is.
      TVDB IDs, Jellyfin's metadata and rating, and image references (the
      item's ID and its image tags). Never images, never URLs: posters are
      still fetched when asked for, re-encoded and cached.
-   - **Kept in sync**: changes read often, a full pass now and then for
-     what's gone.
+   - **Kept in sync**: through Overfin's plugin (2026-11-13), its feed of
+     Jellyfin's own library changes asked every few seconds, only the items
+     it names read again; the whole library read only when the feed can't
+     say (a first run, Jellyfin started again), by ID, never a path.
    - ~~The service account, the index, its sync~~ Done, read library by
      library, with each title's library, dates, rating score, genres and
      studios. ~~Listings from it~~ Done for what it can answer: by

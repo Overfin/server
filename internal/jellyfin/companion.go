@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // Overfin's plugin for its Jellyfin (github.com/Overfin/jellyfin-plugin):
@@ -51,4 +52,70 @@ func (c *Client) Frame(ctx context.Context, admin Auth, item string, at float64)
 	q := url.Values{}
 	q.Set("at", strconv.FormatFloat(at, 'f', 3, 64))
 	return c.readSmall(ctx, streamClient, admin, "/Overfin/Frame/"+id+"/"+id, q, MaxFrame)
+}
+
+// IndexItem is an item as Overfin's plugin gives it for the index: Jellyfin's
+// own field names for what the index keeps, the library it's in, and never a
+// path, only a film's file name and its folder's name, or a series' folder
+// name.
+type IndexItem struct {
+	RawItem
+	LibraryId  string
+	FolderName string
+	FileName   string
+}
+
+// IndexPage is a page of the index's items, and where the next one starts
+// ("" after the last).
+type IndexPage struct {
+	Items []IndexItem
+	Next  string
+}
+
+// IndexChange is one change in the plugin's feed.
+type IndexChange struct {
+	Seq     int64
+	Id      string
+	Removed bool
+}
+
+// IndexChanges is the feed's answer: the changes after a number, or Reset
+// when everything must be read again first, from Generation and Last.
+type IndexChanges struct {
+	Generation string
+	Last       int64
+	Reset      bool
+	Changes    []IndexChange
+}
+
+// IndexPage reads the library's films, series, seasons and episodes, by ID,
+// after `after` ("" for the first page), at most limit.
+func (c *Client) IndexPage(ctx context.Context, admin Auth, after string, limit int) (*IndexPage, error) {
+	q := url.Values{"limit": {strconv.Itoa(limit)}}
+	if after != "" {
+		id, err := NormalizeID(after)
+		if err != nil {
+			return nil, err
+		}
+		q.Set("after", id)
+	}
+	var out IndexPage
+	return &out, c.doQuery(ctx, "the index", http.MethodGet, "/Overfin/Items", q, admin, nil, &out)
+}
+
+// IndexItems reads those of ids (at most 200) still in a library.
+func (c *Client) IndexItems(ctx context.Context, admin Auth, ids []string) (*IndexPage, error) {
+	var out IndexPage
+	return &out, c.doQuery(ctx, "the index", http.MethodGet, "/Overfin/Items", url.Values{"ids": {strings.Join(ids, ",")}}, admin, nil, &out)
+}
+
+// IndexChanges asks the plugin's feed what changed after since in
+// generation ("" for none yet: the answer is a Reset).
+func (c *Client) IndexChanges(ctx context.Context, admin Auth, generation string, since int64, limit int) (*IndexChanges, error) {
+	q := url.Values{"since": {strconv.FormatInt(since, 10)}, "limit": {strconv.Itoa(limit)}}
+	if generation != "" {
+		q.Set("generation", generation)
+	}
+	var out IndexChanges
+	return &out, c.doQuery(ctx, "the index's changes", http.MethodGet, "/Overfin/Changes", q, admin, nil, &out)
 }

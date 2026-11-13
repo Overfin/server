@@ -45,10 +45,8 @@ type RawItem struct {
 	IndexNumber             *int
 	IndexNumberEnd          *int
 	Status                  string
-	// Path is where the file (or the series' folder) is on Jellyfin's
-	// server. Only the catalog asks for it, keeps only its last names, and
-	// never sends it on (SECURITY.md rule 78).
-	Path              string
+	// No Path: where files are on Jellyfin's server never reaches Overfin
+	// (the index gets their names from the plugin; SECURITY.md rule 78).
 	ChildCount        *int
 	AlbumId           string
 	Album             string

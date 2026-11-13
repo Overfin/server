@@ -724,8 +724,9 @@ func run(logger *slog.Logger) error {
 		}
 	}
 	cat := &catalog.Sync{Jellyfin: sh.jf, Store: db, Logger: logger,
-		Service:      sh.service,
-		ChangesEvery: 5 * time.Minute, FullEvery: 24 * time.Hour,
+		Service: sh.service, Admin: sh.service.Admin,
+		// The plugin's feed, asked over loopback: cheap.
+		Every: 5 * time.Second,
 		// New titles matched, and their pages fetched, at once; wished
 		// titles that arrived leave the wishlists for the watchlists.
 		Read: func() {
@@ -737,7 +738,6 @@ func run(logger *slog.Logger) error {
 			}()
 		}}
 	go cat.Run(ctx)
-	go cat.Watch(ctx)
 	// Wishes, handed to Seerr when that's where they go.
 	go (&api.WishesToSeerr{Store: db, Setup: gw.wishSetup, Logger: logger}).Run(ctx)
 	// Titles' certifications, for kids profiles: looked for every 10

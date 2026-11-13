@@ -3,23 +3,19 @@
 // through Overfin's Jellyfin service account and kept in Overfin's
 // database. Nothing personal is read or kept.
 //
-// A full pass reads the whole library now and then, and is the only one that
-// removes titles; in between, only what Jellyfin saved since the last read
-// is read again.
+// Overfin's plugin gives what the index keeps, and a feed of what changed;
+// a full read happens only when the feed can't say.
 package catalog
 
 import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"maps"
 	"net/http"
 	"regexp"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/overfin/server/internal/jellyfin"
@@ -29,23 +25,29 @@ import (
 	"github.com/overfin/server/internal/tracks"
 )
 
-// Service is the Jellyfin service account the catalog reads with.
+// Service is the Jellyfin service account the catalog reads the libraries
+// with.
 type Service interface {
 	Auth(ctx context.Context) (jellyfin.Auth, string, error)
 	// Refused tells it Jellyfin refused its token; it gets a new one.
 	Refused(ctx context.Context) error
 }
 
-// Sync keeps the index in step with the library.
+// Sync keeps the index in step with the library, through Overfin's plugin:
+// its change feed says which items changed since the last read, and only
+// those are read again. The whole library is read when the feed can't say
+// (a first run, a Jellyfin that started again, a place the feed let go),
+// and only then are titles not seen removed.
 type Sync struct {
 	Jellyfin *jellyfin.Client
 	Store    *store.Store
-	Service  Service
-	Logger   *slog.Logger
-	// ChangesEvery is how often changes are read while Jellyfin's socket
-	// is out of reach (Watch); FullEvery, how often the whole library is.
-	ChangesEvery time.Duration
-	FullEvery    time.Duration
+	// Service reads the libraries' list; Admin is Overfin's key, which the
+	// plugin answers.
+	Service Service
+	Admin   func() jellyfin.Auth
+	Logger  *slog.Logger
+	// Every is how often the feed is asked.
+	Every time.Duration
 	// Read, when set, runs once titles were read: the titles' keeper
 	// matches the new ones and fetches their pages then, not on its next
 	// pass.
@@ -54,92 +56,14 @@ type Sync struct {
 	mu      sync.Mutex
 	lastErr string
 	now     func() time.Time
-	// watching: Jellyfin's socket is connected, and says what changes.
-	watching atomic.Bool
-	wake     chan struct{}
-	// removed are the items Jellyfin said were removed, to check.
-	removed map[string]bool
+	// generation and since are where the feed was read to: Jellyfin's
+	// start, and the last change read.
+	generation string
+	since      int64
 }
 
-// wakeUp has Run read the changes now.
-func (s *Sync) wakeUp() {
-	select {
-	case s.wakeCh() <- struct{}{}:
-	default:
-	}
-}
-
-func (s *Sync) wakeCh() chan struct{} {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.wake == nil {
-		s.wake = make(chan struct{}, 1)
-	}
-	return s.wake
-}
-
-// Watch listens on Jellyfin's socket as the service account until ctx
-// ends: each library change has the index read the changes at once, so
-// it doesn't ask Jellyfin every ChangesEvery. When the socket drops, the
-// changes are read on reconnecting (the margin covers what was said in
-// between), and the index polls meanwhile.
-func (s *Sync) Watch(ctx context.Context) {
-	wait := 10 * time.Second
-	for ctx.Err() == nil {
-		a, _, err := s.Service.Auth(ctx)
-		if err == nil {
-			err = s.Jellyfin.Watch(ctx, a, func() {
-				s.watching.Store(true)
-				wait = 10 * time.Second
-				s.Logger.Info("catalog: listening to Jellyfin for library changes")
-				s.wakeUp()
-			}, s.changed)
-		}
-		was := s.watching.Swap(false)
-		if ctx.Err() != nil {
-			return
-		}
-		if jellyfin.IsStatus(err, http.StatusUnauthorized) {
-			if err := s.Service.Refused(ctx); err != nil {
-				s.Logger.Warn("catalog: renewing the service account failed", "err", err)
-			}
-		}
-		if was {
-			s.Logger.Warn("catalog: Jellyfin's socket dropped; reading changes every few minutes until it's back", "err", err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(wait):
-		}
-		wait = min(2*wait, 5*time.Minute)
-	}
-}
-
-// changed notes a library change from Jellyfin, and wakes Run.
-func (s *Sync) changed(lc jellyfin.LibraryChange) {
-	if len(lc.ItemsRemoved) > 0 {
-		s.mu.Lock()
-		if s.removed == nil {
-			s.removed = map[string]bool{}
-		}
-		for _, raw := range lc.ItemsRemoved {
-			if id, err := jellyfin.NormalizeID(raw); err == nil && len(s.removed) < 100_000 {
-				s.removed[id] = true
-			}
-		}
-		s.mu.Unlock()
-	}
-	s.wakeUp()
-}
-
-// pageSize is how many titles one request reads. With their people, a
-// page of 500 took Jellyfin longer than the client waits.
-const pageSize = 100
-
-// margin is how far back changes are read again, so nothing saved during
-// the previous read is missed.
-const margin = 2 * time.Minute
+// pageSize is how many titles one page of a full read holds.
+const pageSize = 1000
 
 func (s *Sync) clock() time.Time {
 	if s.now != nil {
@@ -148,61 +72,79 @@ func (s *Sync) clock() time.Time {
 	return time.Now()
 }
 
-// Run keeps the index in step until ctx ends: a full pass first if the last
-// one is old or there's none, then changes when Jellyfin's socket says
-// (Watch; every ChangesEvery while it's out of reach), and a full pass
-// every FullEvery.
+// Run keeps the index in step until ctx ends.
 func (s *Sync) Run(ctx context.Context) {
 	// Title keys first, for items indexed before they existed.
 	if err := s.Store.RefreshTitleKeys(ctx); err != nil && ctx.Err() == nil {
 		s.Logger.Error("catalog: computing title keys failed", "err", err)
 	}
-	wake := s.wakeCh()
 	for {
 		s.once(ctx)
-		every := s.ChangesEvery
-		if s.watching.Load() {
-			every = time.Hour // only to see whether a full pass is due
-		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-wake:
-		case <-time.After(every):
+		case <-time.After(s.Every):
 		}
 	}
 }
 
 func (s *Sync) once(ctx context.Context) {
-	s.mu.Lock()
-	removed := slices.Collect(maps.Keys(s.removed))
-	s.removed = nil
-	s.mu.Unlock()
-	st, err := s.Store.CatalogState(ctx)
-	if err == nil && len(removed) > 0 && st.Pass > 0 {
-		var n int
-		if n, err = s.confirmGone(ctx, removed, st.Pass); n > 0 {
-			s.Logger.Info("catalog: titles removed", "titles", n)
-		}
-	}
-	if err == nil {
-		if st.Pass == 0 || s.clock().Sub(st.FullAt) >= s.FullEvery {
-			err = s.Full(ctx)
-		} else {
-			err = s.Changes(ctx)
-		}
-	}
+	err := s.step(ctx)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err != nil && ctx.Err() == nil {
-		s.Logger.Error("catalog: reading the library failed", "err", err)
+		if err.Error() != s.lastErr {
+			s.Logger.Error("catalog: reading the library failed", "err", err)
+		}
 		s.lastErr = err.Error()
 	} else {
 		s.lastErr = ""
 	}
 }
 
-// Full reads the whole library, then removes the titles that are gone.
+// step reads what the feed says changed, or the whole library when it
+// can't say.
+func (s *Sync) step(ctx context.Context) error {
+	st, err := s.Store.CatalogState(ctx)
+	if err != nil {
+		return err
+	}
+	ch, err := s.Jellyfin.IndexChanges(ctx, s.Admin(), s.generation, s.since, changesLimit)
+	if err != nil {
+		return err
+	}
+	if ch.Reset || st.Pass == 0 {
+		// The feed's place now, before the read: what changes while it
+		// runs is read after.
+		if err := s.Full(ctx); err != nil {
+			return err
+		}
+		s.generation, s.since = ch.Generation, ch.Last
+		return nil
+	}
+	for {
+		if err := s.apply(ctx, ch.Changes); err != nil {
+			return err
+		}
+		if len(ch.Changes) > 0 {
+			s.since = ch.Changes[len(ch.Changes)-1].Seq
+		}
+		if len(ch.Changes) < changesLimit {
+			return nil
+		}
+		if ch, err = s.Jellyfin.IndexChanges(ctx, s.Admin(), s.generation, s.since, changesLimit); err != nil {
+			return err
+		}
+		if ch.Reset {
+			s.generation = "" // read everything at the next step
+			return nil
+		}
+	}
+}
+
+const changesLimit = 1000
+
+// Full reads the whole library, then removes the titles it didn't see.
 func (s *Sync) Full(ctx context.Context) error {
 	st, err := s.Store.CatalogState(ctx)
 	if err != nil {
@@ -210,12 +152,31 @@ func (s *Sync) Full(ctx context.Context) error {
 	}
 	start := s.clock()
 	pass := st.Pass + 1
-	n, err := s.read(ctx, time.Time{}, pass)
+	if err := s.libraries(ctx); err != nil {
+		return err
+	}
+	n, after := 0, ""
+	for {
+		page, err := s.Jellyfin.IndexPage(ctx, s.Admin(), after, pageSize)
+		if err != nil {
+			return err
+		}
+		items := converted(page.Items)
+		if err := s.Store.PutCatalog(ctx, items, pass); err != nil {
+			return err
+		}
+		n += len(items)
+		if page.Next == "" {
+			break
+		}
+		after = page.Next
+	}
+	// Pages by ID don't shift: a title not seen is gone.
+	unseen, err := s.Store.UnseenCatalog(ctx, pass)
 	if err != nil {
 		return err
 	}
-	removed, err := s.sweep(ctx, pass)
-	if err != nil {
+	if err := s.Store.DeleteCatalog(ctx, unseen); err != nil {
 		return err
 	}
 	if err := s.Store.RefreshTitleKeys(ctx); err != nil {
@@ -225,9 +186,79 @@ func (s *Sync) Full(ctx context.Context) error {
 	if err := s.Store.SetCatalogState(ctx, st); err != nil {
 		return err
 	}
-	s.Logger.Info("catalog: the library was read", "titles", n, "removed", removed)
+	s.Logger.Info("catalog: the library was read", "titles", n, "removed", len(unseen),
+		"seconds", s.clock().Sub(start).Round(100*time.Millisecond).Seconds())
 	s.notify()
 	return nil
+}
+
+// apply reads the items changes name again: those still in a library are
+// kept, the others removed.
+func (s *Sync) apply(ctx context.Context, changes []jellyfin.IndexChange) error {
+	if len(changes) == 0 {
+		return nil
+	}
+	st, err := s.Store.CatalogState(ctx)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	seen := map[string]bool{}
+	for _, c := range changes {
+		if id, err := jellyfin.NormalizeID(c.Id); err == nil && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	read, removed := 0, 0
+	for batch := range slices.Chunk(ids, 200) {
+		page, err := s.Jellyfin.IndexItems(ctx, s.Admin(), batch)
+		if err != nil {
+			return err
+		}
+		items := converted(page.Items)
+		if err := s.Store.PutCatalog(ctx, items, st.Pass); err != nil {
+			return err
+		}
+		present := map[string]bool{}
+		for _, it := range items {
+			present[it.ID] = true
+		}
+		var gone []string
+		for _, id := range batch {
+			if !present[id] {
+				gone = append(gone, id)
+			}
+		}
+		if err := s.Store.DeleteCatalog(ctx, gone); err != nil {
+			return err
+		}
+		read, removed = read+len(items), removed+len(gone)
+	}
+	// A new library's titles come with a change: the list is read again.
+	if err := s.libraries(ctx); err != nil {
+		return err
+	}
+	if err := s.Store.RefreshTitleKeys(ctx); err != nil {
+		return err
+	}
+	st.ChangesAt = s.clock()
+	if err := s.Store.SetCatalogState(ctx, st); err != nil {
+		return err
+	}
+	s.Logger.Info("catalog: changes read", "titles", read, "removed", removed)
+	s.notify()
+	return nil
+}
+
+func converted(raws []jellyfin.IndexItem) []store.CatalogItem {
+	var items []store.CatalogItem
+	for _, raw := range raws {
+		if it, ok := convert(raw); ok {
+			items = append(items, it)
+		}
+	}
+	return items
 }
 
 // notify runs Read, when set.
@@ -237,143 +268,27 @@ func (s *Sync) notify() {
 	}
 }
 
-// Changes reads what Jellyfin saved since the last read.
-func (s *Sync) Changes(ctx context.Context) error {
-	st, err := s.Store.CatalogState(ctx)
-	if err != nil {
-		return err
-	}
-	start := s.clock()
-	n, err := s.read(ctx, st.ChangesAt.Add(-margin), st.Pass)
-	if err != nil {
-		return err
-	}
-	if n > 0 {
-		if err := s.Store.RefreshTitleKeys(ctx); err != nil {
-			return err
-		}
-	}
-	st.ChangesAt = start
-	if err := s.Store.SetCatalogState(ctx, st); err != nil {
-		return err
-	}
-	if n > 0 {
-		s.Logger.Info("catalog: changes read", "titles", n)
-		s.notify()
-	}
-	return nil
-}
-
-// read reads the library, library by library (everything, or what was
-// saved since since), and stores it as seen by pass. It returns how many
-// titles it read.
-func (s *Sync) read(ctx context.Context, since time.Time, pass int64) (int, error) {
+// libraries keeps the libraries' list, as the service account sees them.
+func (s *Sync) libraries(ctx context.Context) error {
 	var libs []jellyfin.RawItem
 	if err := s.withService(ctx, func(a jellyfin.Auth, userID string) error {
 		var err error
 		libs, err = s.Jellyfin.Libraries(ctx, a, userID)
 		return err
 	}); err != nil {
-		return 0, err
+		return err
 	}
 	kept := make([]store.Library, 0, len(libs))
 	for _, lib := range libs {
 		if id, err := jellyfin.NormalizeID(lib.Id); err == nil {
-			lib.Path = "" // never kept
 			item, err := json.Marshal(lib)
 			if err != nil {
-				return 0, err
+				return err
 			}
 			kept = append(kept, store.Library{ID: id, Item: item})
 		}
 	}
-	if err := s.Store.SetLibraries(ctx, kept); err != nil {
-		return 0, err
-	}
-	n := 0
-	for _, lib := range libs {
-		libID, err := jellyfin.NormalizeID(lib.Id)
-		if err != nil {
-			continue
-		}
-		for start := 0; ; start += pageSize {
-			var page *jellyfin.ItemPage
-			err := s.withService(ctx, func(a jellyfin.Auth, userID string) error {
-				var err error
-				page, err = s.Jellyfin.CatalogPage(ctx, a, userID,
-					jellyfin.CatalogQuery{StartIndex: start, Limit: pageSize, Since: since, LibraryID: libID})
-				return err
-			})
-			if err != nil {
-				return n, err
-			}
-			var items []store.CatalogItem
-			for _, raw := range page.Items {
-				if it, ok := convert(raw); ok {
-					it.LibraryID = libID
-					items = append(items, it)
-				}
-			}
-			if err := s.Store.PutCatalog(ctx, items, pass); err != nil {
-				return n, err
-			}
-			n += len(items)
-			if len(page.Items) < pageSize {
-				break
-			}
-		}
-	}
-	return n, nil
-}
-
-// sweep removes the titles the full pass didn't see, after asking Jellyfin
-// about them again: titles added while the pass ran shift its pages, and
-// one missed that way must not be removed.
-func (s *Sync) sweep(ctx context.Context, pass int64) (int, error) {
-	unseen, err := s.Store.UnseenCatalog(ctx, pass)
-	if err != nil {
-		return 0, err
-	}
-	return s.confirmGone(ctx, unseen, pass)
-}
-
-// confirmGone asks Jellyfin about items thought gone, keeps those it still
-// has (as seen by pass), and removes the others from the index.
-func (s *Sync) confirmGone(ctx context.Context, ids []string, pass int64) (int, error) {
-	removed := 0
-	for batch := range slices.Chunk(ids, 100) {
-		var found []jellyfin.RawItem
-		err := s.withService(ctx, func(a jellyfin.Auth, userID string) error {
-			var err error
-			found, err = s.Jellyfin.CatalogItems(ctx, a, userID, batch)
-			return err
-		})
-		if err != nil {
-			return removed, err
-		}
-		var still []store.CatalogItem
-		present := map[string]bool{}
-		for _, raw := range found {
-			if it, ok := convert(raw); ok {
-				still = append(still, it)
-				present[it.ID] = true
-			}
-		}
-		if err := s.Store.PutCatalog(ctx, still, pass); err != nil {
-			return removed, err
-		}
-		var gone []string
-		for _, id := range batch {
-			if !present[id] {
-				gone = append(gone, id)
-			}
-		}
-		if err := s.Store.DeleteCatalog(ctx, gone); err != nil {
-			return removed, err
-		}
-		removed += len(gone)
-	}
-	return removed, nil
+	return s.Store.SetLibraries(ctx, kept)
 }
 
 // withService runs fn with the service account, and once more with a new
@@ -440,10 +355,10 @@ var (
 	imageTag = regexp.MustCompile(`^[0-9A-Za-z]{1,64}$`)
 )
 
-// convert turns one of Jellyfin's items into a title of the index, its text
-// made plain and its IDs checked. Items of other types, or with an ID that
-// isn't one, are left out.
-func convert(raw jellyfin.RawItem) (store.CatalogItem, bool) {
+// convert turns one of the plugin's items into a title of the index, its
+// text made plain and its IDs checked. Items of other types, or with an ID
+// that isn't one, are left out.
+func convert(raw jellyfin.IndexItem) (store.CatalogItem, bool) {
 	kind, ok := kinds[raw.Type]
 	if !ok {
 		return store.CatalogItem{}, false
@@ -479,19 +394,19 @@ func convert(raw jellyfin.RawItem) (store.CatalogItem, bool) {
 	if t, err := time.Parse(time.RFC3339Nano, raw.DateCreated); err == nil {
 		it.AddedAt = t
 	}
+	it.LibraryID, _ = jellyfin.NormalizeID(raw.LibraryId)
 	// What the file and its folder are named, for telling a misidentified
 	// title (the control panel's Identification): a film's file and the
-	// folder it's in, a series' folder. Never the whole path.
+	// folder it's in, a series' folder. The plugin gives the names, never
+	// the path.
 	switch kind {
 	case "movie":
-		dir, file := splitPath(raw.Path)
-		_, it.FolderName = splitPath(dir)
-		it.FileName = file
+		it.FolderName, it.FileName = raw.FolderName, raw.FileName
 		if raw.RunTimeTicks > 0 {
 			it.RuntimeMs = raw.RunTimeTicks / 10_000
 		}
 	case "series":
-		_, it.FolderName = splitPath(raw.Path)
+		it.FolderName = raw.FolderName
 	}
 	it.FolderName, it.FileName = textclean.Plain(it.FolderName, 255), textclean.Plain(it.FileName, 255)
 	if len(raw.PremiereDate) >= 10 {
@@ -548,14 +463,6 @@ func matching(re *regexp.Regexp, s string) string {
 		return s
 	}
 	return ""
-}
-
-// splitPath splits a path from Jellyfin's server (slashes or backslashes)
-// into its folder and its last name.
-func splitPath(p string) (dir, name string) {
-	p = strings.TrimRight(p, `/\`)
-	i := strings.LastIndexAny(p, `/\`)
-	return p[:max(i, 0)], p[i+1:]
 }
 
 // maxAudioLanguages is how many audio languages of a file the index keeps.
