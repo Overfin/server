@@ -18,6 +18,10 @@ import (
 // refuses them at once, rather than letting them reach the backend's own
 // refusal. In memory only, each until its login would have expired.
 type Revocations struct {
+	// New, when set, gets the routes of new titles' artwork the backend
+	// announces (the cache fetches them ahead).
+	New func(paths []string)
+
 	mu      sync.Mutex
 	revoked map[[sha256.Size]byte]int64 // the login cookie's hash: when it'd have expired
 	seq     int64
@@ -70,12 +74,20 @@ func (rv *Revocations) Follow(ctx context.Context, backend http.RoundTripper, lo
 				sc := bufio.NewScanner(resp.Body)
 				for sc.Scan() {
 					var e struct {
-						Type    string `json:"type"`
-						Seq     int64  `json:"seq"`
-						Hash    string `json:"hash"`
-						Expires int64  `json:"expires"`
+						Type    string   `json:"type"`
+						Seq     int64    `json:"seq"`
+						Hash    string   `json:"hash"`
+						Expires int64    `json:"expires"`
+						Images  []string `json:"images"`
 					}
-					if json.Unmarshal(sc.Bytes(), &e) != nil || e.Type != "revoked" {
+					if json.Unmarshal(sc.Bytes(), &e) != nil {
+						continue
+					}
+					if e.Type == "new" && rv.New != nil {
+						rv.New(e.Images)
+						continue
+					}
+					if e.Type != "revoked" {
 						continue
 					}
 					if h, err := hex.DecodeString(e.Hash); err == nil {

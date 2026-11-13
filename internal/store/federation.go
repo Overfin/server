@@ -987,3 +987,32 @@ func (s *Store) DropPeerTitles(ctx context.Context, peerID string, keys []string
 		peerID, jsonList(keys))
 	return err
 }
+
+// NewTitles are the titles the catalog changed after seq (come, gone or
+// changed), at most limit, with the last change number read; head when
+// since is negative: where the log stands now, nothing read.
+func (s *Store) NewTitles(ctx context.Context, since int64, limit int) (keys []string, last int64, err error) {
+	if since < 0 {
+		head, _, err := s.TitleChanges(ctx)
+		return nil, head, err
+	}
+	rows, err := s.read.QueryContext(ctx, `SELECT seq, title_key FROM title_changes
+		WHERE seq > ? AND title_key NOT LIKE 'item/%' ORDER BY seq LIMIT ?`, since, limit)
+	if err != nil {
+		return nil, since, err
+	}
+	defer rows.Close()
+	last = since
+	seen := map[string]bool{}
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&last, &k); err != nil {
+			return nil, since, err
+		}
+		if !seen[k] {
+			seen[k] = true
+			keys = append(keys, k)
+		}
+	}
+	return keys, last, rows.Err()
+}

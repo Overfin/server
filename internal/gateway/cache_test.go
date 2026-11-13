@@ -1,12 +1,15 @@
 package gateway
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/overfin/server/internal/link"
 )
@@ -110,5 +113,53 @@ func TestCacheEviction(t *testing.T) {
 	used, files := c.Used()
 	if !popular || used > 60000 || (big1 && big2) {
 		t.Errorf("popular kept %v, big ones kept %v %v, used %d in %d files", popular, big1, big2, used, files)
+	}
+}
+
+// prefetchBackend serves the prefetch route, counting what it serves.
+type prefetchBackend struct {
+	mu     sync.Mutex
+	served []string
+}
+
+func (p *prefetchBackend) RoundTrip(r *http.Request) (*http.Response, error) {
+	p.mu.Lock()
+	p.served = append(p.served, r.URL.Path+"?"+r.URL.RawQuery)
+	p.mu.Unlock()
+	h := http.Header{}
+	h.Set("Cache-Control", "private, max-age=604800, immutable")
+	h.Set("Content-Type", "image/jpeg")
+	return &http.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader("fetched ahead")), Request: r}, nil
+}
+
+func TestFetchAhead(t *testing.T) {
+	c, b, h := newCache(t, 1<<30)
+	// A browser asked for a poster at width 342: the cache learns the size.
+	get(h, "/api/v1/images/tmdbart_poster_old1234567_jpg?width=342", "S1")
+	pb := &prefetchBackend{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.FetchAhead(ctx, pb)
+	for c.queueReady() == false {
+		time.Sleep(10 * time.Millisecond)
+	}
+	c.Ahead([]string{"/api/v1/images/tmdbart_poster_new1234567_jpg"})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, ok := c.lookup("/api/v1/images/tmdbart_poster_new1234567_jpg?width=342"); ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("not fetched ahead; served %v", pb.served)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(pb.served) != 1 || pb.served[0] != "/link/v1/artwork/tmdbart_poster_new1234567_jpg?width=342" {
+		t.Errorf("asked the backend for %v", pb.served)
+	}
+	// The first visitor gets it from the disk, after the check.
+	rec := get(h, "/api/v1/images/tmdbart_poster_new1234567_jpg?width=342", "S2")
+	if rec.Body.String() != "fetched ahead" || b.fetches["/api/v1/images/tmdbart_poster_new1234567_jpg"] != 0 || b.checks["/api/v1/images/tmdbart_poster_new1234567_jpg"] != 1 {
+		t.Errorf("served %q, fetched %d, checked %d", rec.Body.String(), b.fetches["/api/v1/images/tmdbart_poster_new1234567_jpg"], b.checks["/api/v1/images/tmdbart_poster_new1234567_jpg"])
 	}
 }

@@ -76,13 +76,15 @@ func run(logger *slog.Logger) error {
 	defer stop()
 	errc := make(chan error, 4)
 	revoked := &gateway.Revocations{}
-	go revoked.Follow(ctx, g, logger)
 	cacheMax, err := parseBytes(cmp.Or(os.Getenv("OVERFIN_CACHE_MAX"), "10GB"))
 	if err != nil {
 		return errors.New("OVERFIN_CACHE_MAX: " + err.Error())
 	}
 	cache := &gateway.Cache{Dir: filepath.Join(dir, "cache"), Limit: cacheMax, Margin: 0.10, Logger: logger}
 	cache.Load()
+	revoked.New = cache.Ahead
+	go cache.FetchAhead(ctx, g)
+	go revoked.Follow(ctx, g, logger)
 	site := gateway.Handler(g, Version, revoked, cache, logger)
 	listen := func(addr string) (net.Listener, error) {
 		ln, err := net.Listen("tcp", addr)

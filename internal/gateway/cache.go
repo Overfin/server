@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -38,10 +39,12 @@ type Cache struct {
 	Margin float64 // share of the disk left free (0.10)
 	Logger *slog.Logger
 
-	mu      sync.Mutex
-	entries map[string]*entry
-	used    int64
-	allowed map[string]time.Time // session hash + key: until when it may have it
+	mu       sync.Mutex
+	entries  map[string]*entry
+	used     int64
+	allowed  map[string]time.Time       // session hash + key: until when it may have it
+	variants map[string]map[string]bool // by image kind: the sizes asked for (queries)
+	queue    chan string                // new images to fetch ahead
 }
 
 type entry struct {
@@ -240,8 +243,25 @@ func (c *Cache) store(k string, body []byte, ctype string, took time.Duration, s
 		c.used -= old.size
 	}
 	e := &entry{file: file, size: int64(len(body)), ctype: ctype, fetch: took, at: now}
-	e.touch(sess, now)
+	if sess != ([8]byte{}) {
+		e.touch(sess, now)
+	} else {
+		e.hits = 0.5 // fetched ahead: worth little until someone asks
+	}
 	c.entries[k] = e
+	if path, query, ok := strings.Cut(k, "?"); ok {
+		if kind := imageKind(path); kind != "" {
+			if c.variants == nil {
+				c.variants = map[string]map[string]bool{}
+			}
+			if c.variants[kind] == nil {
+				c.variants[kind] = map[string]bool{}
+			}
+			if len(c.variants[kind]) < maxVariants {
+				c.variants[kind][query] = true
+			}
+		}
+	}
 	c.used += e.size
 	c.mu.Unlock()
 	c.fit()
@@ -301,4 +321,95 @@ func (c *Cache) Used() (int64, int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.used, len(c.entries)
+}
+
+// Fetching ahead: when the backend says titles came (its events), the
+// gateway fetches their artwork into the cache, one at a time, at the sizes
+// browsers asked for that kind of image here, so the first visitor doesn't
+// wait. Best effort: a full queue drops the rest.
+const (
+	maxVariants = 6
+	aheadPause  = 300 * time.Millisecond
+	aheadQueue  = 2000
+)
+
+// imageKind is a TMDB artwork route's kind (poster, backdrop, logo…), ""
+// for other images.
+func imageKind(path string) string {
+	id := strings.TrimPrefix(path, "/api/v1/images/")
+	rest, ok := strings.CutPrefix(id, "tmdbart_")
+	if !ok {
+		return ""
+	}
+	kind, _, _ := strings.Cut(rest, "_")
+	return kind
+}
+
+// Ahead queues new images (their routes, no size) to fetch ahead.
+func (c *Cache) Ahead(paths []string) {
+	c.mu.Lock()
+	q := c.queue
+	c.mu.Unlock()
+	if q == nil {
+		return
+	}
+	for _, p := range paths {
+		select {
+		case q <- p:
+		default:
+			return
+		}
+	}
+}
+
+// FetchAhead fetches what Ahead queues, from the backend over the link
+// (its prefetch route), until ctx ends.
+func (c *Cache) FetchAhead(ctx context.Context, backend http.RoundTripper) {
+	q := make(chan string, aheadQueue)
+	c.mu.Lock()
+	c.queue = q
+	c.mu.Unlock()
+	client := &http.Client{Transport: backend, Timeout: time.Minute}
+	for {
+		var path string
+		select {
+		case <-ctx.Done():
+			return
+		case path = <-q:
+		}
+		kind := imageKind(path)
+		c.mu.Lock()
+		var queries []string
+		for v := range c.variants[kind] {
+			if _, cached := c.entries[path+"?"+v]; !cached {
+				queries = append(queries, v)
+			}
+		}
+		c.mu.Unlock()
+		for _, v := range queries {
+			start := time.Now()
+			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://backend/link/v1/artwork/"+strings.TrimPrefix(path, "/api/v1/images/")+"?"+v, nil)
+			resp, err := client.Do(req)
+			if err != nil {
+				break
+			}
+			body, err := io.ReadAll(io.LimitReader(resp.Body, maxCached+1))
+			resp.Body.Close()
+			if err == nil && resp.StatusCode == http.StatusOK && len(body) <= maxCached {
+				c.store(path+"?"+v, body, resp.Header.Get("Content-Type"), time.Since(start), [8]byte{})
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(aheadPause):
+			}
+		}
+	}
+}
+
+// queueReady says whether FetchAhead runs (tests).
+func (c *Cache) queueReady() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.queue != nil
 }

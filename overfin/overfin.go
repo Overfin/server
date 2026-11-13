@@ -347,6 +347,7 @@ func run(logger *slog.Logger) error {
 		}
 		edgeSigner = lb.SignEdge
 		lb.Handle("GET "+eventsPath, eventsHandler(db))
+		lb.Handle("GET /link/v1/artwork/{id}", http.HandlerFunc(prefetchHandler))
 		// Paired servers are reached through the gateway only: peers see
 		// the gateway, never this machine (internal/outbound).
 		outbound.Through(lb.DialEgress)
