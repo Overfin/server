@@ -430,6 +430,8 @@ function browserFamily() {
  * @property {(device: string) => void} [onTakenOver] Another device of the
  *   account took over; player.continueHere() takes it back.
  * @property {(error: Error) => void} [onError] The playback can't go on.
+ * @property {(on: boolean) => void} [onReconnecting] The server can't be reached:
+ *   the player waits for it, the place kept (true), then starts over there (false).
  * @property {() => void} [onEnded] Played to the end.
  * @property {object} [Hls] The hls.js constructor, for browsers without
  *   native HLS; globalThis.Hls by default.
@@ -474,7 +476,13 @@ export class Player {
       timeupdate: () => { this.settled(); this.fillSubtitles(); },
       seeking: () => this.fillSubtitles(),
       seeked: () => { this.settled(); this.report(); },
-      ended: () => { this.report({ ended: true }); this.close(); this.options.onEnded?.(); },
+      // A direct stream cut short: the browser says error, or ends the
+      // video where its data stopped. Not the end of the title.
+      error: () => { if (!this.hls) this.fatal({ details: 'media error' }); },
+      ended: () => {
+        if (this.cutShort()) { this.fatal({ details: 'cut short' }); return; }
+        this.report({ ended: true }); this.close(); this.options.onEnded?.();
+      },
     };
   }
 
@@ -747,13 +755,30 @@ export class Player {
     try { await this.client.playback(pb.id); } catch (err) { this.gone(pb, err); }
   }
 
-  // fatal handles a stream hls.js gave up on: with the playback gone, as
-  // for any report; still there, or the server out of reach, it starts over
-  // at the same place, a few times a minute at most, then says so, rather
+  // cutShort says whether the video ended before its title did: a stream
+  // cut off (the server out of reach) ends where its data stopped.
+  cutShort() {
+    const end = (this.playback?.durationMs || 0) / 1000 || this.video.duration;
+    return Number.isFinite(end) && end > 0 && this.video.currentTime < end - 5;
+  }
+
+  // fatal handles a stream that failed (hls.js gave up, a direct stream cut
+  // short): with the playback gone, as for any report; the server out of
+  // reach, it waits for it, then starts over at the same place; otherwise it
+  // starts over at once, a few times a minute at most, then says so, rather
   // than stay frozen on a playback that holds the account's stream.
   async fatal(data) {
     const pb = this.playback;
-    await this.check();
+    if (!pb || this.closed || this.waiting) return;
+    try {
+      await this.client.playback(pb.id);
+    } catch (err) {
+      if (unreachable(err)) {
+        this.waitForServer();
+        return;
+      }
+      this.gone(pb, err);
+    }
     if (pb !== this.playback || this.closed) return; // gone() took it from here
     const now = Date.now();
     this.fatals = (this.fatals || []).filter((at) => now - at < 60_000);
@@ -764,6 +789,34 @@ export class Player {
     }
     this.video.pause();
     this.options.onError?.(new Error(`the stream failed: ${data?.details || 'unknown'}`));
+  }
+
+  // waitForServer holds the place while the server can't be reached (the
+  // connection lost, its gateway saying it's out of reach or being
+  // updated), asks again every few seconds, and starts over at the same
+  // place once it answers. onReconnecting says when it starts and stops.
+  async waitForServer() {
+    const pb = this.playback;
+    if (!pb || this.waiting || this.closed) return;
+    this.waiting = true;
+    this.held = this.positionMs;
+    const wasPlaying = !this.video.paused || this.video.autoplay;
+    this.video.pause();
+    this.options.onReconnecting?.(true);
+    while (!this.closed && pb === this.playback) {
+      await new Promise((r) => setTimeout(r, RECONNECT_EVERY));
+      try {
+        await this.client.playback(pb.id);
+        break;
+      } catch (err) {
+        if (!unreachable(err)) break; // answered: restart() sorts out a playback it forgot
+      }
+    }
+    this.waiting = false;
+    this.options.onReconnecting?.(false);
+    if (this.closed || pb !== this.playback) return;
+    this.video.autoplay = wasPlaying;
+    this.restart();
   }
 
   // gone handles a playback the server no longer has.
@@ -1070,6 +1123,16 @@ function concat(parts) {
 }
 
 // ---- Helpers ---------------------------------------------------------------
+
+// How often a player waiting for the server asks again.
+const RECONNECT_EVERY = 3_000;
+
+// unreachable says whether an error means the server can't be reached for
+// now (no answer at all, or its gateway saying it's out of reach or being
+// updated), rather than a refusal.
+function unreachable(err) {
+  return !err?.status || err.status === 502 || err.status === 503 || err.status === 504;
+}
 
 // A stretch of subtitles is being fetched, or is here; else the map holds
 // when to try a failed one again.
