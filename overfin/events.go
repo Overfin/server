@@ -19,10 +19,14 @@ import (
 //   - the logins ended before their time (the gateway refuses them at its
 //     first check, package edge);
 //   - new titles' artwork, for the gateway to fetch ahead into its cache
-//     (best effort: from when the stream starts).
+//     (best effort: from when the stream starts);
+//   - a change to what a profile may see (migration 107): the gateway forgets
+//     every access answer its image cache keeps. It forgets them too each
+//     time this stream starts, so a change during a break isn't missed.
 //
 //	{"type":"revoked","seq":12,"hash":"<SHA-256 of the login cookie, hex>","expires":1794000000}
 //	{"type":"new","images":["/api/v1/images/tmdbart_poster_…_jpg", …]}
+//	{"type":"access"}
 //	{"type":"ping"}
 
 // eventsPath is where the gateway follows them, from a revocation number
@@ -42,6 +46,10 @@ func eventsHandler(db *store.Store) http.Handler {
 		if err != nil {
 			return
 		}
+		access, err := db.AccessChange(r.Context())
+		if err != nil {
+			return
+		}
 		for n := 0; ; n++ {
 			if n%10 == 0 {
 				var paths []string
@@ -55,6 +63,19 @@ func eventsHandler(db *store.Store) http.Handler {
 					if flusher != nil {
 						flusher.Flush()
 					}
+				}
+			}
+			changed, err := db.AccessChange(r.Context())
+			if err != nil {
+				return
+			}
+			if changed != access {
+				access = changed
+				if enc.Encode(map[string]string{"type": "access"}) != nil {
+					return
+				}
+				if flusher != nil {
+					flusher.Flush()
 				}
 			}
 			revoked, err := db.RevokedLogins(r.Context(), since, 500)

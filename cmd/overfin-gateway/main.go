@@ -83,6 +83,7 @@ func run(logger *slog.Logger) error {
 	cache := &gateway.Cache{Dir: filepath.Join(dir, "cache"), Limit: cacheMax, Margin: 0.10, Logger: logger}
 	cache.Load()
 	revoked.New = cache.Ahead
+	revoked.Access = cache.ForgetAccess
 	go cache.FetchAhead(ctx, g)
 	go revoked.Follow(ctx, g, logger)
 	site := gateway.Handler(g, Version, revoked, cache, logger)

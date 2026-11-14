@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -268,12 +269,16 @@ func TestSessionFilter(t *testing.T) {
 type eventsBackend struct {
 	fakeBackend
 	revoke string
+	access bool // send an access event too
 }
 
 func (e *eventsBackend) RoundTrip(r *http.Request) (*http.Response, error) {
 	if r.URL.Path == "/link/v1/events" {
 		sum := sha256.Sum256([]byte(e.revoke))
 		line := `{"type":"revoked","seq":7,"hash":"` + hex.EncodeToString(sum[:]) + `","expires":` + strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10) + "}\n"
+		if e.access {
+			line += `{"type":"access"}` + "\n"
+		}
 		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(line)), Request: r}, nil
 	}
 	return e.fakeBackend.RoundTrip(r)
@@ -297,4 +302,28 @@ func TestRevocations(t *testing.T) {
 	if rec := do(h, "GET", "/api/v1/me", "203.0.113.5:1", "Cookie", "overfin-login=live; overfin-edge="+edge.Sign(key, "live")); rec.Code != http.StatusOK {
 		t.Errorf("another login: %d", rec.Code)
 	}
+}
+
+// The cache forgets its access answers each time the events stream starts
+// (a change during a break isn't missed), and on each access event.
+func TestAccessEvents(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	b := &eventsBackend{fakeBackend: fakeBackend{connected: true, pub: pub}, revoke: "x", access: true}
+	var mu sync.Mutex
+	forgot := 0
+	rv := &Revocations{Access: func() { mu.Lock(); forgot++; mu.Unlock() }}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go rv.Follow(ctx, b, quiet)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := forgot
+		mu.Unlock()
+		if n >= 2 {
+			return // the stream's start, then its access event
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Errorf("forgot %d times", forgot)
 }

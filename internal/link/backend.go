@@ -13,6 +13,7 @@ import (
 	"github.com/overfin/server/internal/edge"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/netip"
@@ -161,12 +162,18 @@ func (b *Backend) Run(ctx context.Context) {
 			}
 		}
 		select {
-		case <-time.After(wait):
+		case <-time.After(jittered(wait)):
 		case <-ctx.Done():
 			return
 		}
 		wait = min(2*wait, 30*time.Second)
 	}
+}
+
+// jittered is d give or take a fifth, so a backend coming back after a
+// gateway that keeps restarting doesn't keep its rhythm.
+func jittered(d time.Duration) time.Duration {
+	return time.Duration(float64(d) * (0.8 + 0.4*rand.Float64()))
 }
 
 // connect makes one connection to the gateway and serves it until it ends.

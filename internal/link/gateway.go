@@ -43,7 +43,13 @@ type Gateway struct {
 	status   Status
 	failures int              // wrong codes in a row, for the log
 	usage    map[string]Usage // egress traffic, by address
+	// mismatchAt is when a backend of another version last tried.
+	mismatchAt time.Time
 }
+
+// mismatchFor is how long a backend of another version counts after its
+// last try: it tries at least every 30 s while it's there.
+const mismatchFor = 2 * time.Minute
 
 // Status is what the gateway knows of its backend.
 type Status struct {
@@ -91,11 +97,16 @@ func (g *Gateway) BackendKey() ed25519.PublicKey {
 // Public is the gateway's own key.
 func (g *Gateway) Public() ed25519.PublicKey { return g.id.Public() }
 
-// Status is what the gateway knows of its backend now.
+// Status is what the gateway knows of its backend now. A backend of
+// another version that stopped trying no longer counts.
 func (g *Gateway) Status() Status {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.status
+	st := g.status
+	if time.Since(g.mismatchAt) > mismatchFor {
+		st.Mismatch = ""
+	}
+	return st
 }
 
 // tlsConfig is the TLS side of a backend's connection: the gateway's own
@@ -211,7 +222,7 @@ func (g *Gateway) preamble(c io.Reader, pub ed25519.PublicKey) (string, bool) {
 		if g.status.Mismatch != version {
 			g.logger.Warn("link: the backend's version isn't the gateway's", "backend", version, "gateway", g.version)
 		}
-		g.status.Mismatch = version
+		g.status.Mismatch, g.mismatchAt = version, time.Now()
 		return "NO version " + g.version, false
 	}
 	switch mode {
@@ -234,7 +245,9 @@ func (g *Gateway) preamble(c io.Reader, pub ed25519.PublicKey) (string, bool) {
 			return "NO no-code", false
 		}
 		sum := sha256.Sum256(code)
-		if used, _ := os.ReadFile(filepath.Join(g.dir, "used-code")); strings.TrimSpace(string(used)) == hex.EncodeToString(sum[:]) {
+		// Every code used is remembered, by its hash, one a line.
+		used, _ := os.ReadFile(filepath.Join(g.dir, "used-code"))
+		if slices.Contains(strings.Fields(string(used)), hex.EncodeToString(sum[:])) {
 			g.logger.Warn("link: a backend asked to pair with a code already used; make a new one on the backend")
 			return "NO code-used", false
 		}
@@ -247,7 +260,7 @@ func (g *Gateway) preamble(c io.Reader, pub ed25519.PublicKey) (string, bool) {
 			g.logger.Error("link: the backend's key couldn't be saved", "err", err)
 			return "NO error", false
 		}
-		if err := writeFile(filepath.Join(g.dir, "used-code"), []byte(hex.EncodeToString(sum[:])+"\n")); err != nil {
+		if err := writeFile(filepath.Join(g.dir, "used-code"), append(used, hex.EncodeToString(sum[:])+"\n"...)); err != nil {
 			g.logger.Error("link: the used code couldn't be saved", "err", err)
 		}
 		g.failures = 0

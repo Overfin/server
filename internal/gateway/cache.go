@@ -43,6 +43,8 @@ type Cache struct {
 	entries  map[string]*entry
 	used     int64
 	allowed  map[string]time.Time       // session hash + key: until when it may have it
+	// epoch counts ForgetAccess: an answer asked before one isn't kept.
+	epoch uint64
 	variants map[string]map[string]bool // by image kind: the sizes asked for (queries)
 	queue    chan string                // new images to fetch ahead
 }
@@ -139,6 +141,7 @@ func (c *Cache) may(next http.Handler, r *http.Request, sess [8]byte, k string) 
 	ak := string(sess[:]) + k
 	c.mu.Lock()
 	until, ok := c.allowed[ak]
+	epoch := c.epoch
 	c.mu.Unlock()
 	if ok && time.Now().Before(until) {
 		return true
@@ -162,9 +165,22 @@ func (c *Cache) may(next http.Handler, r *http.Request, sess [8]byte, k string) 
 			}
 		}
 	}
-	c.allowed[ak] = time.Now().Add(allowedFor)
+	// Allowed now; kept unless asked before a change.
+	if c.epoch == epoch {
+		c.allowed[ak] = time.Now().Add(allowedFor)
+	}
 	c.mu.Unlock()
 	return true
+}
+
+// ForgetAccess drops every access answer kept: what a profile may see
+// changed (the backend's "access" event), or a change may have been missed
+// (the events stream started again). Each image is checked again.
+func (c *Cache) ForgetAccess() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.allowed = nil
+	c.epoch++
 }
 
 func (c *Cache) lookup(k string) (*entry, bool) {

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"sync"
 	"time"
@@ -153,20 +154,29 @@ func (g *Gateway) serveEgress(c *tls.Conn, pub ed25519.PublicKey) {
 	g.mu.Lock()
 	paired := g.backend != nil && bytes.Equal(pub, g.backend)
 	g.mu.Unlock()
+	// The version before anything else, as on the link (rule 122).
 	switch {
-	case !paired:
-		refuse("not-paired")
-		return
 	case version != g.version:
 		refuse("version")
 		return
+	case !paired:
+		refuse("not-paired")
+		return
 	}
+	// All within the handshake's 15 s: the check over the link, the name
+	// looked up, the dial.
 	if _, _, err := net.SplitHostPort(addr); err != nil || !g.allowEgress(addr) {
 		g.logger.Warn("link: an egress the backend didn't ask for was refused")
 		refuse("not-allowed")
 		return
 	}
-	out, err := (&net.Dialer{Timeout: 10 * time.Second}).Dial("tcp", addr)
+	target, ok := egressTarget(addr)
+	if !ok {
+		g.logger.Warn("link: an egress to an address the gateway doesn't reach was refused")
+		refuse("not-allowed")
+		return
+	}
+	out, err := (&net.Dialer{Timeout: 5 * time.Second}).Dial("tcp", target)
 	if err != nil {
 		refuse("unreachable")
 		return
@@ -195,10 +205,41 @@ func (g *Gateway) serveEgress(c *tls.Conn, pub ed25519.PublicKey) {
 	g.countEgress(addr, sent, received)
 }
 
+// egressTarget looks addr's host up (3 s) and gives the address to dial;
+// false for one the gateway never reaches for its backend: loopback (its
+// own machine), link-local (a cloud's metadata service among them),
+// unspecified, multicast. Private ranges stay: paired servers may be on a
+// LAN. The address dialed is the one checked, never looked up again.
+func egressTarget(addr string) (string, bool) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil || len(ips) == 0 {
+		return "", false
+	}
+	for _, ip := range ips {
+		if unreached(ip.Unmap()) {
+			return "", false
+		}
+	}
+	return net.JoinHostPort(ips[0].Unmap().String(), port), true
+}
+
+// unreached says whether the gateway refuses to dial ip for its backend
+// (a variable: tests reach their own servers on loopback).
+var unreached = func(ip netip.Addr) bool {
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
+		ip.IsMulticast() || ip.IsInterfaceLocalMulticast()
+}
+
 // allowEgress asks the backend, over the link, whether it means to reach
 // addr.
 func (g *Gateway) allowEgress(addr string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://backend"+egressPath+"?addr="+url.QueryEscape(addr), nil)
 	resp, err := g.RoundTrip(req)

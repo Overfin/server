@@ -84,6 +84,38 @@ func TestCacheServesWithCheck(t *testing.T) {
 	}
 }
 
+// What a profile may see changed: every answer kept is forgotten, and the
+// next hit is checked again, refused now.
+func TestCacheForgetsAccess(t *testing.T) {
+	c, b, h := newCache(t, 1<<30)
+	get(h, "/api/v1/images/a", "L1")
+	get(h, "/api/v1/images/a", "L2") // from the cache, checked once
+	b.mu.Lock()
+	b.deny["/api/v1/images/a"] = true
+	b.mu.Unlock()
+	if rec := get(h, "/api/v1/images/a", "L2"); rec.Code != 200 {
+		t.Fatalf("its answer kept: %d", rec.Code)
+	}
+	c.ForgetAccess()
+	if rec := get(h, "/api/v1/images/a", "L2"); rec.Code != http.StatusNotFound {
+		t.Errorf("after the change: %d", rec.Code)
+	}
+	// An answer asked before a change isn't kept.
+	b.mu.Lock()
+	b.deny["/api/v1/images/a"] = false
+	b.mu.Unlock()
+	c.mu.Lock()
+	epoch := c.epoch
+	c.mu.Unlock()
+	get(h, "/api/v1/images/a", "L4")
+	c.mu.Lock()
+	kept := len(c.allowed)
+	c.mu.Unlock()
+	if epoch != 1 || kept != 1 {
+		t.Errorf("epoch %d, %d answers kept", epoch, kept)
+	}
+}
+
 func TestCacheNotSignedInPassesThrough(t *testing.T) {
 	_, b, h := newCache(t, 1<<30)
 	req := httptest.NewRequest("GET", "/api/v1/images/a", nil)

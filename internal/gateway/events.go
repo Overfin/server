@@ -21,6 +21,10 @@ type Revocations struct {
 	// New, when set, gets the routes of new titles' artwork the backend
 	// announces (the cache fetches them ahead).
 	New func(paths []string)
+	// Access, when set, runs when what a profile may see changed, and each
+	// time the stream starts (a change during a break isn't missed): the
+	// cache forgets its access answers.
+	Access func()
 
 	mu      sync.Mutex
 	revoked map[[sha256.Size]byte]int64 // the login cookie's hash: when it'd have expired
@@ -71,6 +75,9 @@ func (rv *Revocations) Follow(ctx context.Context, backend http.RoundTripper, lo
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://backend/link/v1/events?since="+strconv.FormatInt(since, 10), nil)
 		if resp, err := client.Do(req); err == nil {
 			if resp.StatusCode == http.StatusOK {
+				if rv.Access != nil {
+					rv.Access()
+				}
 				sc := bufio.NewScanner(resp.Body)
 				for sc.Scan() {
 					var e struct {
@@ -85,6 +92,10 @@ func (rv *Revocations) Follow(ctx context.Context, backend http.RoundTripper, lo
 					}
 					if e.Type == "new" && rv.New != nil {
 						rv.New(e.Images)
+						continue
+					}
+					if e.Type == "access" && rv.Access != nil {
+						rv.Access()
 						continue
 					}
 					if e.Type != "revoked" {

@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -160,6 +161,17 @@ func TestCodeUsedOnce(t *testing.T) {
 	if g.Status().Backend != Fingerprint(b.Public()) {
 		t.Error("the pairing changed")
 	}
+
+	// The backend pairs again with a new code; the first one, set again on
+	// the gateway, is still refused: every code used is remembered.
+	first := code
+	code = pairNow(t, b, addr)
+	waitConnected(t, g, true)
+	code = first
+	other.save(p)
+	if err := other.connect(context.Background(), p); err == nil || !strings.Contains(err.Error(), "already used") {
+		t.Fatalf("an older code used again: %v", err)
+	}
 }
 
 // The wrong code, an unpaired backend, another version: refused, with
@@ -200,6 +212,14 @@ func TestRefusals(t *testing.T) {
 	}
 	if st := g.Status(); st.Paired || st.Mismatch != "2.0" {
 		t.Errorf("status after another version: %+v", st)
+	}
+	// A backend of another version that stopped trying no longer counts:
+	// visitors aren't told it's being updated forever.
+	g.mu.Lock()
+	g.mismatchAt = time.Now().Add(-mismatchFor - time.Second)
+	g.mu.Unlock()
+	if st := g.Status(); st.Mismatch != "" {
+		t.Errorf("status long after another version: %+v", st)
 	}
 }
 
@@ -369,6 +389,10 @@ func TestClientAddr(t *testing.T) {
 // the traffic counted at the gateway; an address the backend didn't ask
 // for is refused there.
 func TestEgress(t *testing.T) {
+	// The test's servers are on loopback, which a gateway never dials.
+	was := unreached
+	unreached = func(netip.Addr) bool { return false }
+	t.Cleanup(func() { unreached = was })
 	code := ""
 	g, addr := gatewayOn(t, t.TempDir(), "1.0", &code)
 	b, _ := runBackend(t, t.TempDir(), "1.0")
@@ -402,5 +426,38 @@ func TestEgress(t *testing.T) {
 
 	if _, err := b.dialEgress(context.Background(), "tcp", "192.0.2.1:443", false); err == nil || !strings.Contains(err.Error(), "not-allowed") {
 		t.Errorf("an address the backend didn't ask for: %v", err)
+	}
+}
+
+// A gateway never dials its own machine, link-local addresses (a cloud's
+// metadata service), unspecified or multicast ones for its backend; LAN and
+// public addresses, it does.
+func TestUnreached(t *testing.T) {
+	for addr, want := range map[string]bool{
+		"127.0.0.1": true, "::1": true, "169.254.169.254": true, "fe80::1": true, "0.0.0.0": true,
+		"224.0.0.1": true, "::ffff:127.0.0.1": true,
+		"10.1.2.3": false, "192.168.1.5": false, "8.8.8.8": false, "2001:db8::1": false,
+	} {
+		if got := unreached(netip.MustParseAddr(addr).Unmap()); got != want {
+			t.Errorf("%s: %v, want %v", addr, got, want)
+		}
+	}
+	if _, ok := egressTarget("127.0.0.1:443"); ok {
+		t.Error("loopback taken")
+	}
+	if target, ok := egressTarget("10.1.2.3:8443"); !ok || target != "10.1.2.3:8443" {
+		t.Errorf("a LAN address: %q %v", target, ok)
+	}
+}
+
+// Waits between tries vary by a fifth either way.
+func TestJittered(t *testing.T) {
+	lo, hi := time.Hour, time.Duration(0)
+	for range 200 {
+		d := jittered(10 * time.Second)
+		lo, hi = min(lo, d), max(hi, d)
+	}
+	if lo < 8*time.Second || hi > 12*time.Second || hi-lo < time.Second {
+		t.Errorf("between %v and %v", lo, hi)
 	}
 }

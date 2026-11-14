@@ -69,7 +69,9 @@ changes, this changes with it.
 
 **Reconnecting.** The backend tries again after 1 s, doubling up to 30 s; 30 s
 after a refusal; back to 1 s after a connection that lasted over a minute.
-It reads its pairing file again at each attempt.
+Each wait varies by a fifth either way, so a backend coming back after a
+gateway that keeps restarting doesn't keep its rhythm. It reads its pairing
+file again at each attempt.
 
 **A second connection.** The newest authenticated connection wins: the
 gateway closes the one before.
@@ -93,10 +95,11 @@ gateway → backend   OK\n
 - Refusals: `NO preamble` (malformed), `NO version <gateway's version>`,
   `NO not-paired`, `NO no-code`, `NO code-used`, `NO wrong-code`,
   `NO error`; for egress also `NO not-allowed`, `NO unreachable`.
-- **Order of checks, for `link` and `pair`: the version first** (rule 122),
-  then the key or the code. A backend of another version is never connected;
-  the gateway notes the mismatch and shows visitors that the server is being
-  updated.
+- **Order of checks, for every mode: the version first** (rule 122), then
+  the key or the code. A backend of another version is never connected; the
+  gateway notes the mismatch and shows visitors that the server is being
+  updated, for as long as that backend keeps trying (two minutes after its
+  last try).
 - 15 s for the TLS handshake and the preamble together, on both sides; the
   deadline is cleared before HTTP/2.
 
@@ -129,7 +132,7 @@ Both keys are bound: a proof made for another pair of keys is worthless.
 2. reads its code (`OVERFIN_PAIRING`, else the file `OVERFIN_PAIRING_FILE`,
    at each attempt); none: `NO no-code`;
 3. refuses a code it already used (`NO code-used`): it keeps the SHA-256 of
-   the last code used in `used-code`;
+   every code used, one a line, in `used-code`;
 4. compares the proof in constant time: `NO wrong-code` (counted in the
    log, no lockout);
 5. keeps the backend's key (`backend.pub`) and the code's hash, answers
@@ -208,6 +211,7 @@ object a line (`application/x-ndjson`), on a stream the gateway keeps open.
 ```
 {"type":"revoked","seq":12,"hash":"<SHA-256 of the login cookie, hex>","expires":1794000000}
 {"type":"new","images":["/api/v1/images/tmdbart_poster_…", …]}
+{"type":"access"}
 {"type":"ping"}
 ```
 
@@ -221,6 +225,13 @@ object a line (`application/x-ndjson`), on a stream the gateway keeps open.
   A restarted gateway starts from 0 and gets every revocation still live.
 - **`new`**: new titles' artwork, for the cache to fetch ahead. Best effort:
   those during a break aren't sent again.
+- **`access`**: what a profile may see changed (its libraries, tags,
+  categories, kind or ages; its account's template; a template or a
+  category changed or deleted). Database triggers note it, whatever code
+  makes it; the backend sends the event when the last number grows. The
+  gateway's cache forgets every access answer it keeps (section 10). It also
+  forgets them each time the stream starts, so a change during a break
+  isn't missed.
 - **`ping`** after 15 s without anything else. The gateway doesn't watch for
   it: HTTP/2's own pings find a dead link.
 - The backend looks every second, 500 revocations at a time.
@@ -255,7 +266,9 @@ there** (rule 125): this check only keeps noise off the link.
   same request with `Overfin-Check: 1`; the backend runs its usual check
   and answers without the bytes (204 for 200). A yes is kept 5 minutes, in
   memory, for that session (an 8-byte hash of the login cookie) and that
-  image. A no, of any status: 404.
+  image. A no, of any status: 404. Every answer kept is forgotten when what
+  a profile may see changes, and when the events stream starts again
+  (section 8); an answer to a check that began before that isn't kept.
 - **What's kept:** worth = hits (halving each day) × time to fetch ÷ size;
   images five sessions or more asked for within a day are kept longest.
   Within `OVERFIN_CACHE_MAX` (10 GB by default), leaving a tenth of the disk
@@ -273,9 +286,14 @@ servers see only the gateway (rule 132):
 2. It opens a TLS 1.3 connection to its gateway with ALPN `overfin-egress`,
    checks the gateway's key is the pinned one, and sends
    `OVFLINK1 egress <version> <host:port>`.
-3. The gateway checks the key is its backend's, the version, and asks the
-   backend over the link (`/link/v1/egress?addr=`) whether it asked for that
-   address; then dials it (10 s) and answers `OK`.
+3. The gateway checks the version, then that the key is its backend's, and
+   asks the backend over the link (`/link/v1/egress?addr=`, 4 s) whether it
+   asked for that address. It looks the name up (3 s) and refuses addresses
+   it never reaches for its backend: loopback (its own machine), link-local
+   (a cloud's metadata service among them), unspecified, multicast; private
+   ranges stay, since paired servers may be on a LAN. It dials the address
+   it checked (5 s), never looking it up again, and answers `OK`. All of it
+   within the handshake's 15 s.
 4. From then on the gateway copies bytes both ways. The backend's own TLS
    with the paired server runs inside, end to end: the gateway sees none of
    it. The federation key stays at the backend.
@@ -299,16 +317,16 @@ and per-email limits don't depend on them (rule 126).
 ## 13. Pages and limits
 
 - **When the backend is away:** 503, `Retry-After: 20`, `no-store`. "Being
-  updated" when the backend is of another version, "Out of reach"
-  otherwise; English or French by the visitor's first language; HTML with a
+  updated" while a backend of another version is trying to connect (until
+  two minutes after its last try), "Out of reach" otherwise; English or French by the visitor's first language; HTML with a
   20 s refresh and a strict CSP, or problem JSON under `/api/`. Neither page
   names what's behind the gateway.
 - **Rate limit:** 50 requests a second per address, bursts of 400, in
   memory; 429 with `Retry-After: 5` past it.
 - **Servers:** 10 s to read request headers, 2 minutes idle; no limit on
   writing (films). HSTS for two years over HTTPS.
-- **The link:** 512-byte preamble line, 15 s handshake, 10 s for an egress
-  dial and its check.
+- **The link:** 512-byte preamble line, 15 s handshake (egress included:
+  4 s check, 3 s lookup, 5 s dial).
 
 ## 14. Guarantees, and their tests
 
@@ -324,9 +342,9 @@ Each line is a property a test can check. **Tested** names the test today;
 | PROXY v1 and v2 read exactly, garbage refused, only from configured addresses | `TestProxyHeaders`, `TestProxyListener` |
 | PROXY v1 `UNKNOWN`, v2 `LOCAL` keep the proxy's address | not yet |
 | A pairing proof binds both keys; a wrong code is refused | `TestPairAndReconnect`, `TestRefusals` |
-| A code pairs once | `TestCodeUsedOnce` (the last code only, see 15) |
+| A code pairs once, every code used remembered | `TestCodeUsedOnce` |
 | A gateway whose key changed is refused | `TestGatewayKeyChanged` |
-| Another version is refused first, and visitors are told it's updating | `TestRefusals` |
+| Another version is refused first, and visitors are told it's updating while it tries | `TestRefusals` |
 | A malformed or over-long preamble is refused | not yet |
 | A second connection replaces the first | not yet |
 | Many large transfers at once over the link | `TestParallelTransfers` (8 × 16 MiB) |
@@ -335,10 +353,13 @@ Each line is a property a test can check. **Tested** names the test today;
 | Check-only answers: 200 becomes 204, no body | not yet |
 | Every session route needs a valid edge signature for that login; revoked logins refused | `TestSessionFilter`, `TestRevocations`, `TestSignVerify`, `TestPair` |
 | The cache checks access once per session and image, remembers it, 404 on a refusal | `TestCacheServesWithCheck` |
+| An access change, or the events stream starting, forgets every answer; one asked before isn't kept | `TestCacheForgetsAccess`, `TestAccessEvents`, `TestEventsAccess`, `TestAccessChanges` |
 | The cache's 5-minute expiry, 16 MiB cap, `Range` passing through, emptied at start | not yet |
 | Eviction keeps what's worth most | `TestCacheEviction` |
 | Artwork fetched ahead is served only after a check | `TestFetchAhead` |
 | Egress reaches only what the backend asked for, TLS end to end | `TestEgress` |
+| Egress never dials loopback, link-local, unspecified or multicast addresses | `TestUnreached` |
+| Reconnecting waits vary by a fifth | `TestJittered` |
 | Egress refused for another version, an unpaired key, an unreachable address; the minute expires | not yet |
 | Events: revocations resume after a break; ping after 15 s | not yet (the backend's side) |
 | The down pages name nothing behind the gateway | `TestDownPages` |
@@ -346,29 +367,16 @@ Each line is a property a test can check. **Tested** names the test today;
 
 ## 15. Known gaps, and where this is going
 
-Found while writing this, or raised by review (2026-11-13). None is fixed
-yet; each is a decision or a task.
+Found while writing this, or raised by review (2026-11-13).
 
-**Gaps in what the code does:**
-1. **A profile's access change doesn't reach the gateway.** The backend
-   drops its own cached answers at once, but the gateway keeps its yes for
-   up to 5 minutes: a session keeps images it already loaded (never media)
-   after losing access, parental limits included. Fix: a numbered event,
-   like `revoked`, dropping the gateway's answers for that profile.
-2. **Only the last code used is remembered** (`used-code` holds one hash).
-   An older code could pair again if it were still set on the gateway.
-   Fix: keep the hashes of every code used.
-3. **Egress checks pairing before the version**, where rule 122 says the
-   version comes first.
-4. **Egress can run past its 15 s deadline**: the check over the link (up to
-   10 s) and the dial (up to 10 s) happen under it.
-5. **The gateway limits egress destinations only by the backend's word**:
-   no address range is refused on its own (a private or loopback address
-   the backend asked for would be dialed).
-6. **"Being updated" can outlast the update**: the version mismatch is
-   cleared only by a new connection, even if the backend connected before
-   is still there and of the right version.
-7. **No jitter** in the backend's reconnecting.
+**Gaps found on 2026-11-13, fixed the same day:**
+1. A profile's access change now reaches the gateway (the `access` event).
+2. Every pairing code used is remembered, not only the last.
+3. Egress checks the version first.
+4. Egress stays within its 15 s deadline.
+5. Egress refuses loopback, link-local, unspecified and multicast addresses.
+6. "Being updated" lasts only while a backend of another version tries.
+7. Reconnecting has jitter.
 
 **Not tested yet:** the lines marked "not yet" in section 14, and the
 failure tests a review proposed:

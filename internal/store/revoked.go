@@ -36,3 +36,11 @@ func (s *Store) TrimRevokedLogins(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM revoked_logins WHERE expires_at <= ?`, s.now().Unix())
 	return err
 }
+
+// AccessChange is the number of the last change to what a profile may see
+// (migration 107), 0 before any.
+func (s *Store) AccessChange(ctx context.Context) (int64, error) {
+	var seq int64
+	err := s.read.QueryRowContext(ctx, `SELECT coalesce(max(seq), 0) FROM access_changes`).Scan(&seq)
+	return seq, err
+}
