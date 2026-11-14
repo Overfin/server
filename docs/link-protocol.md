@@ -395,11 +395,17 @@ Long tests run with `OVERFIN_LONG_TESTS=1 go test ./internal/link`, before
 a release. The race detector finds nothing in `internal/link`,
 `internal/gateway`, `internal/edge` and `internal/federation`.
 
-**Still to do:** the gateway killed during real HLS and direct playback in
-a browser (the player's own recovery: the SDK restarts a failed HLS stream
-at the same place, tested on its own; a cut direct-play stream is left to
-the browser), which needs a gateway and a backend apart on the test
-install.
+**The gateway stopped during real playback** (Firefox, the test install
+split into a gateway and a backend, 2026-11-13):
+
+| Outage | HLS (repackaged) | Direct play |
+|---|---|---|
+| 10 s | never stopped: played from its buffer, the failed requests retried, carried on | not tried |
+| 40 s | the buffer ran out after about 36 s; the restart failed (no server), and the player showed "an error occurred", for good, even once the gateway was back | played on from its buffer; once the gateway was back, its progress reports got 503 while the backend reconnected, the playback was stopped and the video emptied, with no message |
+
+So the protocol holds, but **the player doesn't ride out an outage longer
+than its buffer**: it neither waits for the server to come back nor resumes
+at the same place. A player change, to decide.
 
 **No independent security review yet.** This document is meant as its
 starting point.
