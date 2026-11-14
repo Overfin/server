@@ -54,14 +54,9 @@ type Keeper struct {
 	failed  time.Time // the last failed refresh, zero after one works
 	problem string    // why it failed
 	working bool
-	// ranked are the lists made of the votes, by list, as of the latest
-	// day kept (rankedDay); ranking is held while they're made.
-	ranked    map[string]Ranked
-	rankedDay string
-	ranking   sync.Mutex
-	wake      chan struct{}
-	now       func() time.Time
-	least     int // minTitles, but for tests
+	wake    chan struct{}
+	now     func() time.Time
+	least   int // minTitles, but for tests
 }
 
 // NewKeeper returns a keeper of the folder dir.
@@ -109,43 +104,6 @@ func (k *Keeper) Status() Status {
 		s.Titles, s.Built = k.data.Titles, time.Unix(k.data.Built, 0)
 	}
 	return s
-}
-
-// Lists returns IMDb's trending ("trending") or popular ("popular") films
-// and series (Rank), made once per day of votes; ok is false while there's
-// no IMDb data in use or fewer than two days of votes.
-func (k *Keeper) Lists(list string) (Ranked, bool) {
-	fast := list == "trending"
-	if !fast && list != "popular" {
-		return Ranked{}, false
-	}
-	days, err := VoteDays(k.Dir)
-	if err != nil || len(days) < 2 {
-		return Ranked{}, false
-	}
-	// The data taken under the lock: swap closes the old under it, so a
-	// ranking never reads a closed file.
-	k.ranking.Lock()
-	defer k.ranking.Unlock()
-	d := k.Data()
-	if d == nil {
-		return Ranked{}, false
-	}
-	if k.rankedDay != days[len(days)-1] {
-		k.ranked, k.rankedDay = map[string]Ranked{}, days[len(days)-1]
-	}
-	if r, ok := k.ranked[list]; ok {
-		return r, true
-	}
-	r, ok, err := Rank(k.Dir, d, fast)
-	if err != nil {
-		k.Logger.Warn("imdb: the lists couldn't be made of IMDb's votes; TMDB's are used", "err", err)
-		return Ranked{}, false
-	}
-	if ok {
-		k.ranked[list] = r
-	}
-	return r, ok
 }
 
 // Wake asks for a check now, for example right after the operator
@@ -247,17 +205,12 @@ func (k *Keeper) refresh(ctx context.Context, path string) (int, error) {
 			return 0, err
 		}
 	}
-	// The day's votes first: they're kept whatever comes of the rest, unless
-	// they're too few to be IMDb's whole list (half of what the titles need:
-	// fewer titles are rated than exist): a day like that would rank nothing,
-	// or count all of a title's votes as gained.
-	votes, err := WriteVotes(k.Dir, local[2], k.clock())
-	if err != nil {
-		return 0, err
-	}
-	if votes < k.least/2 {
-		os.Remove(filepath.Join(k.Dir, votesPrefix+k.clock().UTC().Format(time.DateOnly)))
-		return 0, fmt.Errorf("imdb: only %d ratings in IMDb's datasets", votes)
+	// Each day's votes were kept for trending and popular lists of IMDb's
+	// (2026-11-07 to 11-13): no longer made, they go.
+	if old, _ := filepath.Glob(filepath.Join(k.Dir, "votes-*")); len(old) > 0 {
+		for _, f := range old {
+			os.Remove(f)
+		}
 	}
 	tmp := path + ".new"
 	n, err := BuildFiles(tmp, local[0], local[1], local[2], k.clock())
@@ -384,13 +337,9 @@ func (k *Keeper) swap(d *Data) {
 	old := k.data
 	k.data = d
 	k.mu.Unlock()
-	k.ranking.Lock()
-	defer k.ranking.Unlock()
 	if old != nil {
 		old.Close()
 	}
-	// Rankings made with the old data knew fewer titles.
-	k.ranked, k.rankedDay = nil, ""
 }
 
 func (k *Keeper) close() { k.swap(nil) }

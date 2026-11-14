@@ -220,11 +220,7 @@ func (c *Client) listAgain(ctx context.Context, path string) refetch {
 // from the same list in the language alone, then gives unreadable ones
 // their English names (fillEnglish). Failing that, they stay as they are.
 func (c *Client) fillTitles(ctx context.Context, path string, q url.Values, titles []*rawTitle) {
-	c.fillWith(q, titles, c.listAgain(ctx, path))
-}
-
-// fillWith is fillTitles for titles that again asks for once more.
-func (c *Client) fillWith(q url.Values, titles []*rawTitle, again refetch) {
+	again := c.listAgain(ctx, path)
 	defer c.fillEnglish(q, titles, again)
 	base := c.baseLanguage()
 	if base == "" || !slices.ContainsFunc(titles, func(r *rawTitle) bool { return r.lacks(base) }) {
@@ -360,7 +356,6 @@ func (c *Client) getOnce(ctx context.Context, path string, q url.Values, out any
 // rawTitle is a title as TMDB sends it, films and series alike.
 type rawTitle struct {
 	ID           int    `json:"id"`
-	Adult        bool   `json:"adult"`
 	MediaType    string `json:"media_type"`
 	Title        string `json:"title"` // films
 	Name         string `json:"name"`  // series

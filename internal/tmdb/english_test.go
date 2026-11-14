@@ -2,7 +2,6 @@ package tmdb
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -38,11 +37,6 @@ func TestUnreadableNamesInEnglish(t *testing.T) {
 				{"id":1,"media_type":"tv","name":"The Princess Royal","original_name":"尚公主","original_language":"zh"},
 				{"id":2,"media_type":"tv","name":"Money Heist","original_name":"La casa de papel","original_language":"es"},
 				{"id":3,"media_type":"tv","name":"小城良方","original_name":"小城良方","original_language":"zh"}]}`)
-		case "/3/find/tt0000001":
-			answer(`{"movie_results":[{"id":5,"title":"लास्ट मैन इन टावर","original_title":"लास्ट मैन इन टावर","original_language":"hi","release_date":"2026-01-01"}],"tv_results":[]}`,
-				`{"movie_results":[{"id":5,"title":"Last Man in Tower","original_title":"लास्ट मैन इन टावर","original_language":"hi"}],"tv_results":[]}`)
-		case "/3/find/tt0000002":
-			io.WriteString(w, `{"movie_results":[{"id":6,"adult":true,"title":"Adult","original_title":"Adult","release_date":"2026-01-01"}],"tv_results":[]}`)
 		case "/3/tv/1":
 			io.WriteString(w, `{"id":1,"name":"尚公主","original_name":"尚公主","original_language":"zh","first_air_date":"2026-01-01",
 				"translations":{"translations":[{"iso_639_1":"zh","data":{"name":"尚公主"}},{"iso_639_1":"en","data":{"name":"The Princess Royal"}}]}}`)
@@ -80,16 +74,6 @@ func TestUnreadableNamesInEnglish(t *testing.T) {
 	full, err := c.Title(ctx, "series", 1)
 	if err != nil || full.Name != "The Princess Royal" {
 		t.Errorf("title: %+v, %v", full, err)
-	}
-
-	// Found by its IMDb ID (Overfin's lists), named the same way.
-	if film, err := c.FindTitle(ctx, "movie", "tt0000001"); err != nil || film.Name != "Last Man in Tower" || film.Year != 2026 {
-		t.Errorf("found: %+v, %v", film, err)
-	}
-
-	// What TMDB marks adult isn't found, as its lists leave it out.
-	if _, err := c.FindTitle(ctx, "movie", "tt0000002"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("adult: %v", err)
 	}
 
 	english.Store(0)

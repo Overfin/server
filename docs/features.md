@@ -182,23 +182,13 @@ each season gets its own, from its episodes', matched by the IMDb IDs
 TMDB gives (never by numbers: sites number episodes in different orders).
 Overfin then downloads IMDb's free datasets once a day (about 300 MB),
 keeps what it uses in one file of about 135 MB in `imdb/` next to the
-database, with each day's votes for 35 days (about 125 MB), and deletes
-the downloads. TMDB gives films' and series' IMDb IDs with their pages;
+database, and deletes the downloads. TMDB gives films' and series' IMDb IDs with their pages;
 an episode's takes one request of its own, asked once, a tenth of a
 second apart (a first pass over a large library takes a while). Titles
 IMDb doesn't have keep TMDB's rating, and a season most of whose
 episodes aren't matched yet takes its series'. IMDb allows its datasets
 for personal and non-commercial use only. Switched off, the folder is
 deleted.
-
-With IMDb's data on, its daily votes also make the trending and popular
-lists (Home, Discover) instead of TMDB's, once two days of votes are
-kept: popular is the titles that gained the most votes in 30 days,
-trending those gaining fastest for their size in 7, adult titles left
-out. Only their order shows; IMDb's numbers never do. A title in them
-Overfin doesn't know yet is found on TMDB by its IMDb ID, once (a first
-day asks a few hundred, then a handful a day). Upcoming stays TMDB's.
-With Seerr as the only source, TMDB's lists stay.
 
 Trending, popular and the suggestions Overfin makes for wishes and for
 Overtide leave out titles in a language the server doesn't offer (fr-CA

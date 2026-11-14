@@ -490,48 +490,6 @@ func (c *Client) Find(ctx context.Context, kind, source, id string) (int, error)
 	return results[0].ID, nil
 }
 
-// FindTitle returns the film ("movie") or the series ("series") an IMDb ID
-// names, with what TMDB's lists give of a title; ErrNotFound when TMDB
-// knows none. The IMDb ID is all it sends (rule 79).
-func (c *Client) FindTitle(ctx context.Context, kind, imdbID string) (Title, error) {
-	if !IMDbID.MatchString(imdbID) || tv(kind) == "" {
-		return Title{}, ErrNotFound
-	}
-	// TMDB's answer, its films' or its series'.
-	find := func(q url.Values) ([]rawTitle, error) {
-		var raw struct {
-			MovieResults []rawTitle `json:"movie_results"`
-			TVResults    []rawTitle `json:"tv_results"`
-		}
-		if err := c.get(ctx, "/find/"+imdbID, q, &raw); err != nil {
-			return nil, err
-		}
-		if kind == "series" {
-			return raw.TVResults, nil
-		}
-		return raw.MovieResults, nil
-	}
-	q := c.withLanguage(url.Values{"external_source": {"imdb_id"}})
-	results, err := find(q)
-	if err != nil {
-		return Title{}, err
-	}
-	// TMDB's lists leave out what it marks adult; finding by ID doesn't.
-	if len(results) == 0 || results[0].Adult {
-		return Title{}, ErrNotFound
-	}
-	// Named as TMDB's lists name their titles (fillTitles).
-	c.fillWith(q, []*rawTitle{&results[0]}, func(q url.Values) ([]rawTitle, bool) {
-		r, err := find(q)
-		return r, err == nil
-	})
-	t, ok := results[0].title(kind)
-	if !ok {
-		return Title{}, ErrNotFound
-	}
-	return t, nil
-}
-
 // externalID is what an IMDb or a TVDB ID looks like.
 var externalID = regexp.MustCompile(`^(tt)?[0-9]{1,12}$`)
 

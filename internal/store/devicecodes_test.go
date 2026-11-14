@@ -79,20 +79,3 @@ func TestDeviceCodes(t *testing.T) {
 		t.Errorf("%d codes left", left)
 	}
 }
-
-// A library's item known only by an IMDb ID that a list names too gets its
-// TMDB ID then: the record of the find would keep the index from asking.
-func TestPutFoundForAnItemWaiting(t *testing.T) {
-	s := openTest(t)
-	ctx := context.Background()
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO catalog_items (id, kind, name, sort_name, rating, seen, imdb) VALUES ('i1', 'movie', 'Waiting', 'waiting', '', 1, 'tt0000003')`); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.PutFound(ctx, "movie", "tt0000003", "503", time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	var tmdb string
-	if err := s.db.QueryRowContext(ctx, `SELECT coalesce(tmdb, '') FROM catalog_items WHERE id = 'i1'`).Scan(&tmdb); err != nil || tmdb != "503" {
-		t.Errorf("the item's TMDB ID: %q, %v", tmdb, err)
-	}
-}

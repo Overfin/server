@@ -191,7 +191,7 @@
             </Setting>
           {/each}
           {#if imdb}
-            <Setting label="Ratings from IMDb" hint={'IMDb\'s ratings count instead of TMDB\'s: from far more votes, and for each season, from its episodes. Overfin downloads IMDb\'s free datasets once a day (about 300 MB, kept as a 135 MB file, plus each day\'s votes for 35 days: about 125 MB), and asks TMDB once for each episode\'s IMDb ID. Its daily votes also make the trending and popular lists (Home, Discover) instead of TMDB\'s, from the second day. IMDb allows its datasets for personal and non-commercial use only.'}>
+            <Setting label="Ratings from IMDb" hint={'IMDb\'s ratings count instead of TMDB\'s: from far more votes, and for each season, from its episodes. Overfin downloads IMDb\'s free datasets once a day (about 300 MB, kept as a 135 MB file), and asks TMDB once for each episode\'s IMDb ID. IMDb allows its datasets for personal and non-commercial use only.'}>
               {#snippet children(ids)}<input type="checkbox" bind:checked={imdb!.on} onchange={setIMDb} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
             </Setting>
             {#if imdbState}<p class="hint">{imdbState}</p>{/if}

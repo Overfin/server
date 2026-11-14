@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"time"
 )
 
@@ -76,56 +75,6 @@ func (s *Store) SetFound(ctx context.Context, t FindTarget, tmdb string, at time
 		return err
 	}
 	return s.RefreshTitleKeys(ctx)
-}
-
-// IMDbTMDB says which TMDB film or series (kind) an IMDb ID names, for a
-// list made of IMDb's votes, without asking TMDB: a title whose page gave
-// that ID, else the one TMDB found for it, as long as its data was kept
-// since fresh. "" when TMDB found none since noneSince. ok is false when
-// TMDB is to be asked (FindTitle, then PutFound).
-func (s *Store) IMDbTMDB(ctx context.Context, kind, imdb string, fresh, noneSince time.Time) (tmdb string, ok bool, err error) {
-	err = s.read.QueryRowContext(ctx, `SELECT tmdb FROM catalog_titles WHERE kind = ? AND imdb = ? AND seen_at >= ? LIMIT 1`,
-		kind, imdb, fresh.Unix()).Scan(&tmdb)
-	if err == nil || !errors.Is(err, sql.ErrNoRows) {
-		return tmdb, err == nil, err
-	}
-	var found sql.NullString
-	var at int64
-	err = s.read.QueryRowContext(ctx, `SELECT tmdb, fetched_at FROM tmdb_found WHERE kind = ? AND source = 'imdb' AND external = ?`,
-		kind, imdb).Scan(&found, &at)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	if !found.Valid {
-		return "", at >= noneSince.Unix(), nil
-	}
-	var kept bool
-	err = s.read.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM catalog_titles WHERE kind = ? AND tmdb = ? AND seen_at >= ?)`,
-		kind, found.String, fresh.Unix()).Scan(&kept)
-	return found.String, kept && err == nil, err
-}
-
-// PutFound records what TMDB said an IMDb ID names (tmdb "": nothing), for
-// a title no library has: unlike SetFound, the index stays as it is, and
-// its costly refresh is spared. A library's item waiting for that very ID
-// goes through SetFound: this record would keep TitlesToFind from it.
-func (s *Store) PutFound(ctx context.Context, kind, imdb, tmdb string, at time.Time) error {
-	var waiting bool
-	err := s.read.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM catalog_items WHERE kind = ? AND imdb = ? AND tmdb IS NULL)`,
-		kind, imdb).Scan(&waiting)
-	if err != nil {
-		return err
-	}
-	if waiting {
-		return s.SetFound(ctx, FindTarget{Kind: kind, Source: "imdb", External: imdb}, tmdb, at)
-	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO tmdb_found (kind, source, external, tmdb, fetched_at) VALUES (?, 'imdb', ?, ?, ?)
-		ON CONFLICT (kind, source, external) DO UPDATE SET tmdb = excluded.tmdb, fetched_at = excluded.fetched_at`,
-		kind, imdb, nullString(tmdb), at.Unix())
-	return err
 }
 
 // foundTMDB is the TMDB ID an item is known by: the one an admin chose

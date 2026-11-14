@@ -57,8 +57,10 @@ func TestKeeper(t *testing.T) {
 	if err := k.Once(ctx); err != nil || k.Data() != nil || len(fake.asked) != 0 {
 		t.Fatalf("off: %v %v %v", err, k.Data(), fake.asked)
 	}
-	// On: the three datasets, made into the file; they don't stay.
+	// On: the three datasets, made into the file; they don't stay, nor do
+	// the days of votes kept before (for lists of IMDb's no longer made).
 	on = true
+	os.WriteFile(filepath.Join(dir, "votes-2026-11-06"), []byte("old"), 0o600)
 	if err := k.Once(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +71,7 @@ func TestKeeper(t *testing.T) {
 		t.Errorf("status: %+v", s)
 	}
 	entries, _ := os.ReadDir(dir)
-	if len(entries) != 2 || entries[0].Name() != fileName || entries[1].Name() != "votes-2026-11-07" {
+	if len(entries) != 1 || entries[0].Name() != fileName {
 		t.Errorf("left in the folder: %v", entries)
 	}
 	// Within a day, nothing's downloaded again.
@@ -109,9 +111,6 @@ func TestKeeper(t *testing.T) {
 	}
 	if m, _ := k.Data().Title("tt0133093"); m.Rating != 9.1 {
 		t.Errorf("after the new download: %+v", m)
-	}
-	if days, _ := VoteDays(dir); len(days) != 2 {
-		t.Errorf("days of votes: %v", days)
 	}
 	if s := k.Status(); s.Problem != "" {
 		t.Errorf("status: %+v", s)
@@ -164,9 +163,6 @@ func TestKeeperRefusesTooFewRatings(t *testing.T) {
 	k.BaseURL, k.Client = srv.URL+"/", srv.Client()
 	if err := k.Once(context.Background()); err == nil {
 		t.Fatal("taken")
-	}
-	if days, err := VoteDays(dir); err != nil || len(days) != 0 {
-		t.Errorf("days kept: %v, %v", days, err)
 	}
 }
 

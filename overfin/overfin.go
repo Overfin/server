@@ -749,10 +749,8 @@ func run(logger *slog.Logger) error {
 	imdbData := imdb.NewKeeper(filepath.Join(filepath.Dir(cfg.Storage.Path), "imdb"), db.IMDbOn, logger)
 	go imdbData.Run(ctx)
 	// Discovery's lists, from TMDB: 10 pages (200 titles) per list, every
-	// hour; with IMDb's data, trending and popular are made of its votes,
-	// their titles found on TMDB a tenth of a second apart.
+	// hour.
 	sh.lists = catalog.NewLists(gw.tmdbSource, db, logger, time.Hour, 10)
-	sh.lists.IMDb, sh.lists.Pause = imdbData.Lists, 100*time.Millisecond
 	go sh.lists.Run(ctx)
 	// With it, each episode's IMDb ID, asked of TMDB once: looked for every
 	// 10 minutes, a tenth of a second between requests.

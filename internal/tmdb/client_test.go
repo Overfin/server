@@ -266,16 +266,6 @@ func TestClient(t *testing.T) {
 	if _, err := c.Find(ctx, "movie", "imdb", "../x"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a bad ID: %v", err)
 	}
-	// By an IMDb ID, with what a list gives of the title (Discover).
-	if found, err := c.FindTitle(ctx, "series", "tt0944947"); err != nil || found.TMDBID != 1399 || found.Kind != "series" ||
-		found.Name != "Le Trône de fer" || found.Year != 2011 || found.Poster != "/gotposter1.jpg" || !slices.Equal(found.ListGenres, []int{18}) {
-		t.Errorf("find a series' title: %+v %v", found, err)
-	}
-	for _, c2 := range [][2]string{{"movie", "tt0944947"}, {"series", "../x"}, {"series", "tvdb123"}} {
-		if _, err := c.FindTitle(ctx, c2[0], c2[1]); !errors.Is(err, ErrNotFound) {
-			t.Errorf("find %v: %v", c2, err)
-		}
-	}
 	season, err := c.Season(ctx, 1399, 1)
 	if err != nil || season.Poster != "/season1abc.jpg" || season.Name != "Saison 1" || season.AirDate != "2011-04-17" || len(season.Episodes) != 3 {
 		t.Fatalf("season: %+v %v", season, err)
