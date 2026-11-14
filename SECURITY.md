@@ -738,7 +738,8 @@ anyone. Paired servers are not trusted at all (rule 94).
      Before serving one from its cache, it asks the backend whether this
      session may have it (the backend runs its usual check, rule 39, and
      answers without the bytes), and keeps the answer five minutes, in
-     memory.
+     memory. Every answer kept is forgotten when what a profile may see
+     changes, and whenever the backend's events stream starts again.
      - Exception: new titles' artwork is fetched ahead into the cache
        without a session; it's served only after the same check.
 129. The backend's own listener serves the control panel, the setup page,
@@ -759,8 +760,9 @@ anyone. Paired servers are not trusted at all (rule 94).
      their streams) go through its gateway, which connects only to an
      address the backend asked for in the last minute and passes the
      bytes; TLS runs end to end between the backend and the other server.
-     Paired servers see the gateway only. The federation key stays at the
-     backend.
+     The gateway never dials, for its backend, a loopback, link-local,
+     unspecified or multicast address. Paired servers see the gateway only.
+     The federation key stays at the backend.
 133. With an identity provider, its callback reaches the gateway and
      passes over the link; the code exchange, the client secret and the
      provider's tokens stay at the backend.
