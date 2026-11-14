@@ -39,12 +39,12 @@ type Cache struct {
 	Margin float64 // share of the disk left free (0.10)
 	Logger *slog.Logger
 
-	mu       sync.Mutex
-	entries  map[string]*entry
-	used     int64
-	allowed  map[string]time.Time       // session hash + key: until when it may have it
+	mu      sync.Mutex
+	entries map[string]*entry
+	used    int64
+	allowed map[string]time.Time // session hash + key: until when it may have it
 	// epoch counts ForgetAccess: an answer asked before one isn't kept.
-	epoch uint64
+	epoch    uint64
 	variants map[string]map[string]bool // by image kind: the sizes asked for (queries)
 	queue    chan string                // new images to fetch ahead
 }
