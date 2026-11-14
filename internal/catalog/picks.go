@@ -181,7 +181,11 @@ func (k *Picks) add(ctx context.Context, l *pickList, kind string, p *tmdb.Page)
 
 func (k *Picks) save(ctx context.Context, name string, l *pickList) error {
 	for _, kind := range []string{"movie", "series"} {
-		if err := k.Store.SetList(ctx, name, kind, l.ids[kind]); err != nil {
+		ids, err := crossing(ctx, k.Store, kind, l.ids[kind])
+		if err != nil {
+			return err
+		}
+		if err := k.Store.SetList(ctx, name, kind, ids); err != nil {
 			return err
 		}
 	}

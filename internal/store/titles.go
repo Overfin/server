@@ -47,6 +47,11 @@ type Title struct {
 	// ListGenres are TMDB's genres by number, as its lists carry them:
 	// kept when there are some (GenresLeftOut).
 	ListGenres []int
+	// ListLanguage (ISO 639-1) and ListVotes are its original language and
+	// TMDB vote count as lists carry them: kept when given ("" and 0 leave
+	// what's known), for Crossing.
+	ListLanguage string
+	ListVotes    int
 }
 
 // TitleGenre is one of TMDB's genres.
@@ -63,19 +68,22 @@ func (s *Store) PutTitles(ctx context.Context, titles []Title, at time.Time) err
 	}
 	defer tx.Rollback()
 	stmt, err := tx.PrepareContext(ctx, `INSERT INTO catalog_titles
-		(kind, tmdb, name, year, overview, poster, backdrop, status, seen_at, sort_name, search_name)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(kind, tmdb, name, year, overview, poster, backdrop, status, seen_at, sort_name, search_name, list_language, list_votes)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (kind, tmdb) DO UPDATE SET name = excluded.name, year = excluded.year,
 			overview = excluded.overview, poster = excluded.poster, backdrop = excluded.backdrop,
 			status = excluded.status, seen_at = excluded.seen_at, sort_name = excluded.sort_name,
-			search_name = excluded.search_name`)
+			search_name = excluded.search_name,
+			list_language = coalesce(excluded.list_language, list_language),
+			list_votes = coalesce(excluded.list_votes, list_votes)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 	for _, t := range titles {
 		if _, err := stmt.ExecContext(ctx, t.Kind, t.TMDB, t.Name, nullInt(t.Year), t.Overview,
-			nullString(t.Poster), nullString(t.Backdrop), t.Status, at.Unix(), SortName(t.Name), Fold(t.Name)); err != nil {
+			nullString(t.Poster), nullString(t.Backdrop), t.Status, at.Unix(), SortName(t.Name), Fold(t.Name),
+			nullString(t.ListLanguage), nullInt(t.ListVotes)); err != nil {
 			return err
 		}
 		if len(t.ListGenres) == 0 {
@@ -237,6 +245,55 @@ func (s *Store) SetList(ctx context.Context, list, kind string, tmdbIDs []string
 		}
 	}
 	return tx.Commit()
+}
+
+// Crossing is tmdbIDs, in order, without the titles in a language none of
+// languages (ISO 639-1) is that have fewer than minVotes TMDB votes: what
+// crossed borders stays, what's popular only where its language is spoken
+// doesn't. A title whose language isn't known stays. The language is the
+// one lists carry, else its page's; the votes, the most either says.
+func (s *Store) Crossing(ctx context.Context, kind string, tmdbIDs, languages []string, minVotes int) ([]string, error) {
+	if len(tmdbIDs) == 0 {
+		return tmdbIDs, nil
+	}
+	spoken := map[string]bool{}
+	for _, l := range languages {
+		spoken[l] = true
+	}
+	ids, err := json.Marshal(tmdbIDs)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.read.QueryContext(ctx, `SELECT t.tmdb, coalesce(t.list_language, d.language, ''),
+			max(coalesce(t.list_votes, 0), coalesce(t.rating_votes, 0))
+		FROM json_each(?) j
+		JOIN catalog_titles t ON t.kind = ? AND t.tmdb = j.value
+		LEFT JOIN catalog_details_language d ON d.kind = t.kind AND d.tmdb = t.tmdb`, string(ids), kind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id, language string
+		var votes int
+		if err := rows.Scan(&id, &language, &votes); err != nil {
+			return nil, err
+		}
+		if language != "" && !spoken[language] && votes < minVotes {
+			out[id] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	kept := make([]string, 0, len(tmdbIDs))
+	for _, id := range tmdbIDs {
+		if !out[id] {
+			kept = append(kept, id)
+		}
+	}
+	return kept, nil
 }
 
 // ListTitles returns a page of a discovery list, in order, from offset:

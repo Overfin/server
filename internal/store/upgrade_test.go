@@ -45,14 +45,23 @@ func openAt(t *testing.T, version int) *Store {
 	return s
 }
 
+// oldPutTitle keeps a title as older Overfins did, before the columns
+// PutTitles writes now.
+func oldPutTitle(t *testing.T, s *Store, title Title, at time.Time) {
+	t.Helper()
+	if _, err := s.db.ExecContext(context.Background(), `INSERT INTO catalog_titles
+		(kind, tmdb, name, overview, status, seen_at, sort_name, search_name) VALUES (?, ?, ?, '', 0, ?, ?, ?)`,
+		title.Kind, title.TMDB, title.Name, at.Unix(), SortName(title.Name), Fold(title.Name)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // oldTitleDetails keeps a title's page as older Overfins did, before the
 // columns SetTitleDetails writes now.
 func oldTitleDetails(t *testing.T, s *Store, title Title, details string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	if err := s.PutTitles(ctx, []Title{title}, at); err != nil {
-		t.Fatal(err)
-	}
+	oldPutTitle(t, s, title, at)
 	if _, err := s.db.ExecContext(ctx, `UPDATE catalog_titles SET details = ?, details_at = ? WHERE kind = ? AND tmdb = ?`,
 		details, at.Unix(), title.Kind, title.TMDB); err != nil {
 		t.Fatal(err)
@@ -135,9 +144,7 @@ func TestUpgradeListsFilmsToFind(t *testing.T) {
 	now := time.Now()
 	oldTitleDetails(t, s, Title{Kind: "movie", TMDB: "11", Name: "Star Wars"}, `{}`, now)
 	oldTitleDetails(t, s, Title{Kind: "series", TMDB: "1399", Name: "Game of Thrones"}, `{}`, now)
-	if err := s.PutTitles(ctx, []Title{{Kind: "movie", TMDB: "12", Name: "Never opened"}}, now); err != nil {
-		t.Fatal(err)
-	}
+	oldPutTitle(t, s, Title{Kind: "movie", TMDB: "12", Name: "Never opened"}, now)
 	if err := s.migrate(ctx); err != nil {
 		t.Fatal(err)
 	}

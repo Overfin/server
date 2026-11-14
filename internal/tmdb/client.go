@@ -391,6 +391,7 @@ func (r rawTitle) title(kind string) (Title, bool) {
 	if isoLanguage.MatchString(r.OriginalLanguage) {
 		t.Language = r.OriginalLanguage
 	}
+	t.Votes = max(r.VoteCount, 0)
 	for _, g := range r.GenreIDs {
 		if g > 0 && g <= 1_000_000 && len(t.ListGenres) < 20 {
 			t.ListGenres = append(t.ListGenres, g)

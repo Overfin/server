@@ -62,6 +62,9 @@ type Title struct {
 	// ListGenres are its genres by TMDB's numbers, as lists and searches
 	// carry them; nil from a title's page (Details names them).
 	ListGenres []int
+	// Votes is how many of TMDB's users rated it, as lists and searches
+	// carry it; 0 when they don't (Seerr's lists).
+	Votes int
 }
 
 // Details is a title's page: the title, and what lists don't carry.

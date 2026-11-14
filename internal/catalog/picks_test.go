@@ -49,7 +49,8 @@ func (f *fakePicks) Providers(_ context.Context, kind, country string, _ int) ([
 
 func (f *fakePicks) Streaming(_ context.Context, kind, country string, providers []int, _ time.Time, page int) (*tmdb.Page, error) {
 	f.asked = append(f.asked, "streaming "+kind+" "+country)
-	return &tmdb.Page{Page: page, TotalPages: 1, Titles: []tmdb.Title{{TMDBID: 200, Kind: "movie", Name: "Streams here"}}}, nil
+	return &tmdb.Page{Page: page, TotalPages: 1, Titles: []tmdb.Title{{TMDBID: 200, Kind: "movie", Name: "Streams here"},
+		{TMDBID: 202, Kind: "movie", Name: "Streams everywhere, watched at home", Language: "hi", Votes: 10}}}, nil
 }
 
 func (f *fakePicks) OutAtHome(_ context.Context, country string, _ time.Time, page int) (*tmdb.Page, error) {
@@ -98,7 +99,8 @@ func TestPicks(t *testing.T) {
 		t.Errorf("liked series: %+v (asked %v)", series, src.asked)
 	}
 	// What's out in the server's country (its ratings country): on its
-	// streaming services, and released at home there, each film once.
+	// streaming services, and released at home there, each film once; not
+	// a film in a language the server doesn't speak with few votes.
 	regional, _ := st.ListTitles(ctx, "regional", "movie", "", nil, 0, 10)
 	if len(regional) != 2 || regional[0].TMDB != "200" || regional[1].TMDB != "201" {
 		t.Errorf("regional: %+v", regional)

@@ -200,6 +200,14 @@ Overfin doesn't know yet is found on TMDB by its IMDb ID, once (a first
 day asks a few hundred, then a handful a day). Upcoming stays TMDB's.
 With Seerr as the only source, TMDB's lists stay.
 
+Trending, popular and the suggestions Overfin makes for wishes and for
+Overtide leave out titles in a language the server doesn't offer (fr-CA
+counts as French) that have fewer than 500 votes on TMDB: those are
+mostly popular where their language is spoken, a streaming service's
+regional series or a local hit, while titles that crossed borders have
+far more. A title whose language TMDB doesn't give stays. Upcoming isn't
+filtered, nor is anything the library already has.
+
 Wishes go where you choose (Features, Wishes): to Overtide, which fetches
 them in Overfin's turns, or to Seerr, where Overfin requests them itself, a
 few a day, as one Seerr user of its own named "Overfin" (give it the Request

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/overfin/server/internal/imdb"
@@ -134,6 +135,12 @@ func (l *Lists) read(ctx context.Context, s tmdb.Source, list, kind string) erro
 			break
 		}
 	}
+	if list == "trending" || list == "popular" {
+		var err error
+		if ids, err = crossing(ctx, l.Store, kind, ids); err != nil {
+			return err
+		}
+	}
 	return l.Store.SetList(ctx, list, kind, ids)
 }
 
@@ -213,11 +220,40 @@ func (l *Lists) readIMDb(ctx context.Context, f titleFinder, list, kind string, 
 	if len(ids) == 0 {
 		return nil
 	}
+	ids, err := crossing(ctx, l.Store, kind, ids)
+	if err != nil {
+		return err
+	}
 	return l.Store.SetList(ctx, list, kind, ids)
 }
 
 // StoreTitle is a title from TMDB as the catalog keeps it.
 func StoreTitle(t tmdb.Title) store.Title {
 	return store.Title{Kind: t.Kind, TMDB: strconv.Itoa(t.TMDBID), Name: t.Name, Year: t.Year, Overview: t.Overview,
-		Poster: t.Poster, Backdrop: t.Backdrop, Status: t.Status, ListGenres: t.ListGenres}
+		Poster: t.Poster, Backdrop: t.Backdrop, Status: t.Status, ListGenres: t.ListGenres,
+		ListLanguage: t.Language, ListVotes: t.Votes}
+}
+
+// CrossingVotes is how many TMDB votes a title in a language the server
+// doesn't speak needs to enter trending, popular or the picks: below it,
+// it's popular mostly where its language is spoken (a streaming service's
+// regional series, a local hit), above it, it crossed borders. Measured on
+// a server's lists, 2026-11: well-known crossovers had 1,300 and more,
+// most local titles under 100.
+const CrossingVotes = 500
+
+// crossing is ids without the titles of a language the server doesn't
+// speak that lack CrossingVotes (store.Crossing). The server's languages
+// are those it offers, by language, region aside (fr-CA is fr).
+func crossing(ctx context.Context, st *store.Store, kind string, ids []string) ([]string, error) {
+	offered, _, _, err := st.Languages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	spoken := make([]string, 0, len(offered))
+	for _, tag := range offered {
+		base, _, _ := strings.Cut(tag, "-")
+		spoken = append(spoken, strings.ToLower(base))
+	}
+	return st.Crossing(ctx, kind, ids, spoken, CrossingVotes)
 }
