@@ -56,7 +56,12 @@ server's language (`translated`, when it isn't English), and whether another
 order on TMDB (DVD, production, digital…) puts other episodes in that
 season's places (`rearranged`), with how many episodes those orders put in
 the season (`otherSizes`: a release with as many files may follow one of
-them). 503 when Overfin has no TMDB token.
+them). Names in the server's language are its region's, else its
+language's (TMDB often names a region's episodes by their number). Each
+episode carries its runtime when TMDB knows it. `others` are those other
+orders, each with only the seasons it rearranges, numbered as it numbers
+them: what a release's number means in each, for whoever chooses by hand.
+503 when Overfin has no TMDB token.
 
 When each film and season arrived in the libraries and left them, as
 Overfin's index saw it (what the libraries had before this history began

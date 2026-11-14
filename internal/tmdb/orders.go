@@ -17,6 +17,17 @@ import (
 // makes that number mean something else.
 type EpisodeOrders struct {
 	Seasons []OrderSeason `json:"seasons"`
+	// Others are the other orders, with only the seasons they rearrange:
+	// what a number means in each, for whoever chooses by hand.
+	Others []OtherOrder `json:"others"`
+}
+
+// OtherOrder is one of a series' other orders on TMDB (an episode group),
+// with the seasons it puts other episodes in.
+type OtherOrder struct {
+	Name    string        `json:"name"`
+	Type    int           `json:"type"` // 1 air, 3 DVD, 4 digital, 6 production, 7 TV
+	Seasons []OrderSeason `json:"seasons"`
 }
 
 // OrderSeason is one season in TMDB's own order. Rearranged: another order
@@ -37,6 +48,7 @@ type OrderEpisode struct {
 	AirDate    string `json:"airDate,omitempty"`
 	Name       string `json:"name,omitempty"`
 	Translated string `json:"translated,omitempty"`
+	Runtime    int    `json:"runtime,omitempty"` // minutes, when TMDB knows
 }
 
 // Episode group types that number seasons as releases do: original air,
@@ -86,9 +98,28 @@ func (c *Client) EpisodeOrders(ctx context.Context, seriesID int) (*EpisodeOrder
 		if translated, err = c.rawSeasons(ctx, path, numbers, c.withLanguage(nil)); err != nil {
 			return nil, err
 		}
+		// A region's translation often lacks episodes' names (TMDB then
+		// names them by number, "Épisode 1"): the language's fill them, as
+		// a season's page does (fill).
+		var lacking []int
+		for _, n := range numbers {
+			if t := translated[n]; t != nil && t.lacks() {
+				lacking = append(lacking, n)
+			}
+		}
+		if c.baseLanguage() != "" && len(lacking) > 0 {
+			base, err := c.rawSeasons(ctx, path, lacking, c.inBase(c.withLanguage(nil)))
+			if err != nil {
+				return nil, err
+			}
+			for n, b := range base {
+				translated[n].fill(*b)
+			}
+		}
 	}
 	places := map[int][]int{}
-	out := &EpisodeOrders{Seasons: []OrderSeason{}}
+	byID := map[int]OrderEpisode{}
+	out := &EpisodeOrders{Seasons: []OrderSeason{}, Others: []OtherOrder{}}
 	for _, number := range numbers {
 		raw := english[number]
 		if raw == nil {
@@ -103,17 +134,38 @@ func (c *Client) EpisodeOrders(ctx context.Context, seriesID int) (*EpisodeOrder
 		}
 		for _, e := range raw.Episodes {
 			places[number] = append(places[number], e.ID)
-			episode := OrderEpisode{Episode: e.EpisodeNumber, AirDate: date(e.AirDate), Name: e.Name}
-			if name := names[e.EpisodeNumber]; name != e.Name {
+			episode := OrderEpisode{Episode: e.EpisodeNumber, AirDate: date(e.AirDate), Name: textclean.Plain(e.Name, 300)}
+			if name := textclean.Plain(names[e.EpisodeNumber], 300); name != episode.Name {
 				episode.Translated = name
 			}
+			if e.Runtime > 0 && e.Runtime < 10_000 {
+				episode.Runtime = e.Runtime
+			}
+			byID[e.ID] = episode
 			season.Episodes = append(season.Episodes, episode)
 		}
 		out.Seasons = append(out.Seasons, season)
 	}
-	rearranged, err := c.rearrangedSeasons(ctx, path, places)
+	rearranged, others, err := c.rearrangedSeasons(ctx, path, places)
 	if err != nil {
 		return nil, err
+	}
+	// The other orders' episodes are TMDB's own: named as they are.
+	for _, o := range others {
+		order := OtherOrder{Name: o.name, Type: o.kind, Seasons: []OrderSeason{}}
+		for _, s := range o.seasons {
+			season := OrderSeason{Season: s.number, OtherSizes: []int{}, Episodes: []OrderEpisode{}}
+			for i, id := range s.ids {
+				e, ok := byID[id]
+				if !ok {
+					e = OrderEpisode{Name: "?"}
+				}
+				e.Episode = i + 1
+				season.Episodes = append(season.Episodes, e)
+			}
+			order.Seasons = append(order.Seasons, season)
+		}
+		out.Others = append(out.Others, order)
 	}
 	for i := range out.Seasons {
 		if sizes := rearranged[out.Seasons[i].Season]; len(sizes) > 0 {
@@ -275,7 +327,7 @@ func (c *Client) ArrangedOrder(ctx context.Context, seriesID int, id string) (*A
 // written before the season's last episodes aired does. A season is
 // numbered as ArrangedOrder numbers it: specials are 0, and a group whose
 // first season has order 0 counts from 1.
-func (c *Client) rearrangedSeasons(ctx context.Context, path string, places map[int][]int) (map[int][]int, error) {
+func (c *Client) rearrangedSeasons(ctx context.Context, path string, places map[int][]int) (map[int][]int, []otherOrder, error) {
 	var list struct {
 		Results []struct {
 			ID   string `json:"id"`
@@ -283,13 +335,14 @@ func (c *Client) rearrangedSeasons(ctx context.Context, path string, places map[
 		} `json:"results"`
 	}
 	if err := c.get(ctx, path+"/episode_groups", nil, &list); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	type groupEpisode struct {
 		ID    int `json:"id"`
 		Order int `json:"order"`
 	}
 	out := map[int][]int{}
+	var others []otherOrder
 	read := 0
 	for _, result := range list.Results {
 		if !slices.Contains(seasonGroupTypes, result.Type) || !groupID.MatchString(result.ID) || read >= maxOrderGroups {
@@ -297,6 +350,7 @@ func (c *Client) rearrangedSeasons(ctx context.Context, path string, places map[
 		}
 		read++
 		var group struct {
+			Name   string `json:"name"`
 			Groups []struct {
 				Name     string         `json:"name"`
 				Order    int            `json:"order"`
@@ -304,8 +358,9 @@ func (c *Client) rearrangedSeasons(ctx context.Context, path string, places map[
 			} `json:"groups"`
 		}
 		if err := c.get(ctx, "/tv/episode_group/"+result.ID, nil, &group); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		order := otherOrder{name: textclean.Plain(group.Name, 120), kind: result.Type}
 		shift := 0
 		for _, g := range group.Groups {
 			if g.Order == 0 && !specialsName.MatchString(g.Name) {
@@ -326,10 +381,31 @@ func (c *Client) rearrangedSeasons(ctx context.Context, path string, places map[
 						out[number] = append(out[number], len(episodes))
 						slices.Sort(out[number])
 					}
+					ids := make([]int, 0, len(episodes))
+					for _, e := range episodes {
+						ids = append(ids, e.ID)
+					}
+					order.seasons = append(order.seasons, otherSeason{number: number, ids: ids})
 					break
 				}
 			}
 		}
+		if len(order.seasons) > 0 {
+			slices.SortFunc(order.seasons, func(a, b otherSeason) int { return a.number - b.number })
+			others = append(others, order)
+		}
 	}
-	return out, nil
+	return out, others, nil
+}
+
+// otherOrder is an order's seasons that rearrange TMDB's, by episode ID.
+type otherOrder struct {
+	name    string
+	kind    int
+	seasons []otherSeason
+}
+
+type otherSeason struct {
+	number int
+	ids    []int
 }

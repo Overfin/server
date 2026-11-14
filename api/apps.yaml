@@ -454,40 +454,28 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [seasons]
+                required: [seasons, others]
                 properties:
                   seasons:
                     type: array
                     items:
+                      $ref: "#/components/schemas/EpisodeOrderSeason"
+                  others:
+                    type: array
+                    description: The other orders on TMDB, each with only the seasons it rearranges (their episodes are TMDB's own, numbered as the order numbers them).
+                    items:
                       type: object
-                      required: [season, rearranged, otherSizes, episodes]
+                      required: [name, type, seasons]
                       properties:
-                        season:
+                        name:
+                          type: string
+                        type:
                           type: integer
-                        rearranged:
-                          type: boolean
-                        otherSizes:
-                          type: array
-                          description: How many episodes the orders that rearrange the season put in it, each size once, smallest first; empty when none does.
-                          items:
-                            type: integer
-                        episodes:
+                          description: TMDB's episode group type (1 air, 3 DVD, 4 digital, 6 production, 7 TV).
+                        seasons:
                           type: array
                           items:
-                            type: object
-                            required: [episode]
-                            properties:
-                              episode:
-                                type: integer
-                              airDate:
-                                type: string
-                                description: YYYY-MM-DD, when TMDB knows it.
-                              name:
-                                type: string
-                                description: In English.
-                              translated:
-                                type: string
-                                description: In the server's language, when it isn't English.
+                            $ref: "#/components/schemas/EpisodeOrderSeason"
         "400":
           description: No valid tmdbId.
           content:
@@ -600,6 +588,39 @@ components:
         `stats`, and the reverse.
 
   schemas:
+    EpisodeOrderSeason:
+      type: object
+      required: [season, rearranged, otherSizes, episodes]
+      properties:
+        season:
+          type: integer
+        rearranged:
+          type: boolean
+        otherSizes:
+          type: array
+          description: How many episodes the orders that rearrange the season put in it, each size once, smallest first; empty when none does.
+          items:
+            type: integer
+        episodes:
+          type: array
+          items:
+            type: object
+            required: [episode]
+            properties:
+              episode:
+                type: integer
+              airDate:
+                type: string
+                description: YYYY-MM-DD, when TMDB knows it.
+              name:
+                type: string
+                description: In English.
+              translated:
+                type: string
+                description: In the server's language, when it isn't English (a region's, else its language's).
+              runtime:
+                type: integer
+                description: Minutes, when TMDB knows it.
     AppHistoryEvent:
       description: A film or a season arriving in the libraries or leaving them.
       type: object

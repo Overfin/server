@@ -27,10 +27,18 @@ func TestEpisodeOrders(t *testing.T) {
 				io.WriteString(w, `{"seasons":[{"season_number":0},{"season_number":1},{"season_number":2},{"season_number":3}]}`)
 				return
 			}
+			// fr-CA names season 3's first episode by its number; fr has it.
+			third := `{"id":31,"episode_number":1,"name":"C1"}`
+			switch r.URL.Query().Get("language") {
+			case "fr-CA":
+				third = `{"id":31,"episode_number":1,"name":"Épisode 1"}`
+			case "fr":
+				third = `{"id":31,"episode_number":1,"name":"Troisième","overview":"Ça arrive."}`
+			}
 			fmt.Fprintf(w, `{"season/0":{"episodes":[]},
 				"season/1":{"episodes":[{"id":11,"episode_number":1,"air_date":"1999-03-28","name":%q},{"id":12,"episode_number":2,"air_date":"nonsense","name":"Same"}]},
-				"season/2":{"episodes":[{"id":21,"episode_number":1,"name":"B1"},{"id":22,"episode_number":2,"name":"B2"}]},
-				"season/3":{"episodes":[{"id":31,"episode_number":1,"name":"C1"},{"id":32,"episode_number":2,"name":"C2"}]}}`, name("Space Pilot", "Pilote"))
+				"season/2":{"episodes":[{"id":21,"episode_number":1,"name":"B1","runtime":22},{"id":22,"episode_number":2,"name":"B2"}]},
+				"season/3":{"episodes":[%s,{"id":32,"episode_number":2,"name":"C2"}]}}`, name("Space Pilot", "Pilote"), third)
 		case "/3/tv/615/episode_groups":
 			if groupsFail {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -41,7 +49,7 @@ func TestEpisodeOrders(t *testing.T) {
 			// Season 1 stops earlier, so its numbers mean the same; season 2
 			// swaps its episodes; a season TMDB's order hasn't is harmless to
 			// the others.
-			io.WriteString(w, `{"groups":[
+			io.WriteString(w, `{"name":"Production","groups":[
 				{"order":1,"episodes":[{"id":11,"order":0}]},
 				{"order":2,"episodes":[{"id":21,"order":1},{"id":22,"order":0}]},
 				{"order":9,"episodes":[{"id":31,"order":0}]}]}`)
@@ -79,6 +87,16 @@ func TestEpisodeOrders(t *testing.T) {
 	}
 	if !slices.Equal(seasons[2].OtherSizes, []int{2, 3}) || len(seasons[1].OtherSizes) != 0 || seasons[1].OtherSizes == nil {
 		t.Errorf("other sizes: %v, %v", seasons[2].OtherSizes, seasons[1].OtherSizes)
+	}
+	// What a number means in each other order: only the seasons it
+	// rearranges, TMDB's episodes as they are.
+	if len(orders.Others) != 2 || orders.Others[0].Name != "Production" || len(orders.Others[0].Seasons) != 2 ||
+		orders.Others[0].Seasons[0].Season != 2 || orders.Others[0].Seasons[0].Episodes[0].Name != "B2" ||
+		orders.Others[0].Seasons[0].Episodes[1] != (OrderEpisode{Episode: 2, Name: "B1", Runtime: 22}) {
+		t.Errorf("others: %+v", orders.Others)
+	}
+	if e := seasons[3].Episodes[0]; e.Translated != "Troisième" {
+		t.Errorf("a regional name by number, the language's instead: %+v", e)
 	}
 	first := seasons[1].Episodes
 	if first[0] != (OrderEpisode{Episode: 1, AirDate: "1999-03-28", Name: "Space Pilot", Translated: "Pilote"}) {
