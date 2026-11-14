@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -406,5 +407,52 @@ func TestLimitAnswer(t *testing.T) {
 	}
 	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") != "5" {
 		t.Errorf("past the limit: %d, Retry-After %q", rec.Code, rec.Header().Get("Retry-After"))
+	}
+}
+
+// Requests a browser wouldn't send, over a real connection: a method not
+// listed, paths that climb or hide /admin and /link, encoded slashes,
+// oversized headers, garbage. None reaches what the gateway refuses, and
+// each gets a plain answer.
+func TestHostileRequests(t *testing.T) {
+	b := &fakeBackend{connected: true}
+	srv := httptest.NewServer(Handler(b, "1.0", nil, nil, quiet))
+	defer srv.Close()
+	raw := func(req string) string {
+		c, err := net.Dial("tcp", strings.TrimPrefix(srv.URL, "http://"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		c.SetDeadline(time.Now().Add(5 * time.Second))
+		io.WriteString(c, req)
+		line, _ := bufio.NewReader(c).ReadString('\n')
+		return strings.TrimSpace(line)
+	}
+	for req, want := range map[string]string{
+		"TRACE /api/v1/me HTTP/1.1\r\nHost: x\r\n\r\n":                                   "404",
+		"DELETE /api/v1/me HTTP/1.1\r\nHost: x\r\n\r\n":                                  "401",
+		"GET /api/v1/../../admin/ HTTP/1.1\r\nHost: x\r\n\r\n":                           "",
+		"GET /./admin/x HTTP/1.1\r\nHost: x\r\n\r\n":                                     "",
+		"GET /link/v1/events HTTP/1.1\r\nHost: x\r\n\r\n":                                "404",
+		"GET /%61dmin/ HTTP/1.1\r\nHost: x\r\n\r\n":                                      "404",
+		"GET /api%2Fv1%2Fadmin HTTP/1.1\r\nHost: x\r\n\r\n":                              "404",
+		"GET /LINK/v1/events HTTP/1.1\r\nHost: x\r\n\r\n":                                "",
+		"BREW /coffee HTTP/1.1\r\nHost: x\r\n\r\n":                                       "404",
+		"GET / HTTP/1.1\r\nHost: x\r\nX-Big: " + strings.Repeat("a", 2<<20) + "\r\n\r\n": "431",
+		"\x16\x03\x01\x02\x00garbage\r\n\r\n":                                            "400",
+	} {
+		before := len(b.seen)
+		got := raw(req)
+		if want != "" && !strings.Contains(got, " "+want+" ") && !strings.HasSuffix(got, " "+want) {
+			t.Errorf("%.40q: %q, want %s", req, got, want)
+		}
+		// The backend routes by exact case: /LINK/… is a page there, never
+		// the link's own routes.
+		for _, s := range b.seen[before:] {
+			if p := strings.SplitN(s, " ", 2)[1]; strings.HasPrefix(p, "/admin") || strings.HasPrefix(p, "/link") || strings.HasPrefix(p, "/apps") {
+				t.Errorf("%.40q reached the backend as %s", req, s)
+			}
+		}
 	}
 }

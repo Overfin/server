@@ -14,9 +14,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -611,5 +614,224 @@ func TestEgressRefusals(t *testing.T) {
 	b.egressMu.Unlock()
 	if b.meant("192.0.2.9:443") {
 		t.Error("still meant after a minute")
+	}
+}
+
+// The link cut while several transfers run: each ends at once, with an
+// error, none hangs; once the backend is back, requests work again.
+func TestLinkCutMidway(t *testing.T) {
+	code := ""
+	g, addr := gatewayOn(t, t.TempDir(), "1.0", &code)
+	bdir := t.TempDir()
+	b, stop := runBackend(t, bdir, "1.0")
+	code = pairNow(t, b, addr)
+	waitConnected(t, g, true)
+
+	const transfers = 6
+	errs := make(chan error, transfers)
+	started := make(chan struct{}, transfers)
+	for i := range transfers {
+		go func() {
+			n := 2 << 30 // far more than a second's worth
+			if i%2 == 1 {
+				n = 1 << 20
+			}
+			resp, err := g.Client().Get("https://backend/bytes?n=" + strconv.Itoa(n))
+			if err != nil {
+				started <- struct{}{}
+				errs <- err
+				return
+			}
+			defer resp.Body.Close()
+			buf := make([]byte, 64<<10)
+			resp.Body.Read(buf)
+			started <- struct{}{}
+			_, err = io.Copy(io.Discard, resp.Body)
+			errs <- err
+		}()
+	}
+	for range transfers {
+		<-started
+	}
+	cut := time.Now()
+	stop()
+	ended := 0
+	for range transfers {
+		select {
+		case <-errs:
+			ended++
+		case <-time.After(20 * time.Second):
+			t.Fatalf("%d of %d transfers still running 20 s after the cut", transfers-ended, transfers)
+		}
+	}
+	if took := time.Since(cut); took > 15*time.Second {
+		t.Errorf("the transfers took %v to end", took)
+	}
+	waitConnected(t, g, false)
+	code = ""
+	runBackend(t, bdir, "1.0")
+	waitConnected(t, g, true)
+	if got := get(t, g, "/hello"); got != "hello from the backend" {
+		t.Errorf("after coming back: %q", got)
+	}
+}
+
+// One download nobody reads fills its own stream's window only: other
+// requests answer at once, another large download goes at full speed.
+func TestStalledStream(t *testing.T) {
+	code := ""
+	g, addr := gatewayOn(t, t.TempDir(), "1.0", &code)
+	b, _ := runBackend(t, t.TempDir(), "1.0")
+	code = pairNow(t, b, addr)
+	waitConnected(t, g, true)
+
+	stalled, err := g.Client().Get("https://backend/bytes?n=" + strconv.Itoa(1<<30))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stalled.Body.Close() // never read
+	time.Sleep(300 * time.Millisecond)
+
+	for range 20 {
+		start := time.Now()
+		if got := get(t, g, "/hello"); got != "hello from the backend" {
+			t.Fatalf("beside a stalled stream: %q", got)
+		}
+		if took := time.Since(start); took > time.Second {
+			t.Errorf("a small request took %v", took)
+		}
+	}
+	start := time.Now()
+	resp, err := g.Client().Get("https://backend/bytes?n=" + strconv.Itoa(64<<20))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, _ := io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if n != 64<<20 {
+		t.Fatalf("another download: %d bytes", n)
+	}
+	if took := time.Since(start); took > 10*time.Second {
+		t.Errorf("64 MiB beside a stalled stream took %v", took)
+	}
+}
+
+// A gateway that keeps failing (stopped, started again, five times): its
+// backend keeps coming back to it, on the pinned keys, and its requests
+// work each time.
+func TestGatewayFailingRepeatedly(t *testing.T) {
+	longTest(t) // five restarts, a minute
+	gdir := t.TempDir()
+	code := ""
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	addr := ln.Addr().String()
+	ln.Close()
+	// start runs a gateway on gdir, as a restarted one would: its key and
+	// pairing from disk; stop ends it, its listener closed.
+	start := func() (*Gateway, func()) {
+		g, err := NewGateway(gdir, "1.0", func() string { return code }, quiet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			for ctx.Err() == nil {
+				if g.Listen(ctx, addr) == nil {
+					return
+				}
+				time.Sleep(50 * time.Millisecond) // the port, freed a moment later
+			}
+		}()
+		return g, func() { cancel(); g.Close(); <-stopped }
+	}
+	g, stop := start()
+	b, _ := runBackend(t, t.TempDir(), "1.0")
+	time.Sleep(100 * time.Millisecond)
+	code = pairNow(t, b, addr)
+	waitConnected(t, g, true)
+	code = ""
+	for i := range 5 {
+		stop()
+		g, stop = start()
+		waitConnectedWithin(t, g, 45*time.Second)
+		if got := get(t, g, "/hello"); got != "hello from the backend" {
+			t.Fatalf("restart %d: %q", i+1, got)
+		}
+	}
+	stop()
+}
+
+func waitConnectedWithin(t *testing.T, g *Gateway, d time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for !g.Status().Connected {
+		if time.Now().After(deadline) {
+			t.Fatalf("not connected after %v (%+v)", d, g.Status())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// Long transfers at once (8 × 1 GiB): the memory they take stays flat,
+// whatever the bytes passed.
+func TestLongTransfersMemory(t *testing.T) {
+	longTest(t) // 8 GiB through the link
+	code := ""
+	g, addr := gatewayOn(t, t.TempDir(), "1.0", &code)
+	b, _ := runBackend(t, t.TempDir(), "1.0")
+	code = pairNow(t, b, addr)
+	waitConnected(t, g, true)
+
+	var peak atomic.Uint64
+	done := make(chan struct{})
+	go func() {
+		var m runtime.MemStats
+		for {
+			select {
+			case <-done:
+				return
+			case <-time.After(100 * time.Millisecond):
+				runtime.ReadMemStats(&m)
+				if m.HeapInuse > peak.Load() {
+					peak.Store(m.HeapInuse)
+				}
+			}
+		}
+	}()
+	var wg sync.WaitGroup
+	var total atomic.Int64
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := g.Client().Get("https://backend/bytes?n=" + strconv.Itoa(1<<30))
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			n, _ := io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			total.Add(n)
+		}()
+	}
+	wg.Wait()
+	close(done)
+	if total.Load() != 8<<30 {
+		t.Errorf("%d bytes passed", total.Load())
+	}
+	if p := peak.Load(); p > 256<<20 {
+		t.Errorf("the heap reached %d MiB for 8 GiB passed", p>>20)
+	}
+	t.Logf("8 GiB passed, heap at most %d MiB", peak.Load()>>20)
+}
+
+// longTest skips a test that takes minutes unless OVERFIN_LONG_TESTS is
+// set: they run by hand before a release, not at every push.
+func longTest(t *testing.T) {
+	t.Helper()
+	if os.Getenv("OVERFIN_LONG_TESTS") == "" {
+		t.Skip("a long test: OVERFIN_LONG_TESTS=1 go test ./internal/link")
 	}
 }

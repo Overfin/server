@@ -378,16 +378,28 @@ Found while writing this, or raised by review (2026-11-13).
 6. "Being updated" lasts only while a backend of another version tries.
 7. Reconnecting has jitter.
 
-**Not tested yet:** the failure tests a review proposed:
-- the gateway killed during HLS and direct playback;
-- the link cut while images, a direct stream, an HLS conversion and a
-  federation playback all run;
-- one HTTP/2 stream stalled while others run;
-- malformed and oversized requests at the gateway;
-- federation messages replayed concurrently with the original; an unpairing
-  while requests are in flight; a peer reusing another's context;
-- long concurrent streaming (memory, latency);
-- repeated gateway failures and reconnecting.
+**Failure tests** (a review's list, 2026-11-13):
+
+| Failure | Test | Result |
+|---|---|---|
+| The link cut while several transfers run | `TestLinkCutMidway` | every transfer ends at once, none hangs; requests work once the backend is back |
+| One stream stalled (never read) beside others | `TestStalledStream` | small requests answer at once; 64 MiB beside it in well under 10 s |
+| Hostile requests at the gateway: unlisted methods, climbing or encoded paths, 2 MiB headers, garbage | `TestHostileRequests` | plain answers (404, 401, 431, 400); `/admin`, `/apps`, `/link` never reach the backend (whose routes match case exactly: `/LINK/…` is a page there) |
+| A federation request replayed 50 times at once | `TestReplayAtOnce` | exactly one accepted |
+| A server signing in another's name; the same nonce under two keys | `TestAnotherServersName` | refused; two separate requests |
+| A pairing ended between two requests | `TestUnpairedMidway` | the next is answered as from a server no longer known; a replay is refused |
+| The gateway failing five times in a row | `TestGatewayFailingRepeatedly` (long) | the backend comes back each time, about 11 s on average |
+| 8 × 1 GiB through the link at once | `TestLongTransfersMemory` (long) | the heap stayed under 16 MiB |
+
+Long tests run with `OVERFIN_LONG_TESTS=1 go test ./internal/link`, before
+a release. The race detector finds nothing in `internal/link`,
+`internal/gateway`, `internal/edge` and `internal/federation`.
+
+**Still to do:** the gateway killed during real HLS and direct playback in
+a browser (the player's own recovery: the SDK restarts a failed HLS stream
+at the same place, tested on its own; a cut direct-play stream is left to
+the browser), which needs a gateway and a backend apart on the test
+install.
 
 **No independent security review yet.** This document is meant as its
 starting point.

@@ -2,11 +2,15 @@ package federation
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -294,5 +298,79 @@ func TestStrangersOwnMemory(t *testing.T) {
 	}
 	if n.add("a paired server", now, false) {
 		t.Error("a nonce twice")
+	}
+}
+
+// The same signed request arriving many times at once (a replay racing the
+// original): exactly one is accepted.
+func TestReplayAtOnce(t *testing.T) {
+	k := NewKey()
+	v := &Verifier{Host: "films.example.org", Seen: &Nonces{}}
+	body := []byte(`{"a":1}`)
+	req, _ := request(k, "POST", "/api/v1/federation/play", body, now)
+	var wg sync.WaitGroup
+	var accepted atomic.Int32
+	for range 50 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := v.Check(req.Clone(context.Background()), body, now); err == nil {
+				accepted.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if n := accepted.Load(); n != 1 {
+		t.Errorf("%d accepted", n)
+	}
+}
+
+// A server can't act in another's name: a request it signed, claiming the
+// other's key, is refused; the same nonce under each one's own key is two
+// requests.
+func TestAnotherServersName(t *testing.T) {
+	a, b := NewKey(), NewKey()
+	v := &Verifier{Host: "films.example.org", Seen: &Nonces{}}
+	body := []byte(`{}`)
+	req, _ := request(a, "POST", "/p", body, now)
+	req.Header.Set(HeaderKey, b64.EncodeToString(b.Public()))
+	if _, err := v.Check(req, body, now); err == nil {
+		t.Error("a request signed by one server, in another's name, accepted")
+	}
+	ra, nonce := request(a, "POST", "/p", body, now)
+	rb, _ := request(b, "POST", "/p", body, now)
+	rb.Header.Set(HeaderNonce, nonce)
+	msg := requestMessage("POST", "films.example.org", "/p", rb.Header.Get(HeaderDate), nonce, body)
+	rb.Header.Set(HeaderSignature, b64.EncodeToString(b.sign(msg)))
+	if _, err := v.Check(ra, body, now); err != nil {
+		t.Errorf("a's request: %v", err)
+	}
+	if _, err := v.Check(rb, body, now); err != nil {
+		t.Errorf("b's request with the same nonce: %v", err)
+	}
+}
+
+// A pairing ended between two requests of the same server: the first
+// passes, the next is answered as from a server no longer known.
+func TestUnpairedMidway(t *testing.T) {
+	k := NewKey()
+	var paired atomic.Bool
+	paired.Store(true)
+	v := &Verifier{Host: "films.example.org", Seen: &Nonces{},
+		Admit:     func(*http.Request, ed25519.PublicKey) (bool, bool) { return paired.Load(), paired.Load() },
+		Forgotten: func(*http.Request, ed25519.PublicKey) bool { return !paired.Load() }}
+	body := []byte(`{}`)
+	first, _ := request(k, "POST", "/p", body, now)
+	if _, err := v.Check(first, body, now); err != nil {
+		t.Fatalf("while paired: %v", err)
+	}
+	paired.Store(false)
+	next, _ := request(k, "POST", "/p", body, now)
+	if _, err := v.Check(next, body, now); !errors.Is(err, ErrForgotten) {
+		t.Errorf("after the pairing ended: %v", err)
+	}
+	// Its replay of the first, now: refused outright.
+	if _, err := v.Check(first, body, now); err == nil || errors.Is(err, ErrForgotten) {
+		t.Errorf("a replay after the pairing ended: %v", err)
 	}
 }

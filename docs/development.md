@@ -2,6 +2,9 @@
 
 ```sh
 go test ./...
+# before a release too: the link's long tests (a gateway restarted five
+# times, 8 GiB through the link), a few minutes
+OVERFIN_LONG_TESTS=1 go test ./internal/link
 node --test sdk/js/overfin.test.js
 mkdir -p dev && printf '[storage]\npath = "dev/overfin.db"\n' > dev/overfin.toml
 # keep this key: the database can't be read without it
