@@ -54,7 +54,9 @@ GET /apps/v1/episode-orders?tmdbId=615
 Each season's episodes with their air dates, English names and names in the
 server's language (`translated`, when it isn't English), and whether another
 order on TMDB (DVD, production, digital…) puts other episodes in that
-season's places (`rearranged`). 503 when Overfin has no TMDB token.
+season's places (`rearranged`), with how many episodes those orders put in
+the season (`otherSizes`: a release with as many files may follow one of
+them). 503 when Overfin has no TMDB token.
 
 When each film and season arrived in the libraries and left them, as
 Overfin's index saw it (what the libraries had before this history began

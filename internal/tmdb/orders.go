@@ -20,10 +20,13 @@ type EpisodeOrders struct {
 }
 
 // OrderSeason is one season in TMDB's own order. Rearranged: another order
-// puts other episodes in its places.
+// puts other episodes in its places; OtherSizes are how many episodes those
+// orders put in the season, each size once, smallest first (a release of
+// that many files may follow one of them).
 type OrderSeason struct {
 	Season     int            `json:"season"`
 	Rearranged bool           `json:"rearranged"`
+	OtherSizes []int          `json:"otherSizes"`
 	Episodes   []OrderEpisode `json:"episodes"`
 }
 
@@ -91,7 +94,7 @@ func (c *Client) EpisodeOrders(ctx context.Context, seriesID int) (*EpisodeOrder
 		if raw == nil {
 			continue
 		}
-		season := OrderSeason{Season: number, Episodes: []OrderEpisode{}}
+		season := OrderSeason{Season: number, OtherSizes: []int{}, Episodes: []OrderEpisode{}}
 		names := map[int]string{}
 		if other := translated[number]; other != nil {
 			for _, e := range other.Episodes {
@@ -113,7 +116,9 @@ func (c *Client) EpisodeOrders(ctx context.Context, seriesID int) (*EpisodeOrder
 		return nil, err
 	}
 	for i := range out.Seasons {
-		out.Seasons[i].Rearranged = rearranged[out.Seasons[i].Season]
+		if sizes := rearranged[out.Seasons[i].Season]; len(sizes) > 0 {
+			out.Seasons[i].Rearranged, out.Seasons[i].OtherSizes = true, sizes
+		}
 	}
 	return out, nil
 }
@@ -263,11 +268,14 @@ func (c *Client) ArrangedOrder(ctx context.Context, seriesID int, id string) (*A
 	return out, nil
 }
 
-// rearrangedSeasons says which seasons another order fills differently,
-// given the episode IDs in each season's places. An order that only stops
-// earlier leaves the numbers it has their meaning, as one written before
-// the season's last episodes aired does.
-func (c *Client) rearrangedSeasons(ctx context.Context, path string, places map[int][]int) (map[int]bool, error) {
+// rearrangedSeasons reads a series' orders that number seasons as releases
+// do, and says which of TMDB's seasons (places: each season's episode IDs)
+// another puts other episodes in, with how many it puts there. An order
+// that only stops earlier leaves the numbers it has their meaning, as one
+// written before the season's last episodes aired does. A season is
+// numbered as ArrangedOrder numbers it: specials are 0, and a group whose
+// first season has order 0 counts from 1.
+func (c *Client) rearrangedSeasons(ctx context.Context, path string, places map[int][]int) (map[int][]int, error) {
 	var list struct {
 		Results []struct {
 			ID   string `json:"id"`
@@ -277,7 +285,11 @@ func (c *Client) rearrangedSeasons(ctx context.Context, path string, places map[
 	if err := c.get(ctx, path+"/episode_groups", nil, &list); err != nil {
 		return nil, err
 	}
-	out := map[int]bool{}
+	type groupEpisode struct {
+		ID    int `json:"id"`
+		Order int `json:"order"`
+	}
+	out := map[int][]int{}
 	read := 0
 	for _, result := range list.Results {
 		if !slices.Contains(seasonGroupTypes, result.Type) || !groupID.MatchString(result.ID) || read >= maxOrderGroups {
@@ -286,28 +298,34 @@ func (c *Client) rearrangedSeasons(ctx context.Context, path string, places map[
 		read++
 		var group struct {
 			Groups []struct {
-				Order    int `json:"order"`
-				Episodes []struct {
-					ID    int `json:"id"`
-					Order int `json:"order"`
-				} `json:"episodes"`
+				Name     string         `json:"name"`
+				Order    int            `json:"order"`
+				Episodes []groupEpisode `json:"episodes"`
 			} `json:"groups"`
 		}
 		if err := c.get(ctx, "/tv/episode_group/"+result.ID, nil, &group); err != nil {
 			return nil, err
 		}
+		shift := 0
+		for _, g := range group.Groups {
+			if g.Order == 0 && !specialsName.MatchString(g.Name) {
+				shift = 1
+			}
+		}
 		for _, season := range group.Groups {
-			mine := places[season.Order]
+			number := season.Order + shift
+			if specialsName.MatchString(season.Name) {
+				number = 0
+			}
+			mine := places[number]
 			episodes := season.Episodes
-			slices.SortStableFunc(episodes, func(a, b struct {
-				ID    int `json:"id"`
-				Order int `json:"order"`
-			}) int {
-				return a.Order - b.Order
-			})
+			slices.SortStableFunc(episodes, func(a, b groupEpisode) int { return a.Order - b.Order })
 			for i, e := range episodes {
 				if i >= len(mine) || mine[i] != e.ID {
-					out[season.Order] = true
+					if !slices.Contains(out[number], len(episodes)) {
+						out[number] = append(out[number], len(episodes))
+						slices.Sort(out[number])
+					}
 					break
 				}
 			}

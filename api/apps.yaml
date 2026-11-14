@@ -460,12 +460,17 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [season, rearranged, episodes]
+                      required: [season, rearranged, otherSizes, episodes]
                       properties:
                         season:
                           type: integer
                         rearranged:
                           type: boolean
+                        otherSizes:
+                          type: array
+                          description: How many episodes the orders that rearrange the season put in it, each size once, smallest first; empty when none does.
+                          items:
+                            type: integer
                         episodes:
                           type: array
                           items:

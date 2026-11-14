@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 )
 
@@ -35,7 +36,7 @@ func TestEpisodeOrders(t *testing.T) {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			io.WriteString(w, `{"results":[{"id":"aa","type":6},{"id":"bb","type":5},{"id":"not/valid","type":3}]}`)
+			io.WriteString(w, `{"results":[{"id":"aa","type":6},{"id":"bb","type":5},{"id":"not/valid","type":3},{"id":"cc","type":3}]}`)
 		case "/3/tv/episode_group/aa":
 			// Season 1 stops earlier, so its numbers mean the same; season 2
 			// swaps its episodes; a season TMDB's order hasn't is harmless to
@@ -44,6 +45,13 @@ func TestEpisodeOrders(t *testing.T) {
 				{"order":1,"episodes":[{"id":11,"order":0}]},
 				{"order":2,"episodes":[{"id":21,"order":1},{"id":22,"order":0}]},
 				{"order":9,"episodes":[{"id":31,"order":0}]}]}`)
+		case "/3/tv/episode_group/cc":
+			// Counted from 0, specials named: its "order 0" is season 1, the
+			// same as TMDB's, and its season 2 holds three episodes.
+			io.WriteString(w, `{"groups":[
+				{"order":0,"name":"Season 1","episodes":[{"id":11,"order":0},{"id":12,"order":1}]},
+				{"order":1,"name":"Season 2","episodes":[{"id":22,"order":0},{"id":21,"order":1},{"id":31,"order":2}]},
+				{"order":5,"name":"Specials","episodes":[]}]}`)
 		case "/3/tv/episode_group/bb":
 			// A story arc: not an order a release follows.
 			io.WriteString(w, `{"groups":[{"order":3,"episodes":[{"id":32,"order":0}]}]}`)
@@ -68,6 +76,9 @@ func TestEpisodeOrders(t *testing.T) {
 	}
 	if len(seasons) != 4 || seasons[1].Rearranged || !seasons[2].Rearranged || seasons[3].Rearranged || seasons[0].Rearranged {
 		t.Errorf("rearranged: %+v", orders.Seasons)
+	}
+	if !slices.Equal(seasons[2].OtherSizes, []int{2, 3}) || len(seasons[1].OtherSizes) != 0 || seasons[1].OtherSizes == nil {
+		t.Errorf("other sizes: %v, %v", seasons[2].OtherSizes, seasons[1].OtherSizes)
 	}
 	first := seasons[1].Episodes
 	if first[0] != (OrderEpisode{Episode: 1, AirDate: "1999-03-28", Name: "Space Pilot", Translated: "Pilote"}) {
