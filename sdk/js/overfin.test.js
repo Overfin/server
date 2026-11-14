@@ -641,3 +641,61 @@ test('a stream hls.js gives up on starts over at the same place, then says so', 
   assert.ok(video.paused);
   await player.close();
 });
+
+test('a stream failed with the server out of reach: the player waits for it, then starts over at the same place', async () => {
+  const state = { started: [], down: true };
+  const calls = hlsServer(state);
+  const api = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    if (state.down && url.startsWith('/api/v1/playback/pb1') && (init.method || 'GET') === 'GET') {
+      throw new TypeError('NetworkError when attempting to fetch resource.');
+    }
+    return api(url, init);
+  };
+  const video = fakeVideo();
+  const seen = [];
+  const errors = [];
+  const reconnecting = [];
+  const player = await new Overfin().play(video, 'title_movie_tmdb_1', {
+    startMs: 0, capabilities: {}, Hls: fakeHls(video, seen), onError: (e) => errors.push(e),
+    onReconnecting: (on) => reconnecting.push(on),
+  });
+  video.currentTime = 211;
+  seen.current.fail(null, { fatal: true, details: 'fragLoadError' });
+  await new Promise((r) => setTimeout(r, 3500)); // a try while still down
+  assert.deepEqual(reconnecting, [true]);
+  assert.deepEqual(state.started, [0], 'no restart while the server is away');
+  assert.ok(video.paused);
+  state.down = false;
+  await new Promise((r) => setTimeout(r, 3500));
+  assert.deepEqual(reconnecting, [true, false]);
+  assert.deepEqual(state.started, [0, 211000]);
+  assert.deepEqual(errors, []);
+  assert.ok(calls.length > 0);
+  await player.close();
+  globalThis.fetch = api;
+});
+
+test('a direct stream cut short is not the end of the title: it starts over at the same place', async () => {
+  const { calls } = playbackServer();
+  const video = fakeVideo();
+  const ended = [];
+  const player = await new Overfin().play(video, 'title_movie_tmdb_1', {
+    startMs: 0, capabilities: {}, onEnded: () => ended.push(true),
+  });
+  video.duration = 1000;
+  video.currentTime = 371;
+  video.emit('ended');
+  await settle();
+  assert.deepEqual(ended, []);
+  assert.equal(player.playback.id, 'pb2');
+  const restart = calls.filter((c) => c.method === 'POST' && c.url === '/api/v1/playback')[1];
+  assert.equal(restart.body.startPositionMs, 371000);
+  assert.ok(!calls.some((c) => c.url.endsWith('/progress') && c.body?.ended), 'not reported as ended');
+  // The real end still is one.
+  video.currentTime = 999;
+  video.emit('ended');
+  await settle();
+  assert.deepEqual(ended, [true]);
+  await player.close();
+});

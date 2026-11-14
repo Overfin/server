@@ -403,9 +403,16 @@ split into a gateway and a backend, 2026-11-13):
 | 10 s | never stopped: played from its buffer, the failed requests retried, carried on | not tried |
 | 40 s | the buffer ran out after about 36 s; the restart failed (no server), and the player showed "an error occurred", for good, even once the gateway was back | played on from its buffer; once the gateway was back, its progress reports got 503 while the backend reconnected, the playback was stopped and the video emptied, with no message |
 
-So the protocol holds, but **the player doesn't ride out an outage longer
-than its buffer**: it neither waits for the server to come back nor resumes
-at the same place. A player change, to decide.
+So the protocol held, but the player didn't ride out an outage longer
+than its buffer. **Fixed the same day** (site v0.99.5's player): a stream
+that fails while the server can't be reached (no answer, or 502, 503,
+504) has the player wait, its place kept, with "Connection lost. Trying
+again…", ask every 3 s, and start over there once the server answers; a
+direct stream that ends before its title did is a failure, not the end.
+The same 40 s outage, again in Firefox: HLS paused at 252.9 s and went on
+from 252.9 s; direct play paused at 349 s and went on from 349 s, each
+some 15 s after the gateway was back (the backend reconnecting, then the
+next try).
 
 **No independent security review yet.** This document is meant as its
 starting point.
