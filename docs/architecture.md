@@ -80,6 +80,11 @@ The control panel and the setup wizard are the backend's, on its own port
 go through the gateway. The panel has its own login, apart from the
 site's accounts.
 
+## The protocol
+
+Every message between the two, each check and limit, the guarantees a test
+can check, and what's known missing: [link-protocol.md](link-protocol.md).
+
 ---
 
 [← Back to the README](../README.md)
