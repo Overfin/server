@@ -661,12 +661,12 @@ anyone. Paired servers are not trusted at all (rule 94).
      Then the server downloads three of them, once a day, from IMDb's own
      address only (datasets.imdbws.com): files that are the same for
      everyone, so nothing about the server is sent. It keeps what it uses
-     in its own folder, readable by Overfin alone (one file, and each day's
-     votes for 35 days); downloads are deleted once that file is made, and
-     a file that can't be read whole is never used. Switched off, the
-     folder is deleted at the next pass. IMDb's numbers are never shown or
-     served: only the order they give lists. The panel says IMDb allows the
-     datasets for personal and non-commercial use.
+     in its own folder, readable by Overfin alone (one file); downloads
+     are deleted once that file is made, and a file that can't be read
+     whole is never used. Switched off, the folder is deleted at the next
+     pass. IMDb's numbers are never shown or served: they only weigh in
+     titles' values. The panel says IMDb allows the datasets for personal
+     and non-commercial use.
 
 ### Signing a screen in with a code
 
