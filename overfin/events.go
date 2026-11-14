@@ -33,6 +33,10 @@ import (
 // (since): those after it, then the new ones as they come.
 const eventsPath = "/link/v1/events"
 
+// pingAfter is how long the stream stays quiet before a ping (a variable:
+// tests make it short).
+var pingAfter = 15 * time.Second
+
 func eventsHandler(db *store.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
@@ -88,7 +92,7 @@ func eventsHandler(db *store.Store) http.Handler {
 				}
 				since = rv.Seq
 			}
-			if len(revoked) > 0 || time.Since(lastWrite) > 15*time.Second {
+			if len(revoked) > 0 || time.Since(lastWrite) > pingAfter {
 				if len(revoked) == 0 && enc.Encode(map[string]string{"type": "ping"}) != nil {
 					return
 				}

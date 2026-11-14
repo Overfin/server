@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/hex"
 	"io"
@@ -326,4 +327,84 @@ func TestAccessEvents(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Errorf("forgot %d times", forgot)
+}
+
+// headersBackend keeps the headers of the last request it got.
+type headersBackend struct {
+	fakeBackend
+	got http.Header
+}
+
+func (h *headersBackend) RoundTrip(r *http.Request) (*http.Response, error) {
+	h.got = r.Header.Clone()
+	return h.fakeBackend.RoundTrip(r)
+}
+
+// What a visitor sends in the gateway's or a proxy's name never reaches the
+// backend; the gateway's own headers do.
+func TestInternalHeadersDropped(t *testing.T) {
+	b := &headersBackend{fakeBackend: fakeBackend{connected: true}}
+	h := Handler(b, "1.0", nil, nil, quiet)
+	rec := do(h, "GET", "/", "203.0.113.5:4000",
+		"Overfin-Check", "1", "Overfin-Client-Addr", "198.51.100.66:1", "X-Real-Ip", "198.51.100.67",
+		"Forwarded", "for=198.51.100.68", "X-Forwarded-Host", "evil.example", "X-Forwarded-Proto", "https")
+	if rec.Code != 200 {
+		t.Fatalf("page: %d", rec.Code)
+	}
+	for _, name := range []string{"Overfin-Check", "X-Real-Ip", "Forwarded", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-For"} {
+		if v := b.got.Get(name); v != "" {
+			t.Errorf("%s reached the backend: %q", name, v)
+		}
+	}
+	if v := b.got.Get(link.ClientAddr); v != "203.0.113.5:4000" {
+		t.Errorf("the visitor's address: %q", v)
+	}
+	// Over TLS, the gateway says so itself.
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "203.0.113.5:4000"
+	req.TLS = &tls.ConnectionState{}
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if v := b.got.Get("X-Forwarded-Proto"); v != "https" {
+		t.Errorf("over TLS: %q", v)
+	}
+}
+
+// PROXY headers that name no visitor keep the proxy's own address: v1
+// UNKNOWN, v2 LOCAL, a v2 family other than TCP.
+func TestProxyHeadersWithoutVisitor(t *testing.T) {
+	if a, err := readProxyHeader(strings.NewReader("PROXY UNKNOWN\r\nrest")); err != nil || a != nil {
+		t.Errorf("v1 UNKNOWN: %v %v", a, err)
+	}
+	v2 := func(command, family byte, body []byte) []byte {
+		var h bytes.Buffer
+		h.Write(v2Signature)
+		h.Write([]byte{0x20 | command, family})
+		binary.Write(&h, binary.BigEndian, uint16(len(body)))
+		h.Write(body)
+		return h.Bytes()
+	}
+	if a, err := readProxyHeader(bytes.NewReader(v2(0, 0, nil))); err != nil || a != nil {
+		t.Errorf("v2 LOCAL: %v %v", a, err)
+	}
+	if a, err := readProxyHeader(bytes.NewReader(v2(1, 0x31, make([]byte, 216)))); err != nil || a != nil {
+		t.Errorf("v2 UNIX: %v %v", a, err)
+	}
+}
+
+// Past its limit, an address gets 429, told when to try again.
+func TestLimitAnswer(t *testing.T) {
+	h := Limit(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	var rec *httptest.ResponseRecorder
+	for range 500 {
+		rec = httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "203.0.113.9:1"
+		h.ServeHTTP(rec, req)
+		if rec.Code == http.StatusTooManyRequests {
+			break
+		}
+	}
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") != "5" {
+		t.Errorf("past the limit: %d, Retry-After %q", rec.Code, rec.Header().Get("Retry-After"))
+	}
 }

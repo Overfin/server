@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +43,9 @@ func (b *imageBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	size := 1000
 	if strings.Contains(r.URL.Path, "big") {
 		size = 50000
+	}
+	if strings.Contains(r.URL.Path, "huge") {
+		size = maxCached + 1
 	}
 	w.Write([]byte(strings.Repeat("x", size)))
 }
@@ -193,5 +198,51 @@ func TestFetchAhead(t *testing.T) {
 	rec := get(h, "/api/v1/images/tmdbart_poster_new1234567_jpg?width=342", "S2")
 	if rec.Body.String() != "fetched ahead" || b.fetches["/api/v1/images/tmdbart_poster_new1234567_jpg"] != 0 || b.checks["/api/v1/images/tmdbart_poster_new1234567_jpg"] != 1 {
 		t.Errorf("served %q, fetched %d, checked %d", rec.Body.String(), b.fetches["/api/v1/images/tmdbart_poster_new1234567_jpg"], b.checks["/api/v1/images/tmdbart_poster_new1234567_jpg"])
+	}
+}
+
+// An access answer lasts five minutes; then the backend is asked again.
+func TestCacheAnswerExpires(t *testing.T) {
+	c, b, h := newCache(t, 1<<30)
+	get(h, "/api/v1/images/a", "L1")
+	get(h, "/api/v1/images/a", "L2")
+	c.mu.Lock()
+	for k := range c.allowed {
+		c.allowed[k] = time.Now().Add(-time.Second)
+	}
+	c.mu.Unlock()
+	get(h, "/api/v1/images/a", "L2")
+	if b.checks["/api/v1/images/a"] != 2 {
+		t.Errorf("checked %d times", b.checks["/api/v1/images/a"])
+	}
+}
+
+// Not kept: an image over 16 MiB, a request for part of one; the cache
+// starts empty, whatever its folder held.
+func TestCacheLimits(t *testing.T) {
+	_, b, h := newCache(t, 1<<30)
+	get(h, "/api/v1/images/huge", "L1")
+	get(h, "/api/v1/images/huge", "L2")
+	if b.fetches["/api/v1/images/huge"] != 2 {
+		t.Errorf("over the size kept: fetched %d times", b.fetches["/api/v1/images/huge"])
+	}
+	for range 2 {
+		req := httptest.NewRequest("GET", "/api/v1/images/a", nil)
+		req.Header.Set("Cookie", "overfin-login=L1; overfin-edge=x")
+		req.Header.Set("Range", "bytes=0-9")
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	if b.fetches["/api/v1/images/a"] != 2 {
+		t.Errorf("a range from the cache: fetched %d times", b.fetches["/api/v1/images/a"])
+	}
+
+	dir := t.TempDir()
+	stale := filepath.Join(dir, "ab", "abcdef")
+	os.MkdirAll(filepath.Dir(stale), 0o700)
+	os.WriteFile(stale, []byte("old"), 0o600)
+	c := &Cache{Dir: dir, Limit: 1 << 30, Logger: quiet}
+	c.Load()
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("a file from before the start: %v", err)
 	}
 }

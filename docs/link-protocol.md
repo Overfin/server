@@ -336,34 +336,34 @@ Each line is a property a test can check. **Tested** names the test today;
 | Guarantee | Test |
 |---|---|
 | Only the specification's operations and pages pass; `/admin*`, `/apps*`, `/link*`, `/api/*` not listed get 404 | `TestAllowlist` |
-| A visitor's `Overfin-Check` and `Overfin-Client-Addr` never reach the backend | not yet |
-| `X-Forwarded-*`, `Forwarded`, `X-Real-Ip` are always the gateway's | `TestClientAddress` (in part) |
+| A visitor's `Overfin-Check` and `Overfin-Client-Addr` never reach the backend | `TestInternalHeadersDropped` |
+| `X-Forwarded-*`, `Forwarded`, `X-Real-Ip` are always the gateway's | `TestInternalHeadersDropped`, `TestClientAddress` |
 | The visitor's address: spoofed headers ignored, the last untrusted hop behind a trusted proxy | `TestClientAddress` |
 | PROXY v1 and v2 read exactly, garbage refused, only from configured addresses | `TestProxyHeaders`, `TestProxyListener` |
-| PROXY v1 `UNKNOWN`, v2 `LOCAL` keep the proxy's address | not yet |
+| PROXY v1 `UNKNOWN`, v2 `LOCAL` and other families keep the proxy's address | `TestProxyHeadersWithoutVisitor` |
 | A pairing proof binds both keys; a wrong code is refused | `TestPairAndReconnect`, `TestRefusals` |
 | A code pairs once, every code used remembered | `TestCodeUsedOnce` |
 | A gateway whose key changed is refused | `TestGatewayKeyChanged` |
 | Another version is refused first, and visitors are told it's updating while it tries | `TestRefusals` |
-| A malformed or over-long preamble is refused | not yet |
-| A second connection replaces the first | not yet |
+| A malformed or over-long preamble is refused | `TestPreambleRefused` |
+| A second connection replaces the first | `TestSecondConnection` |
 | Many large transfers at once over the link | `TestParallelTransfers` (8 × 16 MiB) |
 | The link shares the HTTPS port by ALPN | `TestSharedPort` |
 | `Overfin-Client-Addr` becomes the backend's remote address, a bad one ignored | `TestClientAddr` |
-| Check-only answers: 200 becomes 204, no body | not yet |
+| Check-only answers: 200 becomes 204, no body | `TestCheckOnly` |
 | Every session route needs a valid edge signature for that login; revoked logins refused | `TestSessionFilter`, `TestRevocations`, `TestSignVerify`, `TestPair` |
 | The cache checks access once per session and image, remembers it, 404 on a refusal | `TestCacheServesWithCheck` |
 | An access change, or the events stream starting, forgets every answer; one asked before isn't kept | `TestCacheForgetsAccess`, `TestAccessEvents`, `TestEventsAccess`, `TestAccessChanges` |
-| The cache's 5-minute expiry, 16 MiB cap, `Range` passing through, emptied at start | not yet |
+| The cache's 5-minute expiry, 16 MiB cap, `Range` passing through, emptied at start | `TestCacheAnswerExpires`, `TestCacheLimits` |
 | Eviction keeps what's worth most | `TestCacheEviction` |
 | Artwork fetched ahead is served only after a check | `TestFetchAhead` |
 | Egress reaches only what the backend asked for, TLS end to end | `TestEgress` |
 | Egress never dials loopback, link-local, unspecified or multicast addresses | `TestUnreached` |
 | Reconnecting waits vary by a fifth | `TestJittered` |
-| Egress refused for another version, an unpaired key, an unreachable address; the minute expires | not yet |
-| Events: revocations resume after a break; ping after 15 s | not yet (the backend's side) |
+| Egress refused for another version, an unpaired key, an unreachable address; the minute expires | `TestEgressRefusals` |
+| Events: revocations numbered, resumed after a number; a ping when quiet | `TestEventsRevokedAndPing` |
 | The down pages name nothing behind the gateway | `TestDownPages` |
-| Rate limits | `TestLimits` |
+| Rate limits, 429 with `Retry-After` | `TestLimits`, `TestLimitAnswer` |
 
 ## 15. Known gaps, and where this is going
 
@@ -378,8 +378,7 @@ Found while writing this, or raised by review (2026-11-13).
 6. "Being updated" lasts only while a backend of another version tries.
 7. Reconnecting has jitter.
 
-**Not tested yet:** the lines marked "not yet" in section 14, and the
-failure tests a review proposed:
+**Not tested yet:** the failure tests a review proposed:
 - the gateway killed during HLS and direct playback;
 - the link cut while images, a direct stream, an HLS conversion and a
   federation playback all run;

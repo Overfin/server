@@ -461,3 +461,155 @@ func TestJittered(t *testing.T) {
 		t.Errorf("between %v and %v", lo, hi)
 	}
 }
+
+// A connection that offers the link's protocol but not its preamble is
+// refused: a line that isn't one, a short one, another tag, an over-long
+// one.
+func TestPreambleRefused(t *testing.T) {
+	code := ""
+	_, addr := gatewayOn(t, t.TempDir(), "1.0", &code)
+	_, key, _ := ed25519.GenerateKey(rand.Reader)
+	id, err := newIdentity(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	try := func(line string) string {
+		c, err := tls.Dial("tcp", addr, &tls.Config{Certificates: []tls.Certificate{id.cert}, NextProtos: []string{ALPN},
+			InsecureSkipVerify: true, MinVersion: tls.VersionTLS13})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		c.SetDeadline(time.Now().Add(5 * time.Second))
+		io.WriteString(c, line)
+		b, _ := io.ReadAll(c)
+		return string(b)
+	}
+	for _, line := range []string{"hello\n", "OVFLINK1 link\n", "OVFLINK2 link 1.0\n", "OVFLINK1 dance 1.0\n", "OVFLINK1 pair 1.0 nothex\n"} {
+		if got := try(line); got != "NO preamble\n" {
+			t.Errorf("%q: %q", line, got)
+		}
+	}
+	if got := try("OVFLINK1 link 1.0 " + strings.Repeat("x", 600) + "\n"); strings.HasPrefix(got, "OK") {
+		t.Errorf("an over-long line: %q", got)
+	}
+	if got := try("OVFLINK1 link 9.9\n"); got != "NO version 1.0\n" {
+		t.Errorf("another version: %q", got)
+	}
+	if got := try("OVFLINK1 link 1.0\n"); got != "NO not-paired\n" {
+		t.Errorf("a key that isn't paired: %q", got)
+	}
+}
+
+// The same backend connecting again (its former connection lost to it):
+// the newest connection is the one used.
+func TestSecondConnection(t *testing.T) {
+	code := ""
+	g, addr := gatewayOn(t, t.TempDir(), "1.0", &code)
+	bdir := t.TempDir()
+	b, _ := runBackend(t, bdir, "1.0")
+	code = pairNow(t, b, addr)
+	waitConnected(t, g, true)
+	first := g.Status().Since
+	again, err := NewBackend(bdir, "1.0", backendHandler, quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ := again.load()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go again.connect(ctx, p)
+	deadline := time.Now().Add(5 * time.Second)
+	for !g.Status().Since.After(first) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if st := g.Status(); !st.Connected || !st.Since.After(first) {
+		t.Fatalf("not replaced: %+v", st)
+	}
+	if got := get(t, g, "/hello"); got != "hello from the backend" {
+		t.Errorf("after the replacement: %q", got)
+	}
+}
+
+// The gateway's own question (Overfin-Check): the backend runs the
+// request, answers its status and headers only, 204 for 200.
+func TestCheckOnly(t *testing.T) {
+	h := checkOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(CheckOnly) != "" {
+			t.Error("the header reached the site")
+		}
+		if r.URL.Path == "/no" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Length", "5")
+		io.WriteString(w, "image")
+	}))
+	ask := func(path string, check bool) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", path, nil)
+		if check {
+			r.Header.Set(CheckOnly, "1")
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		return rec
+	}
+	if rec := ask("/yes", true); rec.Code != http.StatusNoContent || rec.Body.Len() != 0 || rec.Header().Get("Content-Length") != "" {
+		t.Errorf("a yes: %d, %d bytes, length %q", rec.Code, rec.Body.Len(), rec.Header().Get("Content-Length"))
+	}
+	if rec := ask("/no", true); rec.Code != http.StatusNotFound || rec.Body.Len() != 0 {
+		t.Errorf("a no: %d, %d bytes", rec.Code, rec.Body.Len())
+	}
+	if rec := ask("/yes", false); rec.Code != http.StatusOK || rec.Body.String() != "image" {
+		t.Errorf("a visitor's request: %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+// Egress refused: a backend of another version, a key the gateway doesn't
+// know, an address that doesn't answer; an address asked for counts a
+// minute only.
+func TestEgressRefusals(t *testing.T) {
+	was := unreached
+	unreached = func(netip.Addr) bool { return false }
+	t.Cleanup(func() { unreached = was })
+	code := ""
+	g, addr := gatewayOn(t, t.TempDir(), "1.0", &code)
+	bdir := t.TempDir()
+	b, _ := runBackend(t, bdir, "1.0")
+	code = pairNow(t, b, addr)
+	waitConnected(t, g, true)
+	ctx := context.Background()
+
+	newer, err := NewBackend(bdir, "2.0", backendHandler, quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newer.dialEgress(ctx, "tcp", "192.0.2.1:443", true); err == nil || !strings.Contains(err.Error(), "version") {
+		t.Errorf("another version: %v", err)
+	}
+	stranger, err := NewBackend(t.TempDir(), "1.0", backendHandler, quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stranger.save(pairing{Address: addr, ServerName: "127.0.0.1", Gateway: fmt.Sprintf("%x", []byte(g.Public()))})
+	if _, err := stranger.dialEgress(ctx, "tcp", "192.0.2.1:443", true); err == nil || !strings.Contains(err.Error(), "not-paired") {
+		t.Errorf("a key the gateway doesn't know: %v", err)
+	}
+	closed, _ := net.Listen("tcp", "127.0.0.1:0")
+	gone := closed.Addr().String()
+	closed.Close()
+	if _, err := b.dialEgress(ctx, "tcp", gone, true); err == nil || !strings.Contains(err.Error(), "unreachable") {
+		t.Errorf("an address that doesn't answer: %v", err)
+	}
+
+	b.asked("192.0.2.9:443")
+	if !b.meant("192.0.2.9:443") {
+		t.Fatal("not meant right after")
+	}
+	b.egressMu.Lock()
+	b.egress["192.0.2.9:443"] = time.Now().Add(-egressAsked - time.Second)
+	b.egressMu.Unlock()
+	if b.meant("192.0.2.9:443") {
+		t.Error("still meant after a minute")
+	}
+}
