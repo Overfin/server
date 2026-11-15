@@ -273,7 +273,8 @@ export interface Title extends TitleSummary {
   cast?: { id?: string; name: string; character?: string; image?: ImageRef }[];
   seasons?: TitleSummary[];
   /** A season's episodes, each with what it's about. */
-  episodes?: (TitleSummary & { overview?: string })[];
+  /** A file holding several episodes is one row: episodeEnd its last, parts each episode's title and overview (since 0.10). */
+  episodes?: (TitleSummary & { overview?: string; episodeEnd?: number; parts?: { name: string; overview?: string }[] })[];
 }
 
 /** One of TMDB's collections: a series of films, such as a saga (since 0.7). */
