@@ -63,13 +63,13 @@ func TestValuation(t *testing.T) {
 			t.Fatalf("preview: %d %s", rec.Code, rec.Body)
 		}
 	}
-	// One account's viewing can't be read from the preview (rule 61): the
-	// film it watched scores as the one nobody watched.
+	// One account's viewing counts in the preview too (rule 61): the film
+	// it watched is worth more than the one nobody watched.
 	ask()
-	if len(preview["most"]) != 2 || preview["most"][0].Score != preview["least"][0].Score {
+	if len(preview["most"]) != 2 || preview["most"][0].ID != "title_movie_tmdb_1" || !(preview["most"][0].Score > preview["least"][0].Score) {
 		t.Errorf("one account: most %+v, least %+v", preview["most"], preview["least"])
 	}
-	// With a second account watching it, it counts.
+	// With a second account watching it, it still leads.
 	_, prof2, _ := db.CreateAccount(ctx, "person-2", store.NewOwner{Name: "Other", JellyfinUserID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", JellyfinUsername: "of-2", JellyfinToken: "t"})
 	db.RecordPlay(ctx, prof2.ID, "movie/tmdb/1", id(0), 0, true, time.Now())
 	p.valued.m = nil // measured again, not from a few seconds ago

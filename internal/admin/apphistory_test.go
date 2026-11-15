@@ -91,3 +91,33 @@ func TestAppHistory(t *testing.T) {
 	get(history, "?since=yesterday", 400)
 	get(key(`{"name":"Values","scopes":["score"]}`), "", 401)
 }
+
+// The measures: in the panel signed in, and for an app with a history key
+// only; totals, nothing per title.
+func TestMeasures(t *testing.T) {
+	_, b, _, _ := signedInPanel(t)
+	rec := b.do("GET", "/admin/api/measures", "", nil)
+	var m struct{ Days, Arrived, Library int }
+	if json.Unmarshal(rec.Body.Bytes(), &m); rec.Code != 200 || m.Days != 90 {
+		t.Fatalf("panel: %d %s", rec.Code, rec.Body)
+	}
+	key := func(body string) string {
+		t.Helper()
+		rec := b.do("POST", "/admin/api/apps", body, nil)
+		var made struct{ Key string }
+		if json.Unmarshal(rec.Body.Bytes(), &made); rec.Code != 201 {
+			t.Fatalf("create %s: %d %s", body, rec.Code, rec.Body)
+		}
+		return made.Key
+	}
+	app := &browser{h: b.h, cookies: map[string]string{}}
+	for scope, want := range map[string]int{"history": 200, "score": 401} {
+		rec := app.do("GET", "/apps/v1/measures", "", map[string]string{"Authorization": "Bearer " + key(`{"name":"`+scope+`","scopes":["`+scope+`"]}`)})
+		if rec.Code != want {
+			t.Errorf("%s key: %d %s", scope, rec.Code, rec.Body)
+		}
+	}
+	if rec := (&browser{h: b.h, cookies: map[string]string{}}).do("GET", "/admin/api/measures", "", nil); rec.Code == 200 {
+		t.Errorf("panel signed out: %d", rec.Code)
+	}
+}

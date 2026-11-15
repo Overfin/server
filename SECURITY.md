@@ -357,10 +357,8 @@ anyone. Paired servers are not trusted at all (rule 94).
     for a few minutes, within a size limit, never on disk. Names and emails
     from an identity provider are shown live through its connector, never
     stored or passed on.
-61. Apps see only what rule 85 allows. The panel's valuation preview shows
-    scores, never their parts, and there a title's watching, favorites,
-    watchlist, follows and wishes count only with two accounts or more
-    behind them.
+61. Apps see only what rule 85 allows. The panel's valuation shows scores
+    and what makes them up, one person's doings included, never who.
 62. No analytics, no telemetry, no calls home. Overfin contacts only what
     the operator set up: Jellyfin, Seerr, TMDB, IMDb, the identity
     provider, the email server, the notice webhook, paired servers.
@@ -462,19 +460,19 @@ anyone. Paired servers are not trusted at all (rule 94).
     for what they ticked (values, watch statistics, in the libraries or
     not, what came and went, wishes to fetch, categories, episode orders),
     shown once, kept as a hash, revocable. What they read:
-    - totals per title, counts below 2 given as 0, plays and favorites as 0
-      when fewer than two accounts are behind them;
-    - watch statistics without the titles fewer than two people watched,
-      and times only by the day;
-    - titles the libraries lack only when two accounts or more want them,
-      or when Overfin picked them from TMDB's lists.
+    - totals per title (plays, viewers, favorites, the day last played),
+      one person's included, never who;
+    - watch statistics of every title someone watched, times only by the
+      day;
+    - titles the libraries lack when someone wants them, or when Overfin
+      picked them from TMDB's lists;
+    - totals for the whole server over the last 90 days (measures): films
+      and seasons that arrived, were started, finished, left, wished for
+      again afterwards, are in the libraries and were watched; counts only,
+      for a key with what came and went (`history`).
 
     - Exception: the fetcher's key (`wishes`, for Overtide) reads the wished
-      titles in turn order, one person's wish included, never who wished
-      nor how many.
-    - Exception: scores (`score`) may count what one person did: a score
-      mixes several inputs into one number, and the key is the operator's.
-    - Exception: Overfin's picks can come from one account's watching.
+      titles in turn order, never who wished nor how many.
 
 ### Code supply
 

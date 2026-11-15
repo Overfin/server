@@ -138,9 +138,8 @@ func TestAppTitles(t *testing.T) {
 	get(scoreOnly, "?list=suggestions&sort=score", 400)
 	get(scoreOnly, "?list=suggestions&inLibrary=true", 400)
 
-	// Statistics: totals, counts below 2 as 0, and plays and favorites
-	// only when two people account for them; a stats key can't sort by
-	// score.
+	// Statistics: totals, one person's included, never who; a stats key
+	// can't sort by score.
 	stats := key(`{"name":"Dashboard","scopes":["stats","availability"]}`)
 	get(stats, "?sort=score", 403)
 	page = get(stats, "?kind=movie", 200)
@@ -148,10 +147,10 @@ func TestAppTitles(t *testing.T) {
 		t.Fatalf("by name: %+v", page.Titles)
 	}
 	alpha, beta := page.Titles[0].Stats, page.Titles[1].Stats
-	if alpha.Plays != 2 || alpha.Viewers != 2 || alpha.LastPlayed == "" || beta.Plays != 0 || beta.Viewers != 0 || beta.LastPlayed != "" {
+	if alpha.Plays != 2 || alpha.Viewers != 2 || alpha.LastPlayed == "" || beta.Plays != 3 || beta.Viewers != 1 || beta.LastPlayed == "" {
 		t.Errorf("alpha %+v, beta %+v", alpha, beta)
 	}
-	if p := get(stats, "?kind=season", 200); len(p.Titles) != 1 || p.Titles[0].Stats.Favorites != 0 {
+	if p := get(stats, "?kind=season", 200); len(p.Titles) != 1 || p.Titles[0].Stats.Favorites != 2 {
 		t.Errorf("one person's favorite, on two profiles: %+v", p.Titles[0].Stats)
 	}
 	if !*page.Titles[0].InLibrary {
@@ -166,9 +165,8 @@ func TestAppTitles(t *testing.T) {
 	get(old, "?fields=score", 403)
 }
 
-// Plays and the day last played count only accounts that played the
-// title: one that only started it doesn't make another's plays anonymous.
-func TestAppTitlesPlaysNeedTwoPlayers(t *testing.T) {
+// Plays and the day last played: every account's, one person's included.
+func TestAppTitlesPlays(t *testing.T) {
 	day := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	f := &store.ValuationFacts{
 		Profiles: map[string]store.ValuationProfile{"pa": {AccountID: "A"}, "pb": {AccountID: "B"}},
@@ -179,21 +177,15 @@ func TestAppTitlesPlaysNeedTwoPlayers(t *testing.T) {
 		},
 	}
 	s := titleStats(f)["movie/tmdb/550"]
-	if s.Plays != 0 || s.LastPlayed != "" || s.Viewers != 2 {
+	if s.Plays != 7 || s.LastPlayed != "2026-10-01" || s.Viewers != 2 {
 		t.Fatalf("one player: plays %d, last %q, viewers %d", s.Plays, s.LastPlayed, s.Viewers)
-	}
-	f.Viewings[1].PlayCount, f.Viewings[1].LastPlayed = 1, day
-	s = titleStats(f)["movie/tmdb/550"]
-	if s.Plays != 8 || s.LastPlayed != "2026-10-01" {
-		t.Fatalf("two players: plays %d, last %q", s.Plays, s.LastPlayed)
 	}
 }
 
-// A title the libraries lack, wanted by one account only (asked for,
-// kept for later, by any of its profiles), isn't listed: its row alone
-// would tell what that person wants. Two accounts' wishes, or one of each
-// kind from two accounts, list it.
-func TestAppTitlesOneWishStaysUnseen(t *testing.T) {
+// A title the libraries lack is listed when someone wants it (asked for,
+// kept for later, by any profile), one account included; a disabled
+// account's wish doesn't count.
+func TestAppTitlesWishedListed(t *testing.T) {
 	ctx := context.Background()
 	p, b, db, _ := signedInPanel(t)
 	var accts, profs []string
@@ -230,10 +222,8 @@ func TestAppTitlesOneWishStaysUnseen(t *testing.T) {
 	}
 	app := &browser{h: b.h, cookies: map[string]string{}}
 	// A disabled account's wish doesn't count (nor does it in the
-	// valuation): 14, asked for by the first and a disabled third, stays
-	// unseen.
+	// valuation): 14, asked for by a disabled third only, isn't listed.
 	third, thirdProf, _ := db.CreateAccount(ctx, "person-3", store.NewOwner{Name: "Main", JellyfinUserID: strings.Repeat("3", 32), JellyfinUsername: "of-3", JellyfinToken: "t"})
-	ask(accts[0], profs[0], "movie/tmdb/14")
 	ask(third.ID, thirdProf.ID, "movie/tmdb/14")
 	if err := db.SetAccountDisabled(ctx, third.ID, true); err != nil {
 		t.Fatal(err)
@@ -248,8 +238,8 @@ func TestAppTitlesOneWishStaysUnseen(t *testing.T) {
 		for _, r := range page.Titles {
 			listed[r.TmdbId] = true
 		}
-		if listed["10"] || listed["11"] || !listed["12"] || !listed["13"] || listed["14"] {
-			t.Errorf("%q: listed %v, want 12 and 13 only", query, listed)
+		if !listed["10"] || !listed["11"] || !listed["12"] || !listed["13"] || listed["14"] {
+			t.Errorf("%q: listed %v, want 10 to 13", query, listed)
 		}
 	}
 }

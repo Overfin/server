@@ -589,23 +589,3 @@ func (m *Measured) Scored(w map[string]int) []Value {
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Score > out[j].Score })
 	return out
 }
-
-// Shared is m as an admin may look at it: what people did with a title
-// counts only when at least two accounts did it, so no score points at
-// what one person watched, kept or asked for (SECURITY.md rule 61). The
-// rest is as measured.
-func (m *Measured) Shared() *Measured {
-	out := &Measured{Titles: make([]Title, len(m.Titles)), Accounts: m.Accounts}
-	for i, t := range m.Titles {
-		parts := make(map[string]float64, len(t.Parts))
-		for c, part := range t.Parts {
-			if people[c] && c != Tastes && t.Behind[c] < 2 {
-				part = 0
-			}
-			parts[c] = part
-		}
-		t.Parts = parts
-		out.Titles[i] = t
-	}
-	return out
-}

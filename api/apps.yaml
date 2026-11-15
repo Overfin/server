@@ -160,9 +160,8 @@ paths:
       operationId: appWatchStats
       summary: Watch totals per film and series, for other apps
       description: |
-        For each film and series at least two people (accounts) watched,
-        what the profiles did with it in total; never anything per person:
-        a title fewer than two people watched is left out. All in
+        For each film and series someone watched, what the profiles did
+        with it in total; never who. All in
         one answer, not paged, in no set order. Needs the `watch-stats` (or
         `stats`) scope; a key without it answers `not-authenticated`.
         Reached like `/apps/v1/titles`, with the same plain-JSON errors.
@@ -427,6 +426,49 @@ paths:
               schema:
                 $ref: "#/components/schemas/AppError"
 
+  /apps/v1/measures:
+    get:
+      operationId: appMeasures
+      summary: Whether the library follows the people using it
+      description: |
+        Totals for the whole server over the last `days` days (90), films
+        and seasons counting as one each: what arrived, and how much of it
+        someone started or watched to the end since (a season: one profile,
+        every episode the libraries have of it); what left, and how much of
+        it someone wished for afterwards; what the libraries have now, and
+        how much of it someone watched some of. Nothing per title, nothing
+        about people. Needs the `history` scope; a key without it answers
+        `not-authenticated`. Reached like `/apps/v1/titles`, with the same
+        plain-JSON errors.
+      tags: [apps]
+      security:
+        - appKey: []
+      responses:
+        "200":
+          description: The measures.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppMeasures"
+        "401":
+          description: No key, not a valid one, or one without the scope
+            (`not-authenticated`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
+        "404":
+          description: Not from a private address (plain text).
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: A failure of the server itself (`internal-error`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppError"
   /apps/v1/episode-orders:
     get:
       operationId: appEpisodeOrders
@@ -621,6 +663,34 @@ components:
               runtime:
                 type: integer
                 description: Minutes, when TMDB knows it.
+    AppMeasures:
+      type: object
+      required: [days, arrived, started, finished, left, missed, library, watched]
+      properties:
+        days:
+          type: integer
+          description: How far back, in days.
+        arrived:
+          type: integer
+          description: Films and seasons that arrived.
+        started:
+          type: integer
+          description: Of those, started by someone since.
+        finished:
+          type: integer
+          description: Of those, watched to the end by someone since.
+        left:
+          type: integer
+          description: Films and seasons that left.
+        missed:
+          type: integer
+          description: Of those, wished for by someone afterwards.
+        library:
+          type: integer
+          description: Films and seasons the libraries have now.
+        watched:
+          type: integer
+          description: Of those, watched (some of it) by someone in those days.
     AppHistoryEvent:
       description: A film or a season arriving in the libraries or leaving them.
       type: object
@@ -660,9 +730,7 @@ components:
 
     AppTitleStats:
       description: |
-        What every profile did with the title, in total. Counts below 2 are
-        given as 0, and so are plays and favorites when fewer than two
-        people (accounts) account for them, so none points at one person.
+        What every profile did with the title, in total; never who.
       type: object
       required: [plays, viewers, favorites]
       properties:
@@ -734,10 +802,8 @@ components:
     AppWatchStats:
       description: |
         What the profiles did with a film or a series, in total (a series
-        counts its seasons and episodes), listed only when two people
-        (accounts) or more watched it. As on `/apps/v1/titles`, favorites
-        are given as 0 when fewer than two people keep it, so none points
-        at one person.
+        counts its seasons and episodes), listed when someone watched it;
+        never who.
       type: object
       required: [kind, plays, viewers, favorites, changedAt]
       properties:

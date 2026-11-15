@@ -6,6 +6,7 @@
   import { message, plural } from '../lib/format';
   import { route } from '../lib/router.svelte';
   import type { Valuation, Valued } from '../lib/types-library';
+  import MeasuresCard from '../parts/library/MeasuresCard.svelte';
 
   route.wide = true;
 
@@ -169,6 +170,8 @@
 {/snippet}
 
 <PageHead title="Valuation" description="How much each film and each season is worth to the people here, from 0 to 100: what they watch, mark, keep for later and ask for, and what TMDB (or IMDb) says of it. Values never depend on files or their size, and say nothing of who did what. Apps you give a key, like Overtide, read them." />
+
+<MeasuresCard />
 
 {#if problem}
   <Notice warn>{problem}</Notice>

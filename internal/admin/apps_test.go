@@ -48,17 +48,16 @@ func TestApps(t *testing.T) {
 		}
 	}
 	json.Unmarshal(rec.Body.Bytes(), &stats)
-	// One viewer: the title is left out.
-	if rec.Code != 200 || len(stats.Titles) != 0 {
+	// One viewer: the title and its totals, never who (rule 85).
+	if rec.Code != 200 || len(stats.Titles) != 1 || stats.Titles[0].Viewers != 1 || stats.Titles[0].Plays != 3 || stats.Titles[0].Favorites != 2 {
 		t.Errorf("stats, one viewer: %d %s", rec.Code, rec.Body)
 	}
-	// A second account watches it: the totals and the day are given, the
-	// time it changed only by its day, and the favorites of one person
-	// as 0.
+	// A second account watches it: the totals grow, the time it changed
+	// only by its day.
 	_, prof2, _ := db.CreateAccount(ctx, "person-2", store.NewOwner{Name: "Other", JellyfinUserID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", JellyfinUsername: "of-2", JellyfinToken: "t"})
 	db.RecordPlay(ctx, prof2.ID, "movie/tmdb/949", "", 0, true, time.Date(2026, 10, 19, 21, 0, 0, 0, time.UTC))
 	// Statistics are kept a minute: asked again at once, the same.
-	if rec := app.do("GET", "/apps/v1/watch-stats", "", map[string]string{"Authorization": "Bearer " + made.Key}); !strings.Contains(rec.Body.String(), `"titles":[]`) {
+	if rec := app.do("GET", "/apps/v1/watch-stats", "", map[string]string{"Authorization": "Bearer " + made.Key}); !strings.Contains(rec.Body.String(), `"viewers":1`) {
 		t.Errorf("stats within the minute: %s", rec.Body)
 	}
 	later := time.Now().Add(61 * time.Second)
@@ -67,7 +66,7 @@ func TestApps(t *testing.T) {
 	stats.Titles = nil
 	json.Unmarshal(rec.Body.Bytes(), &stats)
 	if rec.Code != 200 || len(stats.Titles) != 1 || stats.Titles[0].TmdbId != "949" || stats.Titles[0].ImdbId != "tt0113277" ||
-		stats.Titles[0].Plays != 4 || stats.Titles[0].Viewers != 2 || stats.Titles[0].Favorites != 0 ||
+		stats.Titles[0].Plays != 4 || stats.Titles[0].Viewers != 2 || stats.Titles[0].Favorites != 2 ||
 		stats.Titles[0].LastPlayed != "2026-10-20" || stats.Titles[0].ChangedAt != "2026-10-20T00:00:00Z" {
 		t.Errorf("stats, two viewers: %d %s", rec.Code, rec.Body)
 	}

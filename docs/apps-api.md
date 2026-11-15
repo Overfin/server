@@ -8,9 +8,8 @@ libraries**), **what came and went** (when each film and season arrived
 in the libraries and left them), **wishes to fetch** (what people wished
 for, in Overfin's turns, for the app that fetches them: `/apps/v1/wishes` in
 [api/apps.yaml](../api/apps.yaml)), and **categories and episode orders**
-(`/apps/v1/categories` and `/apps/v1/episode-orders`, below). Any key may also ask which Overfin answers (`/apps/v1/server`: its version). Totals per title only, never anything per person; counts
-below 2 are given as 0, and so are plays and favorites when fewer than two
-people account for them, so none points at one person. Apps ask the control
+(`/apps/v1/categories` and `/apps/v1/episode-orders`, below). Any key may also ask which Overfin answers (`/apps/v1/server`: its version). Totals per title and for the whole server, never who did what: one
+person's viewing counts like anyone's. Apps ask the control
 panel's address (the site's, or its own private listener when you gave it
 one). Each key may make 120 calls a minute, and watch statistics are kept
 a minute:
@@ -98,7 +97,7 @@ Authorization: Bearer ofapp_…
 
 `plays` are plays to the end (a series adds up its episodes), `viewers`
 the accounts that watched some of it, `favorites` the profiles that keep
-it as a favorite. Only titles at least two people watched are listed,
+it as a favorite. Every title someone watched is listed,
 and `changedAt` is only the day (midnight UTC). With `since`, only the
 titles changed on that day or later.
 

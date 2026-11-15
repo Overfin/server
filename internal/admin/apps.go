@@ -233,13 +233,10 @@ type watchStatsJSON struct {
 }
 
 // watchStats (GET /apps/v1/watch-stats?since=RFC 3339) answers, for each
-// film and series at least two people watched, what the profiles did with
-// it in total: plays to the end, viewers (accounts), favorites (profiles),
-// the day it was last played. Never anything per person: a title fewer
-// than two people watched is left out, favorites are given as 0 unless
-// two people or more keep it, and the time it changed is only its day,
-// so no title and no time points at one person. since is compared by the
-// day as well.
+// film and series someone watched, what the profiles did with it in total:
+// plays to the end, viewers (accounts), favorites (profiles), the day it
+// was last played. Totals, never who (rule 85); the time it changed is
+// only its day, and since is compared by the day as well.
 func (p *Panel) watchStats(w http.ResponseWriter, r *http.Request) {
 	if p.appKey(w, r, "watch-stats") == nil {
 		return
@@ -261,13 +258,12 @@ func (p *Panel) watchStats(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]watchStatsJSON, 0, len(all))
 	for _, s := range all {
-		if s.Viewers < 2 {
+		if s.Viewers < 1 {
 			continue
 		}
-		// Plays and the last one only with two accounts behind them.
-		j := watchStatsJSON{Kind: s.Kind, TMDB: s.TMDB, IMDb: s.IMDb, TVDB: s.TVDB, Plays: byTwo(s.Plays, s.PlayAccounts),
-			Viewers: s.Viewers, Favorites: byTwo(s.Favorites, s.FavoriteAccounts), Changed: dayOf(s.Changed).Format(time.RFC3339)}
-		if !s.LastPlayed.IsZero() && s.PlayAccounts >= 2 {
+		j := watchStatsJSON{Kind: s.Kind, TMDB: s.TMDB, IMDb: s.IMDb, TVDB: s.TVDB, Plays: s.Plays,
+			Viewers: s.Viewers, Favorites: s.Favorites, Changed: dayOf(s.Changed).Format(time.RFC3339)}
+		if !s.LastPlayed.IsZero() {
 			j.LastPlayed = s.LastPlayed.Format(time.DateOnly)
 		}
 		out = append(out, j)
@@ -278,23 +274,4 @@ func (p *Panel) watchStats(w http.ResponseWriter, r *http.Request) {
 // dayOf is the start of t's day, in UTC.
 func dayOf(t time.Time) time.Time {
 	return t.UTC().Truncate(24 * time.Hour)
-}
-
-// byTwo gives a count only when two people or more account for it, so a
-// total never points at one person: n is the count (plays, favorites),
-// people the accounts behind it.
-func byTwo(n, people int) int {
-	if people < 2 {
-		return 0
-	}
-	return atLeast2(n)
-}
-
-// atLeast2 gives counts below 2 as 0, so a total never points at one
-// person.
-func atLeast2(n int) int {
-	if n < 2 {
-		return 0
-	}
-	return n
 }

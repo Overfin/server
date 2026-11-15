@@ -35,8 +35,8 @@ type appTitleJSON struct {
 	Categories []string `json:"categories,omitempty"`
 }
 
-// titleStatsJSON: counts below 2 are given as 0, so none points at one
-// person.
+// titleStatsJSON: what every profile did with a title, in total; never
+// who (rule 85).
 type titleStatsJSON struct {
 	Plays      int    `json:"plays"`
 	Viewers    int    `json:"viewers"`
@@ -203,8 +203,8 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		// A title the libraries lack is there because someone here wants it,
-		// or it's one of Overfin's picks: one account's wish stays unseen.
-		if !v.InLibrary && !f.Picks[v.Key] && len(wanted[v.Key]) < 2 {
+		// or it's one of Overfin's picks.
+		if !v.InLibrary && !f.Picks[v.Key] && len(wanted[v.Key]) < 1 {
 			continue
 		}
 		if _, ok := position(v.Key); positions != nil && !ok {
@@ -371,22 +371,19 @@ func wantedBy(f *store.ValuationFacts) map[string]map[string]bool {
 
 // titleStats totals, per film and season, what every profile did: plays
 // to the end, viewers (accounts), favorites (profiles; a series' count for
-// each of its seasons), the day last played. Counts below 2 become 0, and
-// so do plays and favorites when fewer than two people account for them.
+// each of its seasons), the day last played.
 func titleStats(f *store.ValuationFacts) map[string]*titleStatsJSON {
 	type total struct {
 		plays     int
 		viewers   map[string]bool
-		players   map[string]bool // the accounts behind plays and the last one
 		favorites int
-		fans      map[string]bool // the accounts behind favorites
 		last      time.Time
 	}
 	totals := map[string]*total{}
 	get := func(key string) *total {
 		t := totals[key]
 		if t == nil {
-			t = &total{viewers: map[string]bool{}, players: map[string]bool{}, fans: map[string]bool{}}
+			t = &total{viewers: map[string]bool{}}
 			totals[key] = t
 		}
 		return t
@@ -409,15 +406,8 @@ func titleStats(f *store.ValuationFacts) map[string]*titleStatsJSON {
 		if ok {
 			t.viewers[p.AccountID] = true
 		}
-		// Plays and the last one count only accounts that played it: one
-		// that only started it doesn't make another's plays anonymous.
-		if v.PlayCount > 0 {
-			if ok {
-				t.players[p.AccountID] = true
-			}
-			if v.LastPlayed.After(t.last) {
-				t.last = v.LastPlayed
-			}
+		if v.PlayCount > 0 && v.LastPlayed.After(t.last) {
+			t.last = v.LastPlayed
 		}
 	}
 	seasons := map[string][]string{} // series key → its valued seasons
@@ -427,13 +417,7 @@ func titleStats(f *store.ValuationFacts) map[string]*titleStatsJSON {
 		}
 	}
 	for _, fav := range f.Favorites {
-		p, known := f.Profiles[fav.ProfileID]
-		add := func(t *total) {
-			t.favorites++
-			if known {
-				t.fans[p.AccountID] = true
-			}
-		}
+		add := func(t *total) { t.favorites++ }
 		if f.Titles[fav.Title] != nil {
 			add(get(fav.Title))
 		}
@@ -443,9 +427,8 @@ func titleStats(f *store.ValuationFacts) map[string]*titleStatsJSON {
 	}
 	out := make(map[string]*titleStatsJSON, len(totals))
 	for key, t := range totals {
-		s := &titleStatsJSON{Plays: byTwo(t.plays, len(t.players)), Viewers: atLeast2(len(t.viewers)),
-			Favorites: byTwo(t.favorites, len(t.fans))}
-		if !t.last.IsZero() && len(t.players) >= 2 {
+		s := &titleStatsJSON{Plays: t.plays, Viewers: len(t.viewers), Favorites: t.favorites}
+		if !t.last.IsZero() {
 			s.LastPlayed = t.last.UTC().Format(time.DateOnly)
 		}
 		out[key] = s
