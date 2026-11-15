@@ -41,11 +41,18 @@ type Gateway struct {
 	backend  ed25519.PublicKey // pinned once paired
 	cc       *http.ClientConn  // the backend's connection, nil while none
 	status   Status
-	failures int              // wrong codes in a row, for the log
-	usage    map[string]Usage // egress traffic, by address
+	failures int // wrong codes in a row, for the log
+	// wrongLogged is when a wrong code was last logged: the first one is,
+	// then at most one line a wrongLogEvery, with the count.
+	wrongLogged time.Time
+	usage       map[string]Usage // egress traffic, by address
 	// mismatchAt is when a backend of another version last tried.
 	mismatchAt time.Time
 }
+
+// wrongLogEvery is how often wrong pairing codes are logged, at most, after
+// the first.
+const wrongLogEvery = time.Minute
 
 // mismatchFor is how long a backend of another version counts after its
 // last try: it tries at least every 30 s while it's there.
@@ -253,7 +260,12 @@ func (g *Gateway) preamble(c io.Reader, pub ed25519.PublicKey) (string, bool) {
 		}
 		if subtle.ConstantTimeCompare(theirs, proof(code, "backend", g.id.Public(), pub)) != 1 {
 			g.failures++
-			g.logger.Warn("link: a backend asked to pair with another code", "attempts", g.failures)
+			// Counted every time, logged the first time and then once a
+			// minute at most: many tries can't flood the log.
+			if now := time.Now(); g.failures == 1 || now.Sub(g.wrongLogged) >= wrongLogEvery {
+				g.wrongLogged = now
+				g.logger.Warn("link: a backend asked to pair with another code", "attempts", g.failures)
+			}
 			return "NO wrong-code", false
 		}
 		// The code is spent before anything else is kept: a crash or a

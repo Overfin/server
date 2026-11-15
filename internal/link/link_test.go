@@ -440,6 +440,7 @@ func TestUnreached(t *testing.T) {
 	for addr, want := range map[string]bool{
 		"127.0.0.1": true, "::1": true, "169.254.169.254": true, "fe80::1": true, "0.0.0.0": true,
 		"224.0.0.1": true, "::ffff:127.0.0.1": true,
+		"0.1.2.3": true, "255.255.255.255": true, "240.0.0.1": true, "::ffff:255.255.255.255": true,
 		"10.1.2.3": false, "192.168.1.5": false, "8.8.8.8": false, "2001:db8::1": false,
 	} {
 		if got := unreached(netip.MustParseAddr(addr).Unmap()); got != want {
@@ -910,5 +911,56 @@ func TestCodeSpentFirst(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(gdir, "backend.pub")); !os.IsNotExist(err) || g.Status().Paired {
 		t.Errorf("the backend's key was kept: %v %+v", err, g.Status())
+	}
+}
+
+// countingHandler counts the log lines with a message.
+type countingHandler struct {
+	slog.Handler
+	mu    sync.Mutex
+	count map[string]int
+}
+
+func (h *countingHandler) Handle(ctx context.Context, r slog.Record) error {
+	h.mu.Lock()
+	h.count[r.Message]++
+	h.mu.Unlock()
+	return nil
+}
+
+// Twenty wrong pairing codes in a row: all refused, the first logged, not
+// one line each.
+func TestWrongCodesLoggedOnce(t *testing.T) {
+	logs := &countingHandler{Handler: slog.NewTextHandler(io.Discard, nil), count: map[string]int{}}
+	code, _ := NewCode()
+	g, err := NewGateway(t.TempDir(), "1.0", func() string { return code }, slog.New(logs))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go g.Listen(ctx, addr)
+	time.Sleep(50 * time.Millisecond)
+	b, err := NewBackend(t.TempDir(), "1.0", backendHandler, quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 20 {
+		p := pairing{Address: addr, ServerName: "127.0.0.1"}
+		p.Code, _ = NewCode()
+		if err := b.connect(context.Background(), p); err == nil {
+			t.Fatal("paired with a wrong code")
+		}
+	}
+	logs.mu.Lock()
+	defer logs.mu.Unlock()
+	if n := logs.count["link: a backend asked to pair with another code"]; n != 1 {
+		t.Errorf("logged %d times", n)
 	}
 }

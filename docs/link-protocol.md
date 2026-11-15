@@ -28,6 +28,9 @@ changes, this changes with it.
 13. [Pages and limits](#13-pages-and-limits)
 14. [Guarantees, and their tests](#14-guarantees-and-their-tests)
 15. [Known gaps, and where this is going](#15-known-gaps-and-where-this-is-going)
+16. [Each part taken over](#16-each-part-taken-over)
+17. [Keys, from making to replacing](#17-keys-from-making-to-replacing)
+18. [Invariants](#18-invariants)
 
 ## 1. The parties
 
@@ -133,8 +136,9 @@ Both keys are bound: a proof made for another pair of keys is worthless.
    at each attempt); none: `NO no-code`;
 3. refuses a code it already used (`NO code-used`): it keeps the SHA-256 of
    every code used, one a line, in `used-code`;
-4. compares the proof in constant time: `NO wrong-code` (counted in the
-   log, no lockout);
+4. compares the proof in constant time: `NO wrong-code` (no lockout: a
+   160-bit code can't be guessed; each counted, the first logged, then one
+   line a minute at most with the count, so tries can't flood the log);
 5. spends the code first: adds its hash to `used-code`, and if that can't
    be written, pairs nothing (`NO error`). A crash after it leaves the code
    spent and the old pairing in place; pair again with a new code. Never
@@ -304,12 +308,15 @@ servers see only the gateway (rule 132):
    `OVFLINK1 egress <version> <host:port>`.
 3. The gateway checks the version, then that the key is its backend's, and
    asks the backend over the link (`/link/v1/egress?addr=`, 4 s) whether it
-   asked for that address. It looks the name up (3 s) and refuses addresses
-   it never reaches for its backend: loopback (its own machine), link-local
-   (a cloud's metadata service among them), unspecified, multicast; private
-   ranges stay, since paired servers may be on a LAN. It dials the address
-   it checked (5 s), never looking it up again, and answers `OK`. All of it
-   within the handshake's 15 s.
+   asked for that address. It looks the name up (3 s) and checks every
+   address the name gives (an IPv4 address written as IPv6 read as IPv4):
+   one it never reaches for its backend refuses the whole request:
+   loopback (its own machine), link-local (a cloud's metadata service among
+   them), unspecified, multicast, and IPv4's "this network" (0.0.0.0/8),
+   reserved block (240.0.0.0/4) and broadcast. Private ranges stay, since
+   paired servers may be on a LAN (section 16 says what that allows). It
+   dials the address it checked (5 s), never looking it up again, and
+   answers `OK`. All of it within the handshake's 15 s.
 4. From then on the gateway copies bytes both ways. The backend's own TLS
    with the paired server runs inside, end to end: the gateway sees none of
    it. The federation key stays at the backend.
@@ -409,6 +416,17 @@ Found while writing this, or raised by review (2026-11-13).
 4. The image cache keys sessions by the whole SHA-256 of the login cookie,
    not 8 bytes of it (section 10).
 
+**Raised by a second review of the same document, done 2026-11-15:** egress
+refuses IPv4's "this network", reserved block and broadcast too (section
+11); wrong pairing codes are logged once, then once a minute (section 4);
+sections 16 to 18 say what each part can do if taken over, how keys are
+made and replaced, and the protocol's invariants with their tests. Using
+the backend's link key for edge signatures too is safe: the signed message
+starts `overfin-edge v1\n`, TLS 1.3's starts with 64 spaces, so neither
+signature can pass as the other. Not done, by choice: a pairing code
+expiring by itself (remove it from the gateway's settings once paired,
+section 17); versions matched exactly (both reviews say to keep it).
+
 Checked, and already so: egress checks every address a name resolves to
 (IPv4-mapped ones unwrapped) and dials the one checked (section 11);
 files are written whole, renamed into place (section 4). Kept by choice:
@@ -453,3 +471,57 @@ next try).
 
 **No independent security review yet.** This document is meant as its
 starting point.
+
+## 16. Each part taken over
+
+What an attacker holding one part can and can't do. The backend is the
+application: it holds the accounts, the data, Jellyfin, the federation
+keys. The gateway faces the internet and holds none of them.
+
+| Taken over | Can | Can't |
+|---|---|---|
+| **The gateway** (its machine) | See visitors' traffic, their login cookies included (HTTPS ends there), and act as any visitor it saw; give the backend any visitor address (`Overfin-Client-Addr`); refuse or alter what it forwards; stop the site | Read the backend's data or keys; sign in without a visitor's cookie; reach the control panel or the apps' API (not on the link); act as the server towards paired servers (their TLS runs end to end inside egress) |
+| **The backend** | Everything Overfin does; reach through its gateway any address it names, private ranges included (the gateway refuses only its own machine, link-local, unspecified, multicast and reserved addresses) | Make the gateway reach its own machine or a cloud's metadata service |
+| **The gateway's key** (`gateway.key`) | Pose as the gateway to the backend, if it can also make the backend dial it (the backend dials the address it paired with) | Anything without that network position |
+| **The backend's key** (`backend.key`) | Connect to the gateway as its backend, and so answer visitors; sign edge cookies the gateway accepts (the backend still checks every session itself) | Read the real backend's data |
+| **An unused pairing code** | Pair its own backend with the gateway, before the real one: the real one is then refused (`code-used`), which shows | Use it after it's spent; pair with another gateway |
+| **The backend's database** (a copy) | Read the data | Sign in: logins are kept as SHA-256 of their cookies |
+
+## 17. Keys, from making to replacing
+
+- **Made** at first start, when the file is missing: `gateway.key` and
+  `backend.key`, Ed25519, PKCS#8 PEM, mode 0600, in `<data>/link/`. Never
+  sent anywhere; only their public halves are pinned by the other side.
+- **Pinned** at pairing, each side the other's public key; nothing else
+  (address, name, certificate dates) is trusted.
+- **Backed up** with the data folder. A copy restored on another machine is
+  the same identity: protect backups like the keys themselves.
+- **Replaced, the gateway:** reinstalled without its data, or its key
+  deleted, it has a new key; the backend refuses it (`TestGatewayKeyChanged`)
+  until paired again: `overfin-backend -pair <host:port>`, the code set on
+  the gateway (`OVERFIN_PAIRING`). The backend keeps the old gateway pinned
+  until the new pairing succeeds.
+- **Replaced, the backend:** a new backend key (data folder lost, or the key
+  deleted after a theft) is refused (`NO not-paired`) until paired again;
+  pairing replaces the pinned key, and the old one is never accepted again.
+- **A key stolen:** delete it on its side (a new one is made at the next
+  start) and pair again: the stolen one stops working at once on the
+  other side.
+- **The pairing code:** spent at its first use, and remembered spent
+  (`used-code`, a SHA-256 a line, a line per pairing ever made). Remove it
+  from the gateway's settings once paired; an unused code stays valid while
+  it's there.
+
+## 18. Invariants
+
+Each holds as the code stands, and has a test that fails if it breaks.
+
+| Invariant | Tests |
+|---|---|
+| No visitor request reaches `/link`, `/admin` or `/apps`, whatever its method, case, encoding or path | `TestHostileRequests` |
+| The gateway and the backend read a request's path the same way: both route with Go's `net/http`, same release, and the gateway refuses on the decoded path | `TestHostileRequests` |
+| No backend links without the pinned key or an unused code's proof bound to its key | `TestRefusals`, `TestPairAndReconnect`, `TestGatewayKeyChanged` |
+| A pairing code pairs once, even tried at once, even after a crash or a failed write | `TestCodeUsedOnce`, `TestCodeUsedOnceAtOnce`, `TestCodeSpentFirst` |
+| No access answer survives an access change; none asked before one is kept | `TestCacheForgetsAccess`, `TestAccessEvents`, `TestEventsAccess` |
+| No revocation is missed across breaks, gateway restarts or a restored database | `TestEventsRevokedAndPing`, `TestRevocationsReset`, `TestRevocations` |
+| Egress reaches only an address the backend asked for within the minute, never a refused range, dialing the address it checked | `TestEgress`, `TestEgressRefusals`, `TestUnreached` |

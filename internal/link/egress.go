@@ -208,7 +208,7 @@ func (g *Gateway) serveEgress(c *tls.Conn, pub ed25519.PublicKey) {
 // egressTarget looks addr's host up (3 s) and gives the address to dial;
 // false for one the gateway never reaches for its backend: loopback (its
 // own machine), link-local (a cloud's metadata service among them),
-// unspecified, multicast. Private ranges stay: paired servers may be on a
+// unspecified, multicast, IPv4's "this network", reserved and broadcast. Private ranges stay: paired servers may be on a
 // LAN. The address dialed is the one checked, never looked up again.
 func egressTarget(addr string) (string, bool) {
 	host, port, err := net.SplitHostPort(addr)
@@ -230,11 +230,19 @@ func egressTarget(addr string) (string, bool) {
 }
 
 // unreached says whether the gateway refuses to dial ip for its backend
-// (a variable: tests reach their own servers on loopback).
+// (a variable: tests reach their own servers on loopback): loopback,
+// link-local, unspecified, multicast, and IPv4's "this network"
+// (0.0.0.0/8), reserved block (240.0.0.0/4) and broadcast in it.
 var unreached = func(ip netip.Addr) bool {
 	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
-		ip.IsMulticast() || ip.IsInterfaceLocalMulticast()
+		ip.IsMulticast() || ip.IsInterfaceLocalMulticast() ||
+		thisNetwork.Contains(ip) || reservedV4.Contains(ip)
 }
+
+var (
+	thisNetwork = netip.MustParsePrefix("0.0.0.0/8")
+	reservedV4  = netip.MustParsePrefix("240.0.0.0/4") // with 255.255.255.255
+)
 
 // allowEgress asks the backend, over the link, whether it means to reach
 // addr.
