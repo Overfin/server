@@ -514,7 +514,7 @@ type ListQuery struct {
 	Access *Access
 	// Category, when set, keeps only its titles.
 	Category *CategoryFilter
-	// Sort is "name", "premiereDate", "addedAt", "communityRating",
+	// Sort is "name", "premiereDate", "addedAt", "communityRating", "rank",
 	// "latest" (when the title or, for a series, its newest episode was
 	// added) or "lastPlayed" (by the profile's ProfileID). Names, dates and
 	// ratings are TMDB's, the index's only for a file TMDB doesn't know. A
@@ -543,6 +543,8 @@ var listOrder = map[string]string{
 	"premiereDate":    "coalesce(" + fromTMDB("release_date") + ", premiere_date)",
 	"addedAt":         "added_at",
 	"communityRating": "coalesce(" + fromTMDB("rating") + ", community_rating)",
+	// Its rank on the server (title_ranks), 1 the most valued.
+	"rank": "(SELECT r.rank FROM title_ranks r WHERE r.title_key = catalog_items.title_key)",
 	// The later of its own date and its episodes' (either may be NULL,
 	// which makes max of the two NULL).
 	"latest": "coalesce(max(added_at, " + newestOfSeries + "), added_at, " + newestOfSeries + ")",

@@ -800,6 +800,9 @@ func run(logger *slog.Logger) error {
 		if sh.directory != nil {
 			p.Directory = sh.directory
 		}
+		// Each film's and series' rank on the server, by its value, for
+		// title pages and the Rank sort.
+		go p.KeepRanks(ctx, 10*time.Minute)
 		// Identification: TMDB searched as the library's titles are
 		// described (TMDB itself); a title fixed by hand is fetched at once.
 		p.SearchTMDB = func(ctx context.Context, query string) ([]tmdb.Title, error) {

@@ -358,7 +358,9 @@ anyone. Paired servers are not trusted at all (rule 94).
     from an identity provider are shown live through its connector, never
     stored or passed on.
 61. Apps see only what rule 85 allows. The panel's valuation shows scores
-    and what makes them up, one person's doings included, never who.
+    and what makes them up, one person's doings included, never who. The
+    site shows only each film's and series' rank (its place by value
+    among what the profile may see), never a score or what makes it up.
 62. No analytics, no telemetry, no calls home. Overfin contacts only what
     the operator set up: Jellyfin, Seerr, TMDB, IMDb, the identity
     provider, the email server, the notice webhook, paired servers.

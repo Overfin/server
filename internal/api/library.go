@@ -475,6 +475,7 @@ var sorts = map[string]string{
 	"premiereDate":    "PremiereDate",
 	"addedAt":         "DateCreated",
 	"communityRating": "CommunityRating",
+	"rank":            "SortName", // Overfin's own: the index sorts by it
 	"lastPlayed":      "DatePlayed",
 }
 

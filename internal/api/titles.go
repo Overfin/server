@@ -71,6 +71,10 @@ type titleDetail struct {
 	// Collection is the collection a film belongs to, when the profile
 	// sees it (collections.go).
 	Collection *collectionRef `json:"collection,omitempty"`
+	// Rank is a film's or a series' place on the server by its value,
+	// among the titles of its kind the profile may see (1 the most
+	// valued); absent when it has none.
+	Rank *int `json:"rank,omitempty"`
 }
 
 // collectionRef names a collection.
@@ -533,6 +537,10 @@ func (l Library) title(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := titleDetail{TitleSummary: sums[0], Overview: t.Overview, Tagline: t.Details.Tagline, Genres: t.Details.Genres}
+	if out.Rank, err = l.rankFor(ctx, p, key); err != nil {
+		l.storeError(w, err)
+		return
+	}
 	for _, c := range t.Details.Cast {
 		tc := titleCast{Name: c.Name, Character: c.Character}
 		if c.TMDB != "" {

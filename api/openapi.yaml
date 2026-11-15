@@ -2480,7 +2480,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [name, addedAt, premiereDate, communityRating, lastPlayed, random]
+            enum: [name, addedAt, premiereDate, communityRating, rank, lastPlayed, random]
             default: name
         - name: order
           in: query
@@ -5012,6 +5012,14 @@ components:
         - $ref: "#/components/schemas/TitleSummary"
         - type: object
           properties:
+            rank:
+              type: integer
+              minimum: 1
+              description: >-
+                A film's or a series' place on this server by Overfin's value
+                of it, among the titles of its kind the profile may see, 1 the
+                most valued. Absent when it has none (not in the libraries, or
+                not valued yet). Since 0.9.
             collection:
               type: object
               description: >-

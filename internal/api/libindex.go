@@ -34,7 +34,7 @@ func indexQuery(q url.Values, imported bool) (store.ListQuery, bool) {
 	if lq.Sort == "" {
 		lq.Sort = "name"
 	}
-	if !slices.Contains([]string{"name", "premiereDate", "addedAt", "communityRating", "lastPlayed", "random"}, lq.Sort) {
+	if !slices.Contains([]string{"name", "premiereDate", "addedAt", "communityRating", "rank", "lastPlayed", "random"}, lq.Sort) {
 		return store.ListQuery{}, false
 	}
 	if len(q["kind"]) == 0 {

@@ -187,7 +187,7 @@ export interface TitleQuery {
   played?: boolean;
   favorite?: boolean;
   inProgress?: boolean;
-  sort?: 'name' | 'addedAt' | 'premiereDate' | 'communityRating' | 'lastPlayed' | 'random';
+  sort?: 'name' | 'addedAt' | 'premiereDate' | 'communityRating' | 'rank' | 'lastPlayed' | 'random';
   order?: 'asc' | 'desc';
   seed?: string;
   limit?: number;
@@ -265,6 +265,8 @@ export interface TitleSummary {
 
 /** A title's page: a series with its seasons, a season with its episodes. */
 export interface Title extends TitleSummary {
+  /** A film's or a series' place on the server by its value, among the titles of its kind the profile may see, 1 the most valued (since 0.9). */
+  rank?: number;
   /** The collection a film belongs to, when the profile sees it (since 0.7). */
   collection?: { id: string; name: string };
   overview?: string;
