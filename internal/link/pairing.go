@@ -23,6 +23,11 @@ func NewCode() (string, error) {
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
+	return writeCode(b), nil
+}
+
+// writeCode writes a code's bytes in groups of four.
+func writeCode(b []byte) string {
 	s := codeEncoding.EncodeToString(b)
 	var groups []string
 	for len(s) > 0 {
@@ -30,7 +35,7 @@ func NewCode() (string, error) {
 		groups = append(groups, s[:n])
 		s = s[n:]
 	}
-	return strings.Join(groups, "-"), nil
+	return strings.Join(groups, "-")
 }
 
 // codeBytes reads a code as the operator may have typed it: dashes,

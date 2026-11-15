@@ -80,39 +80,7 @@ func (rv *Revocations) Follow(ctx context.Context, backend http.RoundTripper, lo
 				}
 				sc := bufio.NewScanner(resp.Body)
 				for sc.Scan() {
-					var e struct {
-						Type    string   `json:"type"`
-						Seq     int64    `json:"seq"`
-						Hash    string   `json:"hash"`
-						Expires int64    `json:"expires"`
-						Images  []string `json:"images"`
-					}
-					if json.Unmarshal(sc.Bytes(), &e) != nil {
-						continue
-					}
-					if e.Type == "new" && rv.New != nil {
-						rv.New(e.Images)
-						continue
-					}
-					if e.Type == "access" && rv.Access != nil {
-						rv.Access()
-						continue
-					}
-					// The backend's numbers started again (its database
-					// restored): count from its first, the revocations
-					// heard kept.
-					if e.Type == "reset" {
-						rv.mu.Lock()
-						rv.seq = 0
-						rv.mu.Unlock()
-						continue
-					}
-					if e.Type != "revoked" {
-						continue
-					}
-					if h, err := hex.DecodeString(e.Hash); err == nil {
-						rv.add(e.Seq, h, e.Expires)
-					}
+					rv.event(sc.Bytes())
 				}
 			}
 			resp.Body.Close()
@@ -120,6 +88,41 @@ func (rv *Revocations) Follow(ctx context.Context, backend http.RoundTripper, lo
 		select {
 		case <-ctx.Done():
 		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// event takes in one line of the backend's events (section 8 of
+// docs/link-protocol.md); a line it doesn't understand changes nothing.
+func (rv *Revocations) event(line []byte) {
+	var e struct {
+		Type    string   `json:"type"`
+		Seq     int64    `json:"seq"`
+		Hash    string   `json:"hash"`
+		Expires int64    `json:"expires"`
+		Images  []string `json:"images"`
+	}
+	if json.Unmarshal(line, &e) != nil {
+		return
+	}
+	switch e.Type {
+	case "new":
+		if rv.New != nil {
+			rv.New(e.Images)
+		}
+	case "access":
+		if rv.Access != nil {
+			rv.Access()
+		}
+	case "reset":
+		// The backend's numbers started again (its database restored):
+		// count from its first, the revocations heard kept.
+		rv.mu.Lock()
+		rv.seq = 0
+		rv.mu.Unlock()
+	case "revoked":
+		if h, err := hex.DecodeString(e.Hash); err == nil {
+			rv.add(e.Seq, h, e.Expires)
 		}
 	}
 }

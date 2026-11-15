@@ -344,7 +344,10 @@ The gateway works out the visitor's address and sends it in
 - **Behind a TCP proxy** (`OVERFIN_PROXY_PROTOCOL_FROM`): the PROXY protocol,
   v1 or v2, read only from those addresses, within 5 s; v1 `UNKNOWN`, v2
   `LOCAL` and other families keep the proxy's address. Exactly the header is
-  read, nothing after it.
+  read, nothing after it. v1's two addresses must be of the family it
+  names (`TCP4`, `TCP6`), without a zone, with both ports; an IPv4 address
+  written as IPv6 (`::ffff:…`, from a proxy listening on both) is the IPv4
+  one, in v2 too.
 - **Behind an HTTP proxy** (`OVERFIN_TRUSTED_PROXIES`): `X-Forwarded-For`,
   read from the right, the first address that isn't a trusted proxy.
 
@@ -376,7 +379,7 @@ Each line is a property a test can check. **Tested** names the test today;
 | A visitor's `Overfin-Check` and `Overfin-Client-Addr` never reach the backend | `TestInternalHeadersDropped` |
 | `X-Forwarded-*`, `Forwarded`, `X-Real-Ip` are always the gateway's | `TestInternalHeadersDropped`, `TestClientAddress` |
 | The visitor's address: spoofed headers ignored, the last untrusted hop behind a trusted proxy | `TestClientAddress` |
-| PROXY v1 and v2 read exactly, garbage refused, only from configured addresses | `TestProxyHeaders`, `TestProxyListener` |
+| PROXY v1 and v2 read exactly, garbage refused, only from configured addresses | `TestProxyHeaders`, `TestProxyListener`, `FuzzProxyHeader` |
 | PROXY v1 `UNKNOWN`, v2 `LOCAL` and other families keep the proxy's address | `TestProxyHeadersWithoutVisitor` |
 | A pairing proof binds both keys; a wrong code is refused | `TestPairAndReconnect`, `TestRefusals` |
 | A code pairs once, every code used remembered | `TestCodeUsedOnce` |
@@ -445,7 +448,13 @@ section 17); versions matched exactly (both reviews say to keep it).
 paths with an encoded slash or a backslash (`/%2fadmin/`, `/\admin/`)
 reached the backend before, as pages (Go's router there sent them to the
 site, not the panel); they're refused now (section 6). A visitor's
-`Upgrade` reached the backend too; it's dropped now.
+`Upgrade` reached the backend too; it's dropped now. Over HTTP/2
+(`TestRequestParsingHTTP2`, 25 cases, written frame by frame): all held.
+
+**Fuzzed, 2026-11-15:** the preamble (7.3 M inputs), the pairing code
+(2.7 M), the PROXY header (6.3 M), the events (4.9 M). The PROXY reader
+took `TCP4` with an IPv6 address, and an address with a zone (`%eth0`);
+both refused now (section 12), kept among the fuzzer's seeds.
 
 Checked, and already so: egress checks every address a name resolves to
 (IPv4-mapped ones unwrapped) and dials the one checked (section 11);
@@ -467,7 +476,10 @@ matched exactly, the 5-minute image answer cut short by `access`.
 | 8 × 1 GiB through the link at once | `TestLongTransfersMemory` (long) | the heap stayed under 16 MiB |
 
 Long tests run with `OVERFIN_LONG_TESTS=1 go test ./internal/link`, before
-a release. The race detector finds nothing in `internal/link`,
+a release, and the fuzzers too, each a while (`go test -run '^$' -fuzz
+'^FuzzPreamble$' -fuzztime 2m ./internal/link`; `FuzzCode` there,
+`FuzzProxyHeader` and `FuzzEvents` in `./internal/gateway`). Their seeds
+run with every `go test`; an input that fails is kept as one. The race detector finds nothing in `internal/link`,
 `internal/gateway`, `internal/edge` and `internal/federation`.
 
 **The gateway stopped during real playback** (Firefox, the test install
@@ -538,9 +550,13 @@ Each holds as the code stands, and has a test that fails if it breaks.
 
 | Invariant | Tests |
 |---|---|
-| No visitor request reaches `/link`, `/admin` or `/apps`, whatever its method, case, encoding or path | `TestHostileRequests`, `TestRequestParsing` |
+| No visitor request reaches `/link`, `/admin` or `/apps`, whatever its method, case, encoding or path | `TestHostileRequests`, `TestRequestParsing`, `TestRequestParsingHTTP2` |
 | The gateway and the backend read a request the same way: one spelling of a path passes, the backend gets it rewritten over HTTP/2, and both route with Go's `net/http`, same release | `TestRequestParsing`, `TestCanonicalPath` |
 | A request hidden in another's body, two lengths or encodings, a target naming its own host, the gateway's own headers sent twice: answered plainly, or one clean request reaches the backend | `TestRequestParsing` |
+| Over HTTP/2, pseudo-headers missing, twice, unknown, out of place, or headers HTTP/2 forbids: the stream refused or answered at the gateway | `TestRequestParsingHTTP2` |
+| Whatever the backend's line, the gateway never reads past it, answers OK only to the paired backend's `link` at its version, and spends no code and keeps no key without the proof | `FuzzPreamble` |
+| A pairing code reads back to its 20 bytes however it's typed; nothing else is one | `FuzzCode` |
+| An events line that isn't one changes nothing; a revocation is kept and counted from; a reset starts the count again | `FuzzEvents` |
 | No backend links without the pinned key or an unused code's proof bound to its key | `TestRefusals`, `TestPairAndReconnect`, `TestGatewayKeyChanged` |
 | A pairing code pairs once, even tried at once, even after a crash or a failed write | `TestCodeUsedOnce`, `TestCodeUsedOnceAtOnce`, `TestCodeSpentFirst` |
 | No access answer survives an access change; none asked before one is kept | `TestCacheForgetsAccess`, `TestAccessEvents`, `TestEventsAccess` |

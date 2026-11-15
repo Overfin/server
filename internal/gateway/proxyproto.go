@@ -112,15 +112,26 @@ func readV1(r io.Reader) (net.Addr, error) {
 	if len(f) != 5 || (f[0] != "TCP4" && f[0] != "TCP6") {
 		return nil, errors.New("PROXY v1 header not understood")
 	}
-	ip, err := netip.ParseAddr(f[1])
-	if err != nil {
-		return nil, err
+	// Both addresses of the family named, without a zone, and both ports;
+	// an IPv4 address written as IPv6 (from a proxy listening on both) is
+	// the IPv4 one.
+	var ips [2]netip.Addr
+	for i, field := range f[1:3] {
+		ip, err := netip.ParseAddr(field)
+		if err != nil || ip.Zone() != "" || (f[0] == "TCP4" && !ip.Is4()) || (f[0] == "TCP6" && !ip.Is6()) {
+			return nil, errors.New("PROXY v1 header not understood")
+		}
+		ips[i] = ip.Unmap()
 	}
-	port, err := strconv.ParseUint(f[3], 10, 16)
-	if err != nil {
-		return nil, err
+	var ports [2]uint64
+	for i, field := range f[3:5] {
+		port, err := strconv.ParseUint(field, 10, 16)
+		if err != nil {
+			return nil, errors.New("PROXY v1 header not understood")
+		}
+		ports[i] = port
 	}
-	return net.TCPAddrFromAddrPort(netip.AddrPortFrom(ip, uint16(port))), nil
+	return net.TCPAddrFromAddrPort(netip.AddrPortFrom(ips[0], uint16(ports[0]))), nil
 }
 
 func readV2(r io.Reader) (net.Addr, error) {
@@ -153,7 +164,7 @@ func readV2(r io.Reader) (net.Addr, error) {
 		if len(body) < 36 {
 			return nil, errors.New("PROXY v2 header too short")
 		}
-		ip := netip.AddrFrom16([16]byte(body[0:16]))
+		ip := netip.AddrFrom16([16]byte(body[0:16])).Unmap()
 		return net.TCPAddrFromAddrPort(netip.AddrPortFrom(ip, binary.BigEndian.Uint16(body[32:34]))), nil
 	default:
 		return nil, nil // another family: the proxy's own address stays
