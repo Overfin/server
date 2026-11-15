@@ -184,17 +184,31 @@ method and path under `/api/v1`, except those marked `x-status: planned`;
 those under `/api`, `/admin`, `/apps` and `/link` (by prefix, slash or not:
 `/links` is refused too). Everything else: 404, plain text, `Not found`.
 
+**One spelling of a path.** Before routing, the gateway refuses (404) a
+path with an encoded slash or backslash (`%2F`, `%5C`, any case), a
+backslash, an empty segment (`//`), a dot segment (`.`, `..`, encoded or
+not), or a control character. What's left reads the same to the gateway's
+routes and refusals and to the backend's. Go's HTTP server itself already
+answers 400 to two `Content-Length`s, two `Host`s, a null in the target,
+and 501 to any `Transfer-Encoding` but `chunked` alone; with `chunked` and
+a length, the length is dropped. Whatever follows a request's body on the
+connection is read as the next request, checked as any other.
+
 **In order**, outermost first: drop internal headers → the visitor's
-address → rate limit → allowlist → the session's first check (non-public
+address → rate limit → one spelling of a path → allowlist → the session's first check (non-public
 operations) → the image cache (`/api/v1/images/`) → the link.
 
 **Headers.**
 - Dropped from visitors: `Overfin-Check`, `Overfin-Client-Addr`,
   `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `Forwarded`,
-  `X-Real-Ip`.
+  `X-Real-Ip`; `Upgrade` and `Connection` (nothing upgrades through the
+  link). Each name goes whatever number of times it was sent.
 - Set by the gateway: `Overfin-Client-Addr` (section 12);
   `X-Forwarded-Proto: https` when the visitor came over TLS.
 - The backend sees `Host: backend` on every request.
+- The backend never reads a visitor's bytes: the gateway reads the request
+  once and writes it again over HTTP/2, so the two can't split a request
+  differently (no smuggling between them).
 
 **On the backend**, every request from the link: `Overfin-Client-Addr`
 becomes the request's remote address when it parses, and is dropped either
@@ -427,6 +441,12 @@ signature can pass as the other. Not done, by choice: a pairing code
 expiring by itself (remove it from the gateway's settings once paired,
 section 17); versions matched exactly (both reviews say to keep it).
 
+**Request parsing tested, 2026-11-15** (`TestRequestParsing`, 29 cases):
+paths with an encoded slash or a backslash (`/%2fadmin/`, `/\admin/`)
+reached the backend before, as pages (Go's router there sent them to the
+site, not the panel); they're refused now (section 6). A visitor's
+`Upgrade` reached the backend too; it's dropped now.
+
 Checked, and already so: egress checks every address a name resolves to
 (IPv4-mapped ones unwrapped) and dials the one checked (section 11);
 files are written whole, renamed into place (section 4). Kept by choice:
@@ -518,8 +538,9 @@ Each holds as the code stands, and has a test that fails if it breaks.
 
 | Invariant | Tests |
 |---|---|
-| No visitor request reaches `/link`, `/admin` or `/apps`, whatever its method, case, encoding or path | `TestHostileRequests` |
-| The gateway and the backend read a request's path the same way: both route with Go's `net/http`, same release, and the gateway refuses on the decoded path | `TestHostileRequests` |
+| No visitor request reaches `/link`, `/admin` or `/apps`, whatever its method, case, encoding or path | `TestHostileRequests`, `TestRequestParsing` |
+| The gateway and the backend read a request the same way: one spelling of a path passes, the backend gets it rewritten over HTTP/2, and both route with Go's `net/http`, same release | `TestRequestParsing`, `TestCanonicalPath` |
+| A request hidden in another's body, two lengths or encodings, a target naming its own host, the gateway's own headers sent twice: answered plainly, or one clean request reaches the backend | `TestRequestParsing` |
 | No backend links without the pinned key or an unused code's proof bound to its key | `TestRefusals`, `TestPairAndReconnect`, `TestGatewayKeyChanged` |
 | A pairing code pairs once, even tried at once, even after a crash or a failed write | `TestCodeUsedOnce`, `TestCodeUsedOnceAtOnce`, `TestCodeSpentFirst` |
 | No access answer survives an access change; none asked before one is kept | `TestCacheForgetsAccess`, `TestAccessEvents`, `TestEventsAccess` |

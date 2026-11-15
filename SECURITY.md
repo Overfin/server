@@ -715,7 +715,9 @@ anyone. Paired servers are not trusted at all (rule 94).
      the same release lists, with their methods, and GET for the site's
      pages; everything else gets a 404 at the gateway: the control panel,
      the setup page, the apps' API, the link's own routes, any route the
-     specification doesn't list.
+     specification doesn't list, and any path not written one way (an
+     encoded slash or backslash, a backslash, an empty or dot segment, a
+     control character).
 125. On the API routes that need a session, the gateway lets through only
      a login cookie with the backend's signature of it (made with the
      backend's link key, which the gateway pinned), and refuses a login the

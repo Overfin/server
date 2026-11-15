@@ -43,6 +43,9 @@ func Handler(b Backend, version string, revoked *Revocations, cache *Cache, logg
 			pr.Out.Header.Del("X-Forwarded-Proto")
 			pr.Out.Header.Del("Forwarded")
 			pr.Out.Header.Del("X-Real-Ip")
+			// Nothing upgrades through the link (HTTP/2 has no upgrades).
+			pr.Out.Header.Del("Upgrade")
+			pr.Out.Header.Del("Connection")
 			pr.Out.Header.Set(link.ClientAddr, ClientAddr(pr.In))
 			if pr.In.TLS != nil {
 				pr.Out.Header.Set("X-Forwarded-Proto", "https")
@@ -86,7 +89,41 @@ func Handler(b Backend, version string, revoked *Revocations, cache *Cache, logg
 		proxy.ServeHTTP(w, r)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { notFound(w) })
-	return stripInternal(withClientAddr(Limit(mux)))
+	return stripInternal(withClientAddr(Limit(canonical(mux))))
+}
+
+// canonical lets through only a path written one way: no encoded slash
+// or backslash, no backslash, no empty or dot segment, no control
+// character. The gateway's routes and refusals, and the backend's, then
+// read the same path; any other spelling gets a plain 404 here.
+func canonical(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !canonicalPath(r.URL.Path, r.URL.EscapedPath()) {
+			notFound(w)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func canonicalPath(p, escaped string) bool {
+	if !strings.HasPrefix(p, "/") || strings.Contains(p, "//") || strings.Contains(p, `\`) {
+		return false
+	}
+	if e := strings.ToLower(escaped); strings.Contains(e, "%2f") || strings.Contains(e, "%5c") {
+		return false
+	}
+	for _, c := range []byte(p) {
+		if c < 0x20 || c == 0x7f {
+			return false
+		}
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "." || seg == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 // stripInternal takes off what only the gateway itself may send the
