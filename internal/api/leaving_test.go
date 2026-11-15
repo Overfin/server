@@ -109,4 +109,14 @@ func TestSharedFileRow(t *testing.T) {
 		len(season.Episodes[0].Parts) != 2 || season.Episodes[0].Name == " / " || season.Episodes[1].EpisodeEnd != 0 {
 		t.Errorf("episodes: %+v", season.Episodes)
 	}
+	// Marked watched: both episodes are.
+	if code, body := put(t, srv, "PUT", "/api/v1/titles/title_series_tmdb_1877_s1_e1/played", ""); code != 200 {
+		t.Fatalf("mark: %d %s", code, body)
+	}
+	var me struct{ ActiveProfile struct{ ID string } }
+	get(t, srv, "/api/v1/me", &me)
+	states, err := st.PersonalStates(ctx, me.ActiveProfile.ID, []string{"series/tmdb/1877/s1/e1", "series/tmdb/1877/s1/e2", "series/tmdb/1877/s1/e3"})
+	if err != nil || !states["series/tmdb/1877/s1/e1"].Played || !states["series/tmdb/1877/s1/e2"].Played || states["series/tmdb/1877/s1/e3"].Played {
+		t.Errorf("played: %+v %v", states, err)
+	}
 }

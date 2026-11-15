@@ -706,6 +706,20 @@ func (l Library) markTitle(w http.ResponseWriter, r *http.Request, on, favorite 
 		for _, e := range episodes {
 			titles[e.Ref.Key()] = first(e.Items)
 		}
+		// An episode of a file holding several: the file's other episodes
+		// with it, as watching it to the end marks them.
+		if t.Ref.Kind == "episode" {
+			for _, item := range t.Items {
+				more, rerr := st.RangeKeys(ctx, st.RealItem(ctx, item))
+				if rerr != nil {
+					l.storeError(w, rerr)
+					return
+				}
+				for _, k := range more {
+					titles[k] = ""
+				}
+			}
+		}
 		err = st.SetPlayed(ctx, p.ID, titles, on, now)
 	}
 	if err != nil {
