@@ -26,6 +26,9 @@ type appTitleJSON struct {
 	Season *int   `json:"season,omitempty"`
 	// Score is the title's value, 0 to 100 (score).
 	Score *float64 `json:"score,omitempty"`
+	// Place is a season's place among its series' seasons by their own
+	// value, 1 the most valuable (score): its score is its series'.
+	Place *int `json:"place,omitempty"`
 	// Stats are what the profiles did with it, in total (stats).
 	Stats *titleStatsJSON `json:"stats,omitempty"`
 	// InLibrary says whether a library has it (availability).
@@ -199,7 +202,9 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 	var rows []valuation.Value
 	for _, v := range m.Scored(valuation.Weights(saved)) {
 		r, _ := store.ParseTitleKey(v.Key)
-		if (inLibrary != nil && v.InLibrary != *inLibrary) || (kind != "" && r.Kind != kind) {
+		// Films and seasons, as apps fetch them: a series' value is on
+		// each of its seasons.
+		if r.Kind == "series" || (inLibrary != nil && v.InLibrary != *inLibrary) || (kind != "" && r.Kind != kind) {
 			continue
 		}
 		// A title the libraries lack is there because someone here wants it,
@@ -283,6 +288,9 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		}
 		if want["score"] {
 			j.Score = &v.Score
+			if v.Place > 0 {
+				j.Place = &v.Place
+			}
 		}
 		if want["stats"] {
 			j.Stats = stats[v.Key]

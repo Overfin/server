@@ -29,9 +29,11 @@ paths:
       description: |
         One row per film and per season Overfin values, with every ID known
         and the field groups asked for. `score` is Overfin's value (0 to
-        100), `stats` what all profiles did with it in total, `availability`
-        whether a library has it; each needs the key scope of the same name.
-        Never anything per person.
+        100): a series is valued whole, so each of its seasons has its
+        series' score, and `place` orders the seasons within it. `stats` is
+        what all profiles did with it in total, `availability` whether a
+        library has it; each needs the key scope of the same name. Never
+        anything per person.
 
         Served where the control panel is: its own listener, private
         addresses only; or `/apps/` on the site when the panel is at `/admin/`
@@ -824,8 +826,7 @@ components:
         lastPlayed:
           type: string
           format: date
-          description: The day it was last played; only with at least two
-            viewers.
+          description: The day it was last played.
 
     AppTitle:
       description: |
@@ -856,7 +857,13 @@ components:
           type: number
           minimum: 0
           maximum: 100
-          description: Overfin's value of the title (`score`).
+          description: Overfin's value of the title (`score`); a season's
+            is its series'.
+        place:
+          type: integer
+          minimum: 1
+          description: A season's place among its series' seasons by their
+            own value, 1 the most valuable (`score`). Absent for a film.
         stats:
           $ref: "#/components/schemas/AppTitleStats"
         inLibrary:

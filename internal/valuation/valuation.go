@@ -1,13 +1,16 @@
-// Package valuation values titles: how much each film and each season is
+// Package valuation values titles: how much each film and each series is
 // worth to the people of a server, from what they watch, mark, keep for
 // later and ask for, and from what TMDB says of it. The operator weighs
-// the criteria; the result is one score per title, from 0 to 100.
+// the criteria; the result is one score per title, from 0 to 100. A
+// series is valued whole; its seasons are valued too, but only to order
+// them within it: a season's score is its series'.
 //
 // Values never depend on files or sizes: a title is valued the same way
 // whether a library has it or not. Nothing in a value says who did what.
 package valuation
 
 import (
+	"maps"
 	"math"
 	"sort"
 	"time"
@@ -95,12 +98,16 @@ const (
 	thinAccounts = 2
 )
 
-// Title is a film or a season, with how it ranks on each criterion.
+// Title is a film, a series or a season, with how it ranks on each
+// criterion: a film or a series among films and series, a season among
+// seasons (which only orders a series' seasons).
 type Title struct {
 	Key       string
 	Name      string
 	Season    int // seasons only
 	InLibrary bool
+	// Series is a season's series, by key; "" for a film or a series.
+	Series string
 	// Parts are its rank on each criterion that applies to it, from 0 (no
 	// sign of it, or the lowest) to 1 (the highest).
 	Parts map[string]float64
@@ -134,6 +141,33 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 	for _, t := range f.Titles {
 		if r, _ := store.ParseTitleKey(t.Key); r.Kind == "season" {
 			seasons[r.Series().Key()] = append(seasons[r.Series().Key()], t)
+		}
+	}
+	// seriesOf is each valued season's series, by key.
+	seriesOf := map[string]string{}
+	for key, list := range seasons {
+		for _, t := range list {
+			seriesOf[t.Key] = key
+		}
+	}
+	// whole adds each series to m, from its seasons: every account any of
+	// them counts, for the most it counts for in one.
+	whole := func(m map[string]map[string]float64) {
+		bySeries := map[string]map[string]float64{}
+		for key, byAccount := range m {
+			s, ok := seriesOf[key]
+			if !ok {
+				continue
+			}
+			if bySeries[s] == nil {
+				bySeries[s] = map[string]float64{}
+			}
+			for a, v := range byAccount {
+				bySeries[s][a] = max(bySeries[s][a], v)
+			}
+		}
+		for s, byAccount := range bySeries {
+			m[s] = byAccount
 		}
 	}
 	// counted collects, per title, the most each account counts for.
@@ -214,9 +248,18 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 	for key, byAccount := range views {
 		for _, n := range byAccount {
 			raw[WatchTime][key] += math.Min(n, maxViews)
+			if s, ok := seriesOf[key]; ok {
+				raw[WatchTime][s] += math.Min(n, maxViews) // a series' is its seasons'
+			}
 		}
 	}
 	tastes(f, views, active, raw[Tastes])
+	for key, v := range raw[Tastes] {
+		if s, ok := seriesOf[key]; ok {
+			raw[Tastes][s] = max(raw[Tastes][s], v) // its seasons' kind and genres are its own
+		}
+	}
+	whole(audience)
 	sum(raw[Audience], audience)
 	followed := counted()
 	for series, byAccount := range follows {
@@ -232,6 +275,7 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 			}
 		}
 	}
+	whole(followed)
 	sum(raw[Followed], followed)
 
 	// What people marked, keep for later, and asked for.
@@ -266,6 +310,7 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 			}
 			each(pt.Title, func(t *store.ValuedTitle) { add(m, t.Key, p.AccountID, share(p)) })
 		}
+		whole(m)
 		sum(raw[c], m)
 	}
 	requested := counted()
@@ -275,6 +320,7 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 		}
 		each(a.Title, func(t *store.ValuedTitle) { add(requested, t.Key, a.AccountID, 1) })
 	}
+	whole(requested)
 	sum(raw[Requested], requested)
 
 	// How many accounts each title's part comes from, per criterion.
@@ -285,6 +331,7 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 			behind[c][key] = len(byAccount)
 		}
 	}
+	whole(views) // after tastes, which reads films and seasons only
 	behind[WatchTime] = map[string]int{}
 	for key, byAccount := range views {
 		behind[WatchTime][key] = len(byAccount)
@@ -324,6 +371,20 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 		if !t.Added.IsZero() {
 			raw[RecentlyAdded][t.Key] = math.Max(1-math.Max(now.Sub(t.Added).Hours(), 0)/addedFor.Hours(), 0)
 		}
+		// A series: its own rating (IMDb's, else TMDB's, which a season
+		// carries), its latest season, its popularity, its latest arrival.
+		if s, ok := seriesOf[t.Key]; ok {
+			if t.TitleVotes > 0 {
+				v := float64(t.TitleVotes)
+				raw[Rating][s] = (v*t.TitleRating + imdbPrior*imdbMean.of()) / (v + imdbPrior)
+			} else if _, rated := raw[Rating][s]; !rated {
+				v := float64(t.Votes)
+				raw[Rating][s] = (v*t.Rating + ratingPrior*tmdbMean.of()) / (v + ratingPrior)
+			}
+			raw[NewRelease][s] = max(raw[NewRelease][s], raw[NewRelease][t.Key])
+			raw[Popularity][s] = max(raw[Popularity][s], t.Popularity)
+			raw[RecentlyAdded][s] = max(raw[RecentlyAdded][s], raw[RecentlyAdded][t.Key])
+		}
 	}
 
 	out := &Measured{Titles: make([]Title, 0, len(f.Titles))}
@@ -332,12 +393,52 @@ func Measure(f *store.ValuationFacts, now time.Time) *Measured {
 			out.Accounts++
 		}
 	}
+	// Films and series rank together, seasons among seasons; a rating
+	// ranks among its own kind (films', series', seasons'): series are
+	// rated higher than films, which says nothing of their worth here.
 	ranks := map[string]map[string]float64{}
 	for _, c := range Criteria {
-		ranks[c] = rank(raw[c])
+		films, series, seasonal := map[string]float64{}, map[string]float64{}, map[string]float64{}
+		for key, v := range raw[c] {
+			switch {
+			case seriesOf[key] != "":
+				seasonal[key] = v
+			case seasons[key] != nil:
+				series[key] = v
+			default:
+				films[key] = v
+			}
+		}
+		ranks[c] = rank(seasonal)
+		if c == Rating {
+			maps.Copy(ranks[c], rank(films))
+			maps.Copy(ranks[c], rank(series))
+			continue
+		}
+		maps.Copy(films, series)
+		maps.Copy(ranks[c], rank(films))
+	}
+	for key, list := range seasons {
+		in := false
+		for _, t := range list {
+			in = in || t.InLibrary
+		}
+		v := Title{Key: key, Name: list[0].Name, InLibrary: in, Parts: map[string]float64{}, Behind: map[string]int{}}
+		for c, byKey := range behind {
+			if n := byKey[key]; n > 0 {
+				v.Behind[c] = n
+			}
+		}
+		for _, c := range Criteria {
+			if c == RecentlyAdded && !in {
+				continue
+			}
+			v.Parts[c] = ranks[c][key]
+		}
+		out.Titles = append(out.Titles, v)
 	}
 	for _, t := range f.Titles {
-		v := Title{Key: t.Key, Name: t.Name, Season: t.Season, InLibrary: t.InLibrary, Parts: map[string]float64{}, Behind: map[string]int{}}
+		v := Title{Key: t.Key, Name: t.Name, Season: t.Season, InLibrary: t.InLibrary, Series: seriesOf[t.Key], Parts: map[string]float64{}, Behind: map[string]int{}}
 		for c, byKey := range behind {
 			if n := byKey[t.Key]; n > 0 {
 				v.Behind[c] = n
@@ -548,8 +649,11 @@ func rank(m map[string]float64) map[string]float64 {
 // Value is a title's score under some weights.
 type Value struct {
 	*Title
-	// Score is from 0 to 100.
+	// Score is from 0 to 100: a season's is its series'.
 	Score float64
+	// Place is a season's place among its series' seasons by their own
+	// value, 1 the most valuable; 0 for a film or a series.
+	Place int
 }
 
 // Score is t's value under the weights w, with accounts active accounts:
@@ -583,9 +687,36 @@ func Score(t *Title, w map[string]int, accounts int) float64 {
 // (then by key, so the order is stable).
 func (m *Measured) Scored(w map[string]int) []Value {
 	out := make([]Value, len(m.Titles))
+	whole := map[string]float64{}  // series key → its score
+	own := map[string]float64{}    // season key → its own score
+	bySeries := map[string][]int{} // series key → its seasons, by index
 	for i := range m.Titles {
-		out[i] = Value{Title: &m.Titles[i], Score: Score(&m.Titles[i], w, m.Accounts)}
+		t := &m.Titles[i]
+		out[i] = Value{Title: t, Score: Score(t, w, m.Accounts)}
+		if t.Series != "" {
+			own[t.Key] = out[i].Score
+			bySeries[t.Series] = append(bySeries[t.Series], i)
+		} else {
+			whole[t.Key] = out[i].Score
+		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Score > out[j].Score })
+	for series, list := range bySeries {
+		sort.SliceStable(list, func(a, b int) bool {
+			ta, tb := out[list[a]], out[list[b]]
+			if own[ta.Key] != own[tb.Key] {
+				return own[ta.Key] > own[tb.Key]
+			}
+			return ta.Season < tb.Season
+		})
+		for place, i := range list {
+			out[i].Score, out[i].Place = whole[series], place+1
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score
+		}
+		return out[i].Place < out[j].Place
+	})
 	return out
 }

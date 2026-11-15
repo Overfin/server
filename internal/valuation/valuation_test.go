@@ -54,7 +54,7 @@ func parts(t *testing.T, m *Measured, key string) map[string]float64 {
 }
 
 // Watch time is in full views: two people watching half of a film count as
-// one watching all of another; a season's ten episodes watched once count
+// one watching all of another; a series' ten episodes watched once count
 // as one view of it, not ten.
 func TestWatchTimeInFullViews(t *testing.T) {
 	f := facts(4, film("1"), film("2"), season("3", 1, 10), film("4"))
@@ -67,9 +67,9 @@ func TestWatchTimeInFullViews(t *testing.T) {
 	watched(f, "p4", "movie/tmdb/4", 2, 0)
 	m := Measure(f, now)
 	half, whole, season, twice := parts(t, m, "movie/tmdb/1")[WatchTime], parts(t, m, "movie/tmdb/2")[WatchTime],
-		parts(t, m, "series/tmdb/3/s1")[WatchTime], parts(t, m, "movie/tmdb/4")[WatchTime]
+		parts(t, m, "series/tmdb/3")[WatchTime], parts(t, m, "movie/tmdb/4")[WatchTime]
 	if half != whole || whole != season || !(twice > whole) {
-		t.Errorf("two halves %v, one whole %v, a season's ten episodes %v, twice %v", half, whole, season, twice)
+		t.Errorf("two halves %v, one whole %v, a series' ten episodes %v, twice %v", half, whole, season, twice)
 	}
 }
 
@@ -308,5 +308,64 @@ func TestTastes(t *testing.T) {
 	m = Measure(f, now)
 	if !(parts(t, m, other.Key)[Tastes] > parts(t, m, comedy.Key)[Tastes]) {
 		t.Errorf("said films and comedies, watches drama series: %v", m.Titles)
+	}
+}
+
+// A series is valued whole, from all its seasons: a season's score is its
+// series', and its place orders it among them by its own. Watching
+// several seasons adds up for the series, and one account counts once.
+func TestSeriesValuedWhole(t *testing.T) {
+	f := facts(3, season("1", 1, 2), season("1", 2, 2), season("2", 1, 2), film("3"))
+	for _, s := range []string{"s1", "s2"} {
+		for e := 1; e <= 2; e++ {
+			watched(f, "p1", "series/tmdb/1/"+s+"/e"+strconv.Itoa(e), 1, 0)
+		}
+	}
+	watched(f, "p2", "series/tmdb/1/s2/e1", 1, 0)
+	watched(f, "p2", "series/tmdb/1/s2/e2", 1, 0)
+	watched(f, "p3", "series/tmdb/2/s1/e1", 1, 0)
+	f.Favorites = []store.ProfileTitle{{ProfileID: "p1", Title: "series/tmdb/1"}}
+	m := Measure(f, now)
+	one, two := parts(t, m, "series/tmdb/1"), parts(t, m, "series/tmdb/2")
+	if !(one[WatchTime] > two[WatchTime]) || !(one[Audience] > two[Audience]) {
+		t.Errorf("the series watched more: %v, the other %v", one, two)
+	}
+	for _, v := range m.Titles {
+		if v.Key == "series/tmdb/1" && v.Behind[Audience] != 2 {
+			t.Errorf("audience behind series 1: %d accounts, want 2", v.Behind[Audience])
+		}
+		if v.Key == "series/tmdb/1/s1" && v.Series != "series/tmdb/1" {
+			t.Errorf("season 1's series: %q", v.Series)
+		}
+	}
+	scores := map[string]Value{}
+	for _, v := range m.Scored(Defaults()) {
+		scores[v.Key] = v
+	}
+	s1, s2, whole := scores["series/tmdb/1/s1"], scores["series/tmdb/1/s2"], scores["series/tmdb/1"]
+	if s1.Score != whole.Score || s2.Score != whole.Score {
+		t.Errorf("seasons %v and %v, their series %v", s1.Score, s2.Score, whole.Score)
+	}
+	if s2.Place != 1 || s1.Place != 2 || whole.Place != 0 || scores["movie/tmdb/3"].Place != 0 {
+		t.Errorf("places: s1 %d, s2 %d (watched by two), series %d", s1.Place, s2.Place, whole.Place)
+	}
+	if !(scores["series/tmdb/1"].Score > scores["series/tmdb/2"].Score) {
+		t.Errorf("series 1 %v, series 2 %v", scores["series/tmdb/1"].Score, scores["series/tmdb/2"].Score)
+	}
+}
+
+// A rating ranks among its own kind: the best-rated film and the
+// best-rated series rank alike, though series are rated higher.
+func TestRatingWithinKind(t *testing.T) {
+	a, b := film("1"), film("2")
+	a.Rating, a.Votes, b.Rating, b.Votes = 7.5, 5000, 6.5, 5000
+	c, d := season("3", 1, 2), season("4", 1, 2)
+	c.Rating, c.Votes, d.Rating, d.Votes = 8.6, 5000, 8.0, 5000
+	m := Measure(facts(1, a, b, c, d), now)
+	if best, bestSeries := parts(t, m, "movie/tmdb/1")[Rating], parts(t, m, "series/tmdb/3")[Rating]; best != 1 || bestSeries != 1 {
+		t.Errorf("best film %v, best series %v: both should rank first in their kind", best, bestSeries)
+	}
+	if low, lowSeries := parts(t, m, "movie/tmdb/2")[Rating], parts(t, m, "series/tmdb/4")[Rating]; low != lowSeries {
+		t.Errorf("lowest film %v, lowest series %v", low, lowSeries)
 	}
 }

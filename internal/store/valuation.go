@@ -107,6 +107,11 @@ type ValuedTitle struct {
 	// its series'. 0 and 0 otherwise.
 	IMDbRating float64
 	IMDbVotes  int
+	// TitleRating and TitleVotes are IMDb's for the film or the series
+	// itself (a season's series), on the same terms: a series is valued
+	// whole by them.
+	TitleRating float64
+	TitleVotes  int
 	// Released is the film's release, or the season's first air date;
 	// zero when unknown.
 	Released time.Time

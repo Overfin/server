@@ -13,14 +13,14 @@
   const criteria: Record<string, [string, string]> = {
     watchTime: ['Watch time', 'How much it\'s watched, in full views: two people watching half count as one watching all. Recent viewing counts more, and one account counts for three views at most.'],
     audience: ['Audience', 'How many accounts watched it, even a little.'],
-    followed: ['Followed', 'For series: the season people are on and those after it, while they keep watching.'],
+    followed: ['Followed', 'For series: people who keep watching one.'],
     favorites: ['Favorites', 'How many accounts marked it a favorite.'],
     watchlist: ['Watchlist', 'How many accounts keep it to watch later.'],
     requested: ['Wished', 'How many accounts wished for it (or asked for it in Seerr); kept a while once it arrives, until they watched it.'],
     tastes: ['Tastes', 'How well it fits what people here like: what they watch (genres, series or films), and what they said when asked. What someone watches counts more and more over what they said.'],
-    rating: ['Rating', 'IMDb\'s rating when IMDb\'s data is on and it has the title (a season\'s from its episodes), TMDB\'s otherwise. One from a few votes counts for little.'],
-    newRelease: ['New release', 'How recent the film or the season is: its release, or its first air date.'],
-    recentlyAdded: ['Recently added', 'How recently it arrived here (a season: its latest episode), for about two months: what just came isn\'t the least valuable for not being watched yet.'],
+    rating: ['Rating', 'IMDb\'s rating when IMDb\'s data is on and it has the title, TMDB\'s otherwise, compared with titles of the same kind: films with films, series with series. One from a few votes counts for little.'],
+    newRelease: ['New release', 'How recent the film or the series is: its release, or its latest season\'s first air date.'],
+    recentlyAdded: ['Recently added', 'How recently it arrived here (a series: its latest episode), for about two months: what just came isn\'t the least valuable for not being watched yet.'],
     popularity: ['Popularity', 'TMDB\'s popularity: how much people look it up these days.'],
   };
   const criterionName = (c: string) => (criteria[c] || [c])[0];
@@ -169,7 +169,7 @@
   </div>
 {/snippet}
 
-<PageHead title="Valuation" description="How much each film and each season is worth to the people here, from 0 to 100: what they watch, mark, keep for later and ask for, and what TMDB (or IMDb) says of it. Values never depend on files or their size, and say nothing of who did what. Apps you give a key, like Overtide, read them." />
+<PageHead title="Valuation" description="How much each film and each series is worth to the people here, from 0 to 100 (a series' seasons are only ordered within it): what they watch, mark, keep for later and ask for, and what TMDB (or IMDb) says of it. Values never depend on files or their size, and say nothing of who did what. Apps you give a key, like Overtide, read them." />
 
 <MeasuresCard />
 
@@ -180,7 +180,7 @@
 {:else}
   <div class="split">
     <div>
-      <Card title="Criteria" description={`From 0 (left out) to ${data.max} (counts the most). ${plural(data.accounts, 'account')} used in the last six months count${data.accounts === 1 ? 's' : ''}; ${data.titles === 1 ? '1 film or season is' : `${data.titles} films and seasons are`} valued.`}>
+      <Card title="Criteria" description={`From 0 (left out) to ${data.max} (counts the most). ${plural(data.accounts, 'account')} used in the last six months count${data.accounts === 1 ? 's' : ''}; ${data.titles === 1 ? '1 film or series is' : `${data.titles} films and series are`} valued.`}>
         <div>
           {#each data.criteria as c (c.name)}
             <Setting label={criterionName(c.name)} hint={(criteria[c.name] || [])[1] || ''}>

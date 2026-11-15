@@ -15,6 +15,7 @@ type appTitlesPage struct {
 		Kind, Name, TmdbId, ImdbId string
 		Season                     *int
 		Score                      *float64
+		Place                      *int
 		InLibrary                  *bool
 		Stats                      *struct {
 			Plays, Viewers, Favorites int
@@ -101,8 +102,14 @@ func TestAppTitles(t *testing.T) {
 	get(scoreOnly, "?fields=stats", 403)
 	get(scoreOnly, "?sort=size", 400)
 	get(scoreOnly, "?colour=blue", 400)
-	if p := get(scoreOnly, "?kind=season", 200); len(p.Titles) != 1 || *p.Titles[0].Season != 1 || p.Titles[0].TmdbId != "3" {
-		t.Errorf("seasons: %+v", p.Titles)
+	if p := get(scoreOnly, "?kind=season", 200); len(p.Titles) != 1 || *p.Titles[0].Season != 1 || p.Titles[0].TmdbId != "3" ||
+		p.Titles[0].Place == nil || *p.Titles[0].Place != 1 {
+		t.Errorf("seasons (its series' score, first of its seasons): %+v", p.Titles)
+	}
+	for _, r := range page.Titles {
+		if r.Season == nil && r.Place != nil {
+			t.Errorf("a film with a place: %+v", r)
+		}
 	}
 
 	// Pages.

@@ -71,17 +71,16 @@ func withIMDb(f *store.ValuationFacts, d *imdb.Data) {
 		return
 	}
 	for _, t := range f.Titles {
+		if t.TitleIMDb != "" {
+			if it, ok := d.Title(t.TitleIMDb); ok {
+				t.TitleRating, t.TitleVotes = it.Rating, it.Votes
+				t.IMDbRating, t.IMDbVotes = it.Rating, it.Votes
+			}
+		}
 		if r, _ := store.ParseTitleKey(t.Key); r.Kind == "season" {
 			if rating, votes, ok := seasonRating(d, t.EpisodesIMDb); ok {
 				t.IMDbRating, t.IMDbVotes = rating, votes
-				continue
 			}
-		}
-		if t.TitleIMDb == "" {
-			continue
-		}
-		if it, ok := d.Title(t.TitleIMDb); ok {
-			t.IMDbRating, t.IMDbVotes = it.Rating, it.Votes
 		}
 	}
 }
@@ -167,7 +166,13 @@ func (p *Panel) writeValuation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	weights, defaults := valuation.Weights(saved), valuation.Defaults()
-	out := valuationJSON{Max: valuation.MaxWeight, Accounts: m.Accounts, Titles: len(m.Titles), AskTastes: asked}
+	valued := 0 // films and series: seasons are only ordered within theirs
+	for _, t := range m.Titles {
+		if t.Series == "" {
+			valued++
+		}
+	}
+	out := valuationJSON{Max: valuation.MaxWeight, Accounts: m.Accounts, Titles: valued, AskTastes: asked}
 	if p.IMDb != nil {
 		on, err := p.Store.IMDbOn(ctx)
 		if err != nil {
@@ -292,9 +297,13 @@ func (p *Panel) valuationPreview(w http.ResponseWriter, r *http.Request, _ *sess
 		p.fail(w, "measuring the titles", err)
 		return
 	}
-	scored := m.Scored(weights)
-	var library []valuation.Value
-	for _, v := range scored {
+	// Films and series: a season's value is its series'.
+	var scored, library []valuation.Value
+	for _, v := range m.Scored(weights) {
+		if v.Series != "" {
+			continue
+		}
+		scored = append(scored, v)
 		if v.InLibrary {
 			library = append(library, v)
 		}
