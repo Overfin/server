@@ -61,6 +61,18 @@ func (pb Playback) record(ctx context.Context, s *playback.Stream, positionMs in
 		if err == nil {
 			err = st.RecordPlay(ctx, s.ProfileID, keys[s.ItemID], s.ItemID, positionMs, finished, time.Now())
 		}
+		// A file holding several episodes: watched to the end, all of
+		// them are (where it stopped stays on its first).
+		if err == nil && finished {
+			var more []string
+			if more, err = st.RangeKeys(ctx, s.ItemID); err == nil {
+				for _, key := range more {
+					if err = st.RecordPlay(ctx, s.ProfileID, key, "", 0, true, time.Now()); err != nil {
+						break
+					}
+				}
+			}
+		}
 	}
 	if err != nil {
 		pb.Logger.Error("recording where a profile is in a title failed", "playback", s.ID, "err", err)

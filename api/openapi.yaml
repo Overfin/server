@@ -5053,7 +5053,11 @@ components:
                 $ref: "#/components/schemas/TitleSummary"
             episodes:
               type: array
-              description: A season's episodes, each with what it's about.
+              description: >-
+                A season's episodes, each with what it's about. A file
+                holding several episodes is one row, its first's: its name
+                their titles joined, `episodeEnd` its last episode, `parts`
+                each episode's title and overview (since 0.10).
               items:
                 allOf:
                   - $ref: "#/components/schemas/TitleSummary"
@@ -5061,6 +5065,18 @@ components:
                     properties:
                       overview:
                         type: string
+                      episodeEnd:
+                        type: integer
+                      parts:
+                        type: array
+                        items:
+                          type: object
+                          required: [name]
+                          properties:
+                            name:
+                              type: string
+                            overview:
+                              type: string
 
     TitlePage:
       allOf:

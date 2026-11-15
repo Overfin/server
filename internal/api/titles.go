@@ -83,6 +83,65 @@ type collectionRef struct {
 type episodeJSON struct {
 	library.TitleSummary
 	Overview string `json:"overview,omitempty"`
+	// EpisodeEnd is the last episode a file holding several holds, on its
+	// first's row (the others' rows go); Parts, each episode's title and
+	// overview, in order.
+	EpisodeEnd int           `json:"episodeEnd,omitempty"`
+	Parts      []episodePart `json:"parts,omitempty"`
+}
+
+// episodePart is one episode of a file holding several.
+type episodePart struct {
+	Name     string `json:"name"`
+	Overview string `json:"overview,omitempty"`
+}
+
+// mergeShared folds the episodes held by the same file as an earlier one
+// into its row (shared: by key, the file's first episode's key): one row,
+// "Episodes 1–2", the titles joined, each overview under its title, the
+// lengths added up.
+func mergeShared(rows []episodeJSON, keys []string, shared map[string]string) []episodeJSON {
+	if len(shared) == 0 {
+		return rows
+	}
+	at := map[string]int{}
+	for i, r := range rows {
+		at[r.ID] = i
+	}
+	gone := map[int]bool{}
+	for _, key := range keys {
+		first, ok := shared[key]
+		if !ok {
+			continue
+		}
+		i, okRow := at[titleID(key)]
+		f, okFirst := at[titleID(first)]
+		ref, okRef := store.ParseTitleKey(key)
+		if !okRow || !okFirst || !okRef || i == f {
+			continue
+		}
+		row := &rows[f]
+		if row.Parts == nil {
+			row.Parts = []episodePart{{Name: row.Name, Overview: row.Overview}}
+		}
+		row.Parts = append(row.Parts, episodePart{Name: rows[i].Name, Overview: rows[i].Overview})
+		switch {
+		case row.Name == "":
+			row.Name = rows[i].Name
+		case rows[i].Name != "":
+			row.Name += " / " + rows[i].Name
+		}
+		row.DurationMs += rows[i].DurationMs
+		row.EpisodeEnd = max(row.EpisodeEnd, ref.Episode)
+		gone[i] = true
+	}
+	out := rows[:0:0]
+	for i, r := range rows {
+		if !gone[i] {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func today() string { return time.Now().UTC().Format("2006-01-02") }
@@ -547,6 +606,13 @@ func (l Library) title(w http.ResponseWriter, r *http.Request) {
 		for _, e := range episodes {
 			out.Episodes = append(out.Episodes, episodeJSON{TitleSummary: e, Overview: overviews[e.ID]})
 		}
+		// A file holding several episodes: one row for them.
+		shared, err := st.SharedFiles(ctx, keys)
+		if err != nil {
+			l.storeError(w, err)
+			return
+		}
+		out.Episodes = mergeShared(out.Episodes, keys, shared)
 	}
 	writeOK(w, out)
 }

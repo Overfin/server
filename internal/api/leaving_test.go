@@ -77,3 +77,36 @@ func TestLeavingSoon(t *testing.T) {
 		t.Errorf("Heat's page: %d %+v", code, heat)
 	}
 }
+
+// A file holding two episodes: the season lists one row for both, their
+// titles joined, each with its own part; playing the second plays the file.
+func TestSharedFileRow(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{store: &st})
+	ctx := context.Background()
+	id := func(n int) string { return fmt.Sprintf("%032x", n) }
+	one, two, three := 1, 2, 3
+	st.PutCatalog(ctx, []store.CatalogItem{
+		{ID: id(10), Kind: "series", Name: "Phineas", SortName: "Phineas", TMDB: "1877"},
+		{ID: id(11), Kind: "season", Name: "Season 1", SortName: "Season 1", SeriesID: id(10), SeasonNumber: &one},
+		{ID: id(12), Kind: "episode", Name: "Rollercoaster", SortName: "E1", SeriesID: id(10), SeasonID: id(11), SeasonNumber: &one, EpisodeNumber: &one, EpisodeNumberEnd: &two},
+		{ID: id(13), Kind: "episode", Name: "Lawn Gnome", SortName: "E3", SeriesID: id(10), SeasonID: id(11), SeasonNumber: &one, EpisodeNumber: &three},
+	}, 1)
+	st.RefreshTitleKeys(ctx)
+	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
+	st.MarkImported(ctx, ownerID(t, srv), time.Now())
+	var season struct {
+		Episodes []struct {
+			ID, Name   string
+			EpisodeEnd int
+			Parts      []struct{ Name string }
+		}
+	}
+	if code := get(t, srv, "/api/v1/titles/title_series_tmdb_1877_s1", &season); code != 200 {
+		t.Fatalf("season: %d", code)
+	}
+	if len(season.Episodes) != 2 || season.Episodes[0].ID != "title_series_tmdb_1877_s1_e1" || season.Episodes[0].EpisodeEnd != 2 ||
+		len(season.Episodes[0].Parts) != 2 || season.Episodes[0].Name == " / " || season.Episodes[1].EpisodeEnd != 0 {
+		t.Errorf("episodes: %+v", season.Episodes)
+	}
+}

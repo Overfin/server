@@ -390,6 +390,10 @@ func convert(raw jellyfin.IndexItem) (store.CatalogItem, bool) {
 	case "episode":
 		it.SeasonID, _ = jellyfin.NormalizeID(raw.SeasonId)
 		it.SeasonNumber, it.EpisodeNumber = raw.ParentIndexNumber, raw.IndexNumber
+		// A file holding several episodes (S01E01-E02): where it ends.
+		if end := raw.IndexNumberEnd; end != nil && raw.IndexNumber != nil && *end > *raw.IndexNumber {
+			it.EpisodeNumberEnd = end
+		}
 	}
 	if t, err := time.Parse(time.RFC3339Nano, raw.DateCreated); err == nil {
 		it.AddedAt = t

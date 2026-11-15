@@ -566,6 +566,8 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// An episode of a file holding several plays the file.
+	jfItem = l.Provisioner.Store.RealItem(ctx, jfItem)
 
 	ja, uid, ok := l.account(w, r)
 	if !ok {

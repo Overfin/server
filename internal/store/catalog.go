@@ -2,11 +2,14 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -115,7 +118,20 @@ type CatalogItem struct {
 	// them: main audio tracks (with a region when known, "fr-CA") and
 	// subtitles, forced ones aside.
 	AudioTags, SubtitleTags []string
+	// EpisodeNumberEnd is the last episode a file holding several holds
+	// (S01E01-E02: 2); nil for one.
+	EpisodeNumberEnd *int
 }
+
+// rangeID is the index row of an episode n held by item, after its first:
+// derived from the item's ID, so it stays the same pass after pass.
+func rangeID(item string, n int) string {
+	sum := sha256.Sum256([]byte(item + ":" + strconv.Itoa(n)))
+	return hex.EncodeToString(sum[:16])
+}
+
+// maxRange bounds how many episodes one file may hold.
+const maxRange = 20
 
 // PutCatalog adds or updates titles, marking them seen by the full pass
 // pass (the current one, for changes read between passes).
@@ -175,6 +191,28 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 				return err
 			}
 		}
+		// A file of several episodes: a row for each one after its first,
+		// as the item is, pointing to it.
+		if it.Kind == "episode" {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM catalog_items WHERE range_of = ?`, it.ID); err != nil {
+				return err
+			}
+			if it.EpisodeNumber != nil && it.EpisodeNumberEnd != nil {
+				for n := *it.EpisodeNumber + 1; n <= *it.EpisodeNumberEnd && n <= *it.EpisodeNumber+maxRange; n++ {
+					if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_items (id, kind, name, sort_name, year,
+							series_id, season_id, season_number, episode_number, tmdb, imdb, tvdb, rating,
+							primary_tag, backdrop_tag, thumb_tag, seen, library_id, added_at, premiere_date, community_rating,
+							folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages, audio_tags, subtitle_tags, range_of)
+						SELECT ?, kind, name, sort_name, year, series_id, season_id, season_number, ?, tmdb, imdb, tvdb, rating,
+							primary_tag, backdrop_tag, thumb_tag, seen, library_id, added_at, premiere_date, community_rating,
+							folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages, audio_tags, subtitle_tags, id
+						FROM catalog_items WHERE id = ?
+						ON CONFLICT (id) DO NOTHING`, rangeID(it.ID, n), n, it.ID); err != nil {
+						return err
+					}
+				}
+			}
+		}
 	}
 	// A season that arrived before its series was indexed gets its IDs once
 	// the series is: kept with it, should both leave later.
@@ -215,6 +253,12 @@ func (s *Store) DeleteCatalog(ctx context.Context, ids []string) error {
 		return err
 	}
 	defer tx.Rollback()
+	// The rows of a file's other episodes go with it.
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM catalog_items WHERE range_of = ?`, id); err != nil {
+			return err
+		}
+	}
 	// Read before anything goes: a season's series may be among them.
 	type leaving struct {
 		kind, id, seriesID, tmdb, tvdb string
@@ -745,4 +789,49 @@ func (s *Store) CatalogGenres(ctx context.Context, libraryID string, category *C
 	// By name, accents aside.
 	slices.SortFunc(out, func(a, b GenreCount) int { return strings.Compare(SortName(a.Name), SortName(b.Name)) })
 	return out, rows.Err()
+}
+
+// RealItem is the library item that holds an index row: the row itself,
+// or, for an episode of a file holding several, the file's item.
+func (s *Store) RealItem(ctx context.Context, id string) string {
+	var of sql.NullString
+	if err := s.read.QueryRowContext(ctx, `SELECT range_of FROM catalog_items WHERE id = ?`, id).Scan(&of); err == nil && of.Valid {
+		return of.String
+	}
+	return id
+}
+
+// RangeKeys are the title keys of the episodes a file holds after its
+// first (its item's rows, range_of), for marking them all watched.
+func (s *Store) RangeKeys(ctx context.Context, item string) ([]string, error) {
+	var out []string
+	err := s.each(ctx, func(rows *sql.Rows) error {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return err
+		}
+		out = append(out, key)
+		return nil
+	}, `SELECT title_key FROM catalog_items WHERE range_of = ? AND title_key IS NOT NULL ORDER BY episode_number`, item)
+	return out, err
+}
+
+// SharedFiles says, of these episode keys, which are held by the same file
+// as an earlier one: by key, the key of the file's first episode.
+func (s *Store) SharedFiles(ctx context.Context, keys []string) (map[string]string, error) {
+	out := map[string]string{}
+	if len(keys) == 0 {
+		return out, nil
+	}
+	err := s.each(ctx, func(rows *sql.Rows) error {
+		var key, first string
+		if err := rows.Scan(&key, &first); err != nil {
+			return err
+		}
+		out[key] = first
+		return nil
+	}, `SELECT r.title_key, f.title_key FROM json_each(?) j
+		JOIN catalog_items r ON r.title_key = j.value AND r.range_of IS NOT NULL
+		JOIN catalog_items f ON f.id = r.range_of AND f.title_key IS NOT NULL`, jsonList(keys))
+	return out, err
 }
