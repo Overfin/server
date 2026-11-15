@@ -454,7 +454,11 @@ site, not the panel); they're refused now (section 6). A visitor's
 **Fuzzed, 2026-11-15:** the preamble (7.3 M inputs), the pairing code
 (2.7 M), the PROXY header (6.3 M), the events (4.9 M). The PROXY reader
 took `TCP4` with an IPv6 address, and an address with a zone (`%eth0`);
-both refused now (section 12), kept among the fuzzer's seeds.
+both refused now (section 12), kept among the fuzzer's seeds. Each ran
+90 s (the code 60 s) on Go 1.26.11, linux/amd64, 16 workers, from its
+seeds; the corpus each built stays in Go's cache on that machine, not in
+the repository (only the seeds, and inputs that failed, are kept there).
+A count of inputs isn't a proof of coverage.
 
 Checked, and already so: egress checks every address a name resolves to
 (IPv4-mapped ones unwrapped) and dials the one checked (section 11);
