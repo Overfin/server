@@ -56,7 +56,7 @@ type entry struct {
 	hits     float64 // decayed: halves every day
 	at       time.Time
 	fetch    time.Duration
-	sessions map[[8]byte]time.Time // distinct sessions lately (up to essentialAt)
+	sessions map[[sha256.Size]byte]time.Time // distinct sessions lately (up to essentialAt)
 }
 
 const (
@@ -79,15 +79,14 @@ func (c *Cache) path(k string) string {
 	return filepath.Join(c.Dir, h[:2], h)
 }
 
-// session is a short hash of the visitor's login cookie: the cache's own
+// session is a hash of the visitor's login cookie, whole: the cache's own
 // in-memory key, never on disk.
-func session(r *http.Request) ([8]byte, bool) {
+func session(r *http.Request) ([sha256.Size]byte, bool) {
 	login, _, ok := edge.Pair(r)
 	if !ok {
-		return [8]byte{}, false
+		return [sha256.Size]byte{}, false
 	}
-	sum := sha256.Sum256([]byte("cache " + login))
-	return [8]byte(sum[:8]), true
+	return sha256.Sum256([]byte("cache " + login)), true
 }
 
 // Wrap answers cacheable requests from the cache when it can, filling it
@@ -137,7 +136,7 @@ func (c *Cache) Wrap(next http.Handler) http.Handler {
 
 // may asks the backend whether this session may have k (the image's own
 // request, with CheckOnly), unless it said yes in the last minutes.
-func (c *Cache) may(next http.Handler, r *http.Request, sess [8]byte, k string) bool {
+func (c *Cache) may(next http.Handler, r *http.Request, sess [sha256.Size]byte, k string) bool {
 	ak := string(sess[:]) + k
 	c.mu.Lock()
 	until, ok := c.allowed[ak]
@@ -191,7 +190,7 @@ func (c *Cache) lookup(k string) (*entry, bool) {
 }
 
 // used1 counts a use of k by sess.
-func (c *Cache) used1(k string, sess [8]byte) {
+func (c *Cache) used1(k string, sess [sha256.Size]byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if e, ok := c.entries[k]; ok {
@@ -199,11 +198,11 @@ func (c *Cache) used1(k string, sess [8]byte) {
 	}
 }
 
-func (e *entry) touch(sess [8]byte, now time.Time) {
+func (e *entry) touch(sess [sha256.Size]byte, now time.Time) {
 	e.hits = e.hits*decay(now.Sub(e.at)) + 1
 	e.at = now
 	if e.sessions == nil {
-		e.sessions = map[[8]byte]time.Time{}
+		e.sessions = map[[sha256.Size]byte]time.Time{}
 	}
 	for s, t := range e.sessions {
 		if now.Sub(t) > 24*time.Hour {
@@ -235,7 +234,7 @@ func (e *entry) worth(now time.Time) float64 {
 	return e.hits * decay(now.Sub(e.at)) * (float64(e.fetch.Milliseconds()) + 1) / float64(e.size+1)
 }
 
-func (c *Cache) store(k string, body []byte, ctype string, took time.Duration, sess [8]byte) {
+func (c *Cache) store(k string, body []byte, ctype string, took time.Duration, sess [sha256.Size]byte) {
 	file := c.path(k)
 	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
 		return
@@ -259,7 +258,7 @@ func (c *Cache) store(k string, body []byte, ctype string, took time.Duration, s
 		c.used -= old.size
 	}
 	e := &entry{file: file, size: int64(len(body)), ctype: ctype, fetch: took, at: now}
-	if sess != ([8]byte{}) {
+	if sess != ([sha256.Size]byte{}) {
 		e.touch(sess, now)
 	} else {
 		e.hits = 0.5 // fetched ahead: worth little until someone asks
@@ -412,7 +411,7 @@ func (c *Cache) FetchAhead(ctx context.Context, backend http.RoundTripper) {
 			body, err := io.ReadAll(io.LimitReader(resp.Body, maxCached+1))
 			resp.Body.Close()
 			if err == nil && resp.StatusCode == http.StatusOK && len(body) <= maxCached {
-				c.store(path+"?"+v, body, resp.Header.Get("Content-Type"), time.Since(start), [8]byte{})
+				c.store(path+"?"+v, body, resp.Header.Get("Content-Type"), time.Since(start), [sha256.Size]byte{})
 			}
 			select {
 			case <-ctx.Done():

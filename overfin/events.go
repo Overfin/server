@@ -54,6 +54,22 @@ func eventsHandler(db *store.Store) http.Handler {
 		if err != nil {
 			return
 		}
+		// Asked from past the last revocation this database ever gave: it
+		// was restored from a backup, and its numbers start again lower.
+		// The gateway is told to start again, and hears them all.
+		last, err := db.LastRevocation(r.Context())
+		if err != nil {
+			return
+		}
+		if since > last {
+			since = 0
+			if enc.Encode(map[string]string{"type": "reset"}) != nil {
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
 		for n := 0; ; n++ {
 			if n%10 == 0 {
 				var paths []string

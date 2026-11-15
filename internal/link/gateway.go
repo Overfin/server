@@ -256,12 +256,17 @@ func (g *Gateway) preamble(c io.Reader, pub ed25519.PublicKey) (string, bool) {
 			g.logger.Warn("link: a backend asked to pair with another code", "attempts", g.failures)
 			return "NO wrong-code", false
 		}
+		// The code is spent before anything else is kept: a crash or a
+		// failed write between the two leaves it spent (pair again with a
+		// new one), never usable twice. One that can't be marked used pairs
+		// nothing.
+		if err := writeFile(filepath.Join(g.dir, "used-code"), append(used, hex.EncodeToString(sum[:])+"\n"...)); err != nil {
+			g.logger.Error("link: the used code couldn't be saved, so nothing is paired", "err", err)
+			return "NO error", false
+		}
 		if err := writeFile(filepath.Join(g.dir, "backend.pub"), []byte(hex.EncodeToString(pub)+"\n")); err != nil {
 			g.logger.Error("link: the backend's key couldn't be saved", "err", err)
 			return "NO error", false
-		}
-		if err := writeFile(filepath.Join(g.dir, "used-code"), append(used, hex.EncodeToString(sum[:])+"\n"...)); err != nil {
-			g.logger.Error("link: the used code couldn't be saved", "err", err)
 		}
 		g.failures = 0
 		g.backend = pub

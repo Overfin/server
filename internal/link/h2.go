@@ -14,11 +14,19 @@ import (
 // without TLS of its own (the TLS under it is the link's, checked above),
 // "prior knowledge", no HTTP/1.
 
+// maxStreams is how many requests the link carries at once, every
+// visitor's together (the backend's limit, as HTTP/2's server): Go's own
+// default, stated so a new Go can't change it. A request past it waits for
+// a stream to end.
+const maxStreams = 250
+
 // h2Config is both sides' HTTP/2 settings: frames larger than the default
 // 16 KiB (fewer of them for video), the largest windows net/http allows,
-// and a ping when the connection goes quiet, so a dead link is noticed.
+// at most maxStreams requests at once, and a ping when the connection goes
+// quiet, so a dead link is noticed.
 func h2Config() *http.HTTP2Config {
 	return &http.HTTP2Config{
+		MaxConcurrentStreams:          maxStreams,
 		MaxReadFrameSize:              1 << 20,
 		MaxReceiveBufferPerConnection: 4<<20 - 1,
 		MaxReceiveBufferPerStream:     4<<20 - 1,

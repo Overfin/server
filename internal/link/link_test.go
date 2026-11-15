@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -833,5 +834,81 @@ func longTest(t *testing.T) {
 	t.Helper()
 	if os.Getenv("OVERFIN_LONG_TESTS") == "" {
 		t.Skip("a long test: OVERFIN_LONG_TESTS=1 go test ./internal/link")
+	}
+}
+
+// Eight backends pairing at once with the same code: one pairs, the
+// others are refused; checking and spending the code are one step.
+func TestCodeUsedOnceAtOnce(t *testing.T) {
+	code := ""
+	g, addr := gatewayOn(t, t.TempDir(), "1.0", &code)
+	first, err := NewBackend(t.TempDir(), "1.0", backendHandler, quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, err = first.Pair(addr, ""); err != nil {
+		t.Fatal(err)
+	}
+	p := pairing{Address: addr, ServerName: "127.0.0.1", Code: code}
+	// The one that pairs keeps its link (connect doesn't return); the
+	// others are refused, the code used.
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	refused := make(chan error, 8)
+	for range 8 {
+		b, err := NewBackend(t.TempDir(), "1.0", backendHandler, quiet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.save(p)
+		go func() {
+			if err := b.connect(ctx, p); err != nil && ctx.Err() == nil {
+				refused <- err
+			}
+		}()
+	}
+	for i := 0; i < 7; i++ {
+		select {
+		case err := <-refused:
+			if !strings.Contains(err.Error(), "already used") {
+				t.Errorf("refused: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%d refused of 7", i)
+		}
+	}
+	select {
+	case err := <-refused:
+		t.Fatalf("all refused: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if !g.Status().Paired {
+		t.Fatalf("none paired: %+v", g.Status())
+	}
+}
+
+// A code that can't be marked used pairs nothing: no backend key is kept,
+// so the code can't end up usable twice.
+func TestCodeSpentFirst(t *testing.T) {
+	gdir := t.TempDir()
+	// The used codes' file can't be written (its temporary name taken).
+	if err := os.Mkdir(filepath.Join(gdir, "used-code.new"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	code := ""
+	g, addr := gatewayOn(t, gdir, "1.0", &code)
+	b, err := NewBackend(t.TempDir(), "1.0", backendHandler, quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, err = b.Pair(addr, ""); err != nil {
+		t.Fatal(err)
+	}
+	p := pairing{Address: addr, ServerName: "127.0.0.1", Code: code}
+	if err := b.connect(context.Background(), p); err == nil {
+		t.Fatal("paired without the code marked used")
+	}
+	if _, err := os.Stat(filepath.Join(gdir, "backend.pub")); !os.IsNotExist(err) || g.Status().Paired {
+		t.Errorf("the backend's key was kept: %v %+v", err, g.Status())
 	}
 }

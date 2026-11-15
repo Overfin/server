@@ -116,4 +116,10 @@ func TestEventsRevokedAndPing(t *testing.T) {
 	if after, pinged := read(all[1]); len(after) != 0 || !pinged {
 		t.Errorf("after the last: %v, pinged %v", after, pinged)
 	}
+	// Asked from past the last number this database ever gave (it was
+	// restored from a backup, the gateway heard of later ones): it starts
+	// again, and every revocation comes.
+	if again, _ := read("1000"); len(again) != 2 {
+		t.Errorf("after a restore: %v", again)
+	}
 }

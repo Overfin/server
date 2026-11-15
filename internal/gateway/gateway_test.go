@@ -456,3 +456,53 @@ func TestHostileRequests(t *testing.T) {
 		}
 	}
 }
+
+// resetBackend answers the events stream as a backend whose database was
+// restored: a reset, then its revocations numbered from 1 again; it notes
+// where each stream was asked to start.
+type resetBackend struct {
+	fakeBackend
+	mu     sync.Mutex
+	asked  []string
+	revoke string
+}
+
+func (e *resetBackend) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Path != "/link/v1/events" {
+		return e.fakeBackend.RoundTrip(r)
+	}
+	e.mu.Lock()
+	e.asked = append(e.asked, r.URL.Query().Get("since"))
+	e.mu.Unlock()
+	sum := sha256.Sum256([]byte(e.revoke))
+	line := `{"type":"reset"}` + "\n" + `{"type":"revoked","seq":3,"hash":"` + hex.EncodeToString(sum[:]) + `","expires":` + strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10) + "}\n"
+	return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(line)), Request: r}, nil
+}
+
+// After the backend's database was restored, its revocations count from
+// lower again: a reset makes the gateway count from its numbers, so a
+// revocation numbered below the last it heard of isn't missed, and the
+// next stream starts from it.
+func TestRevocationsReset(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	b := &resetBackend{fakeBackend: fakeBackend{connected: true, pub: pub}, revoke: "ended after the restore"}
+	rv := &Revocations{seq: 50}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go rv.Follow(ctx, b, quiet)
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		b.mu.Lock()
+		n := len(b.asked)
+		b.mu.Unlock()
+		if n >= 2 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !rv.Revoked("ended after the restore") || len(b.asked) < 2 || b.asked[0] != "50" || b.asked[1] != "3" {
+		t.Errorf("revoked %v, asked from %v", rv.Revoked("ended after the restore"), b.asked)
+	}
+}

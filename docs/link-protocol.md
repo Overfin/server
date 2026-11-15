@@ -135,8 +135,14 @@ Both keys are bound: a proof made for another pair of keys is worthless.
    every code used, one a line, in `used-code`;
 4. compares the proof in constant time: `NO wrong-code` (counted in the
    log, no lockout);
-5. keeps the backend's key (`backend.pub`) and the code's hash, answers
-   with its own proof.
+5. spends the code first: adds its hash to `used-code`, and if that can't
+   be written, pairs nothing (`NO error`). A crash after it leaves the code
+   spent and the old pairing in place; pair again with a new code. Never
+   the reverse: a code is never usable twice;
+6. keeps the backend's key (`backend.pub`) and answers with its own proof.
+
+Checking a code, spending it and keeping the key are one step, under one
+lock: of many backends pairing at once with the same code, one pairs.
 
 **The backend** checks the gateway's proof in constant time, then pins the
 gateway's key and forgets the code.
@@ -154,7 +160,10 @@ written whole (a new file renamed into place), mode 0600.
 - Settings, both sides: frames up to 1 MiB; flow-control windows of
   4 MiB − 1 per stream and per connection; a ping when the connection is
   quiet for 15 s, and the connection dropped if a ping goes unanswered for
-  10 s. Concurrent streams: Go's default.
+  10 s. At most 250 requests at once on the link, every visitor's
+  together (the backend's limit, as the HTTP/2 server; Go's own default,
+  stated so a new Go can't change it): one past it waits for a stream to
+  end.
 - **Each visitor request is its own stream**, with its own window: a slow
   or stalled visitor fills only their stream's window.
 - **Cancellation:** the gateway forwards with the visitor's request context.
@@ -209,6 +218,7 @@ The backend tells the gateway what it must know as it happens: one JSON
 object a line (`application/x-ndjson`), on a stream the gateway keeps open.
 
 ```
+{"type":"reset"}
 {"type":"revoked","seq":12,"hash":"<SHA-256 of the login cookie, hex>","expires":1794000000}
 {"type":"new","images":["/api/v1/images/tmdbart_poster_…", …]}
 {"type":"access"}
@@ -223,6 +233,12 @@ object a line (`application/x-ndjson`), on a stream the gateway keeps open.
 - **Resuming:** the gateway asks for those after the highest `seq` it saw;
   after a break, it reconnects within 2 s from there, so none is missed.
   A restarted gateway starts from 0 and gets every revocation still live.
+- **`reset`**: the gateway asked from past the last number the backend's
+  database ever gave (it was restored from a backup, its numbers start
+  again lower). The backend sends `reset` first, then every revocation
+  still live from its first; the gateway counts from those numbers. Without
+  it, revocations made after the restore would carry numbers the gateway
+  thinks it has heard of, and wait for its next restart.
 - **`new`**: new titles' artwork, for the cache to fetch ahead. Best effort:
   those during a break aren't sent again.
 - **`access`**: what a profile may see changed (its libraries, tags,
@@ -265,7 +281,7 @@ there** (rule 125): this check only keeps noise off the link.
 - **Access, before every hit** (rule 128): the gateway asks the backend the
   same request with `Overfin-Check: 1`; the backend runs its usual check
   and answers without the bytes (204 for 200). A yes is kept 5 minutes, in
-  memory, for that session (an 8-byte hash of the login cookie) and that
+  memory, for that session (the SHA-256 of the login cookie) and that
   image. A no, of any status: 404. Every answer kept is forgotten when what
   a profile may see changes, and when the events stream starts again
   (section 8); an answer to a check that began before that isn't kept.
@@ -343,6 +359,8 @@ Each line is a property a test can check. **Tested** names the test today;
 | PROXY v1 `UNKNOWN`, v2 `LOCAL` and other families keep the proxy's address | `TestProxyHeadersWithoutVisitor` |
 | A pairing proof binds both keys; a wrong code is refused | `TestPairAndReconnect`, `TestRefusals` |
 | A code pairs once, every code used remembered | `TestCodeUsedOnce` |
+| Eight backends pairing at once with one code: one pairs | `TestCodeUsedOnceAtOnce` |
+| A code that can't be marked used pairs nothing, no key kept | `TestCodeSpentFirst` |
 | A gateway whose key changed is refused | `TestGatewayKeyChanged` |
 | Another version is refused first, and visitors are told it's updating while it tries | `TestRefusals` |
 | A malformed or over-long preamble is refused | `TestPreambleRefused` |
@@ -361,7 +379,8 @@ Each line is a property a test can check. **Tested** names the test today;
 | Egress never dials loopback, link-local, unspecified or multicast addresses | `TestUnreached` |
 | Reconnecting waits vary by a fifth | `TestJittered` |
 | Egress refused for another version, an unpaired key, an unreachable address; the minute expires | `TestEgressRefusals` |
-| Events: revocations numbered, resumed after a number; a ping when quiet | `TestEventsRevokedAndPing` |
+| Events: revocations numbered, resumed after a number; a ping when quiet; asked from past the last number ever given, all again | `TestEventsRevokedAndPing` |
+| After a reset, the gateway counts from the backend's numbers: none missed | `TestRevocationsReset` |
 | The down pages name nothing behind the gateway | `TestDownPages` |
 | Rate limits, 429 with `Retry-After` | `TestLimits`, `TestLimitAnswer` |
 
@@ -377,6 +396,24 @@ Found while writing this, or raised by review (2026-11-13).
 5. Egress refuses loopback, link-local, unspecified and multicast addresses.
 6. "Being updated" lasts only while a backend of another version tries.
 7. Reconnecting has jitter.
+
+**Raised by a review of this document, fixed 2026-11-15:**
+1. A code is spent before the backend's key is kept, and a code that can't
+   be marked used pairs nothing (section 4): a crash or a failed write no
+   longer leaves it usable twice. Many pairings at once with one code: one
+   pairs (it was already one step under a lock; now tested).
+2. A backend database restored from a backup no longer makes the gateway
+   miss revocations: the `reset` event (section 8).
+3. The link's limit of concurrent requests is stated (section 5), not left
+   to Go's default.
+4. The image cache keys sessions by the whole SHA-256 of the login cookie,
+   not 8 bytes of it (section 10).
+
+Checked, and already so: egress checks every address a name resolves to
+(IPv4-mapped ones unwrapped) and dials the one checked (section 11);
+files are written whole, renamed into place (section 4). Kept by choice:
+private networks reachable by egress (paired servers on a LAN), versions
+matched exactly, the 5-minute image answer cut short by `access`.
 
 **Failure tests** (a review's list, 2026-11-13):
 

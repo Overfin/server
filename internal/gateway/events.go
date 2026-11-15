@@ -98,6 +98,15 @@ func (rv *Revocations) Follow(ctx context.Context, backend http.RoundTripper, lo
 						rv.Access()
 						continue
 					}
+					// The backend's numbers started again (its database
+					// restored): count from its first, the revocations
+					// heard kept.
+					if e.Type == "reset" {
+						rv.mu.Lock()
+						rv.seq = 0
+						rv.mu.Unlock()
+						continue
+					}
 					if e.Type != "revoked" {
 						continue
 					}

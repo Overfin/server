@@ -44,3 +44,12 @@ func (s *Store) AccessChange(ctx context.Context) (int64, error) {
 	err := s.read.QueryRowContext(ctx, `SELECT coalesce(max(seq), 0) FROM access_changes`).Scan(&seq)
 	return seq, err
 }
+
+// LastRevocation is the number the latest revocation was given, ever (its
+// row gone or not); 0 before any. A database restored from a backup gives
+// a lower one than an app may have heard of.
+func (s *Store) LastRevocation(ctx context.Context) (int64, error) {
+	var seq int64
+	err := s.read.QueryRowContext(ctx, `SELECT coalesce((SELECT seq FROM sqlite_sequence WHERE name = 'revoked_logins'), 0)`).Scan(&seq)
+	return seq, err
+}
