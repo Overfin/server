@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -357,4 +358,76 @@ func family(rating string) []string {
 		return []string{"Family"}
 	}
 	return nil
+}
+
+// "Not interested": the film leaves the profile's recommendations, the
+// title page says so, and taking it back brings it back; only a film or a
+// series; clearing the history forgets it.
+func TestNotInterested(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{store: &st})
+	ctx := context.Background()
+	now := time.Now()
+	lib := fmt.Sprintf("%032x", 0xf1)
+	var items []store.CatalogItem
+	for i, name := range []string{"Heat", "Collateral"} {
+		items = append(items, store.CatalogItem{ID: fmt.Sprintf("%032x", i+1), Kind: "movie", Name: name, SortName: name, TMDB: strconv.Itoa(i + 1), LibraryID: lib})
+	}
+	st.PutCatalog(ctx, items, 1)
+	st.RefreshTitleKeys(ctx)
+	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
+	for i, it := range items {
+		st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: strconv.Itoa(i + 1), Name: it.Name, Genres: []store.TitleGenre{{ID: 80, Name: "g"}}}, []byte(`{}`), now)
+		st.SetTitleRatings(ctx, store.RatedTitle{Kind: "movie", TMDB: strconv.Itoa(i + 1)}, map[string][]string{"US": {"R"}}, "2000-01-01", "2000-01-01", now)
+	}
+	names := func() []string {
+		t.Helper()
+		var page struct{ Items []struct{ Name string } }
+		if code := get(t, srv, "/api/v1/titles/recommended", &page); code != 200 {
+			t.Fatalf("recommended: %d", code)
+		}
+		var out []string
+		for _, it := range page.Items {
+			out = append(out, it.Name)
+		}
+		return out
+	}
+	notInterested := func() bool {
+		t.Helper()
+		var title struct{ NotInterested bool }
+		if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_2", &title); code != 200 {
+			t.Fatalf("title: %d", code)
+		}
+		return title.NotInterested
+	}
+	if got := names(); !slices.Contains(got, "Collateral") || notInterested() {
+		t.Fatalf("before: %v", got)
+	}
+	if code, _ := put(t, srv, "PUT", "/api/v1/titles/title_movie_tmdb_2/not-interested", ""); code != 204 {
+		t.Fatalf("not interested: %d", code)
+	}
+	if got := names(); slices.Contains(got, "Collateral") || !slices.Contains(got, "Heat") || !notInterested() {
+		t.Errorf("after: %v", got)
+	}
+	// Still everywhere else.
+	var page struct{ Items []struct{ Name string } }
+	get(t, srv, "/api/v1/titles?kind=movie", &page)
+	if len(page.Items) != 2 {
+		t.Errorf("the library: %+v", page.Items)
+	}
+	if code, _ := put(t, srv, "DELETE", "/api/v1/titles/title_movie_tmdb_2/not-interested", ""); code != 204 {
+		t.Fatalf("taken back: %d", code)
+	}
+	if got := names(); !slices.Contains(got, "Collateral") || notInterested() {
+		t.Errorf("taken back: %v", got)
+	}
+	// Clearing the history forgets it.
+	owner := ownerID(t, srv)
+	st.SetNotInterested(ctx, owner, "movie/tmdb/2", true, now)
+	if err := st.ClearPersonal(ctx, owner); err != nil {
+		t.Fatal(err)
+	}
+	if notInterested() {
+		t.Error("kept after the history was cleared")
+	}
 }

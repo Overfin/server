@@ -71,6 +71,9 @@ type titleDetail struct {
 	// Collection is the collection a film belongs to, when the profile
 	// sees it (collections.go).
 	Collection *collectionRef `json:"collection,omitempty"`
+	// NotInterested says the profile said it isn't interested in this film
+	// or series: its recommendations leave it out.
+	NotInterested bool `json:"notInterested,omitempty"`
 	// Rank is a film's or a series' place on the server by its value,
 	// among the titles of its kind the profile may see (1 the most
 	// valued); absent when it has none.
@@ -541,6 +544,12 @@ func (l Library) title(w http.ResponseWriter, r *http.Request) {
 		l.storeError(w, err)
 		return
 	}
+	if ref.Kind == "movie" || ref.Kind == "series" {
+		if out.NotInterested, err = st.IsNotInterested(ctx, p.ID, key); err != nil {
+			l.storeError(w, err)
+			return
+		}
+	}
 	for _, c := range t.Details.Cast {
 		tc := titleCast{Name: c.Name, Character: c.Character}
 		if c.TMDB != "" {
@@ -817,6 +826,39 @@ func (l Library) forgetTitleProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeOK(w, state)
+}
+
+func (l Library) markNotInterested(w http.ResponseWriter, r *http.Request) {
+	l.notInterested(w, r, true)
+}
+func (l Library) unmarkNotInterested(w http.ResponseWriter, r *http.Request) {
+	l.notInterested(w, r, false)
+}
+
+// notInterested records that the profile isn't interested in a film or a
+// series, or takes it back: its recommendations leave the title out, and
+// nothing else changes (not its value, nor anything others see).
+func (l Library) notInterested(w http.ResponseWriter, r *http.Request, on bool) {
+	if !onlyParams(w, r) {
+		return
+	}
+	p := l.active(w, r)
+	if p == nil {
+		return
+	}
+	t, ok := l.visibleTitle(w, r, p)
+	if !ok {
+		return
+	}
+	if t.Ref.Kind != "movie" && t.Ref.Kind != "series" {
+		problem.Send(w, problem.InvalidRequest, "only a film or a series")
+		return
+	}
+	if err := l.Provisioner.Store.SetNotInterested(r.Context(), p.ID, t.Ref.Key(), on, time.Now()); err != nil {
+		l.storeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func first(s []string) string {

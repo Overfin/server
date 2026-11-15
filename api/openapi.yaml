@@ -2763,6 +2763,44 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /titles/{titleId}/not-interested:
+    parameters:
+      - $ref: "#/components/parameters/TitleId"
+    put:
+      operationId: markNotInterested
+      summary: Say the profile isn't interested in a film or a series
+      description: Its recommendations (`/titles/recommended`) leave the
+        title out from then on. Nothing else changes, not even what others
+        see. Since 0.9.
+      tags: [titles]
+      responses:
+        "204":
+          description: Noted.
+        "400":
+          description: Not a film or a series (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: unmarkNotInterested
+      summary: Take back "not interested"
+      description: The title may be recommended again. Since 0.9.
+      tags: [titles]
+      responses:
+        "204":
+          description: Taken back.
+        "400":
+          description: Not a film or a series (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /titles/{titleId}/up-next:
     parameters:
       - $ref: "#/components/parameters/TitleId"
@@ -5012,6 +5050,12 @@ components:
         - $ref: "#/components/schemas/TitleSummary"
         - type: object
           properties:
+            notInterested:
+              type: boolean
+              description: >-
+                The profile said it isn't interested in this film or series
+                (`/titles/{titleId}/not-interested`); absent otherwise. Since
+                0.9.
             rank:
               type: integer
               minimum: 1

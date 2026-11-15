@@ -95,9 +95,14 @@ func (l Library) recommend(ctx context.Context, p *store.Profile, recent bool, n
 	if err != nil {
 		return nil, err
 	}
+	// What it said it's not interested in never comes back.
+	unwanted, err := st.NotInterested(ctx, p.ID)
+	if err != nil {
+		return nil, err
+	}
 	keys := make([]string, 0, len(facts))
 	for k := range facts {
-		if !seen[k] {
+		if !seen[k] && !unwanted[k] {
 			keys = append(keys, k)
 		}
 	}

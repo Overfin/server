@@ -265,6 +265,8 @@ export interface TitleSummary {
 
 /** A title's page: a series with its seasons, a season with its episodes. */
 export interface Title extends TitleSummary {
+  /** The profile said it isn't interested in this film or series (since 0.9). */
+  notInterested?: boolean;
   /** A film's or a series' place on the server by its value, among the titles of its kind the profile may see, 1 the most valued (since 0.9). */
   rank?: number;
   /** The collection a film belongs to, when the profile sees it (since 0.7). */
@@ -573,6 +575,8 @@ export class Overfin {
 
   setPlayed(id: string, played?: boolean): Promise<UserState>;
   setFavorite(id: string, favorite?: boolean): Promise<UserState>;
+  /** Says the profile isn't interested in a film or a series (its recommendations leave it out), or takes that back (since 0.9). */
+  setNotInterested(id: string, notInterested?: boolean): Promise<null>;
   forgetProgress(id: string): Promise<UserState>;
   /** What playing a series plays: the episode in progress (and where), the one after the last finished, or the first. */
   upNext(seriesId: string): Promise<{ title: TitleSummary; positionMs: number }>;

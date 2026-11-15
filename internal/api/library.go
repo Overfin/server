@@ -84,12 +84,14 @@ func (l Library) Register(r *plugin.Registrar) error {
 		"GET /api/v1/collections/{id}": l.collection,
 		"POST /api/v1/search":          l.search,
 		// What the profile does with titles (rule 58).
-		"PUT /api/v1/titles/{id}/played":      l.markTitlePlayed,
-		"DELETE /api/v1/titles/{id}/played":   l.unmarkTitlePlayed,
-		"PUT /api/v1/titles/{id}/favorite":    l.markTitleFavorite,
-		"DELETE /api/v1/titles/{id}/favorite": l.unmarkTitleFavorite,
-		"DELETE /api/v1/titles/{id}/progress": l.forgetTitleProgress,
-		"DELETE /api/v1/me/history":           l.clearHistory,
+		"PUT /api/v1/titles/{id}/played":            l.markTitlePlayed,
+		"DELETE /api/v1/titles/{id}/played":         l.unmarkTitlePlayed,
+		"PUT /api/v1/titles/{id}/favorite":          l.markTitleFavorite,
+		"DELETE /api/v1/titles/{id}/favorite":       l.unmarkTitleFavorite,
+		"PUT /api/v1/titles/{id}/not-interested":    l.markNotInterested,
+		"DELETE /api/v1/titles/{id}/not-interested": l.unmarkNotInterested,
+		"DELETE /api/v1/titles/{id}/progress":       l.forgetTitleProgress,
+		"DELETE /api/v1/me/history":                 l.clearHistory,
 	} {
 		if err := r.HandleFunc(pattern, h); err != nil {
 			return err

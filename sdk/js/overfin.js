@@ -250,6 +250,10 @@ export class Overfin {
   setPlayed(id, played = true) { return this.request(played ? 'PUT' : 'DELETE', `/titles/${enc(id)}/played`); }
   /** Marks a title a favorite, or not. Returns its new state. */
   setFavorite(id, favorite = true) { return this.request(favorite ? 'PUT' : 'DELETE', `/titles/${enc(id)}/favorite`); }
+
+  /** Says the profile isn't interested in a film or a series (its
+   * recommendations leave it out), or takes that back (since 0.9). */
+  setNotInterested(id, notInterested = true) { return this.request(notInterested ? 'PUT' : 'DELETE', `/titles/${enc(id)}/not-interested`); }
   /** Takes a title out of Continue Watching; whether it was watched stays. Returns its new state. */
   forgetProgress(id) { return this.request('DELETE', `/titles/${enc(id)}/progress`); }
   /** What playing a series plays: { title (an episode), positionMs }. */

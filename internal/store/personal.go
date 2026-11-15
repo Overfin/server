@@ -465,6 +465,9 @@ func (s *Store) ClearPersonal(ctx context.Context, profileID string) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM continue_dismissed WHERE profile_id = ?`, profileID); err != nil {
 		return err
 	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM not_interested WHERE profile_id = ?`, profileID); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM profile_titles WHERE profile_id = ?`, profileID)
 	return err
 }

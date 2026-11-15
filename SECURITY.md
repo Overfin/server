@@ -330,7 +330,8 @@ anyone. Paired servers are not trusted at all (rule 94).
       short-lived playback state, encrypted upstream tokens and keys;
     - per profile: what it did with each title (where it stopped, whether
       and how often and when it watched it, its favorites, its track
-      choices, series it took out of Continue Watching), its watchlist, its
+      choices, series it took out of Continue Watching, films and series
+      it said it's not interested in), its watchlist, its
       wishes in its order and which came, PIN failure times;
     - per account: what it said it likes (when the operator asks), and,
       with Overfin's own sign-in, the email, a hash of the password
