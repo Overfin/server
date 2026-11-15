@@ -257,7 +257,7 @@ export interface TitleSummary {
   episodeCount?: { inLibrary: number; aired: number };
   images?: Images;
   userState?: UserState;
-  /** In a collection's films: one no library has that isn't out yet. It has no page and can't be wished for until it's out (since 0.7). */
+  /** In a collection's films and the upcoming discovery list: one no library has that isn't out yet. It has no page and can't be wished for until it's out (since 0.7; in discovery since 0.10). */
   upcoming?: boolean;
 }
 

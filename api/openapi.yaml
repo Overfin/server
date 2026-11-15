@@ -3677,7 +3677,9 @@ paths:
         library" (`library`) or "trending titles we don't have" (`missing`).
         Titles, as everywhere, with their availability and what the
         profile did with them. Kids profiles see those rated within their
-        limits. A filtered page may hold fewer titles than asked for;
+        limits. The `upcoming` list keeps the titles not out yet as the
+        server shows titles, marked `upcoming`; the other lists leave them
+        out. A filtered page may hold fewer titles than asked for;
         `nextCursor` says whether there are more.
       tags: [catalog]
       parameters:
@@ -4948,7 +4950,8 @@ components:
         upcoming:
           type: boolean
           description: >-
-            Only in a collection's films (since 0.7). A film no library has
+            Only in a collection's films (since 0.7) and the `upcoming`
+            discovery list (since 0.10). A film or a series no library has
             that isn't out yet as the server shows titles, listed all the
             same; it has no page (`/titles/{titleId}` answers 404) and can't
             be wished for until it's out.

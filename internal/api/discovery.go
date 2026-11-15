@@ -97,7 +97,9 @@ func (d Discovery) discover(w http.ResponseWriter, r *http.Request) {
 	for _, t := range titles {
 		keys = append(keys, t.Kind+"/tmdb/"+t.TMDB)
 	}
-	all, err := d.Library.titleSummaries(r.Context(), p, keys)
+	// The upcoming list keeps what isn't out yet as the panel shows titles,
+	// marked "coming soon" like a collection's films; other lists don't.
+	all, err := d.Library.summaries(r.Context(), p, keys, list == "upcoming")
 	if err != nil {
 		d.Library.storeError(w, err)
 		return

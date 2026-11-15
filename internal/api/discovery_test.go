@@ -32,6 +32,10 @@ func fakeSeerr(t *testing.T) *seerr.Client {
 				"releaseDate": "1995-12-15", "overview": "A film.", "posterPath": poster}
 		}
 		switch r.URL.Path {
+		case "/api/v1/discover/movies/upcoming":
+			json.NewEncoder(w).Encode(map[string]any{"page": 1, "totalPages": 1, "results": []any{
+				film(777, "/poster777abcdef.jpg"), film(778, "/poster778abcdef.jpg"),
+			}})
 		case "/api/v1/discover/trending":
 			json.NewEncoder(w).Encode(map[string]any{"page": 1, "totalPages": 1, "results": []any{
 				film(949, "/poster949abcdef.jpg"), film(100, "../../etc/passwd"),
@@ -199,6 +203,42 @@ func TestDiscover(t *testing.T) {
 	}
 	if code, body := post(t, srv, "/api/v1/playback", fmt.Sprintf(`{"itemId":"item_%032x"}`, 4)); code != 404 {
 		t.Errorf("kids playback of item 4: %d %s", code, body)
+	}
+}
+
+// The upcoming list keeps the films not out yet when the server shows only
+// released titles, marked upcoming; trending doesn't, and a film whose
+// release isn't known yet stays out.
+func TestDiscoverUpcoming(t *testing.T) {
+	var st *store.Store
+	s := fakeSeerr(t)
+	srv, _ := newServerWith(t, options{seerr: s, store: &st})
+	ctx := context.Background()
+	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
+	st.SetTitlesShown(ctx, "released")
+	lists := catalog.NewLists(func() tmdb.Source { return s }, st, slog.New(slog.NewTextHandler(io.Discard, nil)), time.Hour, 1)
+	if err := lists.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	st.SetTitleRatings(ctx, store.RatedTitle{Kind: "movie", TMDB: "777"}, map[string][]string{"US": {"G"}}, "2099-01-01", "", now)
+	st.SetTitleRatings(ctx, store.RatedTitle{Kind: "movie", TMDB: "100"}, map[string][]string{"US": {"G"}}, "2099-01-01", "", now)
+	var out struct {
+		Items []struct {
+			ID       string
+			Upcoming bool
+		}
+	}
+	if code := get(t, srv, "/api/v1/discover?list=upcoming&mediaKind=movie", &out); code != 200 ||
+		len(out.Items) != 1 || out.Items[0].ID != "title_movie_tmdb_777" || !out.Items[0].Upcoming {
+		t.Errorf("upcoming: %d %+v", code, out.Items)
+	}
+	out.Items = nil
+	get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie", &out)
+	for _, it := range out.Items {
+		if it.ID == "title_movie_tmdb_100" || it.Upcoming {
+			t.Errorf("trending keeps what isn't out: %+v", out.Items)
+		}
 	}
 }
 
