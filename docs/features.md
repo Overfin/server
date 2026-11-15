@@ -143,6 +143,7 @@ watchlist are always on; the rest is switched on in the control panel.
 | Catalog | The library's index, matched to TMDB by Overfin | Always on |
 | Discovery | Trending, popular and upcoming titles, from TMDB | With a TMDB token or Seerr; kids profiles see what their age allows |
 | Wishlists | Each profile's films and seasons to get, taken in turns account by account | When the operator chooses where wishes go (Overtide or Seerr) |
+| Leaving soon | A title someone keeps for later or is partway through waits a week before an app (Overtide) removes it; those people see when it leaves, and a Last chance row on Home | With an app that removes titles and asks first |
 
 Everything people see about a title, its text and its images, comes from
 TMDB, in each account's language. For that, Overfin needs **your own TMDB
