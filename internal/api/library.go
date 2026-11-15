@@ -55,6 +55,9 @@ type Library struct {
 	// Lookups limits what each account has TMDB asked about titles not
 	// kept yet (describe); nil: no limit.
 	Lookups *AccountLimiter
+	// Interests, when set, lists what profiles keep for later (the
+	// watchlist), by title key: who a title leaving soon is shown to.
+	Interests func(ctx context.Context) ([]store.ProfileTitle, error)
 }
 
 func (Library) Name() string { return "library" }
@@ -70,6 +73,7 @@ func (l Library) Register(r *plugin.Registrar) error {
 		"GET /api/v1/titles":              l.titles,
 		"GET /api/v1/titles/latest":       l.latestTitles,
 		"GET /api/v1/titles/continue":     l.continueTitles,
+		"GET /api/v1/titles/leaving":      l.leavingTitles,
 		"GET /api/v1/titles/{id}":         l.title,
 		"GET /api/v1/titles/{id}/similar": l.similar,
 		"GET /api/v1/titles/recommended":  l.recommended,

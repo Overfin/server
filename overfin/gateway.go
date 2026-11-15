@@ -223,8 +223,11 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 		// end by themselves.
 		checker.UnlockAfter = 15 * time.Minute
 	}
+	// The modules switched on, filled in below; watchlists come from them.
+	on := map[string]bool{}
 	lib := api.Library{Sessions: sessions, Provisioner: prov, Jellyfin: sh.jf, Images: sh.images, CursorKey: k.Cursor,
-		Folders: sh.folders, Service: sh.service, Titles: sh.titles, Texts: sh.texts, Searches: sh.searches, Lookups: sh.lookups, Logger: logger}
+		Folders: sh.folders, Service: sh.service, Titles: sh.titles, Texts: sh.texts, Searches: sh.searches, Lookups: sh.lookups, Logger: logger,
+		Interests: func(ctx context.Context) ([]store.ProfileTitle, error) { return interests(ctx, on, sh) }}
 	// The gateway's prefetch of new titles' artwork (backend only).
 	prefetch := http.HandlerFunc(lib.PrefetchArtwork)
 	prefetchArtwork.Store(&prefetch)
@@ -243,7 +246,7 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	pb.Federation = func() *federation.Service { return fedNow }
 	// The modules the operator switched on, with their control panel routes
 	// and tabs.
-	b := &built{admin: http.NewServeMux(), playback: pb, on: map[string]bool{}}
+	b := &built{admin: http.NewServeMux(), playback: pb, on: on}
 	var mounts []api.Mount
 	for _, m := range modules {
 		info := m.Info()
@@ -566,14 +569,18 @@ func (g *gateway) AdminRoutes() http.Handler { return g.current.Load().admin }
 // Interests lists what profiles keep for later in the modules switched
 // on (the watchlist), by title key, for the title valuation.
 func (g *gateway) Interests(ctx context.Context) ([]store.ProfileTitle, error) {
-	on := g.current.Load().on
+	return interests(ctx, g.current.Load().on, g.sh)
+}
+
+// interests is gateway.Interests for the modules on.
+func interests(ctx context.Context, on map[string]bool, sh *shared) ([]store.ProfileTitle, error) {
 	var out []store.ProfileTitle
 	for _, m := range modules {
 		mi, ok := m.(feature.Interested)
 		if !ok || !on[m.Info().Name] {
 			continue
 		}
-		list, err := mi.Interests(ctx, g.sh.moduleDBs[m.Info().Name])
+		list, err := mi.Interests(ctx, sh.moduleDBs[m.Info().Name])
 		if err != nil {
 			return nil, err
 		}

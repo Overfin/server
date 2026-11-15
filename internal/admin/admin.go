@@ -370,6 +370,7 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("GET /apps/v1/titles", p.appTitles)
 	mux.HandleFunc("GET /apps/v1/history", p.appHistory)
 	mux.HandleFunc("GET /apps/v1/measures", p.appMeasures)
+	mux.HandleFunc("POST /apps/v1/departures", p.appDepartures)
 	mux.HandleFunc("GET /apps/v1/server", p.appServer)
 	mux.HandleFunc("GET /apps/v1/categories", p.appCategories)
 	mux.HandleFunc("GET /apps/v1/episode-orders", p.appEpisodeOrders)

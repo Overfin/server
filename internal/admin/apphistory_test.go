@@ -121,3 +121,43 @@ func TestMeasures(t *testing.T) {
 		t.Errorf("panel signed out: %d", rec.Code)
 	}
 }
+
+// An app asks which of the titles it plans to remove should wait: one
+// someone keeps for later is held a week, the others may go; the answer
+// never says who. A history key only; a malformed title is refused.
+func TestAppDepartures(t *testing.T) {
+	p, b, _, _ := signedInPanel(t)
+	p.Interests = func(context.Context) ([]store.ProfileTitle, error) {
+		return []store.ProfileTitle{{ProfileID: "p1", Title: "movie/tmdb/1"}, {ProfileID: "p1", Title: "series/tmdb/2"}}, nil
+	}
+	key := func(scope string) string {
+		t.Helper()
+		rec := b.do("POST", "/admin/api/apps", `{"name":"`+scope+`","scopes":["`+scope+`"]}`, nil)
+		var made struct{ Key string }
+		if json.Unmarshal(rec.Body.Bytes(), &made); rec.Code != 201 {
+			t.Fatalf("create: %d %s", rec.Code, rec.Body)
+		}
+		return made.Key
+	}
+	app := &browser{h: b.h, cookies: map[string]string{}}
+	ask := func(k, body string, want int) []departureJSON {
+		t.Helper()
+		rec := app.do("POST", "/apps/v1/departures", body, map[string]string{"Authorization": "Bearer " + k, "Content-Type": "application/json"})
+		var out struct{ Titles []departureJSON }
+		if json.Unmarshal(rec.Body.Bytes(), &out); rec.Code != want {
+			t.Fatalf("%s: %d %s", body, rec.Code, rec.Body)
+		}
+		return out.Titles
+	}
+	history := key("history")
+	got := ask(history, `{"titles":[{"kind":"movie","tmdbId":"1"},{"kind":"movie","tmdbId":"3"},{"kind":"season","tmdbId":"2","season":1}]}`, 200)
+	if len(got) != 3 || got[0].HoldUntil == "" || got[1].HoldUntil != "" || got[2].HoldUntil == "" {
+		t.Fatalf("answer: %+v", got)
+	}
+	if until, _ := time.Parse(time.RFC3339, got[0].HoldUntil); until.Before(time.Now().Add(store.DepartureNotice - time.Minute)) {
+		t.Errorf("held until %s", got[0].HoldUntil)
+	}
+	ask(history, `{"titles":[{"kind":"season","tmdbId":"2"}]}`, 400)
+	ask(history, `{"titles":[{"kind":"movie","tmdbId":"x"}]}`, 400)
+	ask(key("score"), `{"titles":[]}`, 401)
+}

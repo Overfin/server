@@ -343,6 +343,7 @@ func (l Library) summaries(ctx context.Context, p *store.Profile, keys []string,
 		return nil, err
 	}
 	out := []library.TitleSummary{}
+	var outKeys []string
 	for i, t := range list {
 		if !visible[i] {
 			continue
@@ -353,7 +354,9 @@ func (l Library) summaries(ctx context.Context, p *store.Profile, keys []string,
 		}
 		s.Upcoming = soon[i]
 		out = append(out, s)
+		outKeys = append(outKeys, t.Ref.Key())
 	}
+	l.withLeaving(ctx, p, out, outKeys)
 	return out, nil
 }
 

@@ -259,6 +259,8 @@ export interface TitleSummary {
   userState?: UserState;
   /** In a collection's films and the upcoming discovery list: one no library has that isn't out yet. It has no page and can't be wished for until it's out (since 0.7; in discovery since 0.10). */
   upcoming?: boolean;
+  /** When it leaves the server (ISO date), held for a last watch: only for a profile that keeps it for later or is partway through it (since 0.10). */
+  leavesAt?: string;
 }
 
 /** A title's page: a series with its seasons, a season with its episodes. */
@@ -539,6 +541,8 @@ export class Overfin {
   pages(query?: TitleQuery): AsyncGenerator<TitlePage>;
   /** Started titles and each followed series' next episode, a library's or not. */
   continueWatching(limit?: number): Promise<TitleSummary[]>;
+  /** What leaves the server soon for the profile, the first to leave first (since 0.10). */
+  leaving(): Promise<TitleSummary[]>;
   /** A library's genres (every library's without one), or a category's, for filters. */
   genres(libraryId?: string, categoryId?: string): Promise<Genre[]>;
   /** The operator's categories (since 0.6); libraries: whether the menu shows the libraries. */

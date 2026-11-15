@@ -469,7 +469,11 @@ anyone. Paired servers are not trusted at all (rule 94).
     - totals for the whole server over the last 90 days (measures): films
       and seasons that arrived, were started, finished, left, wished for
       again afterwards, are in the libraries and were watched; counts only,
-      for a key with what came and went (`history`).
+      for a key with what came and went (`history`);
+    - with the same key, the titles an app plans to remove: Overfin answers
+      until when each is held for a last watch (someone keeps it for later
+      or is partway through it), never who nor how many; only those people
+      see when it leaves.
 
     - Exception: the fetcher's key (`wishes`, for Overtide) reads the wished
       titles in turn order, never who wished nor how many.

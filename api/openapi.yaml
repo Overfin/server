@@ -2551,6 +2551,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/TitlePage"
 
+  /titles/leaving:
+    get:
+      operationId: listLeavingTitles
+      summary: What leaves the server soon, for the profile
+      description: >-
+        Titles held for a last watch before they're removed, among those the
+        profile keeps for later or is partway through, the first to leave
+        first, each with `leavesAt`. Empty most of the time. Since 0.10.
+      tags: [titles]
+      responses:
+        "200":
+          description: The first to leave first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TitlePage"
+
   /titles/recommended:
     get:
       operationId: listRecommended
@@ -4955,6 +4972,13 @@ components:
             that isn't out yet as the server shows titles, listed all the
             same; it has no page (`/titles/{titleId}` answers 404) and can't
             be wished for until it's out.
+        leavesAt:
+          type: string
+          format: date-time
+          description: >-
+            When it leaves the server, held for a last watch: given only to
+            a profile that keeps it for later or is partway through it. A
+            series carries its first season to leave. Since 0.10.
 
     Collection:
       type: object

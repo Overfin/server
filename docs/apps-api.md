@@ -101,6 +101,13 @@ it as a favorite. Every title someone watched is listed,
 and `changedAt` is only the day (midnight UTC). With `since`, only the
 titles changed on that day or later.
 
+With **what came and went**, an app that removes titles also reads the
+**measures** (`GET /apps/v1/measures`: over the last 90 days, how much of
+what arrived was watched, how much of the library, how much of what left
+was wished for again), and asks, before removing, which titles should
+wait (`POST /apps/v1/departures`): a film, a season or a series someone
+keeps for later or is partway through is held a week for a last watch,
+and those people see when it leaves. The answer only says until when.
 
 ---
 

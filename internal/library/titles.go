@@ -60,6 +60,10 @@ type TitleSummary struct {
 	// server shows titles: listed (a collection's films), but it has no page
 	// and can't be requested until it's out.
 	Upcoming bool `json:"upcoming,omitempty"`
+	// LeavesAt is when it leaves the server (RFC 3339), for the profile
+	// that keeps it for later or is partway through it: held for a last
+	// watch. A series carries its first season to leave.
+	LeavesAt string `json:"leavesAt,omitempty"`
 }
 
 // TitleRequest is a request covering a title: its ID and status.
