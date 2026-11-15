@@ -219,7 +219,7 @@ export interface Track {
   hearingImpaired?: boolean;
   /** Subtitles that are pictures (PGS), drawn over the video (PictureSubtitles). */
   pictures?: boolean;
-  /** Subtitles: WebVTT for text, PGS for pictures. */
+  /** Subtitles, in stretches at `url` + "/n" (see subtitleStretchSeconds): WebVTT for text, PGS for pictures. */
   url?: string;
 }
 
@@ -328,6 +328,8 @@ export interface Playback {
   forcedTracks?: Track[];
   /** Those in the audio's language: shown whenever no other subtitles are. */
   forcedTrack?: string;
+  /** How long each stretch of a subtitle track is, in seconds: stretch n covers [n × it, (n+1) × it). */
+  subtitleStretchSeconds?: number;
   maxBitrateKbps?: number;
   segments?: Segment[];
   /** Seek-bar previews, when the server has some: sheets of `columns` x `rows` tiles, tile n at n x `intervalMs`. */
@@ -388,6 +390,8 @@ export interface PlayerOptions {
   onTakenOver?: (device: string) => void;
   /** The playback can't go on. */
   onError?: (error: Error) => void;
+  /** The server can't be reached: the player waits for it, its place kept (true), then starts over there (false). */
+  onReconnecting?: (on: boolean) => void;
   /** Played to the end. */
   onEnded?: () => void;
   /** The hls.js constructor; globalThis.Hls by default. */
@@ -449,8 +453,13 @@ export interface PGSCue {
   pictures: PGSPicture[];
 }
 
-/** Reads a PGS track into its cues, in order. Throws on a malformed track. */
-export function decodePGS(bytes: Uint8Array | ArrayBuffer): PGSCue[];
+/**
+ * Reads a PGS track into its cues, in order; with clears, the moments the
+ * screen is cleared too, as cues with no picture. Throws on a malformed track.
+ */
+export function decodePGS(bytes: Uint8Array | ArrayBuffer, options?: { clears?: boolean }): PGSCue[];
+/** Reads WebVTT as Overfin rebuilds it into cues, in seconds. */
+export function parseVTT(vtt: string): { start: number; end: number; text: string }[];
 /** A picture's pixels, RGBA (width × height × 4). Throws when they overflow its size. */
 export function pgsPixels(picture: PGSPicture): Uint8ClampedArray;
 /** The cue showing at a time (ms), or null. */
@@ -460,8 +469,13 @@ export function cueAt(cues: PGSCue[], ms: number): PGSCue | null;
 export class PictureSubtitles {
   constructor(video: HTMLVideoElement, canvas: HTMLCanvasElement);
   readonly cues: PGSCue[];
-  /** Loads a track by its URL; resolves once its cues are read. */
-  load(url: string): Promise<void>;
+  readonly url: string;
+  /** Shows a track from its URL, its stretches fetched with part(). */
+  show(url: string): void;
+  /** Fetches one stretch of the track shown, once. */
+  part(n: number): void;
+  /** Merges a stretch's cues (decodePGS with clears) with those already here. */
+  add(cues: PGSCue[]): void;
   /** Stops drawing and clears the canvas. */
   hide(): void;
 }
