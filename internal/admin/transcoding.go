@@ -135,9 +135,11 @@ func (p *Panel) setTranscoding(w http.ResponseWriter, r *http.Request, s *sessio
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// previewsJSON is whether Overfin's Jellyfin makes seek-bar previews.
+// previewsJSON is whether seek-bar previews are made, and whether Overfin
+// makes them itself (else its Jellyfin does).
 type previewsJSON struct {
-	On bool `json:"on"`
+	On  bool `json:"on"`
+	Own bool `json:"own,omitempty"`
 }
 
 func (p *Panel) previews(w http.ResponseWriter, r *http.Request, s *session) {
@@ -150,7 +152,7 @@ func (p *Panel) previews(w http.ResponseWriter, r *http.Request, s *session) {
 		p.upstreamProblem(w, err, "reading whether previews are made")
 		return
 	}
-	writeJSON(w, http.StatusOK, previewsJSON{On: on})
+	writeJSON(w, http.StatusOK, previewsJSON{On: on, Own: p.OwnPreviews})
 }
 
 func (p *Panel) setPreviews(w http.ResponseWriter, r *http.Request, s *session) {
@@ -167,5 +169,5 @@ func (p *Panel) setPreviews(w http.ResponseWriter, r *http.Request, s *session) 
 		return
 	}
 	p.Logger.Info("seek-bar previews set in the control panel", "on", req.On)
-	writeJSON(w, http.StatusOK, req)
+	writeJSON(w, http.StatusOK, previewsJSON{On: req.On, Own: p.OwnPreviews})
 }

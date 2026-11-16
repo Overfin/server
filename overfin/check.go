@@ -189,7 +189,7 @@ func (c *checker) jellyfin(ctx context.Context, cfg *config.Config) {
 		}
 		previews, _ := store.ReadPreviews(ctx, cfg.Storage.Path)
 		changes, err := jfsettings.Plan(ctx, jf, jellyfin.Auth{Token: key, DeviceID: "overfin-check"},
-			jfsettings.Choices{Transcoding: transcodingSettings(family, device), Previews: previews})
+			jfsettings.Choices{Transcoding: transcodingSettings(family, device), Previews: previews, OwnPreviews: ownPreviews()})
 		switch {
 		case err != nil:
 			c.fail("Jellyfin's settings can't be read: %v", err)

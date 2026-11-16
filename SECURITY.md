@@ -424,8 +424,12 @@ anyone. Paired servers are not trusted at all (rule 94).
     - Exception: owners see the list of the libraries' tags, to hide some
       from a profile.
 78. File paths, server internals and permission flags are never served.
-    File paths never reach Overfin: its index gets a film's file and
-    folder names, and a series' folder name, from its plugin.
+    File paths reach only the backend's seek-bar previews, next to its
+    Jellyfin: each file's path is used to read the file, read-only, for its
+    fingerprint and previews, then forgotten; only fingerprints are kept,
+    and no path is logged. The rest of Overfin never gets one: its index
+    gets a film's file and folder names, and a series' folder name, from
+    its plugin.
     - Exception, control panel only: Identification shows a film's or a
       series' folder and file names (never the whole path), to tell a title
       Jellyfin matched wrong; Libraries shows each library's folders, and

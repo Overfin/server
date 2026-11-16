@@ -39,6 +39,8 @@ export interface TranscodingTest {
 
 export interface Previews {
   on: boolean;
+  /** Overfin makes them itself (else its Jellyfin does). */
+  own?: boolean;
 }
 
 export interface Mail {

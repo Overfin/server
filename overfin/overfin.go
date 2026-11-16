@@ -33,6 +33,7 @@ import (
 	"github.com/overfin/server/internal/cookie"
 	"github.com/overfin/server/internal/emails"
 	"github.com/overfin/server/internal/federation"
+	"github.com/overfin/server/internal/gpu"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/imdb"
 	"github.com/overfin/server/internal/introskipper"
@@ -44,6 +45,7 @@ import (
 	"github.com/overfin/server/internal/outbound"
 	"github.com/overfin/server/internal/personal"
 	"github.com/overfin/server/internal/playback"
+	"github.com/overfin/server/internal/previews"
 	"github.com/overfin/server/internal/proof"
 	"github.com/overfin/server/internal/provision"
 	"github.com/overfin/server/internal/ratings"
@@ -694,6 +696,31 @@ func run(logger *slog.Logger) error {
 	// why it exists before them. Its source is the gateway's, once there is
 	// one.
 	var gw *gateway
+	// Seek-bar previews, made by Overfin itself next to Jellyfin (package
+	// previews): by file, not by Jellyfin's item.
+	if ownPreviews() {
+		st, err := previews.NewStore(filepath.Join(filepath.Dir(cfg.Storage.Path), "previews"))
+		if err != nil {
+			return err
+		}
+		sh.previews = &previews.Keeper{Store: st, DB: db, Format: previews.Default, Every: 10 * time.Minute, Logger: logger,
+			JellyfinData: os.Getenv("JELLYFIN_DATA_DIR"), On: db.Previews,
+			Files: func(ctx context.Context, each func(jellyfin.VideoFile) bool) error {
+				return sh.jf.VideoFiles(ctx, gw.adminAuth(), each)
+			},
+			Hardware: func(ctx context.Context) []string {
+				family, device, err := db.Transcoding(ctx)
+				if err != nil {
+					return nil
+				}
+				f, ok := gpu.Find(family)
+				if !ok {
+					return nil
+				}
+				return previews.HardwareFor(f.Mode, device)
+			},
+			Maker: previews.Maker{FFmpeg: os.Getenv("JELLYFIN_FFMPEG"), Busy: func() bool { return sh.tickets.Transcodes() > 0 }}}
+	}
 	sh.texts = catalog.NewTexts(func(language string) catalog.TitleSource { return gw.textSource(language) }, db, logger,
 		100*time.Millisecond, 3*time.Second)
 	sh.titles = catalog.NewTitles(func() catalog.TitleSource { return gw.titleSource() }, db, logger,
@@ -701,6 +728,9 @@ func run(logger *slog.Logger) error {
 	gw, err = newGateway(*configPath, cfg, sh)
 	if err != nil {
 		return err
+	}
+	if sh.previews != nil {
+		go sh.previews.Run(ctx) // it asks Jellyfin with the gateway's key
 	}
 	skipper.Jellyfin = func() (*jellyfin.Client, jellyfin.Auth, bool) { return sh.jf, gw.adminAuth(), true }
 	// The service account follows the configuration's admin key.
@@ -800,6 +830,7 @@ func run(logger *slog.Logger) error {
 		if sh.directory != nil {
 			p.Directory = sh.directory
 		}
+		p.OwnPreviews = sh.previews != nil
 		// Each film's and series' rank on the server, by its value, for
 		// title pages and the Rank sort.
 		go p.KeepRanks(ctx, 10*time.Minute)

@@ -37,6 +37,7 @@ import (
 	"github.com/overfin/server/internal/pin"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/plugin"
+	"github.com/overfin/server/internal/previews"
 	"github.com/overfin/server/internal/proof"
 	"github.com/overfin/server/internal/provision"
 	"github.com/overfin/server/internal/ratings"
@@ -59,6 +60,7 @@ type shared struct {
 	keys      *keys.Keys
 	jf        *jellyfin.Client
 	images    *images.Pipeline
+	previews  *previews.Keeper // nil unless Overfin makes previews itself
 	tickets   *playback.Tickets
 	// folders remembers which library items the index doesn't hold are in.
 	folders *api.FolderCache
@@ -225,7 +227,7 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	}
 	// The modules switched on, filled in below; watchlists come from them.
 	on := map[string]bool{}
-	lib := api.Library{Sessions: sessions, Provisioner: prov, Jellyfin: sh.jf, Images: sh.images, CursorKey: k.Cursor,
+	lib := api.Library{Sessions: sessions, Provisioner: prov, Jellyfin: sh.jf, Images: sh.images, Previews: sh.previews, CursorKey: k.Cursor,
 		Folders: sh.folders, Service: sh.service, Titles: sh.titles, Texts: sh.texts, Searches: sh.searches, Lookups: sh.lookups, Logger: logger,
 		Interests: func(ctx context.Context) ([]store.ProfileTitle, error) { return interests(ctx, on, sh) }}
 	// The gateway's prefetch of new titles' artwork (backend only).
@@ -814,7 +816,7 @@ func (g *gateway) choices(ctx context.Context) (jfsettings.Choices, error) {
 		return jfsettings.Choices{}, err
 	}
 	previews, err := g.sh.db.Previews(ctx)
-	return jfsettings.Choices{Transcoding: transcodingSettings(family, device), Previews: previews}, err
+	return jfsettings.Choices{Transcoding: transcodingSettings(family, device), Previews: previews, OwnPreviews: ownPreviews()}, err
 }
 
 // applySettings sets back the Jellyfin settings Overfin owns, with the

@@ -94,20 +94,26 @@ func show(v any) string {
 type Choices struct {
 	// Transcoding are the settings of the GPU chosen, if one was.
 	Transcoding []Setting
-	// Previews is whether Jellyfin makes seek-bar previews (trickplay
-	// images): off unless the operator turns them on.
+	// Previews is whether the operator wants seek-bar previews (trickplay
+	// images): off unless they turn them on.
 	Previews bool
+	// OwnPreviews says Overfin makes them itself (package previews): then
+	// Jellyfin never does.
+	OwnPreviews bool
 }
 
 // librarySettings are every library's, with the operator's choices.
 func librarySettings(c Choices) []Setting {
-	why := "the operator turned seek-bar previews off"
-	if c.Previews {
+	why, on := "the operator turned seek-bar previews off", c.Previews
+	switch {
+	case c.OwnPreviews:
+		why, on = "Overfin makes seek-bar previews itself", false
+	case c.Previews:
 		why = "the operator turned seek-bar previews on"
 	}
 	return append(slices.Clone(libraryBase),
-		Setting{"EnableTrickplayImageExtraction", c.Previews, why},
-		Setting{"ExtractTrickplayImagesDuringLibraryScan", c.Previews, why})
+		Setting{"EnableTrickplayImageExtraction", on, why},
+		Setting{"ExtractTrickplayImagesDuringLibraryScan", on, why})
 }
 
 // Plan is what differs from Overfin's settings on the server, changing

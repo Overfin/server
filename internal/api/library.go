@@ -22,6 +22,7 @@ import (
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/library"
 	"github.com/overfin/server/internal/plugin"
+	"github.com/overfin/server/internal/previews"
 	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/provision"
 	"github.com/overfin/server/internal/store"
@@ -37,8 +38,11 @@ type Library struct {
 	Provisioner *provision.Provisioner
 	Jellyfin    *jellyfin.Client
 	Images      *images.Pipeline
-	CursorKey   []byte
-	Logger      *slog.Logger
+	// Previews are the seek-bar previews Overfin makes itself, nil when it
+	// doesn't (it isn't next to Jellyfin): Jellyfin's are served then.
+	Previews  *previews.Keeper
+	CursorKey []byte
+	Logger    *slog.Logger
 	// Folders remembers which library items the index doesn't have are in,
 	// for profiles limited to some libraries.
 	Folders *FolderCache

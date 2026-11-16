@@ -117,6 +117,9 @@ type Modules interface {
 
 // Panel serves the control panel.
 type Panel struct {
+	// OwnPreviews says Overfin makes seek-bar previews itself (package
+	// previews), next to its Jellyfin; else Jellyfin does.
+	OwnPreviews bool
 	// Version is this Overfin's, as apps read it (GET /apps/v1/server).
 	Version  string
 	Features Features

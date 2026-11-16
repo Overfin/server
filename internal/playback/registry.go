@@ -33,8 +33,11 @@ type Stream struct {
 	AudioIndex    *int
 	SubtitleIndex *int
 	View          any // the session as last sent to the client, for restoring
-	// Trickplay is the set of seek-bar previews offered with it, if any.
+	// Trickplay is the set of seek-bar previews offered with it, if any;
+	// Previews, the fingerprint they're kept by when Overfin made them,
+	// "" when Jellyfin did.
 	Trickplay *jellyfin.Trickplay
+	Previews  string
 	// Remote, for a title a paired server holds: the playback is there,
 	// its stream fetched from there; this one keeps the profile's side
 	// (where it is, its limits).

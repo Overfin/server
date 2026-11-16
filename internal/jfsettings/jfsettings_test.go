@@ -179,6 +179,12 @@ func TestPreviews(t *testing.T) {
 	}
 	if o := LibraryOptions(Choices{}); o["EnableTrickplayImageExtraction"] != false {
 		t.Errorf("a new library's options, previews off: %v", o)
+	} // Overfin making them itself: Jellyfin never does, previews on or not.
+	if _, err := Apply(ctx, jf, admin, Choices{Previews: true, OwnPreviews: true}); err != nil {
+		t.Fatal(err)
+	}
+	if f.lib["EnableTrickplayImageExtraction"] != false || f.lib["ExtractTrickplayImagesDuringLibraryScan"] != false {
+		t.Errorf("Overfin's own previews: %v", f.lib)
 	}
 }
 

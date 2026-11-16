@@ -624,8 +624,19 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 			out.Next = next
 		}
 	}
-	// Seek-bar previews are a bonus too: the set nearest 320 pixels wide.
-	if sets, err := l.Jellyfin.Trickplays(ctx, ja, uid, jfItem, sourceID); err == nil && len(sets) > 0 {
+	// Seek-bar previews are a bonus too: Overfin's own, else Jellyfin's
+	// set nearest 320 pixels wide.
+	if fp, set, ok := l.Previews.ForVersion(ctx, jfItem, sourceID); ok {
+		s.Trickplay = &jellyfin.Trickplay{Width: set.Width, Height: set.Height, Columns: set.Columns, Rows: set.Rows,
+			Count: set.Count, IntervalMs: set.IntervalMs}
+		s.Previews = fp
+		tp := &trickplayJSON{TileWidth: set.Width, TileHeight: set.Height, Columns: set.Columns, Rows: set.Rows,
+			IntervalMs: set.IntervalMs, TileCount: set.Count}
+		for n := range set.Sheets() {
+			tp.Sheets = append(tp.Sheets, "/api/v1/playback/"+s.ID+"/trickplay/"+strconv.Itoa(n))
+		}
+		out.Trickplay = tp
+	} else if sets, err := l.Jellyfin.Trickplays(ctx, ja, uid, jfItem, sourceID); err == nil && len(sets) > 0 {
 		best := sets[0]
 		for _, t := range sets[1:] {
 			if max(t.Width-320, 320-t.Width) < max(best.Width-320, 320-best.Width) {
@@ -722,9 +733,14 @@ func (pb Playback) trickplaySheet(w http.ResponseWriter, r *http.Request) {
 	}
 	l := pb.Library
 	key := fmt.Sprintf("trickplay/%s/%s/%d/%d", s.ItemID, s.SourceID, tp.Width, n)
-	data, err := l.Images.Fetched(r.Context(), key, func(ctx context.Context) ([]byte, error) {
+	fetch := func(ctx context.Context) ([]byte, error) {
 		return l.Jellyfin.TrickplaySheet(ctx, s.Auth, s.ItemID, s.SourceID, tp.Width, n)
-	})
+	}
+	if fp := s.Previews; fp != "" {
+		key = fmt.Sprintf("previews/%s/%d", fp, n)
+		fetch = func(context.Context) ([]byte, error) { return l.Previews.Store.Sheet(fp, n) }
+	}
+	data, err := l.Images.Fetched(r.Context(), key, fetch)
 	if err != nil {
 		if r.Context().Err() == nil {
 			pb.Logger.Warn("a seek-bar preview sheet failed", "playback", s.ID, "err", err)

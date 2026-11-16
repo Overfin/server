@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -301,7 +302,7 @@ func ownSettings(ctx context.Context, db *store.Store, url, key string, logger *
 		logger.Warn("whether to make seek-bar previews can't be read", "err", err)
 	}
 	changes, err := jfsettings.Apply(ctx, jf, jellyfin.Auth{Token: key, DeviceID: "overfin-admin"},
-		jfsettings.Choices{Transcoding: transcodingSettings(family, device), Previews: previews})
+		jfsettings.Choices{Transcoding: transcodingSettings(family, device), Previews: previews, OwnPreviews: ownPreviews()})
 	for _, c := range changes {
 		logger.Info("a Jellyfin setting was set to Overfin's", "change", c.String())
 	}
@@ -374,4 +375,10 @@ func tmdbClient(db *store.Store, token string) (*tmdb.Client, error) {
 		return out
 	}
 	return c, nil
+}
+
+// ownPreviews says Overfin makes seek-bar previews itself: it runs next to
+// its Jellyfin, in the backend's image, with Jellyfin's ffmpeg and data.
+func ownPreviews() bool {
+	return os.Getenv("JELLYFIN_FFMPEG") != "" && os.Getenv("JELLYFIN_DATA_DIR") != ""
 }

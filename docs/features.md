@@ -61,7 +61,7 @@
   account gets, whether each profile keeps a stream of its own, and the
   categories its profiles see), limits, languages,
   libraries, the GPU that converts videos (tested on your own files),
-  seek-bar previews (off by default: they take time and disk space), email, Seerr, each title's metadata (how it's matched, its texts and artwork), what each title is
+  seek-bar previews (off by default: they take time and disk space; Overfin makes them itself, kept by file, so a file moved keeps them), email, Seerr, each title's metadata (how it's matched, its texts and artwork), what each title is
   worth to your server (Valuation).
 - **Bringing people over** from another Jellyfin, their watch history
   included, with their old username and password, once. Nothing changes on
