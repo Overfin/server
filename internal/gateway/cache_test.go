@@ -271,3 +271,32 @@ func TestCacheCheckWithoutAnswer(t *testing.T) {
 		t.Errorf("%d answers kept", kept)
 	}
 }
+
+// An image the visitor gets as it comes; one cut short (the visitor left,
+// or less than the backend said) is never kept.
+func TestCacheKeepsOnlyWhole(t *testing.T) {
+	c := &Cache{Dir: t.TempDir(), Limit: 1 << 30, Logger: quiet}
+	c.Load()
+	short := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "private, max-age=604800, immutable")
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Content-Length", "2000")
+		w.Write([]byte(strings.Repeat("x", 1000)))
+	})
+	h := c.Wrap(short)
+	if rec := get(h, "/api/v1/images/cut", "L1"); rec.Body.Len() != 1000 {
+		t.Fatalf("passed on: %d", rec.Body.Len())
+	}
+	if _, ok := c.lookup(key(httptest.NewRequest("GET", "/api/v1/images/cut", nil))); ok {
+		t.Error("a cut image was kept")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest("GET", "/api/v1/images/a", nil).WithContext(ctx)
+	req.Header.Set("Cookie", "overfin-login=L1; overfin-edge=x")
+	b := &imageBackend{fetches: map[string]int{}, checks: map[string]int{}, deny: map[string]bool{}}
+	c.Wrap(b).ServeHTTP(httptest.NewRecorder(), req)
+	if _, ok := c.lookup(key(req)); ok {
+		t.Error("kept for a visitor who left")
+	}
+}

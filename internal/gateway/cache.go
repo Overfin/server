@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -118,18 +119,19 @@ func (c *Cache) Wrap(next http.Handler) http.Handler {
 			}
 		}
 		// Not cached: from the backend, kept on the way if it's worth it.
+		// The visitor gets it as it comes; a copy is kept up to the size
+		// worth caching, no more.
 		start := time.Now()
-		rec := httptest.NewRecorder()
-		next.ServeHTTP(rec, r)
-		res := rec.Result()
-		body := rec.Body.Bytes()
-		for name, vals := range res.Header {
-			w.Header()[name] = vals
+		tee := &keeping{ResponseWriter: w}
+		next.ServeHTTP(tee, r)
+		// Only whole: not when the visitor left halfway, nor shorter than
+		// the backend said.
+		whole := r.Context().Err() == nil
+		if n := w.Header().Get("Content-Length"); n != "" && n != strconv.Itoa(tee.body.Len()) {
+			whole = false
 		}
-		w.WriteHeader(res.StatusCode)
-		_, _ = w.Write(body)
-		if res.StatusCode == http.StatusOK && strings.Contains(res.Header.Get("Cache-Control"), "immutable") && len(body) <= maxCached {
-			c.store(k, body, res.Header.Get("Content-Type"), time.Since(start), sess)
+		if whole && tee.status == http.StatusOK && !tee.over && strings.Contains(w.Header().Get("Cache-Control"), "immutable") {
+			c.store(k, tee.body.Bytes(), w.Header().Get("Content-Type"), time.Since(start), sess)
 		}
 	})
 }
@@ -446,3 +448,42 @@ func (a *answered) Write(b []byte) (int, error) {
 	a.wrote = true
 	return a.ResponseRecorder.Write(b)
 }
+
+// keeping passes a response on and keeps a copy of it, up to maxCached
+// (over says it was larger: nothing worth keeping then).
+type keeping struct {
+	http.ResponseWriter
+	status int
+	body   bytes.Buffer
+	over   bool
+}
+
+func (k *keeping) WriteHeader(code int) {
+	if k.status == 0 {
+		k.status = code
+	}
+	k.ResponseWriter.WriteHeader(code)
+}
+
+func (k *keeping) Write(b []byte) (int, error) {
+	if k.status == 0 {
+		k.status = http.StatusOK
+	}
+	if !k.over {
+		if k.body.Len()+len(b) > maxCached {
+			k.over = true
+			k.body = bytes.Buffer{}
+		} else {
+			k.body.Write(b)
+		}
+	}
+	return k.ResponseWriter.Write(b)
+}
+
+func (k *keeping) Flush() {
+	if f, ok := k.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (k *keeping) Unwrap() http.ResponseWriter { return k.ResponseWriter }
