@@ -286,7 +286,9 @@ func TestManagedRegistration(t *testing.T) {
 	if resMe.StatusCode != 201 {
 		t.Fatalf("the account: %d", resMe.StatusCode)
 	}
-	if list := admin("GET", "/invites", nil)["items"].([]any); list[0].(map[string]any)["uses"] != 1.0 {
+	// Two uses: the account's, and the one held by registering its email
+	// again (rule 101: the same as for an email with no account).
+	if list := admin("GET", "/invites", nil)["items"].([]any); list[0].(map[string]any)["uses"] != 2.0 {
 		t.Errorf("the invitation's uses: %v", list)
 	}
 }
