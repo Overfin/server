@@ -224,6 +224,10 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	// Addresses paired servers give: this machine's own only when the
+	// operator allows it (SECURITY.md rule 136). On a gateway, its egress
+	// for the backend follows the same.
+	outbound.AllowLoopback(cfg.Federation.AllowLoopback)
 	addr := cfg.Listen
 	linkDir := filepath.Join(filepath.Dir(cfg.Storage.Path), "link")
 	if backendMode {

@@ -42,6 +42,9 @@ network security expert. So the rules come in two kinds:
     wishes sent to Seerr a day (rule 48), the password's digit and special
     character (rule 105), and whether a copied setup link signs its person
     in at once (rule 108).
+  - **Paired servers on this machine** (rule 136): refused; the operator
+    may allow loopback addresses (`federation.allow_loopback`), never
+    link-local ones.
 
 Every rule not named here is a hard rule.
 
@@ -790,8 +793,8 @@ anyone. Paired servers are not trusted at all (rule 94).
      their streams) go through its gateway, which connects only to an
      address the backend asked for in the last minute and passes the
      bytes; TLS runs end to end between the backend and the other server.
-     The gateway never dials, for its backend, a loopback, link-local,
-     unspecified or multicast address. Paired servers see the gateway only.
+     The gateway never dials, for its backend, an address rule 136
+     refuses. Paired servers see the gateway only.
      The federation key stays at the backend.
 133. With an identity provider, its callback reaches the gateway and
      passes over the link; the code exchange, the client secret and the
@@ -803,6 +806,22 @@ anyone. Paired servers are not trusted at all (rule 94).
 135. When the backend is out of reach or being updated, the gateway says
      so to visitors in its own page, in their language, without naming
      what's behind it.
+
+### Connecting to paired servers
+
+136. Addresses come from paired servers (a code, a pair request, an
+     address change, a stream's URL), so every connection made for one
+     is checked first, on the gateway's egress (rule 132) as on a single
+     Overfin, and when Overfin reads its own certificate (rule 99).
+     Overfin never dials, for a peer, loopback, link-local (a cloud's
+     metadata service among them), unspecified or multicast addresses,
+     IPv4's 0.0.0.0/8 or 240.0.0.0/4, or broadcast. An IPv4-mapped IPv6
+     address counts as its IPv4 one. Private ranges are allowed: paired
+     servers may share a LAN. A name is looked up once per connection,
+     every address it gives must pass, and the address dialed is the one
+     checked, never looked up again. Redirects are never followed. One
+     setting loosens this: `federation.allow_loopback`, for a peer on the
+     same machine; nothing else refused is ever allowed.
 
 ## Deployment
 

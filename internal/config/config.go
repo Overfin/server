@@ -46,6 +46,8 @@ type Config struct {
 	Site      Site                         `toml:"site"`
 	Mail      Mail                         `toml:"mail"`
 	HTTPS     HTTPS                        `toml:"https"`
+	// Federation is how Overfin connects to its paired servers.
+	Federation Federation `toml:"federation"`
 
 	// FeaturesInFile reports whether the file held feature settings
 	// (limits, plugins, wishes, modules). Those live in the
@@ -421,6 +423,16 @@ func validPin(s string) bool {
 const DefaultCSP = "default-src 'self'; img-src 'self' data:; media-src 'self' blob:; worker-src 'self' blob:; " +
 	"connect-src 'self'; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; " +
 	"form-action 'self'; frame-ancestors 'none'"
+
+// Federation is how Overfin connects to the servers it's paired with.
+type Federation struct {
+	// AllowLoopback lets Overfin connect to a paired server on loopback
+	// addresses (127.0.0.0/8, ::1): one on the same machine. Off, the
+	// default: an address a peer gives never reaches this machine itself
+	// (SECURITY.md rule 136). Link-local addresses, a cloud's metadata
+	// service among them, stay refused either way.
+	AllowLoopback bool `toml:"allow_loopback"`
+}
 
 type Storage struct {
 	// Path is the database file.

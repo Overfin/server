@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -23,6 +22,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/overfin/server/internal/outbound"
 )
 
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -436,9 +437,8 @@ func TestClientAddr(t *testing.T) {
 // for is refused there.
 func TestEgress(t *testing.T) {
 	// The test's servers are on loopback, which a gateway never dials.
-	was := unreached
-	unreached = func(netip.Addr) bool { return false }
-	t.Cleanup(func() { unreached = was })
+	outbound.AllowLoopback(true)
+	t.Cleanup(func() { outbound.AllowLoopback(false) })
 	code := ""
 	g, addr := gatewayOn(t, t.TempDir(), "1.0", &code)
 	b, _ := runBackend(t, t.TempDir(), "1.0")
@@ -477,20 +477,12 @@ func TestEgress(t *testing.T) {
 
 // A gateway never dials its own machine, link-local addresses (a cloud's
 // metadata service), unspecified or multicast ones for its backend; LAN and
-// public addresses, it does.
-func TestUnreached(t *testing.T) {
-	for addr, want := range map[string]bool{
-		"127.0.0.1": true, "::1": true, "169.254.169.254": true, "fe80::1": true, "0.0.0.0": true,
-		"224.0.0.1": true, "::ffff:127.0.0.1": true,
-		"0.1.2.3": true, "255.255.255.255": true, "240.0.0.1": true, "::ffff:255.255.255.255": true,
-		"10.1.2.3": false, "192.168.1.5": false, "8.8.8.8": false, "2001:db8::1": false,
-	} {
-		if got := unreached(netip.MustParseAddr(addr).Unmap()); got != want {
-			t.Errorf("%s: %v, want %v", addr, got, want)
+// public addresses, it does (outbound's policy, tested there).
+func TestEgressTarget(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1:443", "[::ffff:127.0.0.1]:443", "169.254.169.254:80", "localhost:443"} {
+		if _, ok := egressTarget(addr); ok {
+			t.Errorf("%s taken", addr)
 		}
-	}
-	if _, ok := egressTarget("127.0.0.1:443"); ok {
-		t.Error("loopback taken")
 	}
 	if target, ok := egressTarget("10.1.2.3:8443"); !ok || target != "10.1.2.3:8443" {
 		t.Errorf("a LAN address: %q %v", target, ok)
@@ -616,9 +608,8 @@ func TestCheckOnly(t *testing.T) {
 // know, an address that doesn't answer; an address asked for counts a
 // minute only.
 func TestEgressRefusals(t *testing.T) {
-	was := unreached
-	unreached = func(netip.Addr) bool { return false }
-	t.Cleanup(func() { unreached = was })
+	outbound.AllowLoopback(true)
+	t.Cleanup(func() { outbound.AllowLoopback(false) })
 	code := ""
 	g, addr := gatewayOn(t, t.TempDir(), "1.0", &code)
 	bdir := t.TempDir()

@@ -165,6 +165,14 @@ spa_fallback = false
 # the certificates the address serves (see docs/federation.md):
 # certificates = ["<43 characters>"]
 
+[federation]
+# Overfin never connects, for a paired server, to its own machine (loopback),
+# link-local addresses (a cloud's metadata service among them), unspecified,
+# multicast or reserved ones. Private ranges (a LAN) are fine. Set this to
+# true only to pair with a server on this same machine; link-local stays
+# refused. With a gateway, set it on the gateway: it makes the connections.
+allow_loopback = false
+
 # ---- Feature settings --------------------------------------------------------
 # Everything below is switched on and off in the control panel, and lives in
 # the database. These sections are only read on the very first start, to fill

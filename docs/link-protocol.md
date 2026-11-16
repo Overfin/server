@@ -339,7 +339,10 @@ servers see only the gateway (rule 132):
    loopback (its own machine), link-local (a cloud's metadata service among
    them), unspecified, multicast, and IPv4's "this network" (0.0.0.0/8),
    reserved block (240.0.0.0/4) and broadcast. Private ranges stay, since
-   paired servers may be on a LAN (section 16 says what that allows). It
+   paired servers may be on a LAN (section 16 says what that allows).
+   Loopback is allowed only with the gateway's `federation.allow_loopback`.
+   This is the same check a single Overfin makes on its own connections
+   to peers (`internal/outbound`, SECURITY.md rule 136). It
    dials the address it checked (5 s), never looking it up again, and
    answers `OK`. All of it within the handshake's 15 s.
 4. From then on the gateway copies bytes both ways. The backend's own TLS
@@ -411,7 +414,7 @@ Each line is a property a test can check. **Tested** names the test today;
 | Eviction keeps what's worth most | `TestCacheEviction` |
 | Artwork fetched ahead is served only after a check | `TestFetchAhead` |
 | Egress reaches only what the backend asked for, TLS end to end | `TestEgress` |
-| Egress never dials loopback, link-local, unspecified or multicast addresses | `TestUnreached` |
+| Egress never dials loopback, link-local, unspecified or multicast addresses | `TestEgressTarget`, `TestRefused` (internal/outbound) |
 | Reconnecting waits vary by a fifth | `TestJittered` |
 | Egress refused for another version, an unpaired key, an unreachable address; the minute expires | `TestEgressRefusals` |
 | Events: revocations numbered, resumed after a number; a ping when quiet; asked from past the last number ever given, or from one whose hash isn't the one heard, all again | `TestEventsRevokedAndPing` |
@@ -577,4 +580,4 @@ Each holds as the code stands, and has a test that fails if it breaks.
 | A pairing code pairs once, even tried at once, even after a crash or a failed write | `TestCodeUsedOnce`, `TestCodeUsedOnceAtOnce`, `TestCodeSpentFirst` |
 | No access answer survives an access change; none asked before one is kept | `TestCacheForgetsAccess`, `TestAccessEvents`, `TestEventsAccess` |
 | No revocation is missed across breaks, gateway restarts or a restored database | `TestEventsRevokedAndPing`, `TestRevocationsReset`, `TestRevocations` |
-| Egress reaches only an address the backend asked for within the minute, never a refused range, dialing the address it checked | `TestEgress`, `TestEgressRefusals`, `TestUnreached` |
+| Egress reaches only an address the backend asked for within the minute, never a refused range, dialing the address it checked | `TestEgress`, `TestEgressRefusals`, `TestEgressTarget` |

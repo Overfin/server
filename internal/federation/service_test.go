@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/overfin/server/internal/outbound"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/seal"
 	"github.com/overfin/server/internal/store"
@@ -519,4 +520,23 @@ func TestRefusedWhileNotToldAccepted(t *testing.T) {
 	if got, _ := b.s.Store.PeerByID(ctx, aOnB.ID); got.State != store.PeerPaired {
 		t.Errorf("B's view of A after A asked: %s", got.State)
 	}
+}
+
+// A code whose address is this machine's own (loopback) is never dialed
+// unless the operator allows it (SECURITY.md rule 136): pairing fails, and
+// nothing is kept.
+func TestLoopbackPeerRefused(t *testing.T) {
+	ctx := context.Background()
+	a, b := newServer(t, "A"), newServer(t, "B")
+	code, _, err := a.s.NewCode(ctx, "for B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbound.AllowLoopback(false)
+	defer outbound.AllowLoopback(true)
+	if _, err := b.s.UseCode(ctx, code); !errors.Is(err, ErrUnreachable) || !errors.Is(err, outbound.ErrRefused) {
+		t.Fatalf("a code on loopback: %v", err)
+	}
+	noPeers(t, a)
+	noPeers(t, b)
 }

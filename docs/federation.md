@@ -89,7 +89,40 @@ people.
 
 Between servers on plain `http://`, requests are still signed, so neither
 can be impersonated, but what they say (titles, tickets) can be read on
-the way. The panel says so. The full rules are SECURITY.md's 94 to 100.
+the way. The panel says so. The full rules are SECURITY.md's 94 to 100,
+and 136.
+
+## Which addresses Overfin connects to
+
+A paired server tells yours where to reach it: in its code, its pairing
+request, an address change, and its streams' URLs. Overfin never connects,
+for a paired server, to:
+
+- its own machine (loopback: `127.0.0.0/8`, `::1`);
+- link-local addresses (`169.254.0.0/16`, `fe80::/10`), where a cloud's
+  metadata service answers;
+- unspecified, multicast and reserved addresses (`0.0.0.0/8`,
+  `240.0.0.0/4`, broadcast).
+
+An IPv6 address that maps an IPv4 one (`::ffff:127.0.0.1`) counts as that
+IPv4 address. Private ranges (`10.0.0.0/8`, `192.168.0.0/16`, `fd00::/8`…)
+are fine: two servers on a LAN pair as usual. A name is looked up once per
+connection, every address it has must pass (one refused refuses the name),
+and Overfin connects to the address it checked, never looking the name up
+again. With a gateway, the gateway makes these connections and checks the
+same way. Redirects are never followed.
+
+To pair with a server on the same machine, allow loopback (on the gateway,
+if you run one). Link-local addresses stay refused either way:
+
+```toml
+[federation]
+allow_loopback = true
+```
+
+The same applies when Overfin reads its own certificate at its own address
+(below): if that address is this machine's (an `/etc/hosts` line, say),
+name the certificate in the configuration instead, or allow loopback.
 
 ## HTTPS certificates
 
