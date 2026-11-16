@@ -234,17 +234,37 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		}
 		rows = suggestionOrder(outSoon(rows, releases, p.clock()))
 	}
+	// The cursor's title sorts by the place it had in the list then (it
+	// may have moved, or left it).
+	const cursorKey = "\x00cursor"
+	listPlace := func(v valuation.Value) int {
+		if v.Key == cursorKey && after != nil {
+			return after.List
+		}
+		n, _ := position(v.Key)
+		return n
+	}
+	seasonOf := func(v valuation.Value) int {
+		if v.Key == cursorKey && after != nil {
+			return after.Season
+		}
+		r, _ := store.ParseTitleKey(v.Key)
+		return r.Season
+	}
+	keyOf := func(v valuation.Value) string {
+		if v.Key == cursorKey && after != nil {
+			return after.Key
+		}
+		return v.Key
+	}
 	lessV := func(x, y valuation.Value) bool {
 		if sortBy == "list" {
-			a, _ := position(x.Key)
-			b, _ := position(y.Key)
+			a, b := listPlace(x), listPlace(y)
 			if a != b {
 				return a < b
 			}
-			rx, _ := store.ParseTitleKey(x.Key)
-			ry, _ := store.ParseTitleKey(y.Key)
-			if rx.Season != ry.Season {
-				return rx.Season < ry.Season
+			if sx, sy := seasonOf(x), seasonOf(y); sx != sy {
+				return sx < sy
 			}
 		}
 		if sortBy == "score" && x.Score != y.Score {
@@ -253,7 +273,7 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		if a, b := store.Fold(x.Name), store.Fold(y.Name); a != b {
 			return a < b
 		}
-		return x.Key < y.Key
+		return keyOf(x) < keyOf(y)
 	}
 	// before says whether x comes before y in the order asked.
 	before := func(x, y valuation.Value) bool {
@@ -269,10 +289,13 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		return before(rows[i], rows[j])
 	})
 	if after != nil {
-		last := valuation.Value{Title: &valuation.Title{Key: after.Key, Name: after.Name}, Score: after.Score}
+		last := valuation.Value{Title: &valuation.Title{Key: cursorKey, Name: after.Name}, Score: after.Score}
 		start = len(rows)
+		// Suggestions have no order to compare a title gone by: after the
+		// title itself, else at its place then.
+		byPlace := list == "suggestions"
 		for i, v := range rows {
-			if list == "suggestions" {
+			if byPlace {
 				// No order to compare by: after the title itself, else
 				// at its place then.
 				if v.Key == after.Key {
@@ -286,7 +309,7 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		if list == "suggestions" && start == len(rows) && after.Place < len(rows) {
+		if byPlace && start == len(rows) && after.Place < len(rows) {
 			start = after.Place
 		}
 	}
@@ -348,7 +371,17 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 	page := map[string]any{"titles": out, "generatedAt": p.clock().UTC().Format(time.RFC3339)}
 	if next := start + len(out); next < len(rows) && len(out) > 0 {
 		v := rows[next-1]
-		page["next"] = titlesCursor{Key: v.Key, Name: v.Name, Score: v.Score, Place: next}.String()
+		c := titlesCursor{Key: v.Key, Name: v.Name, Place: next}
+		// The score only when the list sorts by it (a key that may read
+		// scores): the cursor is readable, and must say nothing more than
+		// the page.
+		if sortBy == "score" {
+			c.Score = v.Score
+		}
+		if sortBy == "list" {
+			c.List, c.Season = listPlace(v), seasonOf(v)
+		}
+		page["next"] = c.String()
 	}
 	writeJSON(w, http.StatusOK, page)
 }
@@ -486,8 +519,11 @@ func titleStats(f *store.ValuationFacts) map[string]*titleStatsJSON {
 type titlesCursor struct {
 	Key   string  `json:"k"`
 	Name  string  `json:"n"`
-	Score float64 `json:"s"`
+	Score float64 `json:"s,omitempty"`
 	Place int     `json:"p"`
+	// List and Season: its place in the list asked (sort=list) and season.
+	List   int `json:"l,omitempty"`
+	Season int `json:"e,omitempty"`
 }
 
 func (c titlesCursor) String() string {

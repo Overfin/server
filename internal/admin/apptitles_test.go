@@ -292,11 +292,45 @@ func TestAppTitlesPagesWhileChanging(t *testing.T) {
 	if len(first.Titles) != 1 || first.Titles[0].Name != "Alpha" {
 		t.Fatalf("first: %+v", first)
 	}
+	// Sorted by name, the cursor says no score (it can be read).
+	if c, ok := readTitlesCursor(first.Next); !ok || c.Score != 0 || c.Key != "movie/tmdb/1" {
+		t.Errorf("cursor: %+v %v", c, ok)
+	}
 	db.DeleteCatalog(ctx, []string{id(0)})
 	p.valued.mu.Lock()
 	p.valued.m = nil // measured anew, as a minute later
 	p.valued.mu.Unlock()
 	if second := page(first.Next); len(second.Titles) != 1 || second.Titles[0].Name != "Beta" {
 		t.Errorf("second: %+v", second)
+	}
+
+	// A discovery list in its own order: its first title leaving the list
+	// between pages, the next page is still its second.
+	db.PutCatalog(ctx, items[:1], 2) // Alpha back
+	db.RefreshTitleKeys(ctx)
+	db.SetList(ctx, "trending", "movie", []string{"1", "2", "3"})
+	listed := func(cursor string) appTitlesPage {
+		t.Helper()
+		rec := app.do("GET", "/apps/v1/titles?list=trending&limit=1&cursor="+url.QueryEscape(cursor), "", map[string]string{"Authorization": "Bearer " + made.Key})
+		var out appTitlesPage
+		if json.Unmarshal(rec.Body.Bytes(), &out); rec.Code != 200 {
+			t.Fatalf("%d %s", rec.Code, rec.Body)
+		}
+		return out
+	}
+	reset := func() {
+		p.valued.mu.Lock()
+		p.valued.m = nil
+		p.valued.mu.Unlock()
+	}
+	reset()
+	one := listed("")
+	if len(one.Titles) != 1 || one.Titles[0].Name != "Alpha" {
+		t.Fatalf("list, first: %+v", one)
+	}
+	db.SetList(ctx, "trending", "movie", []string{"2", "3"})
+	reset()
+	if two := listed(one.Next); len(two.Titles) != 1 || two.Titles[0].Name != "Beta" {
+		t.Errorf("list, second: %+v", two)
 	}
 }
