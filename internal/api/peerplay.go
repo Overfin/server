@@ -548,9 +548,9 @@ func keepPeerURLs(out *sessionJSON, address string) (string, bool) {
 		rest, in := strings.CutPrefix(u, base)
 		name, track, sub := strings.Cut(rest, "/")
 		if sub {
-			return in && (name == "subtitles" || name == "pictures") && fileNameRe.MatchString(track)
+			return in && (name == "subtitles" || name == "pictures") && fileName(track)
 		}
-		return in && fileNameRe.MatchString(rest)
+		return in && fileName(rest)
 	}
 	if !ok(out.Stream.URL) || (out.Stream.Protocol != "hls" && out.Stream.Protocol != "file") || !playIDRe.MatchString(out.ID) {
 		return "", false

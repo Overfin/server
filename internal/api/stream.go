@@ -77,6 +77,13 @@ var (
 	rangeRe    = regexp.MustCompile(`^bytes=\d{0,15}-\d{0,15}$`)
 )
 
+// fileName says whether s may name a file of a stream (MSFP media): the
+// characters of fileNameRe, never "." or "..", which a URL resolves as a
+// folder, not a file.
+func fileName(s string) bool {
+	return s != "." && s != ".." && fileNameRe.MatchString(s)
+}
+
 // stream finds the playback behind a ticket, for its own session only.
 func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream, *jellyfin.Auth) {
 	ticket := r.PathValue("ticket")
@@ -140,7 +147,7 @@ func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream
 
 func (s Stream) serve(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if len(r.URL.Query()) > 0 || !fileNameRe.MatchString(name) {
+	if len(r.URL.Query()) > 0 || !fileName(name) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}

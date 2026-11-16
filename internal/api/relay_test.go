@@ -19,6 +19,11 @@ func TestCheckRelayedPlaylist(t *testing.T) {
 		{"#EXTM3U\n#EXT-X-MAP:uri=https://k.example.org/i.mp4\n", false},
 		{"#EXTM3U\n#EXT-X-MAP:URI=init0.mp4\n", false},
 		{"<html>\n", false},
+		// "." and "..", which a URL resolves as folders (MSFP media).
+		{"#EXTM3U\n..\n", false},
+		{"#EXTM3U\n.\n", false},
+		{"#EXTM3U\n#EXT-X-MAP:URI=\"..\"\n", false},
+		{"#EXTM3U\n...\n", true},
 	} {
 		if err := checkRelayedPlaylist([]byte(tc.body)); (err == nil) != tc.ok {
 			t.Errorf("%q: %v", tc.body, err)
@@ -40,7 +45,9 @@ func TestRelayURLs(t *testing.T) {
 		t.Fatalf("%+v", out)
 	}
 	for _, u := range []string{"https://b.example.org/api/v1/stream/T2/subtitles/s3", "https://b.example.org/api/v1/stream/T1/x/y/z",
-		"https://c.example.org/api/v1/stream/T1/subtitles/s3"} {
+		"https://c.example.org/api/v1/stream/T1/subtitles/s3",
+		"https://b.example.org/api/v1/stream/T1/..", "https://b.example.org/api/v1/stream/T1/.",
+		"https://b.example.org/api/v1/stream/T1/subtitles/..", "https://b.example.org/api/v1/stream/T1/pictures/."} {
 		bad := sessionJSON{ID: out.ID, Stream: streamJSON{URL: "https://b.example.org/api/v1/stream/T1/file", Protocol: "file"},
 			SubtitleTracks: []trackJSON{{URL: u}}}
 		if _, ok := keepPeerURLs(&bad, "https://b.example.org"); ok {

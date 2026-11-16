@@ -310,11 +310,11 @@ func checkRelayedPlaylist(body []byte) error {
 		case strings.HasPrefix(line, "#"):
 			for _, m := range playlistURIRe.FindAllStringSubmatch(line, -1) {
 				v := m[1]
-				if len(v) < 2 || !strings.HasPrefix(v, `"`) || !strings.HasSuffix(v, `"`) || !fileNameRe.MatchString(v[1:len(v)-1]) {
+				if len(v) < 2 || !strings.HasPrefix(v, `"`) || !strings.HasSuffix(v, `"`) || !fileName(v[1:len(v)-1]) {
 					return errors.New("an address that isn't the stream's")
 				}
 			}
-		case !fileNameRe.MatchString(line):
+		case !fileName(line):
 			return errors.New("an address that isn't the stream's")
 		}
 	}
