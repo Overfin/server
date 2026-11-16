@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -94,9 +95,15 @@ func (p *Pipeline) Keep(ctx context.Context, wanted []TMDBRef, refetch time.Time
 		}
 		keep[file] = true
 		if info, err := os.Stat(file); err != nil || !info.ModTime().After(refetch) {
+			if p.refusedLately(file) {
+				continue
+			}
 			data, err := p.fetchOriginal(ctx, ref, p.background)
 			if errors.Is(err, ErrHidden) || errors.Is(err, ErrUnsafe) {
-				continue // TMDB has no such image, or a bad one: tried again next pass
+				// TMDB has no such image, or a bad one: asked again in a
+				// week, not at every pass (TMDB's requests kept low).
+				p.refused(file)
+				continue
 			}
 			if err == nil {
 				err = writeKept(file, data)
@@ -277,4 +284,31 @@ func (p *Pipeline) ForgetKept() error {
 		}
 	}
 	return nil
+}
+
+// refusedAgain is how long an image TMDB refused (none there, or a bad
+// one) waits before it's asked for again.
+const refusedAgain = 7 * 24 * time.Hour
+
+var refusedImages = struct {
+	sync.Mutex
+	until map[string]time.Time
+}{until: map[string]time.Time{}}
+
+func (p *Pipeline) refused(file string) {
+	refusedImages.Lock()
+	defer refusedImages.Unlock()
+	refusedImages.until[file] = time.Now().Add(refusedAgain)
+}
+
+// refusedLately says whether TMDB refused file within refusedAgain.
+func (p *Pipeline) refusedLately(file string) bool {
+	refusedImages.Lock()
+	defer refusedImages.Unlock()
+	until, ok := refusedImages.until[file]
+	if ok && time.Now().After(until) {
+		delete(refusedImages.until, file)
+		return false
+	}
+	return ok
 }
