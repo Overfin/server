@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -572,6 +573,9 @@ func cleanPeerText(out *sessionJSON) bool {
 	clean := func(list []trackJSON) []trackJSON {
 		kept := list[:0]
 		for _, t := range list {
+			if !peerIDRe.MatchString(t.ID) {
+				continue
+			}
 			t.Label = peerLabel(t.Label)
 			t.Language = languageTag(t.Language)
 			if t.Role != tracks.Commentary && t.Role != tracks.Description {
@@ -590,8 +594,28 @@ func cleanPeerText(out *sessionJSON) bool {
 	if len(out.SubtitleTracks)+len(out.ForcedTracks) > 0 {
 		out.SubtitleStretchSeconds = StretchSeconds
 	}
+	// IDs as this server's own look, the duration a duration, skip markers
+	// of the kinds there are, within the title (rules 15 and 96).
+	for _, id := range []*string{&out.VersionID, &out.AudioTrack, &out.SubtitleTrack, &out.ForcedTrack} {
+		if !peerIDRe.MatchString(*id) && *id != "off" {
+			*id = ""
+		}
+	}
+	if out.DurationMs < 0 || out.DurationMs > maxPositionMs {
+		out.DurationMs = 0
+	}
+	segments := out.Segments[:0]
+	for _, sg := range out.Segments {
+		if slices.Contains(segmentKinds, sg.Kind) && sg.StartMs >= 0 && sg.EndMs > sg.StartMs && sg.EndMs <= maxPositionMs && len(segments) < 32 {
+			segments = append(segments, sg)
+		}
+	}
+	out.Segments = segments
 	versions := out.Versions[:0]
 	for _, v := range out.Versions {
+		if !peerIDRe.MatchString(v.ID) {
+			continue
+		}
 		if v.Name = peerLabel(v.Name); v.Name != "" {
 			versions = append(versions, v)
 		}
@@ -718,3 +742,10 @@ func (pb Playback) chooseRemoteTracks(w http.ResponseWriter, r *http.Request, s 
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// peerIDRe is what a paired server's IDs (tracks, versions) may be: plain
+// and short, as this server's own are.
+var peerIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// segmentKinds are the skip markers there are (Jellyfin's, in lower case).
+var segmentKinds = []string{"intro", "outro", "recap", "preview", "commercial"}
