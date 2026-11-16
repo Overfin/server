@@ -59,3 +59,31 @@ func TestOverrides(t *testing.T) {
 		t.Errorf("unknown item: %v", err)
 	}
 }
+
+// Back to Jellyfin's title, for an item Overfin had matched otherwise:
+// the next pass keeps Jellyfin's, and what profiles did stays with it.
+func TestClearOverrideOverOwnMatch(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	_, prof, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
+	item := strings.Repeat("0", 31) + "a"
+	film := CatalogItem{ID: item, Kind: "movie", Name: "Dune", SortName: "dune", TMDB: "841", FolderName: "Dune (1984)"}
+	s.PutCatalog(ctx, []CatalogItem{film}, 1)
+	if err := s.SetMatch(ctx, item, Match{TMDB: "438631"}, "Dune (1984)", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	s.PutCatalog(ctx, []CatalogItem{film}, 2)
+	s.RefreshTitleKeys(ctx)
+	s.SetOverride(ctx, item, "999", time.Now())
+	if err := s.ClearOverride(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	s.RecordPlay(ctx, prof.ID, "movie/tmdb/841", item, 0, true, time.Now())
+	s.PutCatalog(ctx, []CatalogItem{film}, 3) // the next pass
+	s.RefreshTitleKeys(ctx)
+	var key string
+	s.db.QueryRowContext(ctx, `SELECT title_key FROM catalog_items WHERE id = ?`, item).Scan(&key)
+	if key != "movie/tmdb/841" {
+		t.Errorf("after the next pass: %s", key)
+	}
+}

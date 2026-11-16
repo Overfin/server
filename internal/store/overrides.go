@@ -68,6 +68,14 @@ func (s *Store) ClearOverride(ctx context.Context, itemID string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM title_overrides WHERE item_id = ?`, itemID); err != nil {
 		return err
 	}
+	// Overfin's own match, if it made one, says Jellyfin's title from now
+	// on: kept otherwise, the next pass would put the item back on it
+	// (foundTMDB reads matches before Jellyfin's), leaving what profiles
+	// did on Jellyfin's title, which no item would be any more.
+	if _, err := tx.ExecContext(ctx, `UPDATE title_matches SET tmdb = ?, sure = 1, reasons = '[]', source = 'jellyfin'
+		WHERE item_id = ?`, nullString(jellyfinTMDB.String), itemID); err != nil {
+		return err
+	}
 	if err := s.retitle(ctx, tx, itemID, kind, jellyfinTMDB.String, oldKey.String); err != nil {
 		return err
 	}
