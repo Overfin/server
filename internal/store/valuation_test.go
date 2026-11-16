@@ -182,3 +182,26 @@ func TestValuationFactsDescribed(t *testing.T) {
 		t.Errorf("the season's episodes: %v, want %v", season.Episodes, want)
 	}
 }
+
+// A film's file replaced (a new item, a new date) keeps the film's first
+// arrival: an upgrade doesn't make it look just added.
+func TestValuationFilmSwapKeepsArrival(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	now := time.Now()
+	first := now.AddDate(0, -6, 0).Truncate(time.Second)
+	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
+	s.PutCatalog(ctx, []CatalogItem{{ID: id(0), Kind: "movie", Name: "Film", SortName: "film", TMDB: "7", AddedAt: first}}, 1)
+	s.PutCatalog(ctx, []CatalogItem{{ID: id(1), Kind: "movie", Name: "Film", SortName: "film", TMDB: "7", AddedAt: now}}, 2)
+	if err := s.DeleteCatalog(ctx, []string{id(0)}); err != nil {
+		t.Fatal(err)
+	}
+	s.RefreshTitleKeys(ctx)
+	f, err := s.ValuationFacts(ctx, now, nil, 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if film := f.Titles["movie/tmdb/7"]; film == nil || !film.Added.Equal(first) {
+		t.Fatalf("the film: %+v, want added %v", film, first)
+	}
+}

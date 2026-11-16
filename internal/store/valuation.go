@@ -201,6 +201,29 @@ func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []P
 		return nil, err
 	}
 
+	// When each film last arrived (title_history): a copy replacing another
+	// (an upgrade, a new file name) is a new item with a new date, but the
+	// film didn't arrive again.
+	filmArrived := map[string]int64{}
+	rows, err = s.read.QueryContext(ctx, `SELECT tmdb, max(at) FROM title_history
+		WHERE event = 'arrived' AND kind = 'movie' AND tmdb IS NOT NULL GROUP BY tmdb`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var tmdb string
+		var at int64
+		if err := rows.Scan(&tmdb, &at); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		filmArrived["movie/tmdb/"+tmdb] = at
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	// The films and seasons the libraries have.
 	rows, err = s.read.QueryContext(ctx, `SELECT title_key, max(coalesce(runtime_ms, 0)), coalesce(min(added_at), 0)
 		FROM catalog_items
@@ -224,6 +247,9 @@ func (s *Store) ValuationFacts(ctx context.Context, now time.Time, interests []P
 			}
 			// A film arrived with its first copy; a season, with its
 			// latest episode.
+			if at, ok := filmArrived[key]; ok && at > 0 && at < added {
+				added = at
+			}
 			if at := time.Unix(added, 0); added > 0 && at.After(t.Added) {
 				t.Added = at
 			}
