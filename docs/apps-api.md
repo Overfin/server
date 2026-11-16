@@ -104,9 +104,6 @@ it as a favorite. Every title someone watched is listed,
 and `changedAt` is only the day (midnight UTC). With `since`, only the
 titles changed on that day or later.
 
-With `since`, totals going down count as changes too (a favorite taken
-off, plays forgotten): a title nobody watches any more comes with zeros.
-
 With **what came and went**, an app that removes titles also reads the
 **measures** (`GET /apps/v1/measures`: over the last 90 days, how much of
 what arrived was watched, how much of the library, how much of what left
