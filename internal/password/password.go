@@ -14,15 +14,22 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"testing"
 	"unicode"
 	"unicode/utf8"
 )
 
 const (
-	method     = "pbkdf2-sha256"
-	iterations = 600_000
-	saltSize   = 16
-	keySize    = 32
+	method   = "pbkdf2-sha256"
+	saltSize = 16
+	keySize  = 32
+)
+
+// iterations is the cost of a new hash; minIterations the least a stored
+// hash may have. Only CheapForTests changes them.
+var (
+	iterations    = 600_000
+	minIterations = 100_000
 )
 
 // Lengths a password may have, in characters.
@@ -57,7 +64,7 @@ func Check(stored, pw string) bool {
 		return false
 	}
 	n, err := strconv.Atoi(parts[1])
-	if err != nil || n < 100_000 || n > 10_000_000 {
+	if err != nil || n < minIterations || n > 10_000_000 {
 		return false
 	}
 	enc := base64.RawStdEncoding
@@ -127,4 +134,19 @@ func Random() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// CheapForTests makes hashing cheap, for a test binary only (it panics in
+// Overfin itself): at the real cost, the sign-in tests took most of the
+// suite's time. Call it from TestMain, before any test runs.
+func CheapForTests() {
+	if !testing.Testing() {
+		panic("password: CheapForTests outside a test")
+	}
+	iterations, minIterations = 1_000, 1_000
+	h, err := Hash("not anyone's password")
+	if err != nil {
+		panic(err)
+	}
+	Dummy = h
 }

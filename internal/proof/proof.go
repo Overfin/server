@@ -15,12 +15,23 @@ import (
 	"math/bits"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 )
 
 // Bits is how many zero bits an answer's hash starts with: about 130,000
-// tries on average.
-const Bits = 17
+// tries on average. Only CheapForTests changes it.
+var Bits = 17
+
+// CheapForTests makes answers quick to find, for a test binary only (it
+// panics in Overfin itself): the sign-in tests solve one per request.
+// Call it from TestMain, before any test runs.
+func CheapForTests() {
+	if !testing.Testing() {
+		panic("proof: CheapForTests outside a test")
+	}
+	Bits = 4
+}
 
 // lifetime is how long a challenge works.
 const lifetime = 10 * time.Minute
