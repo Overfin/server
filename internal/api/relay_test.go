@@ -14,6 +14,10 @@ func TestCheckRelayedPlaylist(t *testing.T) {
 		{"#EXTM3U\nhttps://elsewhere.example.org/s0.ts\n", false},
 		{"#EXTM3U\n../../api/v1/me\n", false},
 		{"#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"https://k.example.org/key\"\n", false},
+		// Unquoted, which players may read too.
+		{"#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=https://k.example.org/key\n", false},
+		{"#EXTM3U\n#EXT-X-MAP:uri=https://k.example.org/i.mp4\n", false},
+		{"#EXTM3U\n#EXT-X-MAP:URI=init0.mp4\n", false},
 		{"<html>\n", false},
 	} {
 		if err := checkRelayedPlaylist([]byte(tc.body)); (err == nil) != tc.ok {

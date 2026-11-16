@@ -182,7 +182,9 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 	_, _ = io.Copy(w, res.Body)
 }
 
-var playlistURIRe = regexp.MustCompile(`URI="([^"]*)"`)
+// playlistURIRe finds every URI attribute of a tag, quoted or not (an
+// unquoted one, which players may read too, is refused).
+var playlistURIRe = regexp.MustCompile(`(?i)URI=("[^"]*"?|[^,]*)`)
 
 // checkRelayedPlaylist accepts a paired server's playlist only when every
 // address in it is a file of the same stream, by name (no path, no other
@@ -197,7 +199,8 @@ func checkRelayedPlaylist(body []byte) error {
 		case line == "":
 		case strings.HasPrefix(line, "#"):
 			for _, m := range playlistURIRe.FindAllStringSubmatch(line, -1) {
-				if !fileNameRe.MatchString(m[1]) {
+				v := m[1]
+				if len(v) < 2 || !strings.HasPrefix(v, `"`) || !strings.HasSuffix(v, `"`) || !fileNameRe.MatchString(v[1:len(v)-1]) {
 					return errors.New("an address that isn't the stream's")
 				}
 			}
