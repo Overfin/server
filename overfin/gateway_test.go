@@ -600,3 +600,40 @@ func TestSitePanel(t *testing.T) {
 		t.Errorf("admin.private, from the LAN: %q", got)
 	}
 }
+
+// A backend gives its panel a listener of its own (":8081") when the file
+// names none: reloading the file, which still names none, keeps it rather
+// than being refused as a change that needs a restart.
+func TestReloadKeepsBackendPanel(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "overfin.db")
+	cfgPath := filepath.Join(dir, "overfin.toml")
+	// A backend's: managed sign-in, the site's address.
+	backendConfig := strings.NewReplacer(`mode = "forwardauth"`, `mode = "managed"`, `trusted_proxies = ["127.0.0.1"]`, "",
+		`user_header = "Remote-User"`, "", "%DB%", dbPath).Replace(baseConfig) + "[site]\nurl = \"https://media.example.org\"\n"
+	if err := os.WriteFile(cfgPath, []byte(backendConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(cfgPath, env("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Admin.Listen = ":8081" // as the backend sets it at start
+	k, _ := keys.Derive(cfg.Secrets.Key)
+	box, _ := seal.New(k.TokenEncryption)
+	db, err := store.Open(context.Background(), dbPath, box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	jf, _ := jellyfin.New(cfg.Jellyfin.URL, "test")
+	sh := &shared{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), db: db, keys: k, jf: jf,
+		images: images.New(jf, 1<<20), tickets: playback.NewTickets(time.Hour)}
+	g, err := newGateway(cfgPath, cfg, sh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.reload(env("a")); err != nil {
+		t.Fatalf("reload refused: %v", err)
+	}
+}
