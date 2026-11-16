@@ -82,3 +82,37 @@ func TestTitleCategories(t *testing.T) {
 		}
 	}
 }
+
+// A film's file replaced (a new item for the same film), or a second copy
+// coming and going: the film neither arrives nor leaves again.
+func TestHistoryFilmCopies(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
+	film := func(n int) CatalogItem {
+		return CatalogItem{ID: id(n), Kind: "movie", Name: "F", SortName: "f", TMDB: "77"}
+	}
+	count := func(event string) int {
+		var n int
+		s.db.QueryRowContext(ctx, `SELECT count(*) FROM title_history WHERE event = ? AND tmdb = '77'`, event).Scan(&n)
+		return n
+	}
+	if err := s.PutCatalog(ctx, []CatalogItem{film(0)}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutCatalog(ctx, []CatalogItem{film(1)}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteCatalog(ctx, []string{id(0)}); err != nil {
+		t.Fatal(err)
+	}
+	if a, l := count("arrived"), count("left"); a != 1 || l != 0 {
+		t.Fatalf("after the swap: arrived %d, left %d", a, l)
+	}
+	if err := s.DeleteCatalog(ctx, []string{id(1)}); err != nil {
+		t.Fatal(err)
+	}
+	if l := count("left"); l != 1 {
+		t.Fatalf("last copy gone: left %d", l)
+	}
+}

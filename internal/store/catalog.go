@@ -176,6 +176,14 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 			arrived = errors.Is(tx.QueryRowContext(ctx, `SELECT 1 FROM catalog_items WHERE id = ?`, it.ID).Scan(&one), sql.ErrNoRows)
 		}
 		tmdb := s.foundTMDB(ctx, tx, it)
+		// A film's new copy, or its file replaced (an upgrade: a new item),
+		// while another copy of it is here: it didn't arrive.
+		if arrived && it.Kind == "movie" && tmdb != "" {
+			var other int
+			if tx.QueryRowContext(ctx, `SELECT 1 FROM catalog_items WHERE kind = 'movie' AND tmdb = ? AND id <> ? LIMIT 1`, tmdb, it.ID).Scan(&other) == nil {
+				arrived = false
+			}
+		}
 		if _, err := stmt.ExecContext(ctx, it.ID, it.Kind, it.Name, it.SortName, nullInt(it.Year),
 			nullString(it.SeriesID), nullString(it.SeasonID), it.SeasonNumber, it.EpisodeNumber,
 			nullString(tmdb), nullString(it.IMDb), nullString(it.TVDB), it.Rating,
@@ -308,6 +316,15 @@ func (s *Store) DeleteCatalog(ctx context.Context, ids []string) error {
 	}
 	now := time.Now()
 	for _, l := range left {
+		// A film's copy going while another stays (its file replaced, a
+		// second version removed): the film didn't leave.
+		if l.kind == "movie" && l.tmdb != "" {
+			var other int
+			if tx.QueryRowContext(ctx, `SELECT 1 FROM catalog_items WHERE kind = 'movie' AND tmdb = ?
+				AND id NOT IN (SELECT value FROM json_each(?)) LIMIT 1`, l.tmdb, jsonList(ids)).Scan(&other) == nil {
+				continue
+			}
+		}
 		if err := recordHistory(ctx, tx, "left", l.kind, l.id, l.seriesID, l.season, l.tmdb, l.tvdb, now); err != nil {
 			return err
 		}
