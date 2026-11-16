@@ -7,6 +7,10 @@ service would: their own sign-in, profiles, kids limits that hold,
 wishlists, and a clean web app. Jellyfin stays private behind Overfin, and nobody needs
 a Jellyfin account.
 
+**Pair your server with your friends' servers**, and their libraries show
+on your site beside yours, playable with the sign-in your people already
+have: [federation](#federation).
+
 <p>
   <img src="docs/screenshots/home.jpg" alt="The home page: a slideshow of titles over rows of recommendations" width="72%">
   <img src="docs/screenshots/phone.jpg" alt="The home page on a phone" width="24%">
@@ -53,8 +57,12 @@ internet: [how it's built, and why](docs/architecture.md).
   trending titles, and wishlists for what you don't have: Overfin takes
   turns between people, and Overtide or Seerr fetches.
 - **Watching in the browser**, phones included: subtitles, audio tracks,
-  skip intro, next episode, and resume on any device.
-- **Recommendations** per profile, a list, favorites, and their language.
+  previews while seeking, skip intro, next episode, and resume on any device.
+- **A page for every episode**, and what each copy holds: its video, audio
+  and subtitle languages.
+- **Recommendations** per profile, **Not interested** to hide a title, a
+  list, favorites, and their language.
+- **Your friends' servers' titles** beside yours ([federation](#federation)).
 
 **For you, running it**
 
@@ -62,12 +70,34 @@ internet: [how it's built, and why](docs/architecture.md).
   itself when you give it a domain.
 - **A control panel**: people and invitations, what's playing, limits per
   account, categories (Films, Anime, Kids…), your GPU, your brand.
+- **Libraries shared with other servers**, paired by hand, with limits per
+  pairing ([federation](#federation)).
 - **Bring people over** from another Jellyfin, watch history included.
 - **Your identity provider** (OpenID Connect, forward auth) if you have one.
 - **An open API**: the official web app uses nothing else, so your own app
   can do everything it does.
 
 [Everything it does, in detail](docs/features.md).
+
+## Federation
+
+Two Overfin servers whose operators trust each other can pair, and share
+libraries both ways:
+
+- **Their titles on your site**, in your menu ("Films (Alex's server)") or
+  sorted into your own categories, in search, on title pages. A film you
+  both have is one title.
+- **Played through your server**: a viewer's browser never reaches the
+  other server, which never learns who watches. History, positions, lists
+  and kids limits stay on yours.
+- **Library by library**: each side offers some and wants some; only what
+  one offers and the other wants is shared. Streams, transcodes and
+  bitrate are limited per pairing, by the side that shares.
+- **Paired by hand**, with a one-time code and fingerprints compared
+  between operators. Every request between servers is signed; servers
+  that aren't paired get a 404. Ending a pairing ends it on both sides.
+
+How to pair, and what each side sees: [docs/federation.md](docs/federation.md).
 
 ## Where it stands
 
@@ -106,6 +136,8 @@ has reviewed them yet.
 - [Your brand, and your emails](docs/branding-and-emails.md)
 - [Notices](docs/notices.md): emails and webhooks about accounts.
 - [Moving people over from Jellyfin](docs/moving-from-jellyfin.md)
+- [Federation](docs/federation.md): pairing with other servers, sharing
+  libraries, limits.
 - [Features, in detail](docs/features.md): everything it does, TMDB and
   Seerr, building your own client.
 - [Other apps](docs/apps-api.md): the API Overtide reads.

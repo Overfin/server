@@ -41,6 +41,16 @@
   yet: this is for a TV's browser, when it passes its remote's keys to the
   page (not all do).
 
+**Across servers**
+
+- **Federation**: pair your server with friends' Overfin servers, by hand
+  with a one-time code, and share libraries both ways, each side choosing
+  what it offers and what it wants. Their titles show on your site in
+  your menu or your categories, with search and title pages; they play
+  through your server, which keeps everything personal and never lets the
+  other server learn who watches. Streams, transcodes and bitrate are
+  limited per pairing. How it works: [Federation](federation.md).
+
 **For you, running it**
 
 - **Overfin and its own Jellyfin, in one compose file**: Overfin sets
