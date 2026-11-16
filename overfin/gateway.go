@@ -622,7 +622,7 @@ func (g *gateway) reload(getenv func(string) string) error {
 	// The panel's listener a backend gives itself when the file names none
 	// (":8081", after the checks, which are for files) isn't in the file
 	// either: it stays, or every reload would be refused as a restart.
-	if cfg.Admin.Listen == "" {
+	if backendMode && cfg.Admin.Listen == "" {
 		cfg.Admin.Listen = g.cfg.Admin.Listen
 	}
 	if changed := restartOnly(g.cfg, cfg); len(changed) > 0 {

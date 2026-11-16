@@ -619,6 +619,8 @@ func TestReloadKeepsBackendPanel(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Admin.Listen = ":8081" // as the backend sets it at start
+	backendMode = true
+	t.Cleanup(func() { backendMode = false })
 	k, _ := keys.Derive(cfg.Secrets.Key)
 	box, _ := seal.New(k.TokenEncryption)
 	db, err := store.Open(context.Background(), dbPath, box)
