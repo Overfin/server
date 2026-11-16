@@ -411,7 +411,7 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	wantAudio, wantSubtitles := l.wishesFor(ctx, p, tracksKey, req.AudioLanguage)
 	var out sessionJSON
 	remoteStops.wait(ctx, peer.ID, 5*time.Second)
-	status, err := fed.Call(ctx, peer, "/api/v1/federation/play", peerPlayRequest{Title: key, Capabilities: req.Capabilities,
+	status, err := fed.Call(ctx, peer, "/api/v1/federation/play", peerPlayRequest{Title: key, Capabilities: req.Capabilities.ForPeer(),
 		StartPositionMs: req.StartPositionMs, MaxBitrateKbps: kbps, AudioLanguage: wantAudio, SubtitleLanguage: wantSubtitles,
 		AudioTrack: req.AudioTrack, SubtitleTrack: req.SubtitleTrack}, &out)
 	switch {
