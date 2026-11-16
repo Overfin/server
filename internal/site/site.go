@@ -114,6 +114,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
+	// A folder is its index.html: its tags are that file's.
+	if info.Name() == "index.html" && path.Base(name) != "index.html" {
+		name = path.Join(name, "index.html")
+	}
 	rs, ok := f.(io.ReadSeeker)
 	if !ok {
 		http.NotFound(w, r)
@@ -133,7 +137,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	modified := time.Time{}
 	if tag, ok := h.etags[name]; ok {
 		hd.Set("ETag", tag)
-	} else {
+	} else if !info.ModTime().IsZero() {
 		hd.Set("ETag", fmt.Sprintf(`W/"%x-%x"`, info.Size(), info.ModTime().UnixNano()))
 	}
 	if z, ok := h.gzipped[name]; ok {

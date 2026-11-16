@@ -166,3 +166,18 @@ func TestCompressedAndKept(t *testing.T) {
 		t.Errorf("small, unhashed: %v", w.Header())
 	}
 }
+
+// A folder's address is its index.html, tag included: the content's, not
+// one a same-size later build would match.
+func TestFolderIndexTag(t *testing.T) {
+	h, err := Embedded(files, "default-src 'self'", false, open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := get(h, "GET", "/sub/")
+	file := get(h, "GET", "/sub/index.html")
+	if dir.Body.String() != "sub" || dir.Header().Get("ETag") == "" || dir.Header().Get("ETag") != file.Header().Get("ETag") ||
+		strings.HasPrefix(dir.Header().Get("ETag"), "W/") {
+		t.Errorf("folder %q, file %q", dir.Header().Get("ETag"), file.Header().Get("ETag"))
+	}
+}
