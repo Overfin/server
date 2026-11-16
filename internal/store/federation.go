@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -455,10 +456,15 @@ func (s *Store) SetPeerWants(ctx context.Context, peerID string, libs []PeerLibr
 		return err
 	}
 	for _, l := range libs {
+		// The menu entry's ID comes from the pairing and the library: a
+		// library wanted again (unticked, then ticked) gets the same one
+		// back, and categories that named it still do.
+		sum := sha256.Sum256([]byte(peerID + "\x00" + l.ID))
+		menuID := hex.EncodeToString(sum[:16])
 		if _, err := tx.ExecContext(ctx, `INSERT INTO peer_wants (peer_id, library_id, name, kind, menu_id)
-			VALUES (?, ?, ?, ?, lower(hex(randomblob(16))))
+			VALUES (?, ?, ?, ?, ?)
 			ON CONFLICT (peer_id, library_id) DO UPDATE SET name = excluded.name, kind = excluded.kind`,
-			peerID, l.ID, l.Name, l.Kind); err != nil {
+			peerID, l.ID, l.Name, l.Kind, menuID); err != nil {
 			return err
 		}
 	}

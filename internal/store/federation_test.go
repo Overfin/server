@@ -141,6 +141,19 @@ func TestPeerSharing(t *testing.T) {
 	if got, _ := s.PeerWants(ctx, p.ID); len(got) != 1 || got[0].Name != "Films" {
 		t.Fatalf("wants: %v", got)
 	}
+	// Unticked, then ticked again: its menu entry has the same ID (the
+	// categories that name it still do).
+	menuID := func() string {
+		var id string
+		s.db.QueryRowContext(ctx, `SELECT menu_id FROM peer_wants WHERE peer_id = ? AND library_id = 'x'`, p.ID).Scan(&id)
+		return id
+	}
+	first := menuID()
+	s.SetPeerWants(ctx, p.ID, nil)
+	s.SetPeerWants(ctx, p.ID, []PeerLibrary{{ID: "x", Name: "Films", Kind: "movies"}})
+	if again := menuID(); first == "" || again != first {
+		t.Errorf("menu ID wanted again: %q, was %q", again, first)
+	}
 	s.DeletePeer(ctx, p.ID)
 	if got, _ := s.PeerOffers(ctx, p.ID); len(got) != 0 {
 		t.Fatalf("offers outlived the peer: %v", got)
