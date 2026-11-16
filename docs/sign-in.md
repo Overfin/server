@@ -43,7 +43,9 @@ password), for a user allowed only to **view users**.
 still configured (with its `[connector]`), run
 `overfin-backend -import-people` once: everyone it has, with an email, can then sign in
 with that email, keeping their account, and the members of `admin.group`
-stay admins on the site. Then switch to `identity.mode = "managed"`.
+stay admins on the site. With `identity.required_group` set, only the
+provider's members of that group are imported; someone whose groups it
+can't tell is left out, and counted among those left out. Then switch to `identity.mode = "managed"`.
 Imported people have no password yet: they choose one with "Forgot your
 password?", or you set one in the panel.
 

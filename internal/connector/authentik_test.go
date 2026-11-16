@@ -24,9 +24,11 @@ func TestAuthentikPeople(t *testing.T) {
 		switch page {
 		case "1":
 			res["pagination"] = map[string]any{"next": 2}
-			res["results"] = []map[string]any{{"uid": "u1", "username": "alice", "name": "Alice", "email": "a@example.org", "is_active": true}}
+			res["results"] = []map[string]any{{"uid": "u1", "username": "alice", "name": "Alice", "email": "a@example.org", "is_active": true,
+				"groups_obj": []map[string]any{{"name": "media"}, {"name": "admins"}}}}
 		case "2":
-			res["results"] = []map[string]any{{"uid": "u2", "username": "bob", "is_active": false}}
+			res["results"] = []map[string]any{{"uid": "u2", "username": "bob", "is_active": false, "groups_obj": []map[string]any{{"name": "other"}}},
+				{"uid": "u3", "username": "cy"}}
 		}
 		json.NewEncoder(w).Encode(res)
 	}))
@@ -39,6 +41,11 @@ func TestAuthentikPeople(t *testing.T) {
 	}
 	if people["u1"].Name != "Alice" || !people["u1"].Active || people["u2"].Username != "bob" || people["u2"].Active {
 		t.Errorf("people = %+v", people)
+	}
+	// Members: those whose groups include it; cy's groups weren't listed.
+	members, err := a.Members(context.Background(), "media")
+	if err != nil || len(members) != 1 || !members["u1"] {
+		t.Errorf("members = %v %v", members, err)
 	}
 	a.Token = "bad"
 	if _, err := a.People(context.Background()); !errors.Is(err, ErrUnauthorized) {

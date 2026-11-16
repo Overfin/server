@@ -127,3 +127,27 @@ func TestPocketIDFirstAdmin(t *testing.T) {
 		t.Errorf("with someone there: made %v, %v, sent %v", ok, err, made)
 	}
 }
+
+// Members: the users on the named group's page; none for a group Pocket ID
+// doesn't have.
+func TestPocketIDMembers(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/user-groups":
+			io.WriteString(w, `{"data":[{"id":"g-old","name":"media-old"},{"id":"g1","name":"media"}]}`)
+		case "/api/user-groups/g1":
+			io.WriteString(w, `{"id":"g1","name":"media","users":[{"id":"u1"},{"id":"u3"}]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	p := &PocketID{BaseURL: srv.URL, Key: "k", HTTP: srv.Client()}
+	members, err := p.Members(context.Background(), "media")
+	if err != nil || len(members) != 2 || !members["u1"] || !members["u3"] {
+		t.Errorf("members: %v %v", members, err)
+	}
+	if members, err := p.Members(context.Background(), "nobody"); err != nil || len(members) != 0 {
+		t.Errorf("a missing group: %v %v", members, err)
+	}
+}

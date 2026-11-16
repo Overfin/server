@@ -67,6 +67,33 @@ func (p *PocketID) People(ctx context.Context) (map[string]Person, error) {
 	return out, nil
 }
 
+// Members returns the users in the group of that name, from the group's
+// own page; none when Pocket ID has no such group.
+func (p *PocketID) Members(ctx context.Context, group string) (map[string]bool, error) {
+	id, err := p.groupID(ctx, group)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	if id == "" {
+		return out, nil
+	}
+	var res struct {
+		Users []struct {
+			ID string `json:"id"`
+		} `json:"users"`
+	}
+	if err := p.do(ctx, http.MethodGet, "/api/user-groups/"+url.PathEscape(id), nil, &res); err != nil {
+		return nil, fmt.Errorf("reading the group %q: %w", group, err)
+	}
+	for _, u := range res.Users {
+		if u.ID != "" {
+			out[u.ID] = true
+		}
+	}
+	return out, nil
+}
+
 // staticAPIUser is the user Pocket ID's STATIC_API_KEY acts as: not a
 // person.
 const staticAPIUser = "00000000-0000-0000-0000-000000000000"

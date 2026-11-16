@@ -21,22 +21,36 @@ import (
 // to managed sign-in, everyone the provider has, with an email, gets to
 // sign in with it, under the user ID they already have, so their account
 // stays theirs. Those whose last login put them in the control panel's
-// group are admins. Run it with the provider's configuration still in
-// place ([connector]); people already there are left as they are.
+// group are admins. With identity.required_group set, only the people the
+// provider puts in that group are imported. Run it with the provider's
+// configuration still in place ([connector]); people already there are
+// left as they are.
 func importPeople(ctx context.Context, cfg *config.Config, db *store.Store, w io.Writer) error {
 	cn := cfg.Connector
 	if !cn.Enabled() {
 		return errors.New("-import-people reads people from the identity provider: it needs [connector] in the configuration")
 	}
 	dir := connector.New(cn.Kind, cn.URL, cfg.Secrets.ConnectorToken, oidc.NewClient(cn.Dial))
-	return importFrom(ctx, dir, cfg.Admin.Group, db, w)
+	return importFrom(ctx, dir, cfg.Admin.Group, cfg.Identity.RequiredGroup, db, w)
 }
 
-// importFrom imports the people of dir; adminGroup names the admins' group.
-func importFrom(ctx context.Context, dir connector.Directory, adminGroup string, db *store.Store, w io.Writer) error {
+// importFrom imports the people of dir; adminGroup names the admins' group,
+// and requiredGroup, when set, the group someone must be in to be imported.
+// Someone whose membership the provider can't tell is left out.
+func importFrom(ctx context.Context, dir connector.Directory, adminGroup, requiredGroup string, db *store.Store, w io.Writer) error {
 	people, err := dir.People(ctx)
 	if err != nil {
 		return fmt.Errorf("reading people from the identity provider: %w", err)
+	}
+	var members map[string]bool
+	if requiredGroup != "" {
+		members = map[string]bool{}
+		g, ok := dir.(connector.Groups)
+		if !ok {
+			fmt.Fprintf(w, "This identity provider can't tell who is in %q: nobody is imported.\n", requiredGroup)
+		} else if members, err = g.Members(ctx, requiredGroup); err != nil {
+			return fmt.Errorf("reading who is in %q from the identity provider: %w", requiredGroup, err)
+		}
 	}
 	admins := map[string]bool{}
 	if g := adminGroup; g != "" {
@@ -48,6 +62,10 @@ func importFrom(ctx context.Context, dir connector.Directory, adminGroup string,
 	for subject, p := range people {
 		a, err := mail.ParseAddress(p.Email)
 		if !p.Active || err != nil || a.Address != p.Email {
+			skipped++
+			continue
+		}
+		if members != nil && !members[subject] {
 			skipped++
 			continue
 		}
@@ -67,8 +85,11 @@ func importFrom(ctx context.Context, dir connector.Directory, adminGroup string,
 			adminCount++
 		}
 	}
-	fmt.Fprintf(w, "%d people imported (%d admins); %d left out (no usable email, disabled, or already there).\n",
-		added, adminCount, skipped)
+	why := "no usable email, disabled, or already there"
+	if requiredGroup != "" {
+		why = fmt.Sprintf("no usable email, disabled, not in %q, or already there", requiredGroup)
+	}
+	fmt.Fprintf(w, "%d people imported (%d admins); %d left out (%s).\n", added, adminCount, skipped, why)
 	if adminCount == 0 {
 		fmt.Fprintln(w, "No admin was found among them: with managed sign-in, the setup page will ask for one.")
 	}
