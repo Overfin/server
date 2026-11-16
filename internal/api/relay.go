@@ -11,7 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -136,11 +136,17 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 		contentType := "application/vnd.apple.mpegurl"
 		switch {
 		case what.playlist:
-			if err := checkRelayedPlaylist(body); err != nil {
+			subset := mediaSubset
+			if what.path == "master.m3u8" {
+				subset = masterSubset
+			}
+			kept, err := relayedPlaylist(body, subset)
+			if err != nil {
 				l.Logger.Warn("refused a paired server's playlist", "playback", st.ID, "err", err)
 				problem.Send(w, problem.NotPlayable, "")
 				return
 			}
+			body = kept
 		case what.vtt:
 			vtt, ok := playback.SanitizeVTT(body)
 			if !ok {
@@ -305,31 +311,109 @@ func (s Stream) relaySheet(w http.ResponseWriter, r *http.Request, st *playback.
 	writeSheet(w, data)
 }
 
-// playlistURIRe finds every URI attribute of a tag, quoted or not (an
-// unquoted one, which players may read too, is refused).
-var playlistURIRe = regexp.MustCompile(`(?i)URI=("[^"]*"?|[^,]*)`)
+// maxPlaylistURIs bounds the URIs of a paired server's playlist (MSFP
+// media, section 3.1): URI lines and URI= values together.
+const maxPlaylistURIs = 50_000
 
-// checkRelayedPlaylist accepts a paired server's playlist only when every
-// address in it is a file of the same stream, by name (no path, no other
-// server): what the paired server's own rewriting gives (rule 14).
+// Tags of the HLS subset (MSFP media, section 3.1), by playlist kind:
+// what a relayed playlist keeps; other tags and comments are dropped.
+var (
+	masterSubset = []string{"#EXTM3U", "#EXT-X-VERSION", "#EXT-X-INDEPENDENT-SEGMENTS", "#EXT-X-STREAM-INF"}
+	mediaSubset  = []string{"#EXTM3U", "#EXT-X-VERSION", "#EXT-X-TARGETDURATION", "#EXT-X-MEDIA-SEQUENCE",
+		"#EXT-X-PLAYLIST-TYPE", "#EXT-X-INDEPENDENT-SEGMENTS", "#EXTINF", "#EXT-X-DISCONTINUITY", "#EXT-X-ENDLIST", "#EXT-X-MAP"}
+)
+
+var errPlaylist = errors.New("a playlist outside what MSFP allows")
+
+// checkRelayedPlaylist checks a paired server's playlist as MSFP media
+// section 3.1 says, in its order: at most 2 MiB; lines split at line
+// feeds, one carriage return at a line's end removed; a first line of
+// exactly #EXTM3U; every other line empty, a tag (or comment) whose every
+// URI=, in any case and anywhere, is a quoted file name of the stream, or
+// a file name alone; no EXT-X-DEFINE, EXT-X-KEY or EXT-X-SESSION-KEY; at
+// most maxPlaylistURIs URIs (rule 14).
 func checkRelayedPlaylist(body []byte) error {
-	if !bytes.HasPrefix(body, []byte("#EXTM3U")) {
-		return errors.New("not a playlist")
+	_, err := relayedPlaylist(body, nil)
+	return err
+}
+
+// relayedPlaylist is a paired server's playlist once checked
+// (checkRelayedPlaylist), keeping only the tags of subset, comments
+// dropped, each line ending in a line feed; with a nil subset, every
+// line is kept.
+func relayedPlaylist(body []byte, subset []string) ([]byte, error) {
+	if len(body) > maxPlaylist {
+		return nil, errPlaylist
 	}
-	for line := range strings.SplitSeq(string(body), "\n") {
-		line = strings.TrimSuffix(line, "\r")
+	lines := strings.Split(string(body), "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimSuffix(line, "\r")
+	}
+	if lines[0] != "#EXTM3U" {
+		return nil, errors.New("not a playlist")
+	}
+	var out strings.Builder
+	uris := 0
+	for _, line := range lines {
 		switch {
 		case line == "":
+			continue
 		case strings.HasPrefix(line, "#"):
-			for _, m := range playlistURIRe.FindAllStringSubmatch(line, -1) {
-				v := m[1]
-				if len(v) < 2 || !strings.HasPrefix(v, `"`) || !strings.HasSuffix(v, `"`) || !fileName(v[1:len(v)-1]) {
-					return errors.New("an address that isn't the stream's")
-				}
+			n, ok := quotedURIs(line)
+			if !ok {
+				return nil, errors.New("an address that isn't the stream's")
+			}
+			if line == "#EXT-X-DEFINE" || strings.HasPrefix(line, "#EXT-X-DEFINE:") ||
+				strings.HasPrefix(line, "#EXT-X-KEY:") || strings.HasPrefix(line, "#EXT-X-SESSION-KEY:") {
+				return nil, errors.New("variables or keys, which MSFP leaves out")
+			}
+			uris += n
+			tag, _, _ := strings.Cut(line, ":")
+			if subset != nil && !slices.Contains(subset, tag) {
+				continue
 			}
 		case !fileName(line):
-			return errors.New("an address that isn't the stream's")
+			return nil, errors.New("an address that isn't the stream's")
+		default:
+			uris++
+		}
+		if uris > maxPlaylistURIs {
+			return nil, errors.New("too many addresses")
+		}
+		out.WriteString(line)
+		out.WriteByte('\n')
+	}
+	return []byte(out.String()), nil
+}
+
+// quotedURIs counts a tag line's URI= values, false when one isn't a
+// quoted file name of the stream: every URI=, in any case and anywhere
+// in the line (inside another attribute's quoted string too), followed by
+// a quote, a file name and a quote. HLS quoted strings have no escapes.
+func quotedURIs(line string) (int, bool) {
+	// Upper case, ASCII letters only, byte for byte: offsets stay the
+	// line's (strings.ToUpper may change a line's length).
+	upper := []byte(line)
+	for i, c := range upper {
+		if 'a' <= c && c <= 'z' {
+			upper[i] = c - 'a' + 'A'
 		}
 	}
-	return nil
+	n := 0
+	for from := 0; ; {
+		i := bytes.Index(upper[from:], []byte("URI="))
+		if i < 0 {
+			return n, true
+		}
+		rest := line[from+i+len("URI="):]
+		if !strings.HasPrefix(rest, `"`) {
+			return n, false
+		}
+		name, _, closed := strings.Cut(rest[1:], `"`)
+		if !closed || !fileName(name) {
+			return n, false
+		}
+		n++
+		from += i + len("URI=")
+	}
 }

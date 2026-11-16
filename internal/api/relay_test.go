@@ -1,6 +1,11 @@
 package api
 
 import (
+	"encoding/hex"
+	"encoding/json"
+	"os"
+
+	"github.com/overfin/server/internal/playback"
 	"net/http"
 	"strings"
 	"testing"
@@ -69,5 +74,94 @@ func TestRelayErrorWithoutTicket(t *testing.T) {
 	}
 	if got := withoutURL(err).Error(); strings.Contains(got, "SECRETTICKET") || !strings.Contains(got, "Get") {
 		t.Errorf("logged as %q", got)
+	}
+}
+
+// MSFP's media test vectors (https://github.com/C0PT3R/msfp-spec,
+// vectors/v1/media.json), copied in testdata/media-vectors.json: each
+// case through the code that checks what a paired server sends.
+type mediaVectors struct {
+	HLS []struct {
+		Name  string `json:"name"`
+		Text  string `json:"text"`
+		Valid bool   `json:"valid"`
+	} `json:"hls"`
+	WebVTT []struct {
+		Name   string `json:"name"`
+		Text   string `json:"text"`
+		Hex    string `json:"hex"`
+		Valid  bool   `json:"valid"`
+		Output string `json:"output"`
+	} `json:"webvtt"`
+	PGS []struct {
+		Name  string `json:"name"`
+		Hex   string `json:"hex"`
+		Valid bool   `json:"valid"`
+	} `json:"pgs"`
+}
+
+func readMediaVectors(t *testing.T) mediaVectors {
+	t.Helper()
+	b, err := os.ReadFile("testdata/media-vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v mediaVectors
+	if err := json.Unmarshal(b, &v); err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+func TestHLSVectors(t *testing.T) {
+	v := readMediaVectors(t)
+	if len(v.HLS) != 25 {
+		t.Fatalf("%d HLS cases", len(v.HLS))
+	}
+	for _, c := range v.HLS {
+		if err := checkRelayedPlaylist([]byte(c.Text)); (err == nil) != c.Valid {
+			t.Errorf("%s: %v, want valid %v", c.Name, err, c.Valid)
+		}
+	}
+}
+
+func TestWebVTTVectors(t *testing.T) {
+	for _, c := range readMediaVectors(t).WebVTT {
+		in := []byte(c.Text)
+		if c.Hex != "" {
+			in, _ = hex.DecodeString(c.Hex)
+		}
+		out, ok := playback.SanitizeVTT(in)
+		if ok != c.Valid || (ok && string(out) != c.Output) {
+			t.Errorf("%s: %v %q, want %v %q", c.Name, ok, out, c.Valid, c.Output)
+		}
+	}
+}
+
+func TestPGSVectors(t *testing.T) {
+	for _, c := range readMediaVectors(t).PGS {
+		in, _ := hex.DecodeString(c.Hex)
+		if err := playback.CheckPGS(in); (err == nil) != c.Valid {
+			t.Errorf("%s: %v, want valid %v", c.Name, err, c.Valid)
+		}
+	}
+}
+
+// A relayed playlist keeps the subset's tags only: comments and other
+// tags are dropped, URIs checked in them all the same.
+func TestRelayedPlaylistKeepsTheSubset(t *testing.T) {
+	got, err := relayedPlaylist([]byte("#EXTM3U\r\n# a comment\n#EXT-X-FOO:BAR=1\n#EXT-X-TARGETDURATION:6\n\n#EXTINF:6,\nseg0.ts\n#EXT-X-ENDLIST"), mediaSubset)
+	if want := "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nseg0.ts\n#EXT-X-ENDLIST\n"; err != nil || string(got) != want {
+		t.Fatalf("%q %v", got, err)
+	}
+	if _, err := relayedPlaylist([]byte("#EXTM3U\n#EXT-X-FOO:URI=\"a/b\"\n"), mediaSubset); err == nil {
+		t.Fatal("a dropped tag's URI still counts")
+	}
+	if _, err := relayedPlaylist([]byte("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv0.m3u8\n"+strings.Repeat("s.ts\n", maxPlaylistURIs)), nil); err == nil {
+		t.Fatal("too many URIs")
+	}
+	// Byte offsets stay right past letters whose upper case is longer.
+	if _, err := relayedPlaylist([]byte("#EXTM3U\n#EXTINF:6,ßßßß uri=\"a/b\"\nseg0.ts\n"), nil); err == nil {
+		t.Fatal("a URI after non-ASCII text")
 	}
 }

@@ -173,8 +173,14 @@ func rewrite(body []byte, upstream Upstream, tags []string,
 					return nil, err
 				}
 				line = `#EXT-X-MAP:URI="` + neutral + `"`
-			} else if strings.Contains(line, "URI=") || strings.Contains(line, "://") {
-				continue // any other tag pointing elsewhere is dropped
+			} else if m[1] == "EXTINF" {
+				// The duration only: a segment's title is free text, which
+				// could hold what a paired server's check refuses (a uri=).
+				if d, _, ok := strings.Cut(line, ","); ok {
+					line = d + ","
+				}
+			} else if strings.Contains(strings.ToUpper(line), "URI=") || strings.Contains(line, "://") {
+				continue // any other tag pointing elsewhere, in any case, is dropped
 			}
 			b.WriteString(line + "\n")
 		default:
