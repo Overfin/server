@@ -83,9 +83,21 @@ func (l Library) artworkImage(w http.ResponseWriter, r *http.Request, p *store.P
 		if err != nil {
 			return err
 		}
+		var upcoming map[string]int
 		for i, v := range visible {
 			if v && !soon[i] {
 				return nil
+			}
+			// Not out yet, on discovery's upcoming list, which shows it.
+			if v && (titles[i].Ref.Kind == "movie" || titles[i].Ref.Kind == "series") {
+				if upcoming == nil {
+					if upcoming, err = st.ListPositions(ctx, "upcoming"); err != nil {
+						return err
+					}
+				}
+				if _, ok := upcoming[titles[i].Ref.Kind+"/"+titles[i].Ref.TMDB()]; ok {
+					return nil
+				}
 			}
 		}
 		for i, v := range visible {

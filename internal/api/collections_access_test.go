@@ -140,6 +140,15 @@ func TestCollectionImagesAccess(t *testing.T) {
 		"/heatposter11.jpg": 404, "/heattextless.jpg": 404, "/sagaposter1.jpg": 404, "/adultfuture1.jpg": 404,
 		"/futureposter1.jpg": 404,
 	})
+
+	// On discovery's upcoming list, which shows films not out yet: their
+	// posters too, within each profile's limits.
+	st.SetList(ctx, "upcoming", "movie", []string{"8", "9"})
+	expect("partner, upcoming", map[string]int{"/loneposter12.jpg": 404, "/adultfuture1.jpg": 404, "/strayposter1.jpg": 404})
+	post(t, srv, "/api/v1/profiles/"+kid.ID+"/activate", `{}`)
+	expect("kid, upcoming", map[string]int{"/loneposter12.jpg": 200, "/adultfuture1.jpg": 404, "/strayposter1.jpg": 404})
+	post(t, srv, "/api/v1/profiles/"+ownerID(t, srv)+"/activate", `{}`)
+	expect("owner, upcoming", map[string]int{"/loneposter12.jpg": 200, "/adultfuture1.jpg": 200, "/strayposter1.jpg": 404})
 }
 
 // A film not out yet, listed on a collection's page, can't be requested.
