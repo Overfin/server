@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"slices"
 	"strings"
@@ -176,5 +177,37 @@ func TestCategories(t *testing.T) {
 	s.SetLibrariesShown(ctx, false)
 	if on, _ := s.LibrariesShown(ctx); on {
 		t.Error("libraries still shown")
+	}
+}
+
+// A library renamed (a new Jellyfin ID): profiles' libraries, categories'
+// rules and offers to paired servers follow it.
+func TestReplaceLibraryID(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	oldID, newID := strings.Repeat("a", 32), strings.Repeat("b", 32)
+	other := strings.Repeat("c", 32)
+	c := &Category{Names: map[string]string{"en": "Kids"}, Rules: CategoryRules{Kinds: []string{"movie"}, Libraries: []string{other, oldID}}}
+	if err := s.SaveCategory(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	_, p, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
+	s.db.ExecContext(ctx, `UPDATE profiles SET libraries = ? WHERE id = ?`, `["`+oldID+`"]`, p.ID)
+	peer, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A")
+	s.SetPeerOffers(ctx, peer.ID, []string{oldID})
+	if err := s.ReplaceLibraryID(ctx, oldID, newID); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.CategoryByID(ctx, c.ID)
+	if strings.Join(got.Rules.Libraries, ",") != other+","+newID || strings.Join(got.Rules.Kinds, ",") != "movie" {
+		t.Errorf("category: %+v", got.Rules)
+	}
+	var libs string
+	s.db.QueryRowContext(ctx, `SELECT libraries FROM profiles WHERE id = ?`, p.ID).Scan(&libs)
+	if libs != `["`+newID+`"]` {
+		t.Errorf("profile: %s", libs)
+	}
+	if offers, _ := s.PeerOffers(ctx, peer.ID); len(offers) != 1 || offers[0] != newID {
+		t.Errorf("offers: %v", offers)
 	}
 }

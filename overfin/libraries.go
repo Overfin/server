@@ -129,6 +129,14 @@ func (l libraries) Change(ctx context.Context, name, newName string, folders []s
 		if err := jf.RenameLibrary(ctx, a, name, newName); err != nil {
 			return err
 		}
+		// Jellyfin's ID for a library comes from its name: renamed, it has
+		// another. What names it by its ID (profiles' libraries, category
+		// rules, what's offered to paired servers) follows it.
+		if renamed, err := l.find(ctx, newName); err == nil && renamed.ID != "" && lib.ID != "" && renamed.ID != lib.ID {
+			if err := l.g.sh.db.ReplaceLibraryID(ctx, lib.ID, renamed.ID); err != nil {
+				return err
+			}
+		}
 	}
 	if folders != nil {
 		return jf.ScanLibraries(ctx, a)

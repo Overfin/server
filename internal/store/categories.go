@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -418,4 +419,28 @@ func (s *Store) TitleCategories(ctx context.Context, keys []string) (map[string]
 		}
 	}
 	return out, nil
+}
+
+// ReplaceLibraryID gives what names a library by its ID its new one (a
+// library renamed: Jellyfin's ID comes from the name): profiles' libraries,
+// categories' rules, what's offered to paired servers.
+func (s *Store) ReplaceLibraryID(ctx context.Context, old, new string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	swap := `(SELECT json_group_array(CASE j.value WHEN ? THEN ? ELSE j.value END) FROM json_each(%s) j)`
+	if _, err := tx.ExecContext(ctx, `UPDATE profiles SET libraries = `+fmt.Sprintf(swap, "profiles.libraries")+`
+		WHERE libraries IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(profiles.libraries) WHERE value = ?)`, old, new, old); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE categories SET rules = json_set(rules, '$.libraries', json(`+fmt.Sprintf(swap, "categories.rules, '$.libraries'")+`))
+		WHERE EXISTS (SELECT 1 FROM json_each(categories.rules, '$.libraries') WHERE value = ?)`, old, new, old); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE OR IGNORE peer_offers SET library_id = ? WHERE library_id = ?`, new, old); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
