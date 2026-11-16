@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/big"
@@ -470,5 +471,22 @@ func TestInWords(t *testing.T) {
 	want := "Wrong PINs before a lock must be between 3 and 10. The bitrate cap must not be negative."
 	if got := inWords(err); got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// A thousand sign-ins started and never finished don't turn an admin
+// away: the oldest goes to make room.
+func TestPendingSignInsFull(t *testing.T) {
+	p, idp, _ := newPanel(t)
+	p.mu.Lock()
+	p.pending = map[string]pending{}
+	for i := range 1000 {
+		p.pending[fmt.Sprint("flood-", i)] = pending{started: time.Now()}
+	}
+	p.mu.Unlock()
+	b := &browser{h: p.Handler(), cookies: map[string]string{}}
+	rec := signIn(t, b, idp, []string{"overfin-admins"})
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/admin/" {
+		t.Fatalf("finish: %d %s", rec.Code, rec.Body)
 	}
 }

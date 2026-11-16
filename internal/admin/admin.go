@@ -691,9 +691,19 @@ func (p *Panel) login(w http.ResponseWriter, r *http.Request) {
 			delete(p.pending, k)
 		}
 	}
-	if len(p.pending) < 1000 {
-		p.pending[state] = pd
+	// Full: the oldest goes, so a burst of sign-ins started and never
+	// finished can't turn away every admin until they expire (the browser
+	// is sent on either way, and would only find it gone).
+	if len(p.pending) >= 1000 {
+		oldest := ""
+		for k, v := range p.pending {
+			if oldest == "" || v.started.Before(p.pending[oldest].started) {
+				oldest = k
+			}
+		}
+		delete(p.pending, oldest)
 	}
+	p.pending[state] = pd
 	p.mu.Unlock()
 	cookie.Set(w, r, &http.Cookie{Name: pendingCookie, Value: pd.binding, MaxAge: int(pendingFor.Seconds())})
 	http.Redirect(w, r, target, http.StatusSeeOther)
