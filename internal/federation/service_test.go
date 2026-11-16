@@ -417,3 +417,42 @@ func TestForgedRefusal(t *testing.T) {
 		t.Fatalf("the real unknown: %+v, %v", got, err)
 	}
 }
+
+// A paired server never hears of a title in a library it isn't offered,
+// not even as gone (rules 96 and 98); a library no longer offered leaves
+// its list at the next reading.
+func TestSyncTitlesOnlyWhatsOffered(t *testing.T) {
+	ctx := context.Background()
+	a, b := newServer(t, "A"), newServer(t, "B")
+	libraries(t, a, `{"Id":"films","Name":"Films","CollectionType":"movies"}`, `{"Id":"private","Name":"Private","CollectionType":"movies"}`)
+	film := func(n int, tmdb, lib string) store.CatalogItem {
+		return store.CatalogItem{ID: fmt.Sprintf("%032x", n), Kind: "movie", Name: tmdb, SortName: tmdb, TMDB: tmdb, LibraryID: lib}
+	}
+	a.s.Store.PutCatalog(ctx, []store.CatalogItem{film(1, "949", "films")}, 1)
+	a.s.Store.RefreshTitleKeys(ctx)
+	code, _, _ := a.s.NewCode(ctx, "")
+	aOnB, _ := b.s.UseCode(ctx, code)
+	bOnA, _ := a.s.Accept(ctx, onlyPeer(t, a).ID)
+	aOnB, _ = b.s.Store.PeerByID(ctx, aOnB.ID)
+	a.s.SetOffers(ctx, bOnA, []string{"films"})
+	b.s.SetWants(ctx, aOnB, []string{"films", "private"})
+	if n, err := b.s.SyncTitles(ctx, aOnB); err != nil || n != 1 {
+		t.Fatalf("first reading: %d, %v", n, err)
+	}
+	// A private title comes and goes: B's next reading of changes says
+	// nothing of it (B asked, as anyone could, for every library).
+	a.s.Store.PutCatalog(ctx, []store.CatalogItem{film(2, "155", "private")}, 2)
+	a.s.Store.RefreshTitleKeys(ctx)
+	a.s.Store.DeleteCatalog(ctx, []string{fmt.Sprintf("%032x", 2)})
+	head, _, _ := a.s.Store.TitleChanges(ctx)
+	present, gone, _, _, err := a.s.Store.ChangedTitles(ctx, bOnA.ID, []string{"films"}, head-3, "", 100)
+	if err != nil || len(present) != 0 || slices.Contains(gone, "movie/tmdb/155") {
+		t.Fatalf("a private title told: present %v, gone %v, %v", present, gone, err)
+	}
+	// A stops offering Films: B's next reading drops its titles.
+	a.s.SetOffers(ctx, bOnA, nil)
+	b.s.SyncTitles(ctx, aOnB)
+	if got, _ := b.s.Store.TitlesOfPeer(ctx, aOnB.ID); len(got) != 0 {
+		t.Fatalf("titles of a library no longer offered: %v", got)
+	}
+}

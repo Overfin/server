@@ -823,14 +823,21 @@ func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
 	answer := titlesAnswer{Seq: head}
 	// Only what changed, when we still know what changed since then, and
 	// what we offer it hasn't changed since.
+	// Read since the offers last changed (that change has a number of its
+	// own: a reading before it is below it), else a whole list.
 	if req.Since > 0 && req.Since >= floor && req.Since <= head && req.Since >= offersSeq {
-		present, gone, last, err := s.Store.ChangedTitles(ctx, libs, req.Since, req.After, titlesPage)
+		present, gone, last, more, err := s.Store.ChangedTitles(ctx, p.ID, libs, req.Since, req.After, titlesPage)
 		if err != nil {
 			problem.Send(w, problem.Internal, "")
 			return
 		}
 		answer.Changes, answer.Titles, answer.Gone = true, present, gone
-		if len(present)+len(gone) == titlesPage {
+		if err := s.Store.PeerTold(ctx, p.ID, present, gone); err != nil {
+			problem.Send(w, problem.Internal, "")
+			return
+		}
+		// Paged on the keys looked at, told or not.
+		if more {
 			answer.Next = last
 		}
 	} else {
@@ -840,6 +847,10 @@ func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		answer.Titles = page
+		if err := s.Store.PeerTold(ctx, p.ID, page, nil); err != nil {
+			problem.Send(w, problem.Internal, "")
+			return
+		}
 		if len(page) == titlesPage {
 			answer.Next = page[len(page)-1].Key
 		}

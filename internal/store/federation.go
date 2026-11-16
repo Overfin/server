@@ -394,6 +394,13 @@ func (s *Store) SetPeerOffers(ctx context.Context, peerID string, libraryIDs []s
 	}
 	// A peer asking for what changed since before this gets the whole list:
 	// the libraries' titles it gains or loses aren't changes of theirs.
+	// The change of offers takes a number of its own in the change log (a
+	// key no reading lists: item/…), so a reading made before it, even
+	// with nothing else changed since, is below it and reads the whole
+	// list again.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO title_changes (title_key, at) VALUES ('item/offers', unixepoch())`); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE peers SET offers_seq = (`+changesHead+`) WHERE id = ?`, peerID); err != nil {
 		return err
 	}
@@ -918,34 +925,36 @@ func (s *Store) PeerOffersSeq(ctx context.Context, peerID string) (int64, error)
 
 // ChangedTitles lists, in key order after after, at most limit of the
 // title keys changed since change since, as the libraries hold them now:
-// present, those they still hold; gone, those they don't. last is the
-// last key listed ("" when none).
-func (s *Store) ChangedTitles(ctx context.Context, libraries []string, since int64, after string, limit int) (present []PeerTitle, gone []string, last string, err error) {
+// present, those they still hold; gone, those they don't and that peer
+// was told of (peer_sent: never one it couldn't know). last is the last
+// key looked at ("" when none).
+// more says limit keys were looked at: there may be more after last.
+func (s *Store) ChangedTitles(ctx context.Context, peerID string, libraries []string, since int64, after string, limit int) (present []PeerTitle, gone []string, last string, more bool, err error) {
 	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT title_key FROM title_changes
 		WHERE seq > ? AND title_key > ? AND title_key NOT LIKE 'item/%' ORDER BY title_key LIMIT ?`, since, after, limit)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", false, err
 	}
 	var keys []string
 	for rows.Next() {
 		var k string
 		if err := rows.Scan(&k); err != nil {
 			rows.Close()
-			return nil, nil, "", err
+			return nil, nil, "", false, err
 		}
 		keys = append(keys, k)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", false, err
 	}
 	if len(keys) == 0 {
-		return []PeerTitle{}, nil, "", nil
+		return []PeerTitle{}, nil, "", false, nil
 	}
 	present = []PeerTitle{}
 	if len(libraries) > 0 {
 		if present, err = s.titlesIn(ctx, libraries, keys, "", len(keys)); err != nil {
-			return nil, nil, "", err
+			return nil, nil, "", false, err
 		}
 	}
 	held := map[string]bool{}
@@ -953,11 +962,18 @@ func (s *Store) ChangedTitles(ctx context.Context, libraries []string, since int
 		held[t.Key] = true
 	}
 	for _, k := range keys {
-		if !held[k] {
+		if held[k] {
+			continue
+		}
+		var told int
+		if err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM peer_sent WHERE peer_id = ? AND title_key = ?`, peerID, k).Scan(&told); err != nil {
+			return nil, nil, "", false, err
+		}
+		if told > 0 {
 			gone = append(gone, k)
 		}
 	}
-	return present, gone, keys[len(keys)-1], nil
+	return present, gone, keys[len(keys)-1], len(keys) == limit, nil
 }
 
 // TrimTitleChanges forgets the changes noted before a time: a peer that
@@ -1021,4 +1037,25 @@ func (s *Store) NewTitles(ctx context.Context, since int64, limit int) (keys []s
 		}
 	}
 	return keys, last, rows.Err()
+}
+
+// PeerTold records what a peer was told: the titles it now holds of ours
+// (present), and those told gone, forgotten.
+func (s *Store) PeerTold(ctx context.Context, peerID string, present []PeerTitle, gone []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, t := range present {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO peer_sent (peer_id, title_key) VALUES (?, ?) ON CONFLICT DO NOTHING`, peerID, t.Key); err != nil {
+			return err
+		}
+	}
+	for _, k := range gone {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM peer_sent WHERE peer_id = ? AND title_key = ?`, peerID, k); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
