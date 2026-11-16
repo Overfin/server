@@ -48,6 +48,10 @@ type Gateway struct {
 	usage       map[string]Usage // egress traffic, by address
 	// mismatchAt is when a backend of another version last tried.
 	mismatchAt time.Time
+	// strangers counts connections refused for not being this gateway's
+	// backend; strangerLogged is when one was last logged.
+	strangers      int
+	strangerLogged time.Time
 }
 
 // wrongLogEvery is how often wrong pairing codes are logged, at most, after
@@ -221,6 +225,16 @@ func (g *Gateway) Serve(c *tls.Conn) {
 	<-ended
 }
 
+// stranger logs a refused connection, the first time and then once a
+// minute at most (g.mu held), with how many there were.
+func (g *Gateway) stranger(msg string, args ...any) {
+	g.strangers++
+	if now := time.Now(); g.strangers == 1 || now.Sub(g.strangerLogged) >= wrongLogEvery {
+		g.strangerLogged = now
+		g.logger.Warn(msg, append(args, "attempts", g.strangers)...)
+	}
+}
+
 // preamble reads the backend's line and says what to answer, and whether
 // HTTP/2 follows.
 func (g *Gateway) preamble(c io.Reader, pub ed25519.PublicKey) (string, bool) {
@@ -233,17 +247,25 @@ func (g *Gateway) preamble(c io.Reader, pub ed25519.PublicKey) (string, bool) {
 	defer g.mu.Unlock()
 	// Another version is refused before anything else, pairing included:
 	// both sides must be the same release.
+	// Anyone can connect and say anything: only this gateway's backend
+	// (or, before pairing, any) shows its version on the gateway's pages,
+	// and what strangers say is logged once a minute at most.
+	ours := g.backend == nil || bytes.Equal(pub, g.backend)
 	if version != g.version {
-		if g.status.Mismatch != version {
-			g.logger.Warn("link: the backend's version isn't the gateway's", "backend", version, "gateway", g.version)
+		if ours {
+			if g.status.Mismatch != version {
+				g.logger.Warn("link: the backend's version isn't the gateway's", "backend", version, "gateway", g.version)
+			}
+			g.status.Mismatch, g.mismatchAt = version, time.Now()
+		} else {
+			g.stranger("link: a backend that isn't this gateway's, of another version, was refused", "backend", version, "gateway", g.version)
 		}
-		g.status.Mismatch, g.mismatchAt = version, time.Now()
 		return "NO version " + g.version, false
 	}
 	switch mode {
 	case "link":
 		if g.backend == nil || !bytes.Equal(pub, g.backend) {
-			g.logger.Warn("link: a backend that isn't this gateway's was refused", "key", Fingerprint(pub))
+			g.stranger("link: a backend that isn't this gateway's was refused", "key", Fingerprint(pub))
 			return "NO not-paired", false
 		}
 	case "pair":

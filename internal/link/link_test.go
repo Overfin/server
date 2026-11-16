@@ -229,6 +229,33 @@ func TestRefusals(t *testing.T) {
 	}
 }
 
+// Once paired, a stranger of another version is refused without telling
+// visitors the server is being updated; the backend itself still does.
+func TestStrangerVersionIgnored(t *testing.T) {
+	code := ""
+	g, addr := gatewayOn(t, t.TempDir(), "1.0", &code)
+	b, stop := runBackend(t, t.TempDir(), "1.0")
+	code = pairNow(t, b, addr)
+	waitConnected(t, g, true)
+	stop()
+	stranger, err := NewBackend(t.TempDir(), "2.0", backendHandler, quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := pairing{Address: addr, ServerName: "127.0.0.1", Gateway: fmt.Sprintf("%x", g.Public())}
+	for range 3 {
+		if err := stranger.connect(context.Background(), p); err == nil {
+			t.Fatal("a stranger connected")
+		}
+	}
+	g.mu.Lock()
+	n := g.strangers
+	g.mu.Unlock()
+	if st := g.Status(); st.Mismatch != "" || n != 3 {
+		t.Errorf("after a stranger: %+v, %d counted", st, n)
+	}
+}
+
 // A gateway whose key isn't the pinned one (replaced, or someone else at
 // that address) is refused by the backend.
 func TestGatewayKeyChanged(t *testing.T) {
