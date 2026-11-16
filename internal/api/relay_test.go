@@ -165,3 +165,17 @@ func TestRelayedPlaylistKeepsTheSubset(t *testing.T) {
 		t.Fatal("a URI after non-ASCII text")
 	}
 }
+
+// What Overfin as the owning server sent of Jellyfin 12.2's HLS, as a
+// paired server's relay read it in a browser check (2026-11-16): within
+// the subset, kept whole.
+func TestRelayedPlaylistOfJellyfin(t *testing.T) {
+	master := "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=5198950,AVERAGE-BANDWIDTH=5198950,VIDEO-RANGE=SDR,CODECS=\"avc1.64001F,mp4a.40.2\",RESOLUTION=1280x720,FRAME-RATE=24\nv0.m3u8\n"
+	media := "#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:11\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-MAP:URI=\"init.mp4\"\n" +
+		"#EXTINF:10.417000,\nseg0.mp4\n#EXTINF:10.416000,\nseg1.mp4\n#EXT-X-ENDLIST\n"
+	for body, subset := range map[string][]string{master: masterSubset, media: mediaSubset} {
+		if got, err := relayedPlaylist([]byte(body), subset); err != nil || string(got) != body {
+			t.Errorf("%v\n%s", err, got)
+		}
+	}
+}
