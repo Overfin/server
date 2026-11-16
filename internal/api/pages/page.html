@@ -102,6 +102,8 @@
     <label>{{.T.email}}<input id="email" type="email" autocomplete="username" required autofocus></label>
     <button class="primary" type="submit">{{.T.register}}</button>
   </form>
+  <p id="setup-none" hidden>{{.T.setupNoLink}}</p>
+  <p class="links" id="setup-signin" hidden><a href="/signin">{{.T.signIn}}</a></p>
   <p id="done" hidden></p>
   {{end}}
 

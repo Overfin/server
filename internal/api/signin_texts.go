@@ -86,6 +86,7 @@ var signinTexts = map[string]map[string]string{
 		"setupIntro":      "An account was made for you with this address:",
 		"setupNotYours":   "Not your address? Don't go on: ask the administrator who made the account.",
 		"setupHeld":       "Your password is saved. To finish, confirm your address: an email with a link is on its way to {email}.",
+		"setupNoLink":     "This page needs the link you were given: open it again from where you got it. Already used? Sign in with your password.",
 	},
 	"fr": {
 		"title":           "Connexion",
@@ -168,5 +169,6 @@ var signinTexts = map[string]map[string]string{
 		"setupIntro":      "Un compte a été créé pour vous avec cette adresse :",
 		"setupNotYours":   "Ce n’est pas votre adresse ? N’allez pas plus loin : demandez à l’administrateur qui a créé le compte.",
 		"setupHeld":       "Votre mot de passe est enregistré. Pour terminer, confirmez votre adresse : un courriel avec un lien est en route vers {email}.",
+		"setupNoLink":     "Cette page a besoin du lien qui vous a été remis : ouvrez-le de nouveau à partir de l’endroit où vous l’avez reçu. Déjà utilisé ? Connectez-vous avec votre mot de passe.",
 	},
 }

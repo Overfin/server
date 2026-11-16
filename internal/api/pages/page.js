@@ -292,6 +292,12 @@ if (reset && $('reset-new')) {
 // (looking uses nothing up), then its first password. Held until the
 // address is confirmed, the page says an email is on its way.
 const setup = hash.get('setup');
+// Opened again without its link (a reload: the link leaves the address at
+// once), or a used one: a way on, not an empty page.
+if (!setup && $('setup')) {
+  $('setup-none').hidden = false;
+  $('setup-signin').hidden = false;
+}
 if (setup && $('setup')) {
   history.replaceState(null, '', location.pathname + location.search);
   post('/api/v1/setup/look', { link: setup }).then((got) => {
@@ -300,6 +306,7 @@ if (setup && $('setup')) {
     $('new-password').focus();
   }, (err) => {
     $('error').textContent = err.message;
+    $('setup-signin').hidden = false;
   });
   run($('setup'), async () => {
     const answer = await post('/api/v1/setup/password', { link: setup, password: same('new-password', 'new-password2') });
