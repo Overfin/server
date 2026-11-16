@@ -553,7 +553,9 @@ anyone. Paired servers are not trusted at all (rule 94).
     the key exchanged then, never with a web certificate, a name or an
     address alone.
 95. Every request and answer between paired servers is signed (Ed25519,
-    with a nonce used once, within 5 minutes). Refusals to servers known
+    with a nonce used once, within 5 minutes). Nonces are kept in memory,
+    so a request signed before the server started is refused, with no
+    allowance for the other's clock. Refusals to servers known
     now or before are signed too, and unsigned ones count as no answer. A
     stranger gets a plain 404.
 96. Each side shares only libraries it offers and the other wants: titles

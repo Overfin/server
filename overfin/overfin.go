@@ -942,7 +942,9 @@ func newShared(cfg *config.Config, db *store.Store, moduleDBs map[string]*sql.DB
 	if err != nil {
 		return nil, err
 	}
-	sh.fed = fedShared{key: fedKey, seen: &federation.Nonces{}, http: federation.NewHTTPClient()}
+	// The nonces' memory begins now: a request signed before this start
+	// is refused, its nonce perhaps seen by the last one.
+	sh.fed = fedShared{key: fedKey, seen: federation.NewNonces(time.Now()), http: federation.NewHTTPClient()}
 	// Notices: account events, by email and webhook, as the panel sets.
 	sh.notices = &notices.Notifier{Store: db, Emails: sh.emails, Managed: cfg.Identity.Mode == "managed",
 		Site: siteURL(cfg), Logger: logger, Mail: func() notices.Sender {

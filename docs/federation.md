@@ -79,7 +79,9 @@ Servers never trust each other by default. Each proves who it is with the
 key exchanged when pairing, never with a web certificate, a name or an
 address alone. Every request and answer between them is signed (Ed25519,
 a nonce used once, within 5 minutes); a server that isn't paired gets a
-plain 404. A compromised paired server can't reach your data or your
+plain 404. Nonces are kept in memory, so a request signed before a server
+started is refused: a paired server whose clock runs behind is refused for
+that long after each start (keep both clocks set by the network). A compromised paired server can't reach your data or your
 people.
 
 Between servers on plain `http://`, requests are still signed, so neither

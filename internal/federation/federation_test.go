@@ -374,3 +374,38 @@ func TestUnpairedMidway(t *testing.T) {
 		t.Errorf("a replay after the pairing ended: %v", err)
 	}
 }
+
+// Nonces are kept in memory only: after a restart, a request signed before
+// it is refused, since the last process may have seen it (one read on an
+// http pairing, replayed). Requests signed after the start pass, pairing
+// included, right away.
+func TestReplayAfterRestart(t *testing.T) {
+	k := NewKey()
+	body := []byte(`{"a":1}`)
+	old, _ := request(k, "POST", "/api/v1/federation/play", body, now.Add(-time.Second))
+	before := &Verifier{Host: "films.example.org", Seen: NewNonces(now.Add(-time.Hour))}
+	if _, err := before.Check(old.Clone(context.Background()), body, now.Add(-time.Second)); err != nil {
+		t.Fatalf("before the restart: %v", err)
+	}
+	// Started half a second into a second: a request dated that second may
+	// have been signed before the start.
+	started := now.Add(500 * time.Millisecond)
+	after := &Verifier{Host: "films.example.org", Seen: NewNonces(started)}
+	if _, err := after.Check(old.Clone(context.Background()), body, started.Add(time.Second)); err != ErrSignature {
+		t.Errorf("replayed after a restart: %v", err)
+	}
+	sameSecond, _ := request(k, "POST", "/api/v1/federation/play", body, started)
+	if _, err := after.Check(sameSecond, body, started); err != ErrSignature {
+		t.Errorf("dated the second the memory began: %v", err)
+	}
+	fresh, _ := request(k, "POST", "/api/v1/federation/pair", body, now.Add(time.Second))
+	if _, err := after.Check(fresh, body, now.Add(time.Second)); err != nil {
+		t.Errorf("signed after the restart: %v", err)
+	}
+	// A memory that began on a whole second takes that second's requests.
+	exact := &Verifier{Host: "films.example.org", Seen: NewNonces(now)}
+	onTime, _ := request(k, "POST", "/api/v1/federation/play", body, now)
+	if _, err := exact.Check(onTime, body, now); err != nil {
+		t.Errorf("signed the second the memory began, on it: %v", err)
+	}
+}

@@ -152,6 +152,9 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 	if d := now.Sub(time.Unix(when, 0)); d > MaxSkew || d < -MaxSkew {
 		return Verified{}, ErrSignature
 	}
+	if v.Seen != nil && v.Seen.before(when) {
+		return Verified{}, ErrSignature
+	}
 	nonce := r.Header.Get(HeaderNonce)
 	if n, err := b64.DecodeString(nonce); err != nil || len(n) != 16 {
 		return Verified{}, ErrSignature
@@ -205,10 +208,30 @@ const maxStrangerNonces = 1_000
 // 2×MaxSkew, each with the key that signed it: any older request is
 // refused by its date anyway.
 type Nonces struct {
+	// Since is when the memory began (NewNonces): a request signed before
+	// it is refused, since its nonce may have been seen before (a request
+	// read on an http pairing, replayed after a restart). There's no
+	// allowance for the other server's clock: one running behind is
+	// refused for that much after a start, as each second allowed would
+	// let a request from that second before the start be replayed. Zero:
+	// no such check.
+	Since time.Time
+
 	mu        sync.Mutex
 	seen      map[string]time.Time // known servers'
 	strangers map[string]time.Time // others', heard while a code is live
 	last      time.Time            // when the old ones were last cleared
+}
+
+// NewNonces is a memory of nonces that begins at now: give it the time
+// the process started, before any request is heard.
+func NewNonces(now time.Time) *Nonces { return &Nonces{Since: now} }
+
+// before says whether a request signed at when (Unix seconds) may predate
+// the memory. A date is a whole second: one in the second the memory began
+// counts as before it, unless that second began exactly then.
+func (n *Nonces) before(when int64) bool {
+	return time.Unix(when, 0).Before(n.Since)
 }
 
 func (n *Nonces) add(nonce string, now time.Time, known bool) bool {

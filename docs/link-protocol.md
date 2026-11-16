@@ -485,6 +485,7 @@ matched exactly, the 5-minute image answer cut short by `access`.
 | One stream stalled (never read) beside others | `TestStalledStream` | small requests answer at once; 64 MiB beside it in well under 10 s |
 | Hostile requests at the gateway: unlisted methods, climbing or encoded paths, 2 MiB headers, garbage | `TestHostileRequests` | plain answers (404, 401, 431, 400); `/admin`, `/apps`, `/link` never reach the backend (whose routes match case exactly: `/LINK/…` is a page there) |
 | A federation request replayed 50 times at once | `TestReplayAtOnce` | exactly one accepted |
+| A federation request signed before a restart, replayed after it | `TestReplayAfterRestart` | refused; one signed after the start passes |
 | A server signing in another's name; the same nonce under two keys | `TestAnotherServersName` | refused; two separate requests |
 | A pairing ended between two requests | `TestUnpairedMidway` | the next is answered as from a server no longer known; a replay is refused |
 | The gateway failing five times in a row | `TestGatewayFailingRepeatedly` (long) | the backend comes back each time, about 11 s on average |
