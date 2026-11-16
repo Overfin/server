@@ -168,7 +168,8 @@
 
   async function accept(p: Peer) {
     const yes = await ask(
-      `Accept ${p.name} (${p.address})? Compare its fingerprint with its operator first, by phone or a message you trust: ${p.fingerprint}. If they differ, refuse it.`,
+      `Accept ${p.name} (${p.address})? Compare its fingerprint with its operator first, by phone or a message you trust: ${p.fingerprint}. If they differ, refuse it.` +
+        (p.address.startsWith('http://') ? ' Its address is plain http: requests between your servers are signed, but what they say (titles, tickets) can be read on the way.' : ''),
       { yes: 'Accept' },
     );
     if (!yes) return;
@@ -292,7 +293,7 @@
         <tbody>
           {#each s.peers ?? [] as p (p.id)}
             <tr>
-              <td><div class="name">{p.name}</div><div class="hint">{p.address}</div><div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
+              <td><div class="name">{p.name}</div><div class="hint">{p.address}{#if p.address.startsWith('http://')} · plain http: readable on the way{/if}</div><div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
               <td class="hide-narrow"><div>{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint">{shareText(p)}</div>{/if}{#if p.seenAt}<div class="hint">heard from {ago(p.seenAt)}</div>{/if}</td>
               <td class="hide-narrow"><code class="fingerprint">{p.fingerprint}</code></td>
               <td class="row-actions">
@@ -402,6 +403,9 @@
     <Setting label="Address">
       {#snippet children()}<code>{preview?.address}</code>{/snippet}
     </Setting>
+    {#if preview?.address?.startsWith('http://')}
+      <Notice warn>That server's address is plain http: requests between your servers are still signed, so neither can be impersonated, but what they say (titles, tickets) can be read on the way.</Notice>
+    {/if}
     <Setting stack label="Fingerprint" hint="Compare it with the other operator, by phone or a message you trust: if it differs, the code was changed on the way.">
       {#snippet children()}<code class="fingerprint">{preview?.fingerprint}</code>{/snippet}
     </Setting>
