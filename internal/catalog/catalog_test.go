@@ -277,4 +277,14 @@ func TestConvert(t *testing.T) {
 	if !slices.Equal(it.AudioLanguages, []string{"fr", "en"}) {
 		t.Errorf("audio %v", it.AudioLanguages)
 	}
+	if it.Video != "" {
+		t.Errorf("a video without its size or codec named: %q", it.Video)
+	}
+	// Its picture, named as the player names versions (the plugin sends
+	// the video stream since 0.7.0).
+	it, _ = convert(jellyfin.IndexItem{RawItem: jellyfin.RawItem{Id: id(1), Type: "Movie", Name: "Dune", MediaStreams: []jellyfin.MediaStream{
+		{Type: "Video", Codec: "hevc", Width: 3840, Height: 1600, VideoRange: "HDR"}, {Type: "Audio", Language: "eng"}}}})
+	if it.Video != "2160p HDR · HEVC" {
+		t.Errorf("video %q", it.Video)
+	}
 }
