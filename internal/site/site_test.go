@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
 var files = fstest.MapFS{
@@ -108,6 +109,28 @@ func TestFolder(t *testing.T) {
 	}
 	if w := get(h, "GET", "/link.txt"); w.Code != 404 || strings.Contains(w.Body.String(), "outside") {
 		t.Errorf("symlink out of the folder: %d %q", w.Code, w.Body)
+	}
+
+	// An older build put back (a rollback keeping its files' times): a
+	// browser holding the newer page gets the one there now, not a 304.
+	held := get(h, "GET", "/")
+	os.WriteFile(filepath.Join(dir, "index.html"), []byte("v0"), 0o644)
+	old := time.Now().Add(-48 * time.Hour)
+	os.Chtimes(filepath.Join(dir, "index.html"), old, old)
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("If-None-Match", held.Header().Get("ETag"))
+	req.Header.Set("If-Modified-Since", time.Now().UTC().Format(http.TimeFormat))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != 200 || w.Body.String() != "v0" || held.Header().Get("ETag") == "" {
+		t.Errorf("after a rollback: %d %q (held %q)", w.Code, w.Body, held.Header().Get("ETag"))
+	}
+	// The same file again: 304.
+	req.Header.Set("If-None-Match", w.Header().Get("ETag"))
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusNotModified {
+		t.Errorf("unchanged: %d", w.Code)
 	}
 }
 

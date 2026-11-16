@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -125,10 +126,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		hd.Set("Cache-Control", "no-cache") // revalidated on every use
 	}
-	modified := info.ModTime()
+	// A validator always: the content's, else (a folder's files) one of
+	// size and time, so a file put back older (a rollback, a copy keeping
+	// times) is never taken for the newer one a browser holds, as a date
+	// alone would.
+	modified := time.Time{}
 	if tag, ok := h.etags[name]; ok {
 		hd.Set("ETag", tag)
-		modified = time.Time{}
+	} else {
+		hd.Set("ETag", fmt.Sprintf(`W/"%x-%x"`, info.Size(), info.ModTime().UnixNano()))
 	}
 	if z, ok := h.gzipped[name]; ok {
 		hd.Add("Vary", "Accept-Encoding")
