@@ -415,6 +415,17 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	}
 	wantAudio, wantSubtitles := l.wishesFor(ctx, p, tracksKey, req.AudioLanguage)
 	var out sessionJSON
+	// Another audio track or a quality restarts a playback, and the
+	// browser's stop of the old one may come after this start: this
+	// browser's playback of the title there ends first, so the other
+	// server doesn't count it against the pairing's limit, and the new
+	// one waits for that stop (remoteStops).
+	for _, old := range pb.Tickets.Where(func(s *playback.Stream) bool {
+		return s.Remote != nil && s.Remote.PeerID == peer.ID && s.Remote.Key == key &&
+			s.SessionID == caller.Session.ID && s.ProfileID == p.ID
+	}) {
+		pb.end(old, "stopped", "")
+	}
 	remoteStops.wait(ctx, peer.ID, 5*time.Second)
 	status, err := fed.Call(ctx, peer, "/api/v1/federation/play", peerPlayRequest{Title: key, Capabilities: req.Capabilities.ForPeer(),
 		StartPositionMs: req.StartPositionMs, MaxBitrateKbps: roundKbps(kbps), AudioLanguage: wantAudio, SubtitleLanguage: wantSubtitles,

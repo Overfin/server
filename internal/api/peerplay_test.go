@@ -218,16 +218,27 @@ func TestPlayFromPeer(t *testing.T) {
 	if status, body := post(t, srvA, "/api/v1/playback/"+s.ID+"/progress", `{"positionMs":600000}`); status != 204 {
 		t.Fatalf("progress: %d %s", status, body)
 	}
+	// Another audio track, with one stream for the pairing: the browser's
+	// start comes before its stop of the old playback, which ends first.
+	stB.SetPeerLimits(ctx, aOnB.ID, store.PeerLimits{Streams: 1, Transcodes: 1})
+	status, body = post(t, srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{},"audioLanguage":"fr"}`)
+	var restarted peerSession
+	json.Unmarshal([]byte(body), &restarted)
+	if status != 201 {
+		t.Fatalf("a restart under a 1-stream limit: %d %s", status, body)
+	}
+	if code, _ := viewer(s.Stream.URL); code != http.StatusNotFound {
+		t.Errorf("the old playback's stream after the restart: %d", code)
+	}
+	if n := len(onB.Where(func(*playback.Stream) bool { return true })); n != 1 {
+		t.Errorf("playbacks on B after the restart: %d", n)
+	}
 	if status, _ := post(t, srvA, "/api/v1/playback/"+s.ID+"/stop", `{"positionMs":600000}`); status != 204 {
 		t.Fatalf("stop: %d", status)
 	}
-	// A second playback, then B ends the pairing: its stream ends at once.
-	status, body = post(t, srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{},"audioLanguage":"fr"}`)
-	var again peerSession
-	json.Unmarshal([]byte(body), &again)
-	if status != 201 {
-		t.Fatalf("second play: %d %s", status, body)
-	}
+	// The playback started again, then B ends the pairing: its stream ends
+	// at once.
+	again := restarted
 	if err := stB.DeletePeer(ctx, aOnB.ID); err != nil {
 		t.Fatal(err)
 	}
