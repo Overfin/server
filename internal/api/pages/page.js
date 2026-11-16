@@ -407,6 +407,7 @@ run($('link'), async () => {
 });
 run($('link-confirm'), async () => {
   await post('/api/v1/device/confirm', { code });
+  try { sessionStorage.removeItem('overfin-link-code'); } catch { /* nothing kept */ }
   done(page.linked);
   return null;
 });
@@ -415,8 +416,19 @@ $('link-cancel')?.addEventListener('click', () => {
   $('link').hidden = false;
   $('code').focus();
 });
+// The code brought by the address is kept for this tab a few minutes (as
+// long as a code works): coming back after choosing a profile on the site,
+// it's still there.
+const keptCode = 'overfin-link-code';
+if ($('link') && !/^#[A-Za-z-]{8,9}$/.test(location.hash)) {
+  try {
+    const kept = JSON.parse(sessionStorage.getItem(keptCode) || 'null');
+    if (kept && Date.now() - kept.at < 10 * 60_000) $('code').value = kept.code;
+  } catch { /* nothing kept */ }
+}
 if ($('link') && /^#[A-Za-z-]{8,9}$/.test(location.hash)) {
   $('code').value = location.hash.slice(1);
+  try { sessionStorage.setItem(keptCode, JSON.stringify({ code: $('code').value, at: Date.now() })); } catch { /* not kept */ }
   history.replaceState(null, '', location.pathname);
   $('link').requestSubmit();
 }

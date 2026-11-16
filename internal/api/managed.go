@@ -933,8 +933,14 @@ func (m *Managed) ownerHere(w http.ResponseWriter, r *http.Request) bool {
 	if _, _, err := m.Provisioner.Find(r.Context(), id); errors.Is(err, provision.ErrNoAccount) {
 		return true
 	}
-	c := m.Sessions.Current(w, r)
+	c := m.Sessions.CurrentAccount(w, r)
 	if c == nil {
+		return false
+	}
+	// No profile chosen yet in this browser (the owner's has a PIN): said
+	// so, so the person knows what to do (a screen's code on /link stays).
+	if c.Profile == nil {
+		m.refuse(w, r, problem.ProfileRequired, "pickProfile")
 		return false
 	}
 	if !c.IsOwner() {
