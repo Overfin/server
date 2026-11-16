@@ -552,7 +552,7 @@ type ListQuery struct {
 	Category *CategoryFilter
 	// Sort is "name", "premiereDate", "addedAt", "communityRating", "rank",
 	// "latest" (when the title or, for a series, its newest episode was
-	// added) or "lastPlayed" (by the profile's ProfileID). Names, dates and
+	// added; a film, when it first came, not its copy replaced) or "lastPlayed" (by the profile's ProfileID). Names, dates and
 	// ratings are TMDB's, the index's only for a file TMDB doesn't know. A
 	// Limit below 0 lists everything, for shuffling.
 	Sort       string
@@ -574,6 +574,12 @@ func fromTMDB(column string) string {
 // arrived, in SQL (NULL for anything else), read from the series index.
 const newestOfSeries = `(SELECT max(e.added_at) FROM catalog_items e WHERE e.series_id = catalog_items.id)`
 
+// filmArrivedAt is when a film last arrived (title_history), in SQL (NULL
+// for anything else): a copy replacing another (an upgrade, a new file
+// name) is a new item with a new date, but the film didn't arrive again.
+const filmArrivedAt = `(SELECT max(h.at) FROM title_history h
+	WHERE h.kind = 'movie' AND h.event = 'arrived' AND h.tmdb = catalog_items.tmdb AND catalog_items.kind = 'movie')`
+
 var listOrder = map[string]string{
 	"name":            "coalesce(" + fromTMDB("sort_name") + ", lower(sort_name))",
 	"premiereDate":    "coalesce(" + fromTMDB("release_date") + ", premiere_date)",
@@ -582,8 +588,10 @@ var listOrder = map[string]string{
 	// Its rank on the server (title_ranks), 1 the most valued.
 	"rank": "(SELECT r.rank FROM title_ranks r WHERE r.title_key = catalog_items.title_key)",
 	// The later of its own date and its episodes' (either may be NULL,
-	// which makes max of the two NULL).
-	"latest": "coalesce(max(added_at, " + newestOfSeries + "), added_at, " + newestOfSeries + ")",
+	// which makes max of the two NULL); a film's own is the earlier of its
+	// item's and its arrival's, as the valuation takes it.
+	"latest": "coalesce(max(coalesce(min(added_at, " + filmArrivedAt + "), added_at), " + newestOfSeries + "), " +
+		"coalesce(min(added_at, " + filmArrivedAt + "), added_at), " + newestOfSeries + ")",
 }
 
 // PeerItemPrefix starts the IDs listings give the films and series paired

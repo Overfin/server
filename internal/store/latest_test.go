@@ -34,6 +34,35 @@ func TestLatestOrdersSeriesByTheirNewestEpisode(t *testing.T) {
 	}
 }
 
+// A film whose file was replaced (an upgrade) isn't new again: "latest"
+// orders it by when it first came, from the history.
+func TestLatestFilmUpgraded(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
+	day := func(d int) time.Time { return time.Date(2026, 10, d, 12, 0, 0, 0, time.UTC) }
+	old := CatalogItem{ID: id(0), Kind: "movie", Name: "Heat", SortName: "a", LibraryID: "lib", TMDB: "949", AddedAt: day(1)}
+	other := CatalogItem{ID: id(1), Kind: "movie", Name: "Alien", SortName: "b", LibraryID: "lib", TMDB: "348", AddedAt: day(10)}
+	if err := s.PutCatalog(ctx, []CatalogItem{old, other}, 1); err != nil {
+		t.Fatal(err)
+	}
+	// The upgrade: a new item beside the old one, then the old one gone.
+	upgraded := CatalogItem{ID: id(2), Kind: "movie", Name: "Heat", SortName: "a", LibraryID: "lib", TMDB: "949", AddedAt: day(20)}
+	if err := s.PutCatalog(ctx, []CatalogItem{old, other, upgraded}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteCatalog(ctx, []string{old.ID}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListCatalog(ctx, ListQuery{Kinds: []string{"movie", "series"}, Sort: "latest", Descending: true, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{other.ID, upgraded.ID}; !slices.Equal(got, want) {
+		t.Errorf("latest = %v, want %v (the upgraded film by its first arrival)", got, want)
+	}
+}
+
 // "latest" without dates: a series added without one goes by its
 // newest episode, and what has no date at all comes last.
 func TestLatestWithoutDates(t *testing.T) {
