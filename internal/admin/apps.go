@@ -259,7 +259,13 @@ func (p *Panel) watchStats(w http.ResponseWriter, r *http.Request) {
 	out := make([]watchStatsJSON, 0, len(all))
 	for _, s := range all {
 		if s.Viewers < 1 {
-			continue
+			// Nobody watched it: not listed, unless the app asks for what
+			// changed, which then includes totals gone down to nothing
+			// (zeros: what a full list leaves out).
+			if since.IsZero() {
+				continue
+			}
+			s.Plays, s.Favorites, s.LastPlayed = 0, 0, time.Time{}
 		}
 		j := watchStatsJSON{Kind: s.Kind, TMDB: s.TMDB, IMDb: s.IMDb, TVDB: s.TVDB, Plays: s.Plays,
 			Viewers: s.Viewers, Favorites: s.Favorites, Changed: dayOf(s.Changed).Format(time.RFC3339)}

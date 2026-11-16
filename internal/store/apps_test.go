@@ -70,3 +70,25 @@ func TestWatchStats(t *testing.T) {
 		t.Errorf("revoked key: %v", err)
 	}
 }
+
+// A favorite taken off is a change: among changes since, its title comes
+// with zero totals; a full list leaves it out.
+func TestWatchStatsGoingDown(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	_, prof, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
+	day := time.Date(2026, 10, 20, 21, 0, 0, 0, time.UTC)
+	s.SetFavorite(ctx, prof.ID, "series/tmdb/1399", "", true, day)
+	if all, _ := s.AllWatchStats(ctx, time.Time{}); len(all) != 1 || all[0].Favorites != 1 {
+		t.Fatalf("a favorite: %+v", all)
+	}
+	later := day.AddDate(0, 0, 2)
+	s.SetFavorite(ctx, prof.ID, "series/tmdb/1399", "", false, later)
+	changed, _ := s.AllWatchStats(ctx, later.AddDate(0, 0, -1))
+	if len(changed) != 1 || changed[0].Favorites != 0 || changed[0].TMDB != "1399" {
+		t.Errorf("taken off, since: %+v", changed)
+	}
+	if all, _ := s.AllWatchStats(ctx, time.Time{}); len(all) != 0 {
+		t.Errorf("taken off, the full list: %+v", all)
+	}
+}
