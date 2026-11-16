@@ -36,14 +36,23 @@ func TestWishlistOrder(t *testing.T) {
 	if err := s.OrderWishes(ctx, p.ID, []string{"series/tmdb/3/s2", "movie/tmdb/1", "series/tmdb/2"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, bad := range [][]string{{"movie/tmdb/1"}, {"movie/tmdb/1", "movie/tmdb/1", "series/tmdb/2"}, {"movie/tmdb/9", "movie/tmdb/1", "series/tmdb/2"}} {
+	for _, bad := range [][]string{{"movie/tmdb/1", "movie/tmdb/1", "series/tmdb/2"}, {"movie/tmdb/9", "movie/tmdb/1", "series/tmdb/2"}} {
 		if err := s.OrderWishes(ctx, p.ID, bad); !errors.Is(err, ErrWishOrder) {
 			t.Errorf("order %v: %v", bad, err)
 		}
 	}
+	// Some not named (the profile can't see them now): they keep their
+	// places, the others share theirs. Order is s2, 1, 2; naming 2 then s2
+	// leaves 1 in the middle.
+	if err := s.OrderWishes(ctx, p.ID, []string{"series/tmdb/2", "series/tmdb/3/s2"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Wishes(ctx, p.ID); !slices.Equal(wishTitles(got), []string{"series/tmdb/2", "movie/tmdb/1", "series/tmdb/3/s2"}) {
+		t.Errorf("with one not named: %v", wishTitles(got))
+	}
 	s.RemoveWish(ctx, p.ID, "movie/tmdb/1")
 	got, _ = s.Wishes(ctx, p.ID)
-	if !slices.Equal(wishTitles(got), []string{"series/tmdb/3/s2", "series/tmdb/2"}) || got[1].Position != 2 {
+	if !slices.Equal(wishTitles(got), []string{"series/tmdb/2", "series/tmdb/3/s2"}) || got[1].Position != 2 {
 		t.Fatalf("after a removal: %+v", got)
 	}
 }

@@ -168,33 +168,60 @@ func GroupedWishes(titles []string) []string {
 	return out
 }
 
-// OrderWishes sets a profile's order: titles must be its wishlist's, each
-// once.
+// OrderWishes sets a profile's order: titles are its wishlist's, each once.
+// Those it doesn't name (wishes the profile can't see now: an age lowered,
+// a genre left out) keep their places; the ones named take the places
+// they held between them, in the order given.
 func (s *Store) OrderWishes(ctx context.Context, profileID string, titles []string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	var n int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM wishes WHERE profile_id = ?`, profileID).Scan(&n); err != nil {
+	rows, err := tx.QueryContext(ctx, `SELECT title, position FROM wishes WHERE profile_id = ? ORDER BY position, title`, profileID)
+	if err != nil {
 		return err
 	}
-	if n != len(titles) {
-		return ErrWishOrder
+	held := map[string]int{}
+	var all []string
+	for rows.Next() {
+		var title string
+		var position int
+		if err := rows.Scan(&title, &position); err != nil {
+			rows.Close()
+			return err
+		}
+		held[title] = position
+		all = append(all, title)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
 	}
 	seen := make(map[string]bool, len(titles))
-	for i, title := range titles {
-		if seen[title] {
+	for _, title := range titles {
+		if _, ok := held[title]; !ok || seen[title] {
 			return ErrWishOrder
 		}
 		seen[title] = true
-		res, err := tx.ExecContext(ctx, `UPDATE wishes SET position = ? WHERE profile_id = ? AND title = ?`, i+1, profileID, title)
-		if err != nil {
-			return err
+	}
+	// The places the named ones hold now, in order: theirs to share.
+	var places []int
+	for i, title := range all {
+		if seen[title] {
+			places = append(places, i+1)
 		}
-		if k, _ := res.RowsAffected(); k == 0 {
-			return ErrWishOrder
+	}
+	for i, title := range all {
+		if !seen[title] {
+			if _, err := tx.ExecContext(ctx, `UPDATE wishes SET position = ? WHERE profile_id = ? AND title = ?`, i+1, profileID, title); err != nil {
+				return err
+			}
+		}
+	}
+	for i, title := range titles {
+		if _, err := tx.ExecContext(ctx, `UPDATE wishes SET position = ? WHERE profile_id = ? AND title = ?`, places[i], profileID, title); err != nil {
+			return err
 		}
 	}
 	return tx.Commit()

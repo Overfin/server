@@ -307,8 +307,42 @@ func (wl Wishes) order(w http.ResponseWriter, r *http.Request) {
 		}
 		keys[i] = key
 	}
+	// Every title the profile sees on its wishlist, each once; those it
+	// can no longer see (an age lowered, a genre left out) aren't sent,
+	// and keep their places (OrderWishes).
+	ctx, st := r.Context(), l.Provisioner.Store
+	wishes, err := st.Wishes(ctx, c.Profile.ID)
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	all := make([]string, len(wishes))
+	for i, wi := range wishes {
+		all[i] = wi.Title
+	}
+	shown, err := l.titleSummaries(ctx, c.Profile, all)
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	visible := map[string]bool{}
+	for _, t := range shown {
+		if key, ok := keyOfTitleID(t.ID); ok {
+			visible[key] = true
+		}
+	}
+	named := map[string]bool{}
+	for _, k := range keys {
+		named[k] = true
+	}
+	for k := range visible {
+		if !named[k] {
+			problem.Send(w, problem.InvalidRequest, "every title on the wishlist, each once")
+			return
+		}
+	}
 	// A series' seasons stay together, where its first one is.
-	switch err := l.Provisioner.Store.OrderWishes(r.Context(), c.Profile.ID, store.GroupedWishes(keys)); {
+	switch err := st.OrderWishes(ctx, c.Profile.ID, store.GroupedWishes(keys)); {
 	case errors.Is(err, store.ErrWishOrder):
 		problem.Send(w, problem.InvalidRequest, "every title on the wishlist, each once")
 	case err != nil:
