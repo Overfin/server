@@ -474,6 +474,9 @@ export class Player {
     this.starts = 0;
     this.handlers = {
       pause: () => { this.pausedAt = Date.now(); this.report(); },
+      // Once it has played, whether it plays on after a restart is whether
+      // it was playing, not the video's autoplay (always on in the site).
+      playing: () => { this.everPlayed = true; },
       play: () => {
         if (this.pausedAt && Date.now() - this.pausedAt > LONG_PAUSE) this.check();
         this.pausedAt = 0;
@@ -704,14 +707,19 @@ export class Player {
   /** Takes playback back after another device took over. */
   continueHere() {
     this.video.autoplay = true;
-    return this.restart();
+    return this.restart(true);
   }
 
-  /** Stops for good: the server frees the stream at once. */
-  async close() {
+  /**
+   * Stops for good: the server frees the stream at once. ended: the title
+   * counts as watched to its end (left from its credits for the next one).
+   */
+  async close({ ended = false } = {}) {
     if (this.closed) return;
     const pb = this.playback;
-    const position = this.positionMs;
+    // Ended: stopped at its end, in the one request (a report first would
+    // hold the stop back a round trip, the next title already starting).
+    const position = ended && pb?.durationMs ? pb.durationMs : this.positionMs;
     this.teardown();
     this.closed = true;
     this.pictures?.hide();
@@ -724,14 +732,16 @@ export class Player {
 
   // ---- Inside --------------------------------------------------------------
 
-  restart() {
-    const wasPlaying = !this.video.paused;
+  // restart starts over at the same place; playing: whether to play on (by
+  // default, whether it plays now). Paused, it stays paused: an audio
+  // track or a quality picked, or the server back, doesn't start the film.
+  restart(playing = !this.video.paused) {
     const at = this.positionMs;
     this.held = at;
     const old = this.playback;
     this.teardown();
     if (old) this.client.stopPlayback(old.id, at).catch(() => {});
-    this.video.autoplay = this.video.autoplay || wasPlaying;
+    this.video.autoplay = this.everPlayed ? playing : this.video.autoplay || playing;
     return this.start(at);
   }
 
@@ -783,8 +793,12 @@ export class Player {
         return;
       }
       this.gone(pb, err);
+      // Taken over, ended, expired or forgotten: gone() took it from
+      // there (a taken-over playback is kept for Continue here, and must
+      // not start again by itself).
+      if (err?.status === 410 || err?.status === 404) return;
     }
-    if (pb !== this.playback || this.closed) return; // gone() took it from here
+    if (pb !== this.playback || this.closed) return;
     const now = Date.now();
     this.fatals = (this.fatals || []).filter((at) => now - at < 60_000);
     this.fatals.push(now);
@@ -805,7 +819,7 @@ export class Player {
     if (!pb || this.waiting || this.closed) return;
     this.waiting = true;
     this.held = this.positionMs;
-    const wasPlaying = !this.video.paused || this.video.autoplay;
+    const wasPlaying = !this.video.paused || (!this.everPlayed && this.video.autoplay);
     this.video.pause();
     this.options.onReconnecting?.(true);
     while (!this.closed && pb === this.playback) {
@@ -820,8 +834,7 @@ export class Player {
     this.waiting = false;
     this.options.onReconnecting?.(false);
     if (this.closed || pb !== this.playback) return;
-    this.video.autoplay = wasPlaying;
-    this.restart();
+    this.restart(wasPlaying);
   }
 
   // gone handles a playback the server no longer has.
@@ -831,7 +844,6 @@ export class Player {
     // (the server forgets why after an hour, and everything when it
     // restarts): carry on, unnoticed.
     if ((err.status === 410 && err.type === 'playback-expired') || err.status === 404) {
-      this.video.autoplay = !this.video.paused;
       this.restart();
       return;
     }
