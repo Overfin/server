@@ -36,7 +36,8 @@ func importPeople(ctx context.Context, cfg *config.Config, db *store.Store, w io
 
 // importFrom imports the people of dir; adminGroup names the admins' group,
 // and requiredGroup, when set, the group someone must be in to be imported.
-// Someone whose membership the provider can't tell is left out.
+// Someone whose membership the provider can't tell is left out, and so is
+// an email the provider says is unverified, or one two of its people share.
 func importFrom(ctx context.Context, dir connector.Directory, adminGroup, requiredGroup string, db *store.Store, w io.Writer) error {
 	people, err := dir.People(ctx)
 	if err != nil {
@@ -58,10 +59,23 @@ func importFrom(ctx context.Context, dir connector.Directory, adminGroup, requir
 			return err
 		}
 	}
-	var added, adminCount, skipped int
+	// An email two of the provider's people share is nobody's for sure:
+	// neither gets it.
+	sharing := map[string]int{}
+	for _, p := range people {
+		if p.Email != "" {
+			sharing[strings.ToLower(p.Email)]++
+		}
+	}
+	var added, adminCount, skipped, shared int
 	for subject, p := range people {
+		if sharing[strings.ToLower(p.Email)] > 1 {
+			skipped++
+			shared++
+			continue
+		}
 		a, err := mail.ParseAddress(p.Email)
-		if !p.Active || err != nil || a.Address != p.Email {
+		if !p.Active || p.EmailUnverified || err != nil || a.Address != p.Email {
 			skipped++
 			continue
 		}
@@ -90,6 +104,9 @@ func importFrom(ctx context.Context, dir connector.Directory, adminGroup, requir
 		why = fmt.Sprintf("no usable email, disabled, not in %q, or already there", requiredGroup)
 	}
 	fmt.Fprintf(w, "%d people imported (%d admins); %d left out (%s).\n", added, adminCount, skipped, why)
+	if shared > 0 {
+		fmt.Fprintf(w, "%d of them share their email with someone else there: none of those emails was imported.\n", shared)
+	}
 	if adminCount == 0 {
 		fmt.Fprintln(w, "No admin was found among them: with managed sign-in, the setup page will ask for one.")
 	}

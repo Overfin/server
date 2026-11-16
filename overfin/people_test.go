@@ -86,13 +86,24 @@ func TestImportPeopleAndSetPassword(t *testing.T) {
 		"sub-cy":  {Email: "cy@example.org", Active: true},
 		"sub-dan": {Email: "", Active: true},
 		"sub-eve": {Email: "eve@example.org", Active: false},
+		// Two people with the same email: neither gets it.
+		"sub-fay":  {Email: "fay@example.org", Active: true},
+		"sub-fay2": {Email: "Fay@example.org", Active: true},
+		// An email the provider says is unverified.
+		"sub-gus": {Email: "gus@example.org", Active: true, EmailUnverified: true},
 	}
 	var out strings.Builder
 	if err := importFrom(ctx, dir, "media-admins", "", db, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(out.String(), "2 people imported (1 admins); 3 left out") {
+	if !strings.HasPrefix(out.String(), "2 people imported (1 admins); 6 left out") ||
+		!strings.Contains(out.String(), "2 of them share their email") {
 		t.Errorf("report: %s", out.String())
+	}
+	for _, email := range []string{"fay@example.org", "gus@example.org"} {
+		if _, err := db.UserByEmail(ctx, email); err != store.ErrNotFound {
+			t.Errorf("%s was imported: %v", email, err)
+		}
 	}
 	ann, err := db.UserByEmail(ctx, "ann@example.org")
 	if err != nil || ann.Subject != "sub-ann" || !ann.Admin {

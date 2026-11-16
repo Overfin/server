@@ -34,13 +34,15 @@ func (p *PocketID) People(ctx context.Context) (map[string]Person, error) {
 	for page := 1; len(out) < maxPeople; page++ {
 		var res struct {
 			Data []struct {
-				ID          string  `json:"id"`
-				Username    string  `json:"username"`
-				Email       *string `json:"email"`
-				FirstName   string  `json:"firstName"`
-				LastName    *string `json:"lastName"`
-				DisplayName string  `json:"displayName"`
-				Disabled    bool    `json:"disabled"`
+				ID       string  `json:"id"`
+				Username string  `json:"username"`
+				Email    *string `json:"email"`
+				// EmailVerified is nil from a Pocket ID that doesn't say.
+				EmailVerified *bool   `json:"emailVerified"`
+				FirstName     string  `json:"firstName"`
+				LastName      *string `json:"lastName"`
+				DisplayName   string  `json:"displayName"`
+				Disabled      bool    `json:"disabled"`
 			} `json:"data"`
 			Pagination struct {
 				TotalPages int `json:"totalPages"`
@@ -58,7 +60,8 @@ func (p *PocketID) People(ctx context.Context) (map[string]Person, error) {
 			if name == "" {
 				name = strings.TrimSpace(u.FirstName + " " + deref(u.LastName))
 			}
-			out[u.ID] = Person{Username: u.Username, Name: name, Email: deref(u.Email), Active: !u.Disabled}
+			out[u.ID] = Person{Username: u.Username, Name: name, Email: deref(u.Email), Active: !u.Disabled,
+				EmailUnverified: u.EmailVerified != nil && !*u.EmailVerified}
 		}
 		if page >= res.Pagination.TotalPages || len(res.Data) == 0 {
 			break

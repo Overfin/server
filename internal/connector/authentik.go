@@ -28,6 +28,9 @@ type Person struct {
 	Email    string `json:"email,omitempty"`
 	// Active is false when the provider disabled them.
 	Active bool `json:"active"`
+	// EmailUnverified: the provider says the email was never confirmed.
+	// Providers that don't say leave it false.
+	EmailUnverified bool `json:"-"`
 }
 
 // Groups is a connector that can tell who is in one of the provider's

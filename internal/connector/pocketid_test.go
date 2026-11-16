@@ -13,7 +13,8 @@ import (
 )
 
 // People: every page, by user ID; the display name, else first and last
-// names; disabled people inactive. A wrong key is told apart.
+// names; disabled people inactive; an email unverified only when Pocket ID
+// says so. A wrong key is told apart.
 func TestPocketIDPeople(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-API-Key") != "good-key-1234567" {
@@ -26,8 +27,8 @@ func TestPocketIDPeople(t *testing.T) {
 		}
 		switch r.URL.Query().Get("pagination[page]") {
 		case "1":
-			io.WriteString(w, `{"data":[{"id":"u1","username":"alice","email":"a@x.org","firstName":"Alice","lastName":"Roy","displayName":""},
-				{"id":"u2","username":"bob","email":null,"firstName":"","displayName":"Bobby","disabled":true}],
+			io.WriteString(w, `{"data":[{"id":"u1","username":"alice","email":"a@x.org","emailVerified":true,"firstName":"Alice","lastName":"Roy","displayName":""},
+				{"id":"u2","username":"bob","email":null,"emailVerified":false,"firstName":"","displayName":"Bobby","disabled":true}],
 				"pagination":{"totalPages":2,"currentPage":1}}`)
 		default:
 			fmt.Fprint(w, `{"data":[{"id":"u3","username":"carol","displayName":"Carol"}],"pagination":{"totalPages":2,"currentPage":2}}`)
@@ -40,7 +41,8 @@ func TestPocketIDPeople(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(people) != 3 || people["u1"].Name != "Alice Roy" || people["u1"].Email != "a@x.org" || !people["u1"].Active ||
-		people["u2"].Name != "Bobby" || people["u2"].Active || people["u3"].Username != "carol" {
+		people["u2"].Name != "Bobby" || people["u2"].Active || people["u3"].Username != "carol" ||
+		people["u1"].EmailUnverified || !people["u2"].EmailUnverified || people["u3"].EmailUnverified {
 		t.Errorf("people: %+v", people)
 	}
 	bad := &PocketID{BaseURL: srv.URL, Key: "wrong", HTTP: srv.Client()}
