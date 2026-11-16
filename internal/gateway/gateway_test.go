@@ -41,7 +41,8 @@ func (f *fakeBackend) RoundTrip(r *http.Request) (*http.Response, error) {
 		return nil, link.ErrNoBackend
 	}
 	f.seen = append(f.seen, r.Method+" "+r.URL.Path)
-	body := r.URL.Path + " from " + r.Header.Get(link.ClientAddr) + " xff=" + r.Header.Get("X-Forwarded-For")
+	body := r.URL.Path + " from " + r.Header.Get(link.ClientAddr) + " xff=" + r.Header.Get("X-Forwarded-For") +
+		" proto=" + r.Header.Get("X-Forwarded-Proto") + " host=" + r.Host
 	return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 }
 
@@ -124,6 +125,16 @@ func TestClientAddress(t *testing.T) {
 	rec = do(h, "GET", "/", "10.20.0.2:5000", "X-Forwarded-For", "198.51.100.9", "X-Forwarded-For", "192.0.2.45")
 	if got := rec.Body.String(); !strings.Contains(got, "from 192.0.2.45:0") {
 		t.Errorf("two lines: %s", got)
+	}
+	// HTTPS a trusted proxy took the request over: said to the backend,
+	// with the visitor's host; a visitor saying it is ignored.
+	rec = do(h, "GET", "/", "10.20.0.2:5000", "X-Forwarded-For", "192.0.2.45", "X-Forwarded-Proto", "https")
+	if got := rec.Body.String(); !strings.Contains(got, "proto=https") || !strings.Contains(got, "host=example.com") {
+		t.Errorf("through a proxy over HTTPS: %s", got)
+	}
+	rec = do(h, "GET", "/", "203.0.113.5:4000", "X-Forwarded-Proto", "https")
+	if got := rec.Body.String(); strings.Contains(got, "proto=https") {
+		t.Errorf("a visitor's claim: %s", got)
 	}
 }
 

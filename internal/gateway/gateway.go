@@ -47,7 +47,9 @@ func Handler(b Backend, version string, revoked *Revocations, cache *Cache, logg
 			pr.Out.Header.Del("Upgrade")
 			pr.Out.Header.Del("Connection")
 			pr.Out.Header.Set(link.ClientAddr, ClientAddr(pr.In))
-			if pr.In.TLS != nil {
+			// HTTPS: the gateway's own, or a trusted proxy's in front of it
+			// (it makes the backend's cookies stricter, never looser).
+			if pr.In.TLS != nil || viaTrustedHTTPS(pr.In) {
 				pr.Out.Header.Set("X-Forwarded-Proto", "https")
 			}
 		},

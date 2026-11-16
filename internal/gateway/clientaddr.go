@@ -26,6 +26,21 @@ func ClientAddr(r *http.Request) string {
 	return r.RemoteAddr
 }
 
+// viaTrustedHTTPS says whether a trusted proxy in front took the visitor's
+// request over HTTPS (its X-Forwarded-Proto, the last one it set).
+func viaTrustedHTTPS(r *http.Request) bool {
+	peer, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil || !trusted(peer.Addr()) {
+		return false
+	}
+	vals := r.Header.Values("X-Forwarded-Proto")
+	if len(vals) == 0 {
+		return false
+	}
+	parts := strings.Split(vals[len(vals)-1], ",")
+	return strings.EqualFold(strings.TrimSpace(parts[len(parts)-1]), "https")
+}
+
 func trusted(a netip.Addr) bool {
 	for _, p := range HTTPProxies {
 		if p.Contains(a.Unmap()) {

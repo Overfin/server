@@ -33,6 +33,8 @@ var backendHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Reques
 	switch r.URL.Path {
 	case "/hello":
 		io.WriteString(w, "hello from the backend")
+	case "/host":
+		io.WriteString(w, r.Host)
 	case "/bytes":
 		n, _ := strconv.Atoi(r.URL.Query().Get("n"))
 		buf := make([]byte, 32<<10)
@@ -317,6 +319,18 @@ func TestSharedPort(t *testing.T) {
 	waitConnected(t, g, true)
 	if got := get(t, g, "/hello"); got != "hello from the backend" {
 		t.Fatalf("over the shared port: %q", got)
+	}
+	// A visitor's host goes on; the gateway's own requests name the backend.
+	req, _ := http.NewRequest("GET", "https://backend/host", nil)
+	req.Host = "media.example.org"
+	resp, err = g.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(host) != "media.example.org" || get(t, g, "/host") != "backend" {
+		t.Errorf("host: %q, own %q", host, get(t, g, "/host"))
 	}
 }
 

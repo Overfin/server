@@ -331,7 +331,11 @@ func (g *Gateway) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	r := req.Clone(req.Context())
 	r.URL.Scheme, r.URL.Host = "http", "backend"
-	r.Host = "backend"
+	// The visitor's host goes on (the address a screen is shown, without
+	// site.url); the gateway's own requests name the backend.
+	if r.Host == "" {
+		r.Host = "backend"
+	}
 	return cc.RoundTrip(r)
 }
 
