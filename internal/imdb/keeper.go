@@ -331,16 +331,26 @@ func BuildFiles(path, basics, episodes, ratings string, now time.Time) (int, err
 	return n, nil
 }
 
-// swap puts d in use, closing the file used before.
+// swap puts d in use, closing the file used before: a few minutes later
+// (oldKept), as what took it a moment ago (a valuation looking up tens of
+// thousands of titles) may still be reading it; at once when stopping.
 func (k *Keeper) swap(d *Data) {
 	k.mu.Lock()
 	old := k.data
 	k.data = d
 	k.mu.Unlock()
-	if old != nil {
-		old.Close()
+	if old == nil {
+		return
 	}
+	if d == nil {
+		old.Close()
+		return
+	}
+	time.AfterFunc(oldKept, func() { old.Close() })
 }
+
+// oldKept is how long a replaced file stays readable for its readers.
+const oldKept = 5 * time.Minute
 
 func (k *Keeper) close() { k.swap(nil) }
 
