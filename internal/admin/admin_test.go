@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -73,7 +74,13 @@ func newFakeIdP(t *testing.T) *fakeIdP {
 					return
 				}
 				now := time.Now()
-				claims, ok = map[string]any{"iss": f.srv.URL, "aud": "overfin", "sub": "me", "exp": now.Add(time.Minute).Unix(),
+				// A group "@other-user": the token is another user's (one
+				// that doesn't check out for this login).
+				sub := "me"
+				if slices.Contains(groups, "@other-user") {
+					sub = "other"
+				}
+				claims, ok = map[string]any{"iss": f.srv.URL, "aud": "overfin", "sub": sub, "exp": now.Add(time.Minute).Unix(),
 					"iat": now.Unix(), "auth_time": now.Unix(), "groups": groups}, true
 			}
 			if !ok {
@@ -220,6 +227,34 @@ func TestAdminGroupRechecked(t *testing.T) {
 	at = start.Add(12 * time.Minute)
 	if c := ask(); c != 401 {
 		t.Fatalf("out of the group: %d", c)
+	}
+}
+
+// A re-check the provider answers with a token that doesn't check out
+// (another user's) ends the admin session at once, without the grace.
+func TestAdminRecheckUnverified(t *testing.T) {
+	p, idp, _ := newPanel(t)
+	start := time.Now()
+	at := start
+	p.now = func() time.Time { return at }
+	b := &browser{h: p.Handler(), cookies: map[string]string{}}
+	rec := b.do("GET", "/admin/login?return=/admin/", "", nil)
+	loc, _ := url.Parse(rec.Header().Get("Location"))
+	q := loc.Query()
+	code := oidc.Random(8)
+	idp.codes[code] = map[string]any{"iss": idp.srv.URL, "aud": "overfin", "sub": "me", "nonce": q.Get("nonce"),
+		"exp": start.Add(time.Minute).Unix(), "iat": start.Unix(), "auth_time": start.Unix(),
+		"groups": []string{"overfin-admins"}, "preferred_username": "alice", "_refresh": "r1"}
+	idp.refresh["r1"] = []string{"overfin-admins", "@other-user"}
+	ret := url.Values{"code": {code}, "state": {q.Get("state")}}.Encode()
+	b.do("GET", "/admin/auth/callback?"+ret, "", map[string]string{"Sec-Fetch-Site": "cross-site"})
+	b.do("GET", "/admin/auth/finish?"+ret, "", map[string]string{"Sec-Fetch-Site": "same-origin"})
+	if c := b.do("GET", "/admin/api/features", "", nil).Code; c != 200 {
+		t.Fatalf("signed in: %d", c)
+	}
+	at = start.Add(6 * time.Minute) // re-checked, within the grace
+	if c := b.do("GET", "/admin/api/features", "", nil).Code; c != 401 {
+		t.Errorf("after a token that doesn't check out: %d", c)
 	}
 }
 

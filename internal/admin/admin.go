@@ -638,6 +638,11 @@ func (p *Panel) stillInGroup(r *http.Request, s *session) bool {
 	case errors.Is(err, oidc.ErrRevoked):
 		p.Logger.Info("admin session ended: the identity provider refused it", "by", s.logID)
 		return false
+	case errors.Is(err, oidc.ErrUnverified):
+		// The provider answered, with something that doesn't check out: no
+		// grace (that's for a provider out of reach).
+		p.Logger.Warn("admin session ended: the identity provider's new ID token doesn't check out", "by", s.logID, "err", err)
+		return false
 	case err != nil || got.Groups == nil:
 		if now.Sub(s.checked) < groupGrace {
 			p.Logger.Warn("asking the identity provider about an admin session failed; still accepting it for now", "err", err)
