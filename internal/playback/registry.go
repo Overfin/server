@@ -55,6 +55,9 @@ type Stream struct {
 	started       time.Time
 	lastSeen      time.Time
 	positionTicks int64
+	// earliestTicks is the earliest position it was at: its start, or a
+	// report before it.
+	earliestTicks int64
 	paused        bool
 	// title is what plays, in words, for the control panel (Describe).
 	title string
@@ -137,6 +140,9 @@ type Ended struct {
 type Snapshot struct {
 	PositionTicks int64
 	Paused        bool
+	// EarliestTicks is the earliest position the playback was at, its
+	// start included.
+	EarliestTicks int64
 }
 
 // Tickets is the registry of playbacks.
@@ -171,7 +177,7 @@ func (t *Tickets) Add(s *Stream, startTicks int64, now time.Time) {
 func (t *Tickets) add(s *Stream, startTicks int64, now time.Time) {
 	s.ID = ids.New("play")
 	s.Ticket = random(24)
-	s.started, s.lastSeen, s.positionTicks = now, now, startTicks
+	s.started, s.lastSeen, s.positionTicks, s.earliestTicks = now, now, startTicks, startTicks
 	s.over = make(chan struct{})
 	t.byTicket[s.Ticket] = s
 	t.byID[s.ID] = s
@@ -351,13 +357,14 @@ func (t *Tickets) Progress(s *Stream, positionTicks int64, paused bool, now time
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	s.positionTicks, s.paused, s.lastSeen = positionTicks, paused, now
+	s.earliestTicks = min(s.earliestTicks, positionTicks)
 }
 
 // Snapshot returns a stream's latest activity.
 func (t *Tickets) Snapshot(s *Stream) Snapshot {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return Snapshot{PositionTicks: s.positionTicks, Paused: s.paused}
+	return Snapshot{PositionTicks: s.positionTicks, Paused: s.paused, EarliestTicks: s.earliestTicks}
 }
 
 // Remove ends a playback and remembers why. It returns false if the

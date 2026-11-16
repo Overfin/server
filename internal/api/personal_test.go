@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -70,6 +71,38 @@ func TestPersonalData(t *testing.T) {
 	watched := list("/api/v1/titles?kind=movie&played=true")
 	if len(watched.Items) != 1 || !watched.Items[0].UserState.Played || watched.Items[0].UserState.PlayCount != 1 {
 		t.Errorf("watched: %+v", watched)
+	}
+
+	// Restarted in the credits (another audio track): the playback it
+	// replaces counted already, so it's watched once still. Started there
+	// but gone back to the beginning, it counts again.
+	playFrom := func(ms int) string {
+		t.Helper()
+		code, body := post(t, srv, "/api/v1/playback",
+			fmt.Sprintf(`{"itemId":"item_%032x","capabilities":{},"device":"Laptop","startPositionMs":%d}`, 1, ms))
+		if code != http.StatusCreated {
+			t.Fatalf("start at %d: %d %s", ms, code, body)
+		}
+		var s struct{ ID string }
+		json.Unmarshal([]byte(body), &s)
+		return s.ID
+	}
+	playCount := func() int {
+		w := list("/api/v1/titles?kind=movie&played=true")
+		if len(w.Items) != 1 || w.Items[0].UserState == nil {
+			return -1
+		}
+		return w.Items[0].UserState.PlayCount
+	}
+	play = playFrom(6_700_000)
+	post(t, srv, "/api/v1/playback/"+play+"/stop", `{"positionMs":7100000,"ended":true}`)
+	play = playFrom(6_700_000)
+	post(t, srv, "/api/v1/playback/"+play+"/progress", `{"positionMs":600000}`)
+	post(t, srv, "/api/v1/playback/"+play+"/stop", `{"positionMs":7100000,"ended":true}`)
+	eventually(t, func() bool { return playCount() == 2 })
+	time.Sleep(200 * time.Millisecond) // both stops are recorded in the background
+	if n := playCount(); n != 2 {
+		t.Errorf("a restart in the credits, then watched again: %d times, want 2", n)
 	}
 
 	// A favorite, marked by the profile.

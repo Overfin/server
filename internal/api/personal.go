@@ -20,7 +20,9 @@ import (
 
 // When a playback counts: under resumeFrom of a title, nothing is recorded
 // (a peek); from there to watchedFrom, where it stopped; past watchedFrom,
-// or at the end, it's watched once more, when the playback ends.
+// or at the end, it's watched once more, when the playback ends. A playback
+// that was never before watchedFrom isn't: it's the restart of one that
+// counted already (another audio track in the credits).
 const (
 	resumeFrom  = 0.05
 	watchedFrom = 0.90
@@ -46,6 +48,10 @@ func (pb Playback) record(ctx context.Context, s *playback.Stream, positionMs in
 		return
 	case done >= watchedFrom:
 		if !ending {
+			return
+		}
+		earliest := pb.Tickets.Snapshot(s).EarliestTicks / 10_000
+		if float64(earliest)/float64(duration) >= watchedFrom {
 			return
 		}
 		finished = true
