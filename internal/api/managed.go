@@ -561,17 +561,17 @@ func (m *Managed) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	// The other logins end with it (rule 109), before the person is let
+	// off choosing one: if that fails, they're told so and try again, and
+	// the try again does it all (must change still set).
 	err := m.Store.SetPassword(ctx, u.Subject, hash)
+	if err == nil {
+		err = m.Store.DeleteOtherLogins(ctx, u.Subject, l.ID)
+	}
 	if err == nil {
 		err = m.Store.SetMustChange(ctx, u.Subject, false)
 	}
 	if err != nil {
-		m.fail(w, r, err)
-		return
-	}
-	// The other logins end with it (rule 109): if that fails, the person
-	// is told it didn't work, not that it did, and tries again.
-	if err := m.Store.DeleteOtherLogins(ctx, u.Subject, l.ID); err != nil {
 		m.fail(w, r, err)
 		return
 	}

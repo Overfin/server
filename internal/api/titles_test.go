@@ -317,6 +317,16 @@ func TestPlayNextEpisode(t *testing.T) {
 	if got := next("title_series_tmdb_1399_s1_e1"); got != "title_series_tmdb_1399_s1_e3" {
 		t.Errorf("after a file of two: %q", got)
 	}
+	// The season's last file holds E02-E03: after it, the next season.
+	st.PutCatalog(ctx, []store.CatalogItem{
+		{ID: fmt.Sprintf("%032x", 2), Kind: "series", Name: "GoT", SortName: "got", TMDB: "1399"},
+		{ID: fmt.Sprintf("%032x", 1), Kind: "episode", Name: "E", SortName: "e", SeriesID: fmt.Sprintf("%032x", 2),
+			SeasonNumber: n(1), EpisodeNumber: n(2), EpisodeNumberEnd: n(3)},
+	}, 1)
+	st.RefreshTitleKeys(ctx)
+	if got := next("title_series_tmdb_1399_s1_e2"); got != "title_series_tmdb_1399_s2_e1" {
+		t.Errorf("after a season's last file of two: %q", got)
+	}
 	episode(3)
 
 	// Playing the series: the episode a library has (nothing watched yet).

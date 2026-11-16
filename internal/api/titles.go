@@ -933,7 +933,32 @@ func (l Library) nextEpisode(ctx context.Context, p *store.Profile, ep store.Tit
 		}
 		return nil
 	}
+	// Not one the same file holds (S01E01-E02: after E01 comes E03, the
+	// file having played both): left out before looking further, so a
+	// season whose last file holds two goes on to the next season.
+	self := ep.Key()
+	notSameFile := func() error {
+		if len(keys) == 0 {
+			return nil
+		}
+		shared, err := st.SharedFiles(ctx, append([]string{self}, keys...))
+		if err != nil {
+			return err
+		}
+		file := cmp.Or(shared[self], self)
+		kept := keys[:0]
+		for _, k := range keys {
+			if shared[k] != file {
+				kept = append(kept, k)
+			}
+		}
+		keys = kept
+		return nil
+	}
 	if err := add(ep.Season, ep.Episode); err != nil {
+		return nil, err
+	}
+	if err := notSameFile(); err != nil {
 		return nil, err
 	}
 	if len(keys) == 0 && ep.Season > 0 {
@@ -958,23 +983,6 @@ func (l Library) nextEpisode(ctx context.Context, p *store.Profile, ep store.Tit
 				}
 			}
 		}
-	}
-	// Not one the same file holds (S01E01-E02: after E01 comes E03, the
-	// file having played both).
-	if len(keys) > 0 {
-		self := ep.Key()
-		shared, err := st.SharedFiles(ctx, append([]string{self}, keys...))
-		if err != nil {
-			return nil, err
-		}
-		file := cmp.Or(shared[self], self)
-		kept := keys[:0]
-		for _, k := range keys {
-			if shared[k] != file {
-				kept = append(kept, k)
-			}
-		}
-		keys = kept
 	}
 	if len(keys) == 0 {
 		return nil, nil

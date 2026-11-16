@@ -179,6 +179,16 @@ func (s *WishesToSeerr) readBack(ctx context.Context, c *seerr.Client) error {
 			}
 			continue
 		}
+		// One left that way before it was asked again in a while (no time
+		// set): it gets that time now, once.
+		if st.SeerrRequest == 0 && st.State == store.WishRequested && st.NextTry.IsZero() {
+			later := st
+			later.NextTry = s.clock().Add(existsAgain)
+			if err := s.Store.SetWishState(ctx, later); err != nil {
+				return err
+			}
+			continue
+		}
 		if st.SeerrRequest == 0 || (st.State != store.WishRequested && st.State != store.WishDownloading) {
 			continue
 		}
