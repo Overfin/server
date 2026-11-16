@@ -246,3 +246,28 @@ func TestCacheLimits(t *testing.T) {
 		t.Errorf("a file from before the start: %v", err)
 	}
 }
+
+// A visitor who leaves during the check (the proxy writes nothing then)
+// isn't taken as allowed, and nothing is kept for its session.
+func TestCacheCheckWithoutAnswer(t *testing.T) {
+	c := &Cache{Dir: t.TempDir(), Limit: 1 << 30, Logger: quiet}
+	c.Load()
+	b := &imageBackend{fetches: map[string]int{}, checks: map[string]int{}, deny: map[string]bool{}}
+	silent := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(link.CheckOnly) != "" {
+			return // what the proxy's error handler does for a visitor gone
+		}
+		b.ServeHTTP(w, r)
+	})
+	h := c.Wrap(silent)
+	get(h, "/api/v1/images/a", "L1")
+	if rec := get(h, "/api/v1/images/a", "L2"); rec.Code != http.StatusNotFound {
+		t.Errorf("no answer to the check: %d", rec.Code)
+	}
+	c.mu.Lock()
+	kept := len(c.allowed)
+	c.mu.Unlock()
+	if kept != 0 {
+		t.Errorf("%d answers kept", kept)
+	}
+}

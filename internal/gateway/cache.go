@@ -147,9 +147,11 @@ func (c *Cache) may(next http.Handler, r *http.Request, sess [sha256.Size]byte, 
 	}
 	check := r.Clone(r.Context())
 	check.Header.Set(link.CheckOnly, "1")
-	rec := httptest.NewRecorder()
+	rec := &answered{ResponseRecorder: httptest.NewRecorder()}
 	next.ServeHTTP(rec, check)
-	if rec.Code != http.StatusNoContent && rec.Code != http.StatusOK {
+	// Only a yes the backend gave: a visitor who left gets nothing written
+	// (the recorder would still say 200), and nothing is kept for them.
+	if !rec.wrote || r.Context().Err() != nil || (rec.Code != http.StatusNoContent && rec.Code != http.StatusOK) {
 		return false
 	}
 	c.mu.Lock()
@@ -427,4 +429,20 @@ func (c *Cache) queueReady() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.queue != nil
+}
+
+// answered is a recorder that tells whether an answer was written at all.
+type answered struct {
+	*httptest.ResponseRecorder
+	wrote bool
+}
+
+func (a *answered) WriteHeader(code int) {
+	a.wrote = true
+	a.ResponseRecorder.WriteHeader(code)
+}
+
+func (a *answered) Write(b []byte) (int, error) {
+	a.wrote = true
+	return a.ResponseRecorder.Write(b)
 }
