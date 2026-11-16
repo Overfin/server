@@ -812,6 +812,9 @@ func (g *gateway) SetPreviews(ctx context.Context, on bool) error {
 	if err := g.sh.db.SetPreviews(ctx, on); err != nil {
 		return err
 	}
+	if g.sh.previews != nil {
+		g.sh.previews.Wake() // Overfin's own: they start now, not at the next pass
+	}
 	return g.applySettings(ctx)
 }
 

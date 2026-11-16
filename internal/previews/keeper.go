@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/overfin/server/internal/jellyfin"
@@ -30,6 +31,9 @@ const newFor = 7 * 24 * time.Hour
 // the operator has seek-bar previews on, and deletes those no file has had
 // for a week.
 type Keeper struct {
+	wake     chan struct{}
+	wakeOnce sync.Once
+
 	Store  *Store
 	DB     *store.Store
 	Maker  Maker
@@ -50,7 +54,8 @@ type Keeper struct {
 	now      func() time.Time
 }
 
-// Run keeps previews until ctx ends: a pass now, then every Every.
+// Run keeps previews until ctx ends: a pass now, then every Every, or at
+// once when woken (Wake: the panel switched them on).
 func (k *Keeper) Run(ctx context.Context) {
 	k.Store.clearMaking()
 	for {
@@ -61,8 +66,23 @@ func (k *Keeper) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(k.Every):
+		case <-k.woken():
 		}
 	}
+}
+
+// Wake starts a pass now rather than at the next one (an action in the
+// panel shows at once); a pass under way is followed by another.
+func (k *Keeper) Wake() {
+	select {
+	case k.woken() <- struct{}{}:
+	default:
+	}
+}
+
+func (k *Keeper) woken() chan struct{} {
+	k.wakeOnce.Do(func() { k.wake = make(chan struct{}, 1) })
+	return k.wake
 }
 
 func (k *Keeper) clock() time.Time {
