@@ -300,15 +300,16 @@ func TestSharedPort(t *testing.T) {
 	t.Cleanup(func() { srv.Close() })
 	addr := ln.Addr().String()
 
-	visitor := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	// Visitors keep HTTP/2 (the link's ALPN names mustn't turn it off).
+	visitor := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, ForceAttemptHTTP2: true}}
 	resp, err := visitor.Get("https://" + addr + "/")
 	if err != nil {
 		t.Fatal(err)
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if string(body) != "the site" {
-		t.Fatalf("visitor got %q", body)
+	if string(body) != "the site" || resp.ProtoMajor != 2 {
+		t.Fatalf("visitor got %q over %s", body, resp.Proto)
 	}
 
 	b, _ := runBackend(t, t.TempDir(), "1.0")

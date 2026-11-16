@@ -143,6 +143,14 @@ func (g *Gateway) Share(srv *http.Server) {
 		return nil, nil
 	}
 	if srv.TLSNextProto == nil {
+		// A map without "h2" is Go's old way of turning HTTP/2 off: say
+		// which protocols visitors get, so they keep HTTP/2.
+		if srv.Protocols == nil {
+			p := new(http.Protocols)
+			p.SetHTTP1(true)
+			p.SetHTTP2(true)
+			srv.Protocols = p
+		}
 		srv.TLSNextProto = map[string]func(*http.Server, *tls.Conn, http.Handler){}
 	}
 	srv.TLSNextProto[ALPN] = func(_ *http.Server, c *tls.Conn, _ http.Handler) { g.Serve(c) }
