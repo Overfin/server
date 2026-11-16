@@ -112,8 +112,12 @@ func (pb Playback) end(s *playback.Stream, reason, by string) {
 func (pb Playback) stopped(s *playback.Stream) {
 	snap := pb.Tickets.Snapshot(s)
 	if rm := s.Remote; rm != nil {
-		// Where the profile is, kept here; the playback ends there.
+		// Where the profile is, kept here; the playback ends there. Counted
+		// as on its way at once: a playback started right after (another
+		// audio track) waits for it (remoteStops).
+		done := remoteStops.begin(rm.PeerID)
 		go func() {
+			defer done()
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			pb.record(ctx, s, snap.PositionTicks/10_000, true)

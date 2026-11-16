@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -409,6 +410,7 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	}
 	wantAudio, wantSubtitles := l.wishesFor(ctx, p, tracksKey, req.AudioLanguage)
 	var out sessionJSON
+	remoteStops.wait(ctx, peer.ID, 5*time.Second)
 	status, err := fed.Call(ctx, peer, "/api/v1/federation/play", peerPlayRequest{Title: key, Capabilities: req.Capabilities,
 		StartPositionMs: req.StartPositionMs, MaxBitrateKbps: kbps, AudioLanguage: wantAudio, SubtitleLanguage: wantSubtitles,
 		AudioTrack: req.AudioTrack, SubtitleTrack: req.SubtitleTrack}, &out)
@@ -617,13 +619,56 @@ func (pb Playback) stopRemote(peer *store.Peer, id string, positionMs int64) {
 	if fed == nil {
 		return
 	}
+	done := remoteStops.begin(peer.ID)
 	go func() {
+		defer done()
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if _, err := fed.Call(ctx, peer, "/api/v1/federation/stop", peerStopRequest{ID: id, PositionMs: positionMs}, &struct{}{}); err != nil {
 			pb.Logger.Info("a paired server couldn't be told a playback stopped", "peer", peer.Name, "err", err)
 		}
 	}()
+}
+
+// remoteStops are the stops on their way to each paired server. A new
+// playback there waits for them a moment first: another audio track or a
+// quality restarts a playback (stop, then start), and the other server,
+// counting the old one still, would refuse the new one over its limit.
+var remoteStops = pendingStops{byPeer: map[string]int{}}
+
+type pendingStops struct {
+	mu     sync.Mutex
+	byPeer map[string]int
+}
+
+func (p *pendingStops) begin(peer string) (done func()) {
+	p.mu.Lock()
+	p.byPeer[peer]++
+	p.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			p.mu.Lock()
+			if p.byPeer[peer]--; p.byPeer[peer] <= 0 {
+				delete(p.byPeer, peer)
+			}
+			p.mu.Unlock()
+		})
+	}
+}
+
+// wait waits for the stops on their way to peer, at most limit.
+func (p *pendingStops) wait(ctx context.Context, peer string, limit time.Duration) {
+	deadline := time.Now().Add(limit)
+	for time.Now().Before(deadline) && ctx.Err() == nil {
+		p.mu.Lock()
+		n := p.byPeer[peer]
+		p.mu.Unlock()
+		if n == 0 {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // chooseRemoteTracks keeps the tracks chosen while watching a paired
