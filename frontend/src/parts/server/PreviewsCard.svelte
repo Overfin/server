@@ -13,6 +13,7 @@
   let st = $state<Line>({ text: '', kind: '' });
 
   async function save() {
+    st = { text: '', kind: '' }; // an earlier failure's line goes
     if (on === pv.on) return;
     const out = await api<Previews>('PUT', '/admin/api/previews', { on });
     const who = out.own ? 'Overfin' : 'Jellyfin';

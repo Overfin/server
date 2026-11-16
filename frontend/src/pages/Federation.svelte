@@ -81,18 +81,32 @@
   let labels = $state<Record<string, string>>({});
   let limits = $state<Limits>({ streams: 2, transcodes: 1, bitrateKbps: 0 });
 
-  // One load at a time: a slow answer doesn't pile up the next ones.
-  let loading = false;
+  // One load at a time: a slow answer doesn't pile up the next ones. Asked
+  // during one (an action just done while the timer's was on its way), it
+  // reads once more after it, so what the action changed shows, and the
+  // action waits for that.
+  let running: Promise<void> | null = null;
+  let again = false;
   async function load() {
-    if (loading) return;
-    loading = true;
+    if (running) {
+      again = true;
+      return running;
+    }
+    running = (async () => {
+      do {
+        again = false;
+        try {
+          s = await api<State>('GET', '/admin/api/federation');
+          problem = '';
+        } catch (err) {
+          problem = message(err);
+        }
+      } while (again);
+    })();
     try {
-      s = await api<State>('GET', '/admin/api/federation');
-      problem = '';
-    } catch (err) {
-      problem = message(err);
+      await running;
     } finally {
-      loading = false;
+      running = null;
     }
   }
 
