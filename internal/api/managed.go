@@ -569,8 +569,11 @@ func (m *Managed) changePassword(w http.ResponseWriter, r *http.Request) {
 		m.fail(w, r, err)
 		return
 	}
+	// The other logins end with it (rule 109): if that fails, the person
+	// is told it didn't work, not that it did, and tries again.
 	if err := m.Store.DeleteOtherLogins(ctx, u.Subject, l.ID); err != nil {
-		m.Logger.Error("ending other logins after a new password failed", "err", err)
+		m.fail(w, r, err)
+		return
 	}
 	writeOK(w, map[string]string{"next": req.Return})
 }
@@ -872,7 +875,8 @@ func (m *Managed) setPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := m.Store.DeleteOtherLogins(r.Context(), u.Subject, l.ID); err != nil {
-		m.Logger.Error("ending other logins after a new password failed", "err", err)
+		m.fail(w, r, err) // as reset and setup links do: rule 109
+		return
 	}
 	writeOK(w, map[string]bool{"hasPassword": true})
 }
