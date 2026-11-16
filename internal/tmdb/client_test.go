@@ -33,6 +33,18 @@ func fakeTMDB(t *testing.T) *Client {
 			io.WriteString(w, `{"page":1,"total_pages":3,"results":[{"id":680,"title":"Pulp Fiction"},{"id":1399,"media_type":"tv","name":"A series"}]}`)
 		case "/3/discover/tv":
 			q := r.URL.Query()
+			if q.Has("air_date.gte") {
+				// Popular series: started in the last five years, an
+				// episode in the last one.
+				now := time.Now().UTC()
+				if q.Get("first_air_date.gte") != now.AddDate(-5, 0, 0).Format(time.DateOnly) ||
+					q.Get("air_date.gte") != now.AddDate(-1, 0, 0).Format(time.DateOnly) || q.Get("sort_by") != "popularity.desc" {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				io.WriteString(w, `{"page":1,"total_pages":40,"results":[{"id":1399,"name":"Reacher","first_air_date":"2022-02-03"}]}`)
+				return
+			}
 			if q.Has("first_air_date.gte") {
 				// Upcoming series: those starting today (UTC) or later.
 				if q.Get("first_air_date.gte") != time.Now().UTC().Format(time.DateOnly) || q.Get("sort_by") != "popularity.desc" || q.Get("page") != "2" {
@@ -165,6 +177,9 @@ func TestClient(t *testing.T) {
 	}
 	if p, err := c.Discover(ctx, "upcoming", "series", 2); err != nil || len(p.Titles) != 1 || p.Titles[0].Kind != "series" || p.Titles[0].Year != 2011 {
 		t.Errorf("upcoming series: %+v %v", p, err)
+	}
+	if p, err := c.Discover(ctx, "popular", "series", 1); err != nil || len(p.Titles) != 1 || p.Titles[0].Name != "Reacher" {
+		t.Errorf("popular series: %+v %v", p, err)
 	}
 
 	d, err := c.Details(ctx, "movie", 949)

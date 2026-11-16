@@ -410,6 +410,17 @@ func (c *Client) Discover(ctx context.Context, list, kind string, page int) (*Pa
 		path = "/trending/" + k + "/week"
 	case "popular":
 		path = "/" + k + "/popular"
+		if kind == "series" {
+			// TMDB's own popular series are mostly decades-old shows that
+			// still get page views: series that started in the last five
+			// years and aired an episode in the last year instead, the
+			// most popular first.
+			now := time.Now().UTC()
+			path = "/discover/tv"
+			q.Set("first_air_date.gte", now.AddDate(-5, 0, 0).Format(time.DateOnly))
+			q.Set("air_date.gte", now.AddDate(-1, 0, 0).Format(time.DateOnly))
+			q.Set("sort_by", "popularity.desc")
+		}
 	case "upcoming":
 		path = "/movie/upcoming"
 		if kind == "series" {
