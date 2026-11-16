@@ -156,9 +156,15 @@ type twoServers struct {
 // accepts it only as the one B names.
 func pairForPlay(t *testing.T, trustB bool) *twoServers {
 	t.Helper()
+	return pairForPlayWith(t, trustB, nil)
+}
+
+// pairForPlayWith is pairForPlay with B's handler wrapped by wrapB.
+func pairForPlayWith(t *testing.T, trustB bool, wrapB func(http.Handler) http.Handler) *twoServers {
+	t.Helper()
 	ctx := context.Background()
 	var x twoServers
-	x.srvB, x.fakeB = newServerWith(t, options{store: &x.stB, federation: &x.b, tickets: &x.onB})
+	x.srvB, x.fakeB = newServerWith(t, options{store: &x.stB, federation: &x.b, tickets: &x.onB, wrap: wrapB})
 	x.fakeB.setDirect(true)
 	x.stB.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "Heat", SortName: "heat",
 		TMDB: "949", LibraryID: "films", AudioTags: []string{"fr"}}}, 1)

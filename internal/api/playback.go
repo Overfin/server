@@ -617,7 +617,7 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s, out, dec, sourceID, pr := o.stream, o.out, o.dec, o.sourceID, o.pr
+	s, out, dec, pr := o.stream, o.out, o.dec, o.pr
 	if len(titles) == 1 {
 		out.Title = &titles[0]
 		if ref, ok := titleRef(titles[0].ID); ok && ref.Kind == "episode" {
@@ -628,34 +628,10 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 			out.Next = next
 		}
 	}
-	// Seek-bar previews are a bonus too: Overfin's own, else Jellyfin's
-	// set nearest 320 pixels wide.
-	if fp, set, ok := l.Previews.ForVersion(ctx, jfItem, sourceID); ok {
-		s.Trickplay = &jellyfin.Trickplay{Width: set.Width, Height: set.Height, Columns: set.Columns, Rows: set.Rows,
-			Count: set.Count, IntervalMs: set.IntervalMs}
-		s.Previews = fp
-		tp := &trickplayJSON{TileWidth: set.Width, TileHeight: set.Height, Columns: set.Columns, Rows: set.Rows,
-			IntervalMs: set.IntervalMs, TileCount: set.Count}
-		for n := range set.Sheets() {
-			tp.Sheets = append(tp.Sheets, "/api/v1/playback/"+s.ID+"/trickplay/"+strconv.Itoa(n))
-		}
-		out.Trickplay = tp
-	} else if sets, err := l.Jellyfin.Trickplays(ctx, ja, uid, jfItem, sourceID); err == nil && len(sets) > 0 {
-		best := sets[0]
-		for _, t := range sets[1:] {
-			if max(t.Width-320, 320-t.Width) < max(best.Width-320, 320-best.Width) {
-				best = t
-			}
-		}
-		s.Trickplay = &best
-		tp := &trickplayJSON{TileWidth: best.Width, TileHeight: best.Height, Columns: best.Columns, Rows: best.Rows,
-			IntervalMs: best.IntervalMs, TileCount: best.Count}
-		perSheet := best.Columns * best.Rows
-		for n := 0; n*perSheet < best.Count; n++ {
-			tp.Sheets = append(tp.Sheets, "/api/v1/playback/"+s.ID+"/trickplay/"+strconv.Itoa(n))
-		}
-		out.Trickplay = tp
-	}
+	// Seek-bar previews are a bonus too.
+	out.Trickplay = pb.previews(ctx, s, ja, uid, func(n int) string {
+		return "/api/v1/playback/" + s.ID + "/trickplay/" + strconv.Itoa(n)
+	})
 
 	// How it's served and why, without anything that names or reaches the
 	// file (rule 54): what tells a needless conversion.
@@ -672,6 +648,46 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	writeOK(w, out)
+}
+
+// previews gives a playback its seek-bar previews, when its copy has
+// some: Overfin's own, else Jellyfin's set nearest 320 pixels wide, with
+// sheet(n) the address of sheet n. A bonus: nil when there are none or
+// asking fails.
+func (pb Playback) previews(ctx context.Context, s *playback.Stream, ja jellyfin.Auth, uid string, sheet func(n int) string) *trickplayJSON {
+	l := pb.Library
+	var set jellyfin.Trickplay
+	if fp, own, ok := l.Previews.ForVersion(ctx, s.ItemID, s.SourceID); ok {
+		set = jellyfin.Trickplay{Width: own.Width, Height: own.Height, Columns: own.Columns, Rows: own.Rows,
+			Count: own.Count, IntervalMs: own.IntervalMs}
+		s.Previews = fp
+	} else if sets, err := l.Jellyfin.Trickplays(ctx, ja, uid, s.ItemID, s.SourceID); err == nil && len(sets) > 0 {
+		set = sets[0]
+		for _, t := range sets[1:] {
+			if max(t.Width-320, 320-t.Width) < max(set.Width-320, 320-set.Width) {
+				set = t
+			}
+		}
+	}
+	if sheetCount(set) == 0 {
+		return nil
+	}
+	s.Trickplay = &set
+	tp := &trickplayJSON{TileWidth: set.Width, TileHeight: set.Height, Columns: set.Columns, Rows: set.Rows,
+		IntervalMs: set.IntervalMs, TileCount: set.Count, Sheets: []string{}}
+	for n := range sheetCount(set) {
+		tp.Sheets = append(tp.Sheets, sheet(n))
+	}
+	return tp
+}
+
+// sheetCount is how many sheets a set of previews takes.
+func sheetCount(tp jellyfin.Trickplay) int {
+	per := tp.Columns * tp.Rows
+	if per <= 0 || tp.Count <= 0 {
+		return 0
+	}
+	return (tp.Count + per - 1) / per
 }
 
 // lowest returns the smallest positive value, or 0 when there is none.
@@ -723,15 +739,36 @@ const (
 )
 
 // trickplaySheet serves one sheet of a playback's seek-bar previews, to
-// whoever may see the playback, re-encoded like every image (rule 16).
+// whoever may see the playback, re-encoded like every image (rule 16); a
+// paired server's playback's, from that server (rule 97).
 func (pb Playback) trickplaySheet(w http.ResponseWriter, r *http.Request) {
 	s := pb.find(w, r)
 	if s == nil {
 		return
 	}
-	n, err := strconv.Atoi(r.PathValue("sheet"))
+	if s.Remote != nil {
+		Stream{Playback: pb}.relaySheet(w, r, s, r.PathValue("sheet"))
+		return
+	}
+	pb.serveSheet(w, r, s, r.PathValue("sheet"))
+}
+
+// sheetNumber reads a sheet's number, in decimal without leading zeros,
+// within tp's sheets.
+func sheetNumber(tp *jellyfin.Trickplay, sheet string) (int, bool) {
+	n, err := strconv.Atoi(sheet)
+	if err != nil || tp == nil || n < 0 || n >= sheetCount(*tp) || strconv.Itoa(n) != sheet {
+		return 0, false
+	}
+	return n, true
+}
+
+// serveSheet serves sheet of a playback of this server's copy, its
+// access checked by the caller.
+func (pb Playback) serveSheet(w http.ResponseWriter, r *http.Request, s *playback.Stream, sheet string) {
 	tp := s.Trickplay
-	if err != nil || tp == nil || n < 0 || tp.Columns <= 0 || tp.Rows <= 0 || n >= (tp.Count+tp.Columns*tp.Rows-1)/(tp.Columns*tp.Rows) || strconv.Itoa(n) != r.PathValue("sheet") {
+	n, ok := sheetNumber(tp, sheet)
+	if !ok {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -752,6 +789,10 @@ func (pb Playback) trickplaySheet(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
+	writeSheet(w, data)
+}
+
+func writeSheet(w http.ResponseWriter, data []byte) {
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "private, max-age=3600")
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
@@ -983,11 +1024,10 @@ type openArgs struct {
 // opened is a copy opened: its playback registered, and the session's
 // view so far (no title, next episode or previews: those are the caller's).
 type opened struct {
-	stream   *playback.Stream
-	out      sessionJSON
-	dec      *playback.Decision
-	sourceID string
-	pr       jellyfin.PlaybackRequest
+	stream *playback.Stream
+	out    sessionJSON
+	dec    *playback.Decision
+	pr     jellyfin.PlaybackRequest
 }
 
 // open plays a copy: asks Jellyfin how, picks the tracks, admits the
@@ -1204,5 +1244,5 @@ func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*op
 		audioIndex = *pr.AudioStreamIndex
 	}
 	out.Info = infoOf(dec, audioIndex)
-	return &opened{stream: s, out: out, dec: dec, sourceID: sourceID, pr: pr}, true
+	return &opened{stream: s, out: out, dec: dec, pr: pr}, true
 }

@@ -3716,6 +3716,38 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
 
+  /stream/{ticket}/trickplay/{sheet}:
+    parameters:
+      - $ref: "#/components/parameters/Ticket"
+      - name: sheet
+        in: path
+        required: true
+        description: The sheet's number, from 0, in decimal without leading zeros.
+        schema:
+          type: string
+          maxLength: 4
+          pattern: "^(0|[1-9][0-9]{0,3})$"
+    get:
+      security: []
+      operationId: getStreamTrickplaySheet
+      summary: One sheet of a playback's seek-bar previews, by its ticket
+      description: >-
+        For a paired server's viewer's server, which gets these URLs in the
+        `trickplay.sheets` of its play answer (MSFP section 10) and relays
+        the sheets at its own playback route. A JPEG, re-encoded by
+        Overfin; no query string.
+      tags: [playback]
+      responses:
+        "200":
+          description: The sheet.
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   # ---- Catalog (TMDB plugin) -------------------------------------------------
   #
   # These exist only when the operator enables the TMDB catalog (`catalog` in

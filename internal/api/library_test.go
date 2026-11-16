@@ -77,6 +77,16 @@ type fakeJellyfin struct {
 	unmarked bool
 	// notPlayable offers the movie no way to play.
 	notPlayable bool
+	// noTrickplay: the movie has no seek-bar previews; trickplay, when
+	// set, is its only set.
+	noTrickplay bool
+	trickplay   map[string]int
+}
+
+func (f *fakeJellyfin) setTrickplay(none bool, set map[string]int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.noTrickplay, f.trickplay = none, set
 }
 
 func (f *fakeJellyfin) setDirect(on bool) {
@@ -200,11 +210,18 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/Items" && q.Get("fields") == "Trickplay":
 		// Item 1's version has previews at two widths.
 		id := fmt.Sprintf("%032x", 1)
-		json.NewEncoder(w).Encode(map[string]any{"Items": []map[string]any{{"Id": id, "Trickplay": map[string]any{
-			id: map[string]any{
-				"160": map[string]int{"Width": 160, "Height": 68, "TileWidth": 10, "TileHeight": 10, "ThumbnailCount": 645, "Interval": 10000},
-				"320": map[string]int{"Width": 320, "Height": 136, "TileWidth": 10, "TileHeight": 10, "ThumbnailCount": 645, "Interval": 10000},
-			}}}}})
+		if f.noTrickplay {
+			json.NewEncoder(w).Encode(map[string]any{"Items": []map[string]any{{"Id": id}}})
+			break
+		}
+		sets := map[string]any{
+			"160": map[string]int{"Width": 160, "Height": 68, "TileWidth": 10, "TileHeight": 10, "ThumbnailCount": 645, "Interval": 10000},
+			"320": map[string]int{"Width": 320, "Height": 136, "TileWidth": 10, "TileHeight": 10, "ThumbnailCount": 645, "Interval": 10000},
+		}
+		if f.trickplay != nil {
+			sets = map[string]any{"320": f.trickplay}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"Items": []map[string]any{{"Id": id, "Trickplay": map[string]any{id: sets}}}})
 	case r.URL.Path == "/Videos/"+fmt.Sprintf("%032x", 1)+"/Trickplay/320/6.jpg" && q.Get("mediaSourceId") == fmt.Sprintf("%032x", 1):
 		jpeg.Encode(w, image.NewRGBA(image.Rect(0, 0, 64, 32)), nil)
 	case r.URL.Path == "/Items" && q.Has("ids"):
@@ -374,6 +391,9 @@ type options struct {
 	federation **federation.Service
 	// tickets, when set, receives the server's playbacks.
 	tickets **playback.Tickets
+	// wrap, when set, wraps the server's handler (to stand in for a
+	// misbehaving server on some routes).
+	wrap func(http.Handler) http.Handler
 }
 
 func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
@@ -572,6 +592,9 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		t.Fatal(err)
 	}
 	// HTTPS, so the Secure session cookie behaves as in a browser.
+	if o.wrap != nil {
+		h = o.wrap(h)
+	}
 	srv.Config.Handler = h
 	srv.StartTLS()
 	t.Cleanup(srv.Close)

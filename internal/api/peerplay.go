@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -154,6 +155,13 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s, out := o.stream, o.out
+	// Its seek-bar previews, a bonus, by the same ticket (MSFP section 10).
+	out.Trickplay = pb.previews(ctx, s, ja, uid, func(n int) string {
+		return fed.Address + "/api/v1/stream/" + s.Ticket + "/trickplay/" + strconv.Itoa(n)
+	})
+	if out.Trickplay != nil && !peerLayoutOK(out.Trickplay) {
+		out.Trickplay, s.Trickplay = nil, nil // outside what MSFP allows: none
+	}
 	pb.Logger.Info("playback started for a paired server", "playback", s.ID, "peer", peer.Name, "method", o.dec.Method,
 		"reasons", o.dec.Reasons(), "maxKbps", kbps)
 	s.View = out
@@ -474,7 +482,7 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	}
 	s := &playback.Stream{AccountID: p.AccountID, ProfileID: p.ID, SessionID: caller.Session.ID, Device: device,
 		Decision: playback.Decision{Method: "remote", Source: jellyfin.MediaSource{RunTimeTicks: out.DurationMs * 10_000}},
-		Remote:   &playback.Remote{PeerID: peer.ID, ID: out.ID, Key: key, Base: base}}
+		Remote:   &playback.Remote{PeerID: peer.ID, ID: out.ID, Key: key, Base: base}, Trickplay: layoutOf(out.Trickplay)}
 	replaced, err := pb.Tickets.Admit(s, req.StartPositionMs*10_000, time.Now(), lim, device)
 	if err != nil {
 		pb.stopRemote(peer, out.ID, 0)
@@ -486,7 +494,13 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	}
 	// The browser asks this server only (rule 97).
 	relayURLs(&out, base, s.Ticket)
-	out.ID, out.Trickplay, out.Title, out.Next = s.ID, nil, nil, nil
+	out.ID, out.Title, out.Next = s.ID, nil, nil
+	// Its previews' sheets, through this server too.
+	if tp := out.Trickplay; tp != nil {
+		for n := range tp.Sheets {
+			tp.Sheets[n] = "/api/v1/playback/" + s.ID + "/trickplay/" + strconv.Itoa(n)
+		}
+	}
 	if len(titles) == 1 {
 		out.Title = &titles[0]
 		if ref.Kind == "episode" {
@@ -519,10 +533,10 @@ func peerRefusal(r federation.Reply) problem.Type {
 	return problem.NotPlayable
 }
 
-// keepPeerURLs checks a paired server's playback: its stream's and
-// subtitles' URLs must be files of one stream of its own, at its address;
-// segments and previews it may not give. It gives that stream's base, up
-// to its ticket and "/".
+// keepPeerURLs checks a paired server's playback: its stream's,
+// subtitles' and previews' sheets' URLs must be files of one stream of its
+// own, at its address. It gives that stream's base, up to its ticket and
+// "/".
 func keepPeerURLs(out *sessionJSON, address string) (string, bool) {
 	prefix := strings.TrimSuffix(address, "/") + "/api/v1/stream/"
 	ticket, _, found := strings.Cut(strings.TrimPrefix(out.Stream.URL, prefix), "/")
@@ -548,7 +562,48 @@ func keepPeerURLs(out *sessionJSON, address string) (string, bool) {
 			}
 		}
 	}
+	// Sheet n of its previews is at "trickplay/n" of the same stream.
+	if tp := out.Trickplay; tp != nil {
+		for n, u := range tp.Sheets {
+			if u != base+"trickplay/"+strconv.Itoa(n) {
+				return "", false
+			}
+		}
+	}
 	return base, true
+}
+
+// Bounds on a paired server's seek-bar previews (MSFP section 9.5): tiles
+// and sheets of sizes this server re-encodes (images.MaxDimension), a
+// sheet count that a film's previews never need more than.
+const (
+	maxPeerTile      = 2048
+	maxPeerGrid      = 100
+	maxPeerSheetSide = 4096
+	maxPeerSheets    = 1000
+	minPeerInterval  = 100
+	maxPeerInterval  = 3_600_000
+)
+
+// peerLayoutOK says whether a paired server's previews are within those
+// bounds, one sheet listed for each the tiles fill.
+func peerLayoutOK(tp *trickplayJSON) bool {
+	in := func(v, lo, hi int) bool { return v >= lo && v <= hi }
+	if !in(tp.TileWidth, 1, maxPeerTile) || !in(tp.TileHeight, 1, maxPeerTile) || !in(tp.Columns, 1, maxPeerGrid) ||
+		!in(tp.Rows, 1, maxPeerGrid) || tp.Columns*tp.TileWidth > maxPeerSheetSide || tp.Rows*tp.TileHeight > maxPeerSheetSide ||
+		!in(tp.IntervalMs, minPeerInterval, maxPeerInterval) || !in(tp.TileCount, 1, maxPeerSheets*tp.Columns*tp.Rows) {
+		return false
+	}
+	return len(tp.Sheets) == sheetCount(*layoutOf(tp))
+}
+
+// layoutOf is a set of previews' layout, as a playback keeps it.
+func layoutOf(tp *trickplayJSON) *jellyfin.Trickplay {
+	if tp == nil {
+		return nil
+	}
+	return &jellyfin.Trickplay{Width: tp.TileWidth, Height: tp.TileHeight, Columns: tp.Columns, Rows: tp.Rows,
+		Count: tp.TileCount, IntervalMs: tp.IntervalMs}
 }
 
 // relayURLs gives a paired server's playback this server's addresses: its
@@ -643,6 +698,10 @@ func cleanPeerText(out *sessionJSON) bool {
 		}
 	}
 	out.Versions = versions
+	// Previews out of bounds are none: the playback goes on without them.
+	if out.Trickplay != nil && !peerLayoutOK(out.Trickplay) {
+		out.Trickplay = nil
+	}
 	if in := out.Info; in != nil {
 		in.Container = textclean.Plain(in.Container, 32)
 		for _, st := range []*streamInfoJSON{in.Video, in.Audio} {

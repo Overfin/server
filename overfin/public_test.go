@@ -26,6 +26,7 @@ var publicRoutes = map[string]string{
 	"GET /api/v1/stream/{ticket}/{name}":                   "the stream's media",
 	"GET /api/v1/stream/{ticket}/subtitles/{track}/{part}": "the stream's subtitles",
 	"GET /api/v1/stream/{ticket}/pictures/{track}/{part}":  "the stream's picture subtitles",
+	"GET /api/v1/stream/{ticket}/trickplay/{sheet}":        "the stream's seek-bar previews",
 	"POST /api/v1/federation/pair":                         "federation: using a pairing code",
 	"POST /api/v1/federation/hello":                        "federation: where a pairing stands",
 	"POST /api/v1/federation/libraries":                    "federation: the libraries offered",

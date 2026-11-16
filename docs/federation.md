@@ -22,6 +22,9 @@ network, and nothing is shared until both of you say so.
   two. It plays from your copy, unless only the other server has one in
   the person's language: Overfin never picks a version without their
   language when another has it.
+- **Playing as from your own.** The other server's titles play with
+  their audio tracks, subtitles, skip markers and seek-bar previews, all
+  through your server.
 - **Everything personal stays with you.** What they watch, where they
   stopped, their favorites, their list, their wishes: all kept on your
   server only. Kids profiles see a paired server's titles only within

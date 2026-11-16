@@ -109,7 +109,10 @@ anyone. Paired servers are not trusted at all (rule 94).
     them: as JPEG, or PNG for logos and branding. Their size is checked
     before decoding, and oversized ones are refused. SVG, HTML and anything
     that fails to decode are never served. Trickplay sheets are re-encoded
-    as JPEG, never resized.
+    as JPEG, never resized. A paired server's are re-encoded here too, and
+    refused unless each is a JPEG of at most 8 MiB, no larger than a sheet
+    of the layout it announced; a layout past 1,000 sheets, or with sheets
+    over 4,096 pixels a side, is dropped.
 17. Subtitles are served only as sanitized WebVTT, or, for subtitles that
     are pictures (PGS), as each stretch of the track read whole and
     refused unless every part of it is well-formed and within its limits.
@@ -565,7 +568,7 @@ anyone. Paired servers are not trusted at all (rule 94).
     by key, with their languages, never files, paths or people. Playing
     stays within the pairing's limits (2 streams and 1 transcode at first,
     the owner's to change). What a paired server sends is cleaned like any
-    upstream data (rules 14, 15, 17).
+    upstream data (rules 14, 15, 16, 17).
 97. A browser never connects to another server: a paired server's title
     plays through the viewer's own server, which asks the other with a
     ticket the browser never sees. The other server sees that server only,
