@@ -1066,8 +1066,12 @@ func (p *Panel) setRatings(w http.ResponseWriter, r *http.Request, s *session) {
 	}
 	ctx := r.Context()
 	// Everything checked before anything is saved: a refusal changes nothing.
+	// The country only checked when it changes: before TMDB's scales are
+	// known (a fresh server, no token yet), the list is empty, and the
+	// titles shown could never change.
+	current, _ := p.Store.RatingsCountry(ctx)
 	countries, err := p.Store.RatingCountries(ctx)
-	if err == nil && !slices.Contains(countries, req.Country) {
+	if err == nil && req.Country != current && !slices.Contains(countries, req.Country) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": "TMDB has no ratings for this country"})
 		return
 	}
