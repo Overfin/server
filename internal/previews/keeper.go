@@ -1,6 +1,7 @@
 package previews
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -233,7 +234,14 @@ func (k *Keeper) adopt(fp string, f jellyfin.VideoFile) bool {
 		if !set.valid() {
 			continue
 		}
-		from := filepath.Join(k.JellyfinData, "data", "trickplay", f.ItemID[:2], dashed(f.ItemID),
+		// Jellyfin keeps a version's previews under that version's own
+		// item, whose ID is the media source's: a second version (4K and
+		// 1080p of one film) isn't under the item listed.
+		id := cmp.Or(f.SourceID, f.ItemID)
+		if len(id) < 2 {
+			continue
+		}
+		from := filepath.Join(k.JellyfinData, "data", "trickplay", id[:2], dashed(id),
 			fmt.Sprintf("%d - %dx%d", tp.Width, tp.Columns, tp.Rows))
 		if _, err := os.Stat(filepath.Join(from, "0.jpg")); err != nil {
 			continue

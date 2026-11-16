@@ -221,9 +221,16 @@ func TestKeeperPass(t *testing.T) {
 	const old = "00027710370fdf733c764e3e7401f44e"
 	jfSets := filepath.Join(jfData, "data", "trickplay", "00", "00027710-370f-df73-3c76-4e3e7401f44e", "320 - 10x10")
 	writeFile(t, filepath.Join(jfSets, "0.jpg"), []byte("jellyfin's"))
+	// And of the old one's second version, under that version's own item.
+	const alt = "55555555555555555555555555555555"
+	writeFile(t, filepath.Join(media, "alt.mkv"), append(slices.Clone(data), 'y', 'z'))
+	altSets := filepath.Join(jfData, "data", "trickplay", "55", "55555555-5555-5555-5555-555555555555", "320 - 10x10")
+	writeFile(t, filepath.Join(altSets, "0.jpg"), []byte("the second version's"))
 	files := fakeFiles{
 		{ItemID: old, SourceID: old, Path: filepath.Join(media, "old.mkv"),
 			Trickplay: []jellyfin.Trickplay{{Width: 320, Height: 180, Columns: 10, Rows: 10, Count: 2, IntervalMs: 10_000}}},
+		{ItemID: old, SourceID: alt, Path: filepath.Join(media, "alt.mkv"),
+			Trickplay: []jellyfin.Trickplay{{Width: 320, Height: 180, Columns: 10, Rows: 10, Count: 3, IntervalMs: 10_000}}},
 		{ItemID: "11111111111111111111111111111111", SourceID: "11111111111111111111111111111111", Path: filepath.Join(media, "new.mkv")},
 		{ItemID: "22222222222222222222222222222222", SourceID: "22222222222222222222222222222222", Path: filepath.Join(media, "copy", "new.mkv")},
 		{ItemID: "33333333333333333333333333333333", SourceID: "33333333333333333333333333333333", Path: filepath.Join(media, "broken.mkv")},
@@ -250,6 +257,13 @@ func TestKeeperPass(t *testing.T) {
 	}
 	if _, err := os.Stat(jfSets); !os.IsNotExist(err) {
 		t.Error("Jellyfin's copy left")
+	}
+	fpAlt, set, ok := k.ForVersion(ctx, old, alt)
+	if !ok || set.Count != 3 {
+		t.Fatalf("the second version's not taken over: %+v %v", set, ok)
+	}
+	if b, _ := st.Sheet(fpAlt, 0); string(b) != "the second version's" {
+		t.Errorf("second version's sheet: %q", b)
 	}
 	if _, _, ok := k.ForVersion(ctx, "11111111111111111111111111111111", "11111111111111111111111111111111"); ok {
 		t.Error("made while off")
