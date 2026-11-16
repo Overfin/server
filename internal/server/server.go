@@ -62,6 +62,13 @@ func New(logger *slog.Logger, identify func(http.Handler) http.Handler, site htt
 	// Anything no route matched gets the same plain 404, in the API; the
 	// rest is the site's, when there is one.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// The control panel's and the apps' paths, when they reach this far
+		// (the panel isn't on the site's address): never the site's page,
+		// a plain 404, as at the gateway.
+		if notSite(r.URL.Path) {
+			http.Error(w, "404 page not found", http.StatusNotFound)
+			return
+		}
 		if site != nil && !isAPI(r.URL.Path) {
 			site.ServeHTTP(w, r)
 			return
@@ -87,6 +94,12 @@ func requireIdentity(next http.Handler) http.Handler {
 // isAPI reports whether a path is the API's, never the site's.
 func isAPI(p string) bool {
 	return p == "/api" || strings.HasPrefix(p, "/api/")
+}
+
+// notSite says whether p is the control panel's or the apps' (/admin…,
+// /apps…), as the gateway refuses them.
+func notSite(p string) bool {
+	return strings.HasPrefix(p, "/admin") || strings.HasPrefix(p, "/apps")
 }
 
 func health(w http.ResponseWriter, r *http.Request) {

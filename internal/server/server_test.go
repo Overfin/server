@@ -210,3 +210,21 @@ func TestStateChangesMustBeJSON(t *testing.T) {
 		}
 	}
 }
+
+// The control panel's and the apps' paths reaching the site (the panel on
+// a listener of its own) are a plain 404, never the site's page.
+func TestPanelPathsNotTheSite(t *testing.T) {
+	ids := identity.NewForwardAuth(loopback, "Remote-User", "", "|")
+	site := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "the site") })
+	h, err := New(slog.New(slog.NewTextHandler(io.Discard, nil)), ids.Middleware, site, whoami{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]int{"/apps/v1/titles": 404, "/apps": 404, "/admin/": 404, "/admin": 404, "/title/m1/x": 200, "/": 200} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if rec.Code != want || (want == 404 && strings.Contains(rec.Body.String(), "the site")) {
+			t.Errorf("%s: %d %q", path, rec.Code, rec.Body.String())
+		}
+	}
+}
