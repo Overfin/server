@@ -70,7 +70,7 @@ func Handler(b Backend, version string, revoked *Revocations, cache *Cache, logg
 		if op.Planned {
 			continue
 		}
-		var h http.Handler = proxy
+		var h http.Handler = wholeBody(proxy)
 		if cache != nil && strings.HasPrefix(op.Path, "/api/v1/images/") {
 			h = cache.Wrap(proxy)
 		}
