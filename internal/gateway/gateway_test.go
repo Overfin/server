@@ -55,7 +55,7 @@ func do(h http.Handler, method, path, from string, header ...string) *httptest.R
 	req := httptest.NewRequest(method, path, nil)
 	req.RemoteAddr = from
 	for i := 0; i+1 < len(header); i += 2 {
-		req.Header.Set(header[i], header[i+1])
+		req.Header.Add(header[i], header[i+1])
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -119,6 +119,11 @@ func TestClientAddress(t *testing.T) {
 	rec = do(h, "GET", "/", "10.20.0.2:5000", "X-Forwarded-For", "198.51.100.1, 192.0.2.44, 10.20.0.3")
 	if got := rec.Body.String(); !strings.Contains(got, "from 192.0.2.44:0") {
 		t.Errorf("behind a proxy: %s", got)
+	}
+	// A proxy adding its own line after the visitor's: its line counts.
+	rec = do(h, "GET", "/", "10.20.0.2:5000", "X-Forwarded-For", "198.51.100.9", "X-Forwarded-For", "192.0.2.45")
+	if got := rec.Body.String(); !strings.Contains(got, "from 192.0.2.45:0") {
+		t.Errorf("two lines: %s", got)
 	}
 }
 

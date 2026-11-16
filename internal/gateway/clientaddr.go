@@ -39,7 +39,9 @@ func withClientAddr(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		addr := r.RemoteAddr
 		if peer, err := netip.ParseAddrPort(r.RemoteAddr); err == nil && trusted(peer.Addr()) {
-			hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+			// Every line of it: a proxy may add its own line rather than
+			// append to the visitor's, which is then the one to read.
+			hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
 			for i := len(hops) - 1; i >= 0; i-- {
 				a, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
 				if err != nil {
