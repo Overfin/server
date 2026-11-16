@@ -38,6 +38,9 @@ const (
 	// declinedAgain is when a wish Seerr declined, or that failed there, is
 	// handed over again.
 	declinedAgain = 30 * 24 * time.Hour
+	// existsAgain is when a wish Seerr said it already had, without a
+	// request of ours to follow, is handed over again.
+	existsAgain = 7 * 24 * time.Hour
 )
 
 // Run hands wishes over and reads them back every wishSeerrEvery, until
@@ -114,7 +117,12 @@ func (s *WishesToSeerr) Pass(ctx context.Context) error {
 		switch {
 		case errors.Is(err, seerr.ErrExists):
 			// Asked for in Seerr already (by someone there, say): it
-			// comes when it comes, and arrives here like any title.
+			// comes when it comes, and arrives here like any title. With
+			// no request of ours to follow, it's asked again in a while
+			// (existsAgain): that request may be declined, or the title
+			// "available" from another server, and the wish would wait
+			// for nothing.
+			st.NextTry = s.clock().Add(existsAgain)
 		case errors.Is(err, seerr.ErrQuota), errors.Is(err, seerr.ErrRefused):
 			// Overfin's Seerr user may not request (its permissions, its
 			// quota): nothing more goes until the operator sees to it.
@@ -163,6 +171,14 @@ func (s *WishesToSeerr) readBack(ctx context.Context, c *seerr.Client) error {
 		return err
 	}
 	for _, st := range states {
+		// Seerr had it already, a while ago: handed over again (and
+		// found there again, if it still is).
+		if st.SeerrRequest == 0 && st.State == store.WishRequested && !st.NextTry.IsZero() && !s.clock().Before(st.NextTry) {
+			if err := s.Store.SetWishState(ctx, store.WishState{Title: st.Title}); err != nil {
+				return err
+			}
+			continue
+		}
 		if st.SeerrRequest == 0 || (st.State != store.WishRequested && st.State != store.WishDownloading) {
 			continue
 		}
