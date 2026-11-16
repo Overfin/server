@@ -427,21 +427,16 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 		pb.end(old, "stopped", "")
 	}
 	remoteStops.wait(ctx, peer.ID, 5*time.Second)
-	status, err := fed.Call(ctx, peer, "/api/v1/federation/play", peerPlayRequest{Title: key, Capabilities: req.Capabilities.ForPeer(),
+	reply, err := fed.CallReply(ctx, peer, "/api/v1/federation/play", peerPlayRequest{Title: key, Capabilities: req.Capabilities.ForPeer(),
 		StartPositionMs: req.StartPositionMs, MaxBitrateKbps: roundKbps(kbps), AudioLanguage: wantAudio, SubtitleLanguage: wantSubtitles,
 		AudioTrack: req.AudioTrack, SubtitleTrack: req.SubtitleTrack}, &out)
-	switch {
-	case err != nil:
+	if err != nil {
 		pb.Logger.Warn("a paired server couldn't start a playback", "peer", peer.Name, "err", err)
 		problem.Send(w, problem.NotPlayable, "")
 		return
-	case status == http.StatusConflict, status == http.StatusServiceUnavailable:
-		// Its limit for this server reached, or all its transcodes taken:
-		// busy, for now.
-		problem.Send(w, problem.ServerBusy, "")
-		return
-	case status != http.StatusOK:
-		problem.Send(w, problem.NotPlayable, "")
+	}
+	if reply.Status != http.StatusOK {
+		problem.Send(w, peerRefusal(reply), "")
 		return
 	}
 	// Its URLs are its stream's, on its address, nothing else; its words
@@ -506,6 +501,22 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	writeOK(w, out)
+}
+
+// peerRefusal is what the viewer is told of a paired server's refusal to
+// play: its limit for this server reached, or all its transcodes taken, is
+// busy, for now (409 stream-limit-reached, 503); a title it can't play
+// (409 not-playable), or any other refusal, isn't playable. A 409 of
+// another type, or none, is busy: what every 409 meant to Overfin's
+// viewer side before it read the type.
+func peerRefusal(r federation.Reply) problem.Type {
+	switch {
+	case r.Status == http.StatusConflict && r.Problem == string(problem.NotPlayable):
+		return problem.NotPlayable
+	case r.Status == http.StatusConflict, r.Status == http.StatusServiceUnavailable:
+		return problem.ServerBusy
+	}
+	return problem.NotPlayable
 }
 
 // keepPeerURLs checks a paired server's playback: its stream's and

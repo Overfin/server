@@ -75,6 +75,8 @@ type fakeJellyfin struct {
 	// unmarked marks no audio track as default: as Jellyfin does, the
 	// movie is offered as it is unless a track is named.
 	unmarked bool
+	// notPlayable offers the movie no way to play.
+	notPlayable bool
 }
 
 func (f *fakeJellyfin) setDirect(on bool) {
@@ -248,6 +250,10 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			streamed = int(n)
 		}
 		f.calls = append(f.calls, fmt.Sprintf("PlaybackInfo audio=%v subtitles=%v streamed=%d", asked["AudioStreamIndex"], asked["SubtitleStreamIndex"], streamed))
+		if f.notPlayable {
+			json.NewEncoder(w).Encode(map[string]any{"ErrorCode": "NoCompatibleStream"})
+			return
+		}
 		_, named := asked["AudioStreamIndex"]
 		direct := f.direct || (f.unmarked && !named)
 		json.NewEncoder(w).Encode(map[string]any{

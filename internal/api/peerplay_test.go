@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -139,43 +140,67 @@ func TestPeerPlayback(t *testing.T) {
 	}
 }
 
+// twoServers is B, holding a film, Heat, paired with A, which wants B's
+// films and knows of Heat.
+type twoServers struct {
+	srvA, srvB *httptest.Server
+	fakeB      *fakeJellyfin
+	stA, stB   *store.Store
+	a, b       *federation.Service
+	onB        *playback.Tickets
+	aOnB, bOnA *store.Peer
+}
+
+// pairForPlay makes twoServers. With trustB, A trusts B's test
+// certificate as if a public authority had issued it; without, A
+// accepts it only as the one B names.
+func pairForPlay(t *testing.T, trustB bool) *twoServers {
+	t.Helper()
+	ctx := context.Background()
+	var x twoServers
+	x.srvB, x.fakeB = newServerWith(t, options{store: &x.stB, federation: &x.b, tickets: &x.onB})
+	x.fakeB.setDirect(true)
+	x.stB.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "Heat", SortName: "heat",
+		TMDB: "949", LibraryID: "films", AudioTags: []string{"fr"}}}, 1)
+	x.stB.RefreshTitleKeys(ctx)
+	x.stB.SetLibraries(ctx, []store.Library{{ID: "films", Item: []byte(`{"Name":"Films"}`)}})
+	x.srvA, _ = newServerWith(t, options{store: &x.stA, federation: &x.a})
+	if trustB {
+		x.a.HTTP = x.srvB.Client()
+	} else {
+		x.b.Certificates = &federation.Certificates{}
+	}
+
+	code, _, _ := x.b.NewCode(ctx, "")
+	bOnA, err := x.a.UseCode(ctx, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ := x.stB.Peers(ctx)
+	x.aOnB, _ = x.b.Accept(ctx, list[0].ID)
+	x.stA.SetPeerState(ctx, bOnA.ID, store.PeerTheirs, store.PeerPaired)
+	x.bOnA, _ = x.stA.PeerByID(ctx, bOnA.ID)
+	x.b.SetOffers(ctx, x.aOnB, []string{"films"})
+	if err := x.a.SetWants(ctx, x.bOnA, []string{"films"}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := x.a.SyncTitles(ctx, x.bOnA); err != nil || n != 1 {
+		t.Fatalf("sync: %d %v", n, err)
+	}
+	x.stA.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "949", Name: "Heat", Year: 1995}, []byte(`{}`), time.Now())
+	return &x
+}
+
 // Someone on A plays a film only B has: A asks B, the stream comes
 // through A (the browser never asks B), A keeps where they are, and
 // stopping on A ends it on B.
 func TestPlayFromPeer(t *testing.T) {
 	ctx := context.Background()
-	var stB, stA *store.Store
-	var b, a *federation.Service
-	var onB *playback.Tickets
-	srvB, fakeB := newServerWith(t, options{store: &stB, federation: &b, tickets: &onB})
-	fakeB.setDirect(true)
-	stB.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "Heat", SortName: "heat",
-		TMDB: "949", LibraryID: "films", AudioTags: []string{"fr"}}}, 1)
-	stB.RefreshTitleKeys(ctx)
-	stB.SetLibraries(ctx, []store.Library{{ID: "films", Item: []byte(`{"Name":"Films"}`)}})
-	srvA, _ := newServerWith(t, options{store: &stA, federation: &a})
-	a.HTTP = srvB.Client() // A trusts B's test certificate
-
-	code, _, _ := b.NewCode(ctx, "")
-	bOnA, err := a.UseCode(ctx, code)
-	if err != nil {
-		t.Fatal(err)
-	}
-	list, _ := stB.Peers(ctx)
-	aOnB, _ := b.Accept(ctx, list[0].ID) // A can't be reached from B here
-	stA.SetPeerState(ctx, bOnA.ID, store.PeerTheirs, store.PeerPaired)
-	bOnA, _ = stA.PeerByID(ctx, bOnA.ID)
-	b.SetOffers(ctx, aOnB, []string{"films"})
-	if err := a.SetWants(ctx, bOnA, []string{"films"}); err != nil {
-		t.Fatal(err)
-	}
-	if n, err := a.SyncTitles(ctx, bOnA); err != nil || n != 1 {
-		t.Fatalf("sync: %d %v", n, err)
-	}
+	x := pairForPlay(t, true)
+	srvA, srvB, stB, onB, aOnB := x.srvA, x.srvB, x.stB, x.onB, x.aOnB
 
 	// On A (which keeps TMDB's page of it), the film is there to play,
 	// though no library of A's has it.
-	stA.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "949", Name: "Heat", Year: 1995}, []byte(`{}`), time.Now())
 	var title struct {
 		Availability string
 		Playable     bool
@@ -350,5 +375,79 @@ func TestPeerTitlesListed(t *testing.T) {
 	get(t, srvA, "/api/v1/libraries", &libs)
 	if !slices.ContainsFunc(libs.Items, func(l struct{ ID, Name, Kind string }) bool { return l.Name == "Their films" && l.ID == entry }) {
 		t.Fatalf("renamed: %+v", libs.Items)
+	}
+}
+
+// B refusing a playback tells A why, and A its viewer: a title B can't
+// play isn't playable, B's limit for A reached is busy; a 409 without a
+// type (another implementation's) is busy too.
+func TestPeerRefusalsToldApart(t *testing.T) {
+	ctx := context.Background()
+	x := pairForPlay(t, true)
+	start := func() (int, string) {
+		status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
+		var p struct{ Type string }
+		json.Unmarshal([]byte(body), &p)
+		return status, p.Type
+	}
+	x.fakeB.mu.Lock()
+	x.fakeB.notPlayable = true
+	x.fakeB.mu.Unlock()
+	if r, err := x.a.CallReply(ctx, x.bOnA, "/api/v1/federation/play", map[string]any{"title": "movie/tmdb/949"}, &struct{}{}); err != nil ||
+		r.Status != http.StatusConflict || r.Problem != "not-playable" {
+		t.Fatalf("B's refusal: %+v %v", r, err)
+	}
+	if status, typ := start(); status != http.StatusConflict || typ != "not-playable" {
+		t.Fatalf("a title B can't play: %d %s", status, typ)
+	}
+	x.fakeB.mu.Lock()
+	x.fakeB.notPlayable = false
+	x.fakeB.mu.Unlock()
+	x.stB.SetPeerLimits(ctx, x.aOnB.ID, store.PeerLimits{})
+	if status, typ := start(); status != http.StatusServiceUnavailable || typ != "server-busy" {
+		t.Fatalf("B's limit for A reached: %d %s", status, typ)
+	}
+}
+
+// B's certificate isn't publicly trusted: A pairs with it all the same,
+// learns it from B's hello, and plays B's film through it; once B names
+// it no longer, A neither starts a playback nor fetches the media of one
+// started before.
+func TestPlayFromPeerOverNamedCertificate(t *testing.T) {
+	ctx := context.Background()
+	x := pairForPlay(t, false)
+	if bOnA, _ := x.stA.PeerByID(ctx, x.bOnA.ID); len(bOnA.Certificates) != 1 {
+		t.Fatalf("A's view of B's certificates: %v", bOnA.Certificates)
+	}
+	status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
+	var s peerSession
+	json.Unmarshal([]byte(body), &s)
+	if status != 201 {
+		t.Fatalf("play on A: %d %s", status, body)
+	}
+	viewer := func(path string) int {
+		req, _ := http.NewRequest("GET", x.srvA.URL+path, nil)
+		req.Header.Set("Remote-User", subject)
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		res, err := client(x.srvA, subject).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
+		res.Body.Close()
+		return res.StatusCode
+	}
+	if code := viewer(s.Stream.URL); code != 200 {
+		t.Fatalf("the stream through A: %d", code)
+	}
+	// B names no certificate any more (or someone else's stands in its
+	// place): the media is refused, after asking B's hello again.
+	x.b.Certificates = nil
+	x.stA.SetPeerCertificates(ctx, x.bOnA.ID, nil)
+	if code := viewer(s.Stream.URL); code == 200 {
+		t.Fatalf("the stream over a certificate B no longer names: %d", code)
+	}
+	if status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`); status == 201 {
+		t.Fatalf("a playback over a certificate B no longer names: %d %s", status, body)
 	}
 }

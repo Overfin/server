@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"github.com/overfin/server/internal/outbound"
 	"io"
@@ -13,8 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/problem"
+	"github.com/overfin/server/internal/store"
 )
 
 // A paired server's title plays through this server (rule 97): the
@@ -32,26 +35,32 @@ var relayTransport = &http.Transport{
 	IdleConnTimeout:       90 * time.Second,
 }
 
-// relayClients are the clients with the certificates federation trusts,
-// when it was given others than the system's (a test's), by TLS config.
+// relayClients are the clients for each paired server's streams, by its
+// ID: one per TLS settings federation gives for it (its certificates).
 var relayClients sync.Map
 
+type relayConn struct {
+	tls    *tls.Config
+	client *http.Client
+}
+
 // relayClient is the client for a paired server's stream: never following
-// redirects, trusting the certificates federation's client does.
-func (s Stream) relayClient() *http.Client {
-	noRedirect := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	if fed := s.Playback.fed(); fed != nil && fed.HTTP != nil {
-		if t, ok := fed.HTTP.Transport.(*http.Transport); ok && t.TLSClientConfig != nil {
-			if c, ok := relayClients.Load(t.TLSClientConfig); ok {
-				return c.(*http.Client)
-			}
-			tr := relayTransport.Clone()
-			tr.TLSClientConfig = t.TLSClientConfig.Clone()
-			c, _ := relayClients.LoadOrStore(t.TLSClientConfig, &http.Client{Transport: tr, CheckRedirect: noRedirect})
-			return c.(*http.Client)
-		}
+// redirects, trusting what federation's calls to it would, except
+// that a certificate of its own must be one it named (tls.go in
+// federation): a ticket and media have only TLS to protect them.
+func relayClient(fed *federation.Service, peer *store.Peer) *http.Client {
+	cfg := fed.TLSConfig(peer)
+	if c, ok := relayClients.Load(peer.ID); ok && c.(*relayConn).tls == cfg {
+		return c.(*relayConn).client
 	}
-	return &http.Client{Transport: relayTransport, CheckRedirect: noRedirect}
+	tr := relayTransport.Clone()
+	tr.TLSClientConfig = cfg
+	c := &relayConn{tls: cfg, client: &http.Client{Transport: tr,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	if old, ok := relayClients.Swap(peer.ID, c); ok {
+		old.(*relayConn).client.CloseIdleConnections()
+	}
+	return c.client
 }
 
 // relayed is what the browser asks of a paired server's playback: a file
@@ -105,7 +114,23 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 		free = sync.OnceFunc(free)
 		defer free()
 	}
-	res, err := s.relayClient().Do(req)
+	fed := s.Playback.fed()
+	if fed == nil {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	peer, err := fed.Store.PeerByID(ctx, rm.PeerID)
+	if err != nil {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	res, err := relayClient(fed, peer).Do(req)
+	if err != nil && ctx.Err() == nil {
+		// Its certificate renewed: what it names now, and once more.
+		if again, changed := fed.Repin(ctx, peer, err); changed {
+			res, err = relayClient(fed, again).Do(req)
+		}
+	}
 	if err != nil {
 		if ctx.Err() == nil {
 			l.Logger.Warn("a paired server's stream didn't answer", "playback", st.ID, "err", err)

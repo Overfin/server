@@ -63,9 +63,15 @@ type Service struct {
 	// across rebuilds (Verifier.Seen).
 	Seen *Nonces
 
+	// Certificates is what this server names of its own certificates to
+	// its peers (nil: none).
+	Certificates *Certificates
+
 	verifier *Verifier
 	mu       sync.Mutex
 	asked    map[string]time.Time // CheckSoon's, by peer ID
+	// peerConns are the TLS settings and clients for each peer (conns).
+	peerConns map[string]*peerConns
 	// readings holds a lock per peer ID, for SyncTitles.
 	readings sync.Map
 }
@@ -185,6 +191,20 @@ type pairAnswer struct {
 type helloMessage struct {
 	// State is the sender's view: "paired", "waiting", or "ended".
 	State string `json:"state"`
+	// Certificates are the pins of the certificates the sender's address
+	// serves (Pin), for the other's connections to accept: none when its
+	// address is http, or it couldn't tell.
+	Certificates []string `json:"certificates,omitempty"`
+}
+
+// ownCertificates is what this server names of its certificates in a
+// hello.
+func (s *Service) ownCertificates(ctx context.Context) []string {
+	pins, err := s.Certificates.For(ctx, s.Address)
+	if err != nil {
+		s.Logger.Info("federation: this server's certificate couldn't be read at its address", "address", s.Address, "error", err)
+	}
+	return pins
 }
 
 // Hello states.
@@ -313,6 +333,10 @@ func (s *Service) hello(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := s.keepCertificates(ctx, p, msg.Certificates); err != nil {
+		problem.Send(w, problem.Internal, "")
+		return
+	}
 	if err := s.Store.PeerSeen(ctx, p.ID); err != nil {
 		problem.Send(w, problem.Internal, "")
 		return
@@ -322,7 +346,7 @@ func (s *Service) hello(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	s.answer(w, v.Nonce, helloMessage{State: viewOf(p)})
+	s.answer(w, v.Nonce, helloMessage{State: viewOf(p), Certificates: s.ownCertificates(ctx)})
 }
 
 // theyPaired is a peer saying it has accepted: if we were waiting for it,
@@ -379,45 +403,85 @@ var ErrUnreachable = errors.New("federation: the other server couldn't be reache
 // server (a plain 404).
 var ErrUnknown = errors.New("federation: the other server doesn't know this one")
 
-// call sends a signed POST to a peer and checks its signed answer.
-func (s *Service) call(ctx context.Context, address string, peer ed25519.PublicKey, path string, in, out any) (int, error) {
+// Reply is a peer's signed answer to a call: its status, and for a
+// refusal, the problem type its body gives ("" for none).
+type Reply struct {
+	Status  int
+	Problem string
+}
+
+// Paths of the calls that accept any certificate (tls.go).
+const (
+	pairPath  = "/api/v1/federation/pair"
+	helloPath = "/api/v1/federation/hello"
+)
+
+// call sends a signed POST to a peer and checks its signed answer. pair
+// and hello accept any certificate; every other call wants one publicly
+// trusted or named by the peer, and asks the peer's hello once for what it
+// names now when it gets another.
+func (s *Service) call(ctx context.Context, p *store.Peer, path string, in, out any) (Reply, error) {
+	anyCert := path == pairPath || path == helloPath
+	r, err := s.exchange(ctx, s.conns(p, anyCert).client, p, path, in, out)
+	if anyCert || err == nil {
+		return r, err
+	}
+	if q, changed := s.Repin(ctx, p, err); changed {
+		return s.exchange(ctx, s.conns(q, false).client, q, path, in, out)
+	}
+	return r, err
+}
+
+// exchange is one call, by client.
+func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Peer, path string, in, out any) (Reply, error) {
 	body, err := json.Marshal(in)
 	if err != nil {
-		return 0, err
+		return Reply{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(address, "/")+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(p.Address, "/")+path, bytes.NewReader(body))
 	if err != nil {
-		return 0, err
+		return Reply{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	nonce := SignRequest(req, body, s.Key, s.now())
-	res, err := s.HTTP.Do(req)
+	res, err := client.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrUnreachable, err)
+		return Reply{}, fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
 	defer res.Body.Close()
 	answer, err := io.ReadAll(io.LimitReader(res.Body, maxAnswer))
 	if err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrUnreachable, err)
+		return Reply{}, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
 	if res.StatusCode != http.StatusOK {
 		// A refusal counts only signed by its key: a server we're paired
 		// with, or were, signs its own; anything else may come from
 		// someone between the two. A code's server doesn't know us yet:
 		// its refusal is a stranger's, plain, and costs only that pairing.
-		if path == "/api/v1/federation/pair" ||
-			CheckResponse(peer, nonce, res.StatusCode, answer, res.Header.Get(HeaderSignature)) == nil {
-			return res.StatusCode, nil
+		signed := CheckResponse(p.PublicKey, nonce, res.StatusCode, answer, res.Header.Get(HeaderSignature)) == nil
+		if !signed && path != pairPath {
+			return Reply{}, fmt.Errorf("%w: a refusal not signed by its key (%d)", ErrUnreachable, res.StatusCode)
 		}
-		return 0, fmt.Errorf("%w: a refusal not signed by its key (%d)", ErrUnreachable, res.StatusCode)
+		r := Reply{Status: res.StatusCode}
+		if signed {
+			// Its problem's type, when it's one: what tells two refusals
+			// of the same status apart (play's 409).
+			var pd struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(answer, &pd) == nil && len(pd.Type) <= 64 {
+				r.Problem = pd.Type
+			}
+		}
+		return r, nil
 	}
-	if CheckResponse(peer, nonce, res.StatusCode, answer, res.Header.Get(HeaderSignature)) != nil {
-		return 0, fmt.Errorf("%w: its answer isn't signed by its key", ErrUnreachable)
+	if CheckResponse(p.PublicKey, nonce, res.StatusCode, answer, res.Header.Get(HeaderSignature)) != nil {
+		return Reply{}, fmt.Errorf("%w: its answer isn't signed by its key", ErrUnreachable)
 	}
 	if err := json.Unmarshal(answer, out); err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrUnreachable, err)
+		return Reply{}, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
-	return http.StatusOK, nil
+	return Reply{Status: http.StatusOK}, nil
 }
 
 // Errors from using a code, for the panel to explain.
@@ -446,13 +510,13 @@ func (s *Service) UseCode(ctx context.Context, text string) (*store.Peer, error)
 		SecretHash: b64.EncodeToString(store.PairingSecretHash(c.Secret)),
 		Proof:      PairingProof(c.Secret, s.Key.Public(), s.Address)}
 	var answer pairAnswer
-	status, err := s.call(ctx, c.Address, c.Key, "/api/v1/federation/pair", req, &answer)
+	r, err := s.call(ctx, &store.Peer{Address: c.Address, PublicKey: c.Key}, pairPath, req, &answer)
 	switch {
 	case err != nil:
 		return nil, err
-	case status == http.StatusConflict:
+	case r.Status == http.StatusConflict:
 		return nil, store.ErrPeerExists
-	case status != http.StatusOK:
+	case r.Status != http.StatusOK:
 		return nil, ErrCodeRefused
 	}
 	return s.Store.AddPeer(ctx, c.Key, c.Address, cleanName(answer.Name, c.Address))
@@ -490,7 +554,7 @@ func (s *Service) End(ctx context.Context, id string) error {
 	}
 	s.Logger.Info("federation: pairing ended", "name", p.Name)
 	var answer helloMessage
-	if _, err := s.call(ctx, p.Address, p.PublicKey, "/api/v1/federation/hello", helloMessage{State: helloEnded}, &answer); err != nil {
+	if _, err := s.call(ctx, p, helloPath, helloMessage{State: helloEnded}, &answer); err != nil {
 		s.Logger.Info("federation: the other server couldn't be told the pairing ended", "name", p.Name, "error", err)
 	}
 	return nil
@@ -502,21 +566,24 @@ func (s *Service) End(ctx context.Context, id string) error {
 // error says so).
 func (s *Service) Check(ctx context.Context, p *store.Peer) (*store.Peer, error) {
 	var answer helloMessage
-	status, err := s.call(ctx, p.Address, p.PublicKey, "/api/v1/federation/hello", helloMessage{State: viewOf(p)}, &answer)
+	r, err := s.call(ctx, p, helloPath, helloMessage{State: viewOf(p), Certificates: s.ownCertificates(ctx)}, &answer)
 	switch {
 	case err != nil:
 		return p, err
-	case status == http.StatusNotFound:
+	case r.Status == http.StatusNotFound:
 		if p.State != store.PeerGone {
 			if _, err := s.Store.SetPeerState(ctx, p.ID, p.State, store.PeerGone); err != nil {
 				return p, err
 			}
 			s.Logger.Info("federation: a peer no longer knows this server", "name", p.Name)
 		}
-	case status != http.StatusOK:
+	case r.Status != http.StatusOK:
 		return p, ErrUnreachable
 	default:
 		if err := s.Store.PeerSeen(ctx, p.ID); err != nil {
+			return p, err
+		}
+		if err := s.keepCertificates(ctx, p, answer.Certificates); err != nil {
 			return p, err
 		}
 		if answer.State == helloPaired {
@@ -670,14 +737,14 @@ func (s *Service) TheirLibraries(ctx context.Context, p *store.Peer) ([]store.Pe
 		return nil, ErrNotPaired
 	}
 	var answer librariesAnswer
-	status, err := s.call(ctx, p.Address, p.PublicKey, "/api/v1/federation/libraries", struct{}{}, &answer)
+	r, err := s.call(ctx, p, "/api/v1/federation/libraries", struct{}{}, &answer)
 	switch {
 	case err != nil:
 		return nil, err
-	case status == http.StatusNotFound:
+	case r.Status == http.StatusNotFound:
 		s.forgotUs(ctx, p)
 		return nil, ErrUnknown
-	case status != http.StatusOK:
+	case r.Status != http.StatusOK:
 		return nil, ErrUnreachable
 	}
 	s.Store.PeerSeen(ctx, p.ID)
@@ -903,14 +970,14 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 	var seq int64
 	for len(libs) > 0 {
 		var answer titlesAnswer
-		status, err := s.call(ctx, p.Address, p.PublicKey, "/api/v1/federation/titles", titlesRequest{Libraries: libs, After: after, Since: since}, &answer)
+		r, err := s.call(ctx, p, "/api/v1/federation/titles", titlesRequest{Libraries: libs, After: after, Since: since}, &answer)
 		switch {
 		case err != nil:
 			return 0, err
-		case status == http.StatusNotFound:
+		case r.Status == http.StatusNotFound:
 			s.forgotUs(ctx, p)
 			return 0, ErrUnknown
-		case status != http.StatusOK:
+		case r.Status != http.StatusOK:
 			return 0, ErrUnreachable
 		}
 		if first {
@@ -1072,7 +1139,13 @@ func (s *Service) Answer(w http.ResponseWriter, nonce string, v any) { s.answer(
 // Call sends a paired server a signed request and checks its signed answer:
 // the status, and out filled when it's 200.
 func (s *Service) Call(ctx context.Context, p *store.Peer, path string, in, out any) (int, error) {
-	return s.call(ctx, p.Address, p.PublicKey, path, in, out)
+	r, err := s.call(ctx, p, path, in, out)
+	return r.Status, err
+}
+
+// CallReply is Call, giving a refusal's problem type too.
+func (s *Service) CallReply(ctx context.Context, p *store.Peer, path string, in, out any) (Reply, error) {
+	return s.call(ctx, p, path, in, out)
 }
 
 // canonicalTMDB reports whether id is a TMDB ID as TMDB writes it.

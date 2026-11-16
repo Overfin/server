@@ -23,7 +23,10 @@ network security expert. So the rules come in two kinds:
   without extra setup, and changing it only ever affects that operator's
   own server:
   - **HTTPS** (Deployment): Overfin's own certificate, a reverse proxy's,
-    or none, for a LAN or a test. Off until configured.
+    or none, for a LAN or a test. Off until configured. Paired servers
+    accept one no public authority issued once this server names it
+    (rule 99): read at its own address, or set by the operator
+    (`site.certificates`).
   - **Cookies** (rule 26) follow HTTPS: `__Host-` and `Secure` with it,
     without both without it, since browsers refuse them there.
   - **Where the gateway runs** (rule 119): beside the backend, by
@@ -572,6 +575,15 @@ anyone. Paired servers are not trusted at all (rule 94).
     hands one paired server's data to another.
 99. A pairing over plain `http://` is signed but not encrypted: titles and
     tickets travel between the two servers in clear. The panel says so.
+    Over `https://`, a server accepts a peer's certificate when a public
+    authority vouches for it, or when the peer named it, by its public
+    key's SHA-256, in its latest signed hello. Before any is named, any
+    certificate passes for pair and hello only: their answers are checked
+    by key and carry nothing secret. Every other call, and the media with
+    its ticket, wants a trusted or named one, never just any. A server
+    names the certificate its own address serves, read by connecting to
+    it, or the ones its operator set. Naming only adds to public trust,
+    never removes it; a newer hello replaces what was named.
 100. A compromised paired server can't reach the other's data or people.
      It can still make the other store its title list, however long, and
      fetch those titles' details from TMDB.

@@ -29,6 +29,14 @@ type server struct {
 
 func newServer(t *testing.T, name string) *server {
 	t.Helper()
+	return newServerOn(t, name, false)
+}
+
+// newServerOn is newServer, over HTTPS with withTLS: with the test
+// server's certificate, which no public authority issued, and naming it
+// to its peers.
+func newServerOn(t *testing.T, name string, withTLS bool) *server {
+	t.Helper()
 	box, _ := seal.New(bytes.Repeat([]byte{9}, 32))
 	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"), box)
 	if err != nil {
@@ -40,11 +48,19 @@ func newServer(t *testing.T, name string) *server {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	ts := httptest.NewServer(mux)
+	ts := httptest.NewUnstartedServer(mux)
+	if withTLS {
+		ts.StartTLS()
+	} else {
+		ts.Start()
+	}
 	t.Cleanup(ts.Close)
 	s := &Service{Store: st, Key: key, Address: ts.URL, HTTP: NewHTTPClient(),
 		Name:   func(context.Context) string { return name },
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	if withTLS {
+		s.Certificates = &Certificates{}
+	}
 	reg := plugin.NewRegistrar(mux, func(h http.Handler) http.Handler { return h })
 	if err := reg.Load(Plugin{S: s}); err != nil {
 		t.Fatal(err)

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -120,6 +121,10 @@ type Peer struct {
 	// says we may use of it (nil until it said).
 	Limits PeerLimits  `json:"limits"`
 	Theirs *PeerLimits `json:"theirs,omitempty"`
+	// Certificates are the pins of the TLS certificates it said, signed,
+	// its address serves (federation.Pin): its own, not publicly trusted
+	// perhaps. Never sent to the panel.
+	Certificates []string `json:"-"`
 }
 
 // PeerLimits is what a pairing may use of a server at once: streams,
@@ -217,16 +222,18 @@ func (s *Store) AddPeer(ctx context.Context, publicKey []byte, address, name str
 }
 
 const peerSelect = `SELECT id, public_key, address, name, state, created_at, paired_at, seen_at,
-	max_streams, max_transcodes, max_bitrate_kbps, their_streams, their_transcodes, their_bitrate_kbps FROM peers`
+	max_streams, max_transcodes, max_bitrate_kbps, their_streams, their_transcodes, their_bitrate_kbps, certificates FROM peers`
 
 func scanPeer(row interface{ Scan(...any) error }) (*Peer, error) {
 	var p Peer
 	var created int64
 	var paired, seen, ts, tt, tb sql.NullInt64
+	var certificates string
 	if err := row.Scan(&p.ID, &p.PublicKey, &p.Address, &p.Name, &p.State, &created, &paired, &seen,
-		&p.Limits.Streams, &p.Limits.Transcodes, &p.Limits.BitrateKbps, &ts, &tt, &tb); err != nil {
+		&p.Limits.Streams, &p.Limits.Transcodes, &p.Limits.BitrateKbps, &ts, &tt, &tb, &certificates); err != nil {
 		return nil, err
 	}
+	p.Certificates = strings.Fields(certificates)
 	if ts.Valid {
 		p.Theirs = &PeerLimits{Streams: int(ts.Int64), Transcodes: int(tt.Int64), BitrateKbps: int(tb.Int64)}
 	}
@@ -778,6 +785,13 @@ func (s *Store) SetPeerLimits(ctx context.Context, peerID string, l PeerLimits) 
 func (s *Store) SetTheirLimits(ctx context.Context, peerID string, l PeerLimits) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE peers SET their_streams = ?, their_transcodes = ?, their_bitrate_kbps = ? WHERE id = ?`,
 		l.Streams, l.Transcodes, l.BitrateKbps, peerID)
+	return err
+}
+
+// SetPeerCertificates keeps the certificate pins a peer gave in its last
+// signed hello, replacing those it gave before (none: nil).
+func (s *Store) SetPeerCertificates(ctx context.Context, peerID string, pins []string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE peers SET certificates = ? WHERE id = ?`, strings.Join(pins, " "), peerID)
 	return err
 }
 

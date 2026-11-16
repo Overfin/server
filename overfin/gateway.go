@@ -332,9 +332,10 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 
 // fedShared is what federation keeps across rebuilds.
 type fedShared struct {
-	key  federation.Key
-	seen *federation.Nonces
-	http *http.Client
+	key   federation.Key
+	seen  *federation.Nonces
+	http  *http.Client
+	certs *federation.Certificates
 }
 
 // federationService is federation on this server, or nil when the site has
@@ -352,7 +353,7 @@ func federationService(cfg *config.Config, sh *shared) *federation.Service {
 	}
 	db := sh.db
 	return &federation.Service{Store: db, Key: sh.fed.key, Address: address, HTTP: sh.fed.http, Seen: sh.fed.seen,
-		Logger: sh.logger, Name: func(ctx context.Context) string {
+		Certificates: sh.fed.certs, Logger: sh.logger, Name: func(ctx context.Context) string {
 			if b, err := db.Branding(ctx); err == nil && b.On && b.Name != "" {
 				return b.Name
 			}

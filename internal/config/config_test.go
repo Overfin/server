@@ -89,6 +89,11 @@ func TestLoadRejects(t *testing.T) {
 			wantErr: "unknown keys: limits.max_stream_per_account",
 		},
 		{
+			name:    "not a certificate's pin",
+			file:    goodFile + "\n[site]\ncertificates = [\"sha256/AAAA\"]\n",
+			wantErr: "site.certificates",
+		},
+		{
 			name:    "URL with credentials",
 			file:    strings.Replace(goodFile, "http://192.0.2.10", "http://user:pass@192.0.2.10", 1),
 			wantErr: "must not contain credentials",

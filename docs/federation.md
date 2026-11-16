@@ -88,6 +88,49 @@ Between servers on plain `http://`, requests are still signed, so neither
 can be impersonated, but what they say (titles, tickets) can be read on
 the way. The panel says so. The full rules are SECURITY.md's 94 to 100.
 
+## HTTPS certificates
+
+Use HTTPS when you can: the media and its ticket have only HTTPS to
+protect them. A certificate from a public authority (Let's Encrypt, as
+Overfin's own HTTPS domain or Caddy gets one) needs nothing more.
+
+A certificate of your own (self-signed, or from your own authority, such
+as Caddy's `tls internal`) works too, without anything to set in most
+setups. Your server names its certificate to paired servers in its signed
+hellos, and they accept that one, besides any publicly trusted one. To
+know which certificate your address serves, even behind a reverse proxy,
+Overfin connects to its own address now and then, and reads it there. A
+renewed certificate is named again within a minute, and the other server
+asks for it again by itself.
+
+If your server can't reach its own address (a home router without hairpin
+NAT), it can't tell, and other servers can't reach yours over HTTPS with a
+certificate of your own. Name it in the configuration then, by its pin,
+which you get from the certificate file:
+
+```sh
+openssl x509 -in cert.pem -pubkey -noout | openssl pkey -pubin -outform der \
+  | openssl dgst -sha256 -binary | basenc --base64url | tr -d '='
+```
+
+```toml
+[site]
+certificates = ["<the 43 characters it prints>"]
+```
+
+List up to 8, the current one and the next, when you renew with a new key.
+Overfin then names these and looks at nothing.
+
+What this protects: before your certificate is named, someone between
+the two servers could stand in with a certificate of theirs for the
+pairing and hello calls only, which are signed and carry nothing secret:
+they can't change what is said, nor have their own certificate named.
+Every other call, and the media, wants a publicly trusted certificate or
+the one named. Overfin trusts what it finds at its own address, so
+someone who could redirect your server's own connection to itself (by
+its DNS, say) could have their certificate named; naming it in the
+configuration avoids that.
+
 Building your own server that pairs with Overfin? Servers speak MSFP, the
 Media Server Federation Protocol: its specification and test vectors are
 at [github.com/C0PT3R/msfp-spec](https://github.com/C0PT3R/msfp-spec).

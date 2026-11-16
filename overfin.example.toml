@@ -158,6 +158,12 @@ spa_fallback = false
 # The site's public address, for the links in emails (confirming an
 # address, a new password, invitations): emails with a link need it.
 # url = "https://example.org"
+# Paired servers accept the site's HTTPS certificate when a public authority
+# issued it, or when this server named it to them. Overfin names the one its
+# own address serves, by connecting to it: nothing to set, unless it can't
+# reach its own address (a router without hairpin NAT). Then list the pins of
+# the certificates the address serves (see docs/federation.md):
+# certificates = ["<43 characters>"]
 
 # ---- Feature settings --------------------------------------------------------
 # Everything below is switched on and off in the control panel, and lives in

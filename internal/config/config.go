@@ -401,6 +401,19 @@ type Site struct {
 	// Emails' links (invitations, confirmations, resets) point to it; with
 	// [https], it's https://<domain> unless set.
 	URL string `toml:"url"`
+	// Certificates are the pins of the certificates the site's address
+	// serves, named to paired servers so that they accept one no public
+	// authority issued (SHA-256 of its public key, base64url without
+	// padding). Empty, the default: Overfin connects to its own address
+	// and reads it there.
+	Certificates []string `toml:"certificates"`
+}
+
+// validPin reports whether s is a certificate pin: base64url, without
+// padding, of 32 bytes.
+func validPin(s string) bool {
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	return err == nil && len(b) == 32 && base64.RawURLEncoding.EncodeToString(b) == s
 }
 
 // DefaultCSP is the site's Content-Security-Policy unless the operator sets
@@ -683,6 +696,15 @@ func (c *Config) validate() error {
 
 	if c.Listen == "" {
 		add("listen must not be empty")
+	}
+
+	for _, pin := range c.Site.Certificates {
+		if !validPin(pin) {
+			add("site.certificates: %q isn't a certificate's pin (base64url of the SHA-256 of its public key, 43 characters)", pin)
+		}
+	}
+	if len(c.Site.Certificates) > 8 {
+		add("site.certificates: 8 at most")
 	}
 
 	// Jellyfin's address is set here, or on the setup page.
