@@ -91,9 +91,19 @@ func TestRatings(t *testing.T) {
 	if err != nil || len(todo) != 1 || todo[0] != (RatedTitle{"movie", "6"}) {
 		t.Errorf("to rate: %v %v", todo, err)
 	}
-	// Titles not at home yet are fetched again sooner; one at home isn't.
+	// Titles not at home yet, out in the last year or coming, are fetched
+	// again sooner; one at home isn't, nor one with no date at all or out
+	// long ago (asked weekly, they'd be asked forever).
 	s.SetTitleRatings(ctx, RatedTitle{"movie", "1"}, map[string][]string{"US": {"G"}}, "2020-01-01", "2020-06-01", now)
-	if todo, _ := s.TitlesToRate(ctx, now.Add(-time.Hour), now.Add(time.Hour), "2026-10-22", 50); len(todo) != 7 {
+	s.SetTitleRatings(ctx, RatedTitle{"movie", "2"}, map[string][]string{"US": {"R"}}, "2026-09-01", "", now)
+	s.SetTitleRatings(ctx, RatedTitle{"movie", "3"}, map[string][]string{"US": {"PG"}}, "1999-01-01", "", now)
+	todo, _ = s.TitlesToRate(ctx, now.Add(-time.Hour), now.Add(time.Hour), "2026-10-22", 50)
+	var keys []string
+	for _, t := range todo {
+		keys = append(keys, t.TMDB)
+	}
+	slices.Sort(keys)
+	if !slices.Equal(keys, []string{"2", "6"}) {
 		t.Errorf("pending ones again: %v", todo)
 	}
 	if r, h, ok, _ := s.TitleRelease(ctx, "movie", "1"); !ok || r != "2020-01-01" || h != "2020-06-01" {

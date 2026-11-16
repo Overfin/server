@@ -126,15 +126,24 @@ type RatedTitle struct {
 // whose certifications weren't fetched since before.
 //
 // Titles that can't be watched at home yet (as of today, YYYY-MM-DD) are
-// fetched again sooner, after pendingBefore, so a new release shows soon.
+// fetched again sooner, after pendingBefore, so a new release shows soon:
+// those released in the last year or coming. One with no date at home
+// that came out before, or with no date at all (TMDB often lists only a
+// theatrical date for old films), waits like any other: asked weekly, it
+// would be asked forever (TMDB's requests kept low).
 func (s *Store) TitlesToRate(ctx context.Context, before, pendingBefore time.Time, today string, limit int) ([]RatedTitle, error) {
+	yearAgo := today
+	if t, err := time.Parse("2006-01-02", today); err == nil {
+		yearAgo = t.AddDate(-1, 0, 0).Format("2006-01-02")
+	}
 	rows, err := s.read.QueryContext(ctx, `SELECT kind, tmdb FROM (
 			`+heldTitles+`
 			UNION SELECT kind, tmdb FROM catalog_titles) t
 		WHERE NOT EXISTS (SELECT 1 FROM title_ratings_fetched f
 			WHERE f.kind = t.kind AND f.tmdb = t.tmdb AND f.fetched_at >= ?
-			AND (f.fetched_at >= ? OR (f.at_home IS NOT NULL AND f.at_home <= ?)))
-		LIMIT ?`, before.Unix(), pendingBefore.Unix(), today, limit)
+			AND (f.fetched_at >= ? OR (f.at_home IS NOT NULL AND f.at_home <= ?)
+				OR (f.at_home IS NULL AND coalesce(f.released, '') < ?)))
+		LIMIT ?`, before.Unix(), pendingBefore.Unix(), today, yearAgo, limit)
 	if err != nil {
 		return nil, err
 	}
