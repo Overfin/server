@@ -51,9 +51,10 @@ reaches paired servers: the gateway connects there for it and passes the
 bytes, without seeing inside (TLS runs end to end).
 
 The backend also tells the gateway what it needs to know as it happens:
-sign-ins that ended (the gateway refuses them at once), and new titles
+sign-ins that ended (the gateway refuses them at once), changes to what
+people may see (the gateway forgets the answers it kept), and new titles
 (the gateway fetches their pictures ahead, so the first visitor doesn't
-wait).
+wait). A backend restored from a backup tells the gateway to start over.
 
 ## Sessions
 

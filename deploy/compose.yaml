@@ -44,6 +44,10 @@ services:
       - /tmp
     environment:
       TZ: ${TZ:-UTC}
+      # The same domain: the site's address, which invitations, emails
+      # and other servers (federation) are given. The backend serves no
+      # HTTPS itself.
+      OVERFIN_DOMAIN: ${OVERFIN_DOMAIN:-}
       # The gateway beside it, and the volume they pair through.
       OVERFIN_GATEWAY_ADDRESS: gateway:8444
       OVERFIN_PAIRING_FILE: /pairing/code

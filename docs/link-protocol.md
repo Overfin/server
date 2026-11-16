@@ -287,7 +287,7 @@ present with the same prefix, a backend key pinned, a valid signature, the
 login not revoked (section 8). Otherwise 401 `not-authenticated`, before
 anything reaches the backend. Pages and public operations aren't checked
 here. **The backend checks every session itself, as if the gateway weren't
-there** (rule 125): this check only keeps noise off the link.
+there** (rule 123): this check only keeps noise off the link.
 
 ## 10. The image cache
 

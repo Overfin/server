@@ -10,8 +10,9 @@ for, in Overfin's turns, for the app that fetches them: `/apps/v1/wishes` in
 [api/apps.yaml](../api/apps.yaml)), and **categories and episode orders**
 (`/apps/v1/categories` and `/apps/v1/episode-orders`, below). Any key may also ask which Overfin answers (`/apps/v1/server`: its version). Totals per title and for the whole server, never who did what: one
 person's viewing counts like anyone's. Apps ask the control
-panel's address (the site's, or its own private listener when you gave it
-one). Each key may make 120 calls a minute, and watch statistics are kept
+panel's address: the backend's own listener (`http://<the backend>:8081`),
+which answers private addresses only; the gateway never passes `/apps/`
+on. Each key may make 120 calls a minute, and watch statistics are kept
 a minute:
 
 ```
@@ -37,7 +38,7 @@ should add them, the most valuable first; never sorted
 otherwise; each with the `categories` it fits, by what TMDB says of it, as
 `GET /apps/v1/categories` lists them).
 Sorting: `sort=score` (keys with the value only) or `name`, `order=asc` or
-`desc`. Pages of `limit` rows (100 by default, at most 1000); the next one
+`desc`; a list (`list=`) without `sort` keeps its own order. Pages of `limit` rows (100 by default, at most 1000); the next one
 at `cursor=` what `next` says. An app that frees space (such as Overtide)
 asks for the least valuable titles the libraries have, as above; an app
 that adds titles (such as Overtide), for `list=suggestions`.

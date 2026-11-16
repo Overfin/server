@@ -22,7 +22,8 @@ Overfin's are the place to start, at the release you run:
 
 - `layout.html` and `layout.txt` frame every email; `verify` (confirming
   an address), `reset` (a new password), `exists` (someone registered
-  with an address that has an account), `invite`, `test`, the notices to
+  with an address that has an account), `invite`, `setup` (the link to
+  choose a password, for someone an admin added), `test`, the notices to
   admins (`joined`, `expiring`, `expired`) and the one to someone whose
   access ends (`ending`) are each email's own (`.html` and `.txt`). The
   subject is the `.txt` file's `subject` block.

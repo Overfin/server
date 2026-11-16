@@ -21,7 +21,10 @@
   `{"EnteredUsername":"overfin-admin"}` writes a PIN to a
   `passwordreset*.json` file in Jellyfin's config folder;
   `POST /Users/ForgotPassword/Pin` with `{"Pin":"…"}` makes that PIN the
-  password. `-recover-tokens` prints these steps too.
+  password. `-recover-tokens` prints these steps too. **Not yet with the
+  backend image**: there, Jellyfin runs inside the backend's container on
+  127.0.0.1 only, and `-recover-tokens` stops before starting it, so these
+  steps have nothing to reach. Keep the secret key's backup safe.
 - **Locked out?** `overfin -set-password you@example.org` asks for a new
   password and ends that account's other logins (with Docker: `docker exec
   -it overfin-backend /overfin-backend -set-password you@example.org`).

@@ -58,8 +58,9 @@ sign in with their email and a password. In the control panel: add people
 (People: their email; Overfin emails them a setup link to choose their
 password, or you copy it and hand it over), connect an email server
 (Server, Email), make invitations (People, Registration: links anyone can
-register with, confirming their email; they need the site's address too:
-`OVERFIN_DOMAIN`, or `site.url` in the file below), choose your GPU
+register with, confirming their email; they need the site's address too,
+as federation does: `OVERFIN_DOMAIN`, which the compose file gives both
+containers, or `site.url` in the file below), choose your GPU
 (Server, Transcoding; the compose file says how to give the container
 one). Without an email server, there are no invitations or
 forgotten-password emails: you add people yourself, and copy their setup
@@ -119,11 +120,9 @@ nginx (inside your `server { listen 443 ssl; ... }` block):
 
 ```nginx
 location / {
-    client_max_body_size 10m;         # the panel's pictures
     proxy_pass http://overfin-gateway:8080;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $remote_addr;
-    proxy_set_header X-Forwarded-Proto $scheme;
     proxy_buffering off;              # video streams
     proxy_read_timeout 1h;
 }

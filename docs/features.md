@@ -23,6 +23,14 @@
 - **Their language and their look**: each account picks its language among
   those you offer (the site, titles' names and synopses, emails), and each
   profile light, dark, or the device's.
+- **A page for every episode**: its picture, rating, guests and crew, the
+  episodes before and after, its season's row; and, for films and
+  episodes, what each copy holds (its video, audio and subtitle
+  languages).
+- **Each title's rank on the server**, among films or among series, from
+  Overfin's valuation (Valuation, in the control panel), on its page.
+- **Not interested**: a profile hides a title from its recommendations,
+  and takes it back on the title's page.
 - **Recommendations** for each profile on the home page, from what it
   watches and what its account said it likes, and **similar titles** on
   each title's page. Children's content shows in a profile's
@@ -130,18 +138,19 @@ input. Among its rules: every route is declared (no passthrough to
 Jellyfin), Jellyfin tokens never reach the browser and are encrypted at
 rest, Overfin reaches Jellyfin as one locked-down account and decides
 itself what each profile may see, images are
-re-encoded, nothing is collected for analytics, and between Overfin servers (planned
-sharing) nothing is ever trusted by default. What depends on your setup
-(HTTPS, where the control panel answers) has a secure default you may
-relax for your own server.
+re-encoded, nothing is collected for analytics, and between Overfin servers
+([federation](federation.md)) nothing is ever trusted by default. The
+control panel answers private addresses only (your LAN, a VPN), never the
+internet.
 
 The rules are in [SECURITY.md](../SECURITY.md), the threats they answer in
 [THREAT_MODEL.md](../THREAT_MODEL.md). Remember they haven't been reviewed by
 anyone outside the project yet.
 
 ## The features one by one, TMDB and Seerr
-Everything is built in. Accounts and profiles, the library, playback and the
-watchlist are always on; the rest is switched on in the control panel.
+Everything is built in. Accounts and profiles, the library, playback, the
+watchlist and invitations are always on; the rest is switched on in the
+control panel.
 
 | Feature | Offers | |
 | --- | --- | --- |
