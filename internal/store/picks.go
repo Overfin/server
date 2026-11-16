@@ -218,3 +218,11 @@ func (s *Store) FilmReleases(ctx context.Context) (map[string]HomeRelease, error
 	}
 	return out, rows.Err()
 }
+
+// PickUnknown notes that TMDB no longer knows a pick (its page answered
+// not found): it isn't asked again until the rest of TMDB's data is old,
+// rather than at every pass while it stays on a list.
+func (s *Store) PickUnknown(ctx context.Context, kind, tmdb string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE catalog_titles SET details_at = ? WHERE kind = ? AND tmdb = ?`, at.Unix(), kind, tmdb)
+	return err
+}

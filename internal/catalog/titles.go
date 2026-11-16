@@ -199,6 +199,13 @@ func (a *Titles) describePicks(ctx context.Context, src TitleSource) (int, error
 			switch {
 			case errors.Is(err, tmdb.ErrUnauthorized), ctx.Err() != nil:
 				return fetched, err
+			case errors.Is(err, tmdb.ErrNotFound):
+				// TMDB doesn't know it (any more): as fetch does, done for
+				// now, rather than asked again every pass.
+				if err := a.Store.PickUnknown(ctx, t.Kind, t.TMDB, a.clock()); err != nil {
+					return fetched, err
+				}
+				streak = 0
 			case err != nil:
 				failed[t.Key()] = true
 				if streak++; streak == 10 {
