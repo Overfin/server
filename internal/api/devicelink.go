@@ -23,8 +23,9 @@ import (
 
 const (
 	linkPagePath = "/link"
-	// DeviceCookie holds a screen's secret while its code waits.
-	DeviceCookie = "overfin-device"
+	// DeviceCookie holds a screen's secret while its code waits (not the
+	// known-device cookie, managed.go: one would replace the other).
+	DeviceCookie = "overfin-screen"
 	// deviceCodeFor is how long a code can be confirmed.
 	deviceCodeFor = 10 * time.Minute
 	// codeLetters are the codes' letters: no vowels (no words) and nothing
