@@ -576,3 +576,48 @@ func (s *Store) SetSeerrWishUser(ctx context.Context, id int) error {
 		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, []byte(strconv.Itoa(id)))
 	return err
 }
+
+// WishesGoTo notes where wishes go now ("overtide" or "seerr"). When that
+// changed since the last time, the states the last fetcher left are
+// dropped: every open wish is waiting again, for the new one to take on
+// its next turn (one left "requested" by Seerr, say, would wait forever
+// under Overtide). The first time, with nothing noted, only the states
+// the other fetcher alone gives are dropped: Seerr's (requested, or with
+// a request there) under Overtide, Overtide's downloading under Seerr.
+// It reports whether any state was dropped.
+func (s *Store) WishesGoTo(ctx context.Context, to string) (bool, error) {
+	if to == "" {
+		return false, nil // no wishes: nothing changes until they go somewhere
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var last string
+	err = tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'wishes-to'`).Scan(&last)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	if last == to {
+		return false, nil
+	}
+	drop := `DELETE FROM wish_states`
+	switch {
+	case last != "":
+	case to == "overtide":
+		drop += ` WHERE state = 'requested' OR seerr_request IS NOT NULL`
+	default:
+		drop += ` WHERE state = 'downloading' AND seerr_request IS NULL`
+	}
+	res, err := tx.ExecContext(ctx, drop)
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO meta (name, value) VALUES ('wishes-to', ?)
+		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, []byte(to)); err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, tx.Commit()
+}

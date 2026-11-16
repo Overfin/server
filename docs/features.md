@@ -225,7 +225,10 @@ permission, and auto-approval if you like). Seerr never learns who wished
 for what, and people never need Seerr itself: keep it private on your
 network, reachable by Overfin and you only. Requests made before wishlists
 became wishes; the Seerr users accounts had then stay in Seerr, for you to
-delete there.
+delete there. Switching from one to the other hands every open wish to the
+new one, in its next turns: what the old one said of them (requested,
+downloading, not found) is forgotten, and what it had started there goes on
+there.
 
 
 ---

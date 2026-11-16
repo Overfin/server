@@ -89,6 +89,26 @@ func TestWishesToSeerr(t *testing.T) {
 	if s2 := states["series/tmdb/1399/s2"]; s2.State != store.WishDownloading {
 		t.Errorf("started: %+v", s2)
 	}
+
+	// Wishes go to Overtide now: what Seerr left is waiting again, for
+	// Overtide's next read, and nothing more goes to Seerr.
+	st.SetWishState(ctx, store.WishState{Title: "movie/tmdb/2", State: store.WishRequested})
+	to = config.WishesToOvertide
+	if err := s.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if states, _ = st.WishStates(ctx); len(states) != 0 {
+		t.Errorf("states Seerr left, under Overtide: %+v", states)
+	}
+	// Overtide starts the season; back to Seerr, it's Seerr's to fetch.
+	st.SetWishState(ctx, store.WishState{Title: "series/tmdb/1399/s2", State: store.WishDownloading})
+	to = config.WishesToSeerr
+	if err := s.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if states, _ = st.WishStates(ctx); states["series/tmdb/1399/s2"].State == store.WishDownloading {
+		t.Errorf("Overtide's state, under Seerr: %+v", states)
+	}
 }
 
 // fakeSeerrRequests is Seerr for the wishes handed to it: users, requests

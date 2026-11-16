@@ -220,3 +220,65 @@ func TestSpendWishTurns(t *testing.T) {
 		t.Errorf("the turn's profile: %+v", turns[ann.ID])
 	}
 }
+
+// Where wishes go, noted: a change drops every state the last fetcher left;
+// the first time, only those the other fetcher alone gives.
+func TestWishesGoTo(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	set := func(states ...WishState) {
+		for _, st := range states {
+			if err := s.SetWishState(ctx, st); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	titles := func() []string {
+		states, _ := s.WishStates(ctx)
+		var out []string
+		for k := range states {
+			out = append(out, k)
+		}
+		slices.Sort(out)
+		return out
+	}
+	set(WishState{Title: "movie/tmdb/1", State: WishRequested, SeerrRequest: 7},
+		WishState{Title: "movie/tmdb/2", State: WishRequested},
+		WishState{Title: "movie/tmdb/3", State: WishDownloading, SeerrRequest: 8},
+		WishState{Title: "movie/tmdb/4", State: WishDownloading},
+		WishState{Title: "movie/tmdb/5", State: WishUnreleased, ReleaseOn: "2027-01-01"})
+	// Nothing noted yet, to Overtide: Seerr's go.
+	if dropped, err := s.WishesGoTo(ctx, "overtide"); err != nil || !dropped {
+		t.Fatalf("first time: %v %v", dropped, err)
+	}
+	if got := titles(); !slices.Equal(got, []string{"movie/tmdb/4", "movie/tmdb/5"}) {
+		t.Errorf("the first time, to Overtide: %v", got)
+	}
+	// The same again, or no wishes at all: nothing changes.
+	if dropped, _ := s.WishesGoTo(ctx, "overtide"); dropped {
+		t.Error("dropped with no change")
+	}
+	if dropped, _ := s.WishesGoTo(ctx, ""); dropped || len(titles()) != 2 {
+		t.Error("dropped with wishes off")
+	}
+	// To Seerr: everything Overtide left waits again.
+	if dropped, err := s.WishesGoTo(ctx, "seerr"); err != nil || !dropped || len(titles()) != 0 {
+		t.Errorf("to Seerr: %v %v %v", dropped, err, titles())
+	}
+}
+
+// The first time, to Seerr: only Overtide's downloading goes.
+func TestWishesGoToSeerrFirst(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	s.SetWishState(ctx, WishState{Title: "movie/tmdb/1", State: WishRequested, SeerrRequest: 7})
+	s.SetWishState(ctx, WishState{Title: "movie/tmdb/2", State: WishDownloading, SeerrRequest: 8})
+	s.SetWishState(ctx, WishState{Title: "movie/tmdb/3", State: WishDownloading})
+	if _, err := s.WishesGoTo(ctx, "seerr"); err != nil {
+		t.Fatal(err)
+	}
+	states, _ := s.WishStates(ctx)
+	if len(states) != 2 || states["movie/tmdb/3"].State != "" {
+		t.Errorf("states: %+v", states)
+	}
+}

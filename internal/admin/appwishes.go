@@ -38,6 +38,17 @@ func (p *Panel) toOvertide() bool {
 	return p.Features.Features().Wishes.To == config.WishesToOvertide
 }
 
+// wishesToOvertide notes that wishes go to Overtide: just switched from
+// Seerr, the wishes Seerr left are waiting again, for Overtide to take. It
+// answers the failure itself.
+func (p *Panel) wishesToOvertide(w http.ResponseWriter, r *http.Request) bool {
+	if _, err := p.Store.WishesGoTo(r.Context(), config.WishesToOvertide); err != nil {
+		p.fail(w, "reading where wishes went", err)
+		return false
+	}
+	return true
+}
+
 // order reads the turns: the titles to fetch, next first.
 func (p *Panel) wishOrder(r *http.Request, limit int) ([]wishes.Next, error) {
 	ctx := r.Context()
@@ -79,6 +90,9 @@ func (p *Panel) appWishes(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []appWishJSON{}
 	if p.toOvertide() {
+		if !p.wishesToOvertide(w, r) {
+			return
+		}
 		order, err := p.wishOrder(r, limit)
 		if err != nil {
 			p.fail(w, "reading the wishes", err)
@@ -156,6 +170,9 @@ func (p *Panel) appWishStatus(w http.ResponseWriter, r *http.Request) {
 	// Wishes going to Seerr are followed there: an app has none to report.
 	if !p.toOvertide() {
 		notFound(w, "Wishes don't go to an app")
+		return
+	}
+	if !p.wishesToOvertide(w, r) {
 		return
 	}
 	var req struct {

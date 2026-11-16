@@ -71,6 +71,12 @@ func (s *WishesToSeerr) clock() time.Time {
 // over the next ones, within the day's count.
 func (s *WishesToSeerr) Pass(ctx context.Context) error {
 	to, perDay, c := s.Setup()
+	// Switched from Overtide (or back): what it left goes to Seerr now.
+	if dropped, err := s.Store.WishesGoTo(ctx, to); err != nil {
+		return err
+	} else if dropped {
+		s.Logger.Info("wishes go elsewhere now: those open wait for their next turn there", "to", to)
+	}
 	if to != config.WishesToSeerr || c == nil {
 		return nil
 	}
