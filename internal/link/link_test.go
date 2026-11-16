@@ -965,3 +965,46 @@ func TestWrongCodesLoggedOnce(t *testing.T) {
 		t.Errorf("logged %d times", n)
 	}
 }
+
+// A response nobody reads (a paused viewer's film) holds its own stream's
+// window, not the whole link's: other requests still get their answers.
+func TestStalledStreamDoesntHoldTheLink(t *testing.T) {
+	code := ""
+	g, addr := gatewayOn(t, t.TempDir(), "1.0", &code)
+	b, _ := runBackend(t, t.TempDir(), "1.0")
+	code = pairNow(t, b, addr)
+	waitConnected(t, g, true)
+	stalled := make([]*http.Response, 0, 3)
+	for range 3 {
+		resp, err := g.Client().Get("https://backend/bytes?n=" + strconv.Itoa(64<<20))
+		if err != nil {
+			t.Fatal(err)
+		}
+		stalled = append(stalled, resp) // never read
+	}
+	t.Cleanup(func() {
+		for _, r := range stalled {
+			r.Body.Close()
+		}
+	})
+	time.Sleep(300 * time.Millisecond) // the backend fills what the windows allow
+	done := make(chan string, 1)
+	go func() {
+		resp, err := g.Client().Get("https://backend/bytes?n=" + strconv.Itoa(1<<20))
+		if err != nil {
+			done <- err.Error()
+			return
+		}
+		n, _ := io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		done <- strconv.FormatInt(n, 10)
+	}()
+	select {
+	case got := <-done:
+		if got != strconv.Itoa(1<<20) {
+			t.Errorf("the other request got %s", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the other request waited behind the unread ones")
+	}
+}
