@@ -97,6 +97,13 @@ func (l libraries) Change(ctx context.Context, name, newName string, folders []s
 		return err
 	}
 	jf, a := l.client()
+	// The new name is checked first: refused after the folders changed,
+	// the change would be half made while the panel says nothing was.
+	if newName != "" && newName != name {
+		if _, err := l.find(ctx, newName); err == nil {
+			return admin.Problem("There's a library named " + newName + " already.")
+		}
+	}
 	if folders != nil {
 		if err := l.exist(ctx, folders); err != nil {
 			return err
@@ -119,9 +126,6 @@ func (l libraries) Change(ctx context.Context, name, newName string, folders []s
 		}
 	}
 	if newName != "" && newName != name {
-		if _, err := l.find(ctx, newName); err == nil {
-			return admin.Problem("There's a library named " + newName + " already.")
-		}
 		if err := jf.RenameLibrary(ctx, a, name, newName); err != nil {
 			return err
 		}
