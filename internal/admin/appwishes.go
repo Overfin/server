@@ -248,7 +248,7 @@ func (p *Panel) appWishStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, next := range order {
 			if next.Title == key {
-				if _, err := p.Store.SpendWishTurns(ctx, key); err != nil {
+				if _, err := p.Store.SpendWishTurns(ctx, key, store.WishTurnOf{AccountID: next.AccountID, ProfileID: next.ProfileID}); err != nil {
 					p.fail(w, "spending the turns", err)
 					return
 				}

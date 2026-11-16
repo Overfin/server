@@ -200,12 +200,23 @@ func TestSpendWishTurns(t *testing.T) {
 	s.AddWish(ctx, a2.ID, "movie/tmdb/1")
 	s.AddWish(ctx, b1.ID, "movie/tmdb/1")
 	s.AddWish(ctx, c1.ID, "movie/tmdb/2")
-	n, err := s.SpendWishTurns(ctx, "movie/tmdb/1")
+	n, err := s.SpendWishTurns(ctx, "movie/tmdb/1", WishTurnOf{})
 	if err != nil || n != 2 {
 		t.Fatalf("%d accounts, %v", n, err)
 	}
 	turns, _ := s.WishTurns(ctx)
 	if len(turns) != 2 || turns[ann.ID].ProfileID != a2.ID || turns[bob.ID].ProfileID != b1.ID {
 		t.Fatalf("turns: %+v", turns)
+	}
+	// Fetched on the first profile's turn: that turn is recorded as the
+	// first profile's, whatever the other's wish's place, so the account's
+	// next turn goes to the other profile.
+	s.AddWish(ctx, a1.ID, "movie/tmdb/3")
+	s.AddWish(ctx, a2.ID, "movie/tmdb/3")
+	if _, err := s.SpendWishTurns(ctx, "movie/tmdb/3", WishTurnOf{AccountID: ann.ID, ProfileID: a1.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if turns, _ := s.WishTurns(ctx); turns[ann.ID].ProfileID != a1.ID {
+		t.Errorf("the turn's profile: %+v", turns[ann.ID])
 	}
 }

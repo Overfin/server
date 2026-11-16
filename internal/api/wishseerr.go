@@ -128,7 +128,7 @@ func (s *WishesToSeerr) Pass(ctx context.Context) error {
 		}
 		// A request, made or found, spends the turn of every account that
 		// wished for it: each gets it.
-		if _, err := s.Store.SpendWishTurns(ctx, next.Title); err != nil {
+		if _, err := s.Store.SpendWishTurns(ctx, next.Title, store.WishTurnOf{AccountID: next.AccountID, ProfileID: next.ProfileID}); err != nil {
 			return err
 		}
 		if err := s.Store.RecordWishSend(ctx, next.Title); err != nil {

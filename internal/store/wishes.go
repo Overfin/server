@@ -347,6 +347,10 @@ func (s *Store) WishTurns(ctx context.Context) (map[string]WishTurn, error) {
 	return out, rows.Err()
 }
 
+// WishTurnOf is whose turn a title was fetched on: an account, one of
+// its profiles; empty when it wasn't anyone's in particular.
+type WishTurnOf struct{ AccountID, ProfileID string }
+
 // SpendWishTurn records that an account's turn went, on a profile's wish.
 func (s *Store) SpendWishTurn(ctx context.Context, accountID, profileID string) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO wish_turns (account_id, turn_at, profile_id) VALUES (?, ?, ?)
@@ -357,9 +361,11 @@ func (s *Store) SpendWishTurn(ctx context.Context, accountID, profileID string) 
 
 // SpendWishTurns spends the turn of every account that wished for a title,
 // when it's fetched: each got it, so the others go next. An account whose
-// profiles wished it spends one turn, on the profile whose wish is highest.
-// It reports how many accounts did.
-func (s *Store) SpendWishTurns(ctx context.Context, title string) (int, error) {
+// profiles wished it spends one turn, on the profile whose wish is highest;
+// the account whose turn it was (turn), on the profile whose turn it was,
+// so its next turn goes to its next profile. It reports how many accounts
+// did.
+func (s *Store) SpendWishTurns(ctx context.Context, title string, turn WishTurnOf) (int, error) {
 	rows, err := s.read.QueryContext(ctx, `SELECT p.account_id, w.profile_id FROM wishes w JOIN profiles p ON p.id = w.profile_id
 		WHERE w.title = ? ORDER BY p.account_id, w.position, w.profile_id`, title)
 	if err != nil {
@@ -381,6 +387,9 @@ func (s *Store) SpendWishTurns(ctx context.Context, title string) (int, error) {
 		return 0, err
 	}
 	for i := range accounts {
+		if accounts[i] == turn.AccountID && turn.ProfileID != "" {
+			profiles[i] = turn.ProfileID
+		}
 		if err := s.SpendWishTurn(ctx, accounts[i], profiles[i]); err != nil {
 			return i, err
 		}
