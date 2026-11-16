@@ -456,3 +456,24 @@ func TestSyncTitlesOnlyWhatsOffered(t *testing.T) {
 		t.Fatalf("titles of a library no longer offered: %v", got)
 	}
 }
+
+// A pairing ended on one side while the other couldn't hear it: the
+// other's next reading, answered "unknown" (signed), marks it gone.
+func TestSyncTitlesPeerForgotUs(t *testing.T) {
+	ctx := context.Background()
+	a, b := newServer(t, "A"), newServer(t, "B")
+	libraries(t, a, `{"Id":"films","Name":"Films","CollectionType":"movies"}`)
+	code, _, _ := a.s.NewCode(ctx, "")
+	aOnB, _ := b.s.UseCode(ctx, code)
+	bOnA, _ := a.s.Accept(ctx, onlyPeer(t, a).ID)
+	aOnB, _ = b.s.Store.PeerByID(ctx, aOnB.ID)
+	a.s.SetOffers(ctx, bOnA, []string{"films"})
+	b.s.SetWants(ctx, aOnB, []string{"films"})
+	a.s.Store.DeletePeer(ctx, bOnA.ID) // A ended it; B didn't hear
+	if _, err := b.s.SyncTitles(ctx, aOnB); !errors.Is(err, ErrUnknown) {
+		t.Fatalf("reading from a peer that forgot us: %v", err)
+	}
+	if p, _ := b.s.Store.PeerByID(ctx, aOnB.ID); p == nil || p.State != store.PeerGone {
+		t.Fatalf("still: %+v", p)
+	}
+}

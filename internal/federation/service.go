@@ -675,6 +675,7 @@ func (s *Service) TheirLibraries(ctx context.Context, p *store.Peer) ([]store.Pe
 	case err != nil:
 		return nil, err
 	case status == http.StatusNotFound:
+		s.forgotUs(ctx, p)
 		return nil, ErrUnknown
 	case status != http.StatusOK:
 		return nil, ErrUnreachable
@@ -907,6 +908,7 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 		case err != nil:
 			return 0, err
 		case status == http.StatusNotFound:
+			s.forgotUs(ctx, p)
 			return 0, ErrUnknown
 		case status != http.StatusOK:
 			return 0, ErrUnreachable
@@ -1077,4 +1079,16 @@ func (s *Service) Call(ctx context.Context, p *store.Peer, path string, in, out 
 func canonicalTMDB(id string) bool {
 	n, err := strconv.Atoi(id)
 	return err == nil && strconv.Itoa(n) == id && tmdb.ValidID(n)
+}
+
+// forgotUs marks gone a peer whose signed answer says it no longer knows
+// this server (it ended the pairing while we couldn't hear it): its titles
+// leave our listings at once, rather than wait for a Check by hand.
+func (s *Service) forgotUs(ctx context.Context, p *store.Peer) {
+	if p.State == store.PeerGone {
+		return
+	}
+	if ok, err := s.Store.SetPeerState(ctx, p.ID, p.State, store.PeerGone); err == nil && ok {
+		s.Logger.Info("federation: a peer no longer knows this server", "name", p.Name)
+	}
 }
