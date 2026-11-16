@@ -1059,3 +1059,12 @@ func (s *Store) PeerTold(ctx context.Context, peerID string, present []PeerTitle
 	}
 	return tx.Commit()
 }
+
+// ItemOfferedTo says whether one of our items (by Jellyfin ID) is in a
+// library we offer the peer.
+func (s *Store) ItemOfferedTo(ctx context.Context, peerID, itemID string) (bool, error) {
+	var ok bool
+	err := s.read.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM catalog_items i JOIN peer_offers o ON o.library_id = i.library_id
+		WHERE i.id = ? AND o.peer_id = ?)`, itemID, peerID).Scan(&ok)
+	return ok, err
+}

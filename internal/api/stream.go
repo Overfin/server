@@ -70,11 +70,18 @@ func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream
 			problem.Send(w, problem.NotFound, "")
 			return nil, nil
 		}
-		peer, err := s.Playback.Library.Provisioner.Store.PeerByID(r.Context(), strings.TrimPrefix(st.ProfileID, playback.PeerPrefix))
+		st2 := s.Playback.Library.Provisioner.Store
+		peer, err := st2.PeerByID(r.Context(), strings.TrimPrefix(st.ProfileID, playback.PeerPrefix))
 		if err != nil || peer.State != store.PeerPaired {
 			if errors.Is(err, store.ErrNotFound) || err == nil {
 				s.Playback.end(st, "pairing ended", "")
 			}
+			problem.Send(w, problem.NotFound, "")
+			return nil, nil
+		}
+		// Nor once its library is no longer offered to that server.
+		if offered, err := st2.ItemOfferedTo(r.Context(), peer.ID, st.ItemID); err == nil && !offered {
+			s.Playback.end(st, "no longer shared", "")
 			problem.Send(w, problem.NotFound, "")
 			return nil, nil
 		}
