@@ -586,8 +586,10 @@ func (m *Managed) changePassword(w http.ResponseWriter, r *http.Request) {
 // they can't read: someone registering another's address gets nothing.
 // The registration takes a use of the invitation at once, so a single-use
 // invitation lets one person register. An email that has an
-// account here gets a notice instead, and the use is given back; the
-// answer is the same.
+// account here gets a notice instead, and the use stays taken until the
+// hold runs out, as for a registration never confirmed: giving it back
+// would tell, through the invitation still opening, that the email has
+// an account (rule 101). The answer is the same.
 func (m *Managed) register(w http.ResponseWriter, r *http.Request) {
 	req, ok := m.read(w, r)
 	if !ok || !m.checked(w, r, req) || !m.cleanEmail(w, r, &req) {
@@ -624,7 +626,7 @@ func (m *Managed) register(w http.ResponseWriter, r *http.Request) {
 	}
 	lang := pageLang(r, m.Store)
 	u, err := m.Store.RegisterUser(ctx, req.Email, "", hold)
-	if err != nil {
+	if err != nil && !errors.Is(err, store.ErrEmailTaken) {
 		if rerr := inviter.Release(ctx, h, hold); rerr != nil {
 			m.Logger.Error("giving back an invitation's use failed", "err", rerr)
 		}

@@ -292,8 +292,9 @@ func TestManagedRegistration(t *testing.T) {
 }
 
 // A single-use invitation lets one person register: the registration takes
-// its use at once, and the account set up later gets the invitation's
-// plan. Someone whose invitation is gone gets no account without one.
+// its use at once, whatever the email, and the account set up later gets
+// the invitation's plan. Someone whose invitation is gone gets no account
+// without one.
 func TestManagedSingleUseInvitation(t *testing.T) {
 	box := &mailbox{}
 	var st *store.Store
@@ -351,10 +352,6 @@ func TestManagedSingleUseInvitation(t *testing.T) {
 	ann, eve := newBrowser(srv), newBrowser(srv)
 	openPage(t, ann, srv, link)
 	openPage(t, eve, srv, link) // the link went around before Ann used it
-	// An email that has an account here takes no use.
-	if c, out := register(ann, "old@example.org"); c != 200 {
-		t.Fatalf("an email with an account: %d %v", c, out)
-	}
 	if c, out := register(ann, "ann@example.org"); c != 200 {
 		t.Fatalf("Ann registering: %d %v", c, out)
 	}
@@ -411,6 +408,23 @@ func TestManagedSingleUseInvitation(t *testing.T) {
 	st.DeleteUser(ctx, u.Subject)
 	if c, out := register(dan, "dan2@example.org"); c != 200 {
 		t.Errorf("the link, Dan removed: %d %v", c, out)
+	}
+
+	// An email that has an account here takes the use too, as a
+	// registration never confirmed does: the invitation still opening
+	// afterwards would tell that the email has an account (rule 101).
+	_, link = invite("Olga")
+	olga, other := newBrowser(srv), newBrowser(srv)
+	openPage(t, olga, srv, link)
+	openPage(t, other, srv, link)
+	if c, out := register(olga, "old@example.org"); c != 200 || out["sent"] != true {
+		t.Fatalf("an email with an account: %d %v", c, out)
+	}
+	if c, out := register(other, "olga@example.org"); c != 403 || out["type"] != "invitation-required" {
+		t.Errorf("the link after an email with an account: %d %v", c, out)
+	}
+	if res, body := openPage(t, newBrowser(srv), srv, link); res.StatusCode != 200 || strings.Contains(body, `id="register"`) {
+		t.Errorf("the link still opens after an email with an account: %d", res.StatusCode)
 	}
 }
 

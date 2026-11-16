@@ -524,6 +524,8 @@ anyone. Paired servers are not trusted at all (rule 94).
 91. A single-use invitation lets one person in. With Overfin's own
     sign-in, registering holds a use at once, for 8 days, and for 30 days
     from when the address is confirmed; removing the person gives it back.
+    Registering an email that already has an account holds a use the same
+    way, for 8 days (rule 101).
     The hold is kept sealed on the person's record, and they get an account
     only with it, whatever their cookies. With an identity provider, the
     use is taken when the account is set up, under the account-creation
