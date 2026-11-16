@@ -174,9 +174,7 @@ paths:
         - name: since
           in: query
           description: Only titles whose totals changed on this time's day
-            (UTC) or later; compared by the day, like `changedAt`. Totals
-            going down count as changes; a title nobody watches any more
-            comes with zeros.
+            (UTC) or later; compared by the day, like `changedAt`.
           schema:
             $ref: "#/components/schemas/Timestamp"
       responses:

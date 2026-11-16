@@ -105,14 +105,12 @@ type WatchStats struct {
 
 // AllWatchStats totals, for each film and series anyone watched or keeps
 // as a favorite, what the profiles did with it; only those changed since
-// since when it isn't zero. Every row counts for when a title changed, a
-// favorite taken off or plays forgotten included, so totals going down
-// show as changes too (a title with nothing left has zero totals).
+// since when it isn't zero.
 func (s *Store) AllWatchStats(ctx context.Context, since time.Time) ([]WatchStats, error) {
 	rows, err := s.read.QueryContext(ctx, `SELECT t.title, p.account_id, t.play_count, t.played, t.favorite,
 			coalesce(t.last_played_at, 0), t.updated_at
 		FROM profile_titles t JOIN profiles p ON p.id = t.profile_id
-		WHERE t.title NOT LIKE 'item/%'`)
+		WHERE (t.play_count > 0 OR t.played = 1 OR t.favorite = 1) AND t.title NOT LIKE 'item/%'`)
 	if err != nil {
 		return nil, err
 	}
@@ -175,10 +173,6 @@ func (s *Store) AllWatchStats(ctx context.Context, since time.Time) ([]WatchStat
 	for _, key := range order {
 		t := byKey[key]
 		if !since.IsZero() && t.Changed.Before(since) {
-			continue
-		}
-		// Nothing to total: listed only among changes (a total gone down).
-		if since.IsZero() && t.Plays == 0 && len(t.viewers) == 0 && len(t.fans) == 0 {
 			continue
 		}
 		var imdb, tvdb, tmdb sql.NullString
