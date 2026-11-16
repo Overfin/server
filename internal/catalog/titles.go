@@ -396,8 +396,11 @@ func (a *Titles) FetchTitle(ctx context.Context, kind, tmdbID string) error {
 	if _, err := a.page(ctx, src, kind, id, images); err != nil {
 		return err
 	}
-	inLibrary, err := a.Store.InLibrary(ctx, kind, tmdbID)
-	if err != nil || inLibrary {
+	// One a library or a paired server has: the keeper keeps its images,
+	// its seasons' with them; written here with the series' own only, they
+	// would count as kept, and its seasons' wait months.
+	held, err := a.Store.Held(ctx, kind, tmdbID)
+	if err != nil || held {
 		return err
 	}
 	return a.Store.SetArtwork(ctx, store.ArtworkTarget{Kind: kind, TMDB: tmdbID}, images, a.clock())

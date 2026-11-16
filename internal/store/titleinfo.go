@@ -602,6 +602,15 @@ func (s *Store) SeriesSeasons(ctx context.Context, series TitleRef, listed []Sea
 	return out, rows.Err()
 }
 
+// Held says whether a library here, or a paired server's we read, has the
+// title: then the artwork keeper keeps its images, seasons included.
+func (s *Store) Held(ctx context.Context, kind, tmdb string) (bool, error) {
+	var ok bool
+	err := s.read.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM catalog_items WHERE kind = ? AND tmdb = ?)
+		OR EXISTS (SELECT 1 FROM peer_titles WHERE title_key = ? || '/tmdb/' || ?)`, kind, tmdb, kind, tmdb).Scan(&ok)
+	return ok, err
+}
+
 // InLibrary says whether a library has a film or a series (by TMDB ID).
 func (s *Store) InLibrary(ctx context.Context, kind, tmdb string) (bool, error) {
 	var ok bool
