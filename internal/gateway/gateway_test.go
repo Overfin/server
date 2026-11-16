@@ -79,6 +79,7 @@ func TestAllowlist(t *testing.T) {
 		{"GET", "/", true},
 		{"GET", "/title/m550988/free-guy", true},
 		{"GET", "/signin", true},
+		{"GET", "/link", true}, // confirming a screen's code
 		{"HEAD", "/", true},
 		// Never through the gateway.
 		{"GET", "/admin/", false},
@@ -450,7 +451,7 @@ func TestHostileRequests(t *testing.T) {
 		// The backend routes by exact case: /LINK/… is a page there, never
 		// the link's own routes.
 		for _, s := range b.seen[before:] {
-			if p := strings.SplitN(s, " ", 2)[1]; strings.HasPrefix(p, "/admin") || strings.HasPrefix(p, "/link") || strings.HasPrefix(p, "/apps") {
+			if p := strings.SplitN(s, " ", 2)[1]; strings.HasPrefix(p, "/admin") || strings.HasPrefix(p, "/link/") || strings.HasPrefix(p, "/apps") {
 				t.Errorf("%.40q reached the backend as %s", req, s)
 			}
 		}

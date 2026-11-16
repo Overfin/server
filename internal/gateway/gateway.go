@@ -154,9 +154,14 @@ func requireSession(b Backend, revoked *Revocations, next http.Handler) http.Han
 	})
 }
 
-// refused are the paths the gateway never passes on as pages.
+// refused are the paths the gateway never passes on as pages. The link
+// between servers lives under /link/; /link alone is the page where a
+// signed-in person confirms a screen's code, a page like the others.
 func refused(p string) bool {
-	for _, prefix := range []string{"/api/", "/admin", "/apps", "/link"} {
+	if strings.HasPrefix(p, "/link/") {
+		return true
+	}
+	for _, prefix := range []string{"/api/", "/admin", "/apps"} {
 		if p == strings.TrimSuffix(prefix, "/") || strings.HasPrefix(p, prefix) {
 			return true
 		}

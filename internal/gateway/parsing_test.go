@@ -100,7 +100,7 @@ func TestRequestParsing(t *testing.T) {
 		var paths []string
 		for _, r := range sent {
 			paths = append(paths, r.URL.Path)
-			for _, p := range []string{"/admin", "/apps", "/link"} {
+			for _, p := range []string{"/admin", "/apps", "/link/"} {
 				if strings.HasPrefix(strings.ToLower(r.URL.Path), p) {
 					t.Errorf("%s reached the backend as %s", c.name, r.URL.Path)
 				}
