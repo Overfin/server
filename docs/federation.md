@@ -76,6 +76,19 @@ some of your transcodes for your own people, whatever the pairings allow
 together (1 at first). The other server learns your limits and doesn't
 offer its people what yours would refuse.
 
+Besides those, Overfin protects itself from a paired server that calls
+too much, by fault or on purpose, with fixed limits nobody needs to set:
+federation calls per address before any signature (50 a second, bursts
+of 400), per paired server (20 a second, bursts of 200), for all of them
+together (200 a second, bursts of 2,000), `play` per paired server (30 a
+minute, 20 at once), and requests at once (8 per paired server, 64 in
+all, each with a short queue). Media has its own: 8 fetches at once per
+playback and 64 per paired server, on both sides. Normal use (catalog
+reads, playback, seek-bar previews) stays far below them. Past one, the
+other server is told to wait a moment, signed, and waits; Overfin waits
+the same way when another server tells it to, and, when one doesn't
+answer, asks it less often by itself, up to once an hour.
+
 ## Security
 
 Servers never trust each other by default. Each proves who it is with the

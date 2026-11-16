@@ -67,6 +67,10 @@ type Service struct {
 	// its peers (nil: none).
 	Certificates *Certificates
 
+	// Limits are the limits on calls here and the memory of peers that
+	// asked to wait, shared across rebuilds; nil makes its own.
+	Limits *Limits
+
 	// PeerChanged, when set, is told a peer's ID once its pairing ended,
 	// it is no longer paired, or what we offer it changed: its playbacks
 	// here end at once (MSFP playback, section 6.3).
@@ -134,6 +138,16 @@ func (p Plugin) Register(r *plugin.Registrar) error {
 	return r.HandlePublic("POST /api/v1/federation/titles", SignRefusals(http.HandlerFunc(p.S.titles)))
 }
 
+// lim is s.Limits, made the first time when nil.
+func (s *Service) lim() *Limits {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Limits == nil {
+		s.Limits = &Limits{}
+	}
+	return s.Limits
+}
+
 // changed tells PeerChanged, when set.
 func (s *Service) changed(peerID string) {
 	if s.PeerChanged != nil {
@@ -154,6 +168,8 @@ func (s *Service) forgotten(r *http.Request, key ed25519.PublicKey) bool {
 type refusalWriter struct {
 	rec  *httptest.ResponseRecorder
 	sign func(status int, body []byte) string
+	// free frees the request's slots (Limits), once its handler is done.
+	free func()
 }
 
 func (rw *refusalWriter) Header() http.Header         { return rw.rec.Header() }
@@ -168,6 +184,9 @@ func SignRefusals(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rw := &refusalWriter{rec: httptest.NewRecorder()}
 		h.ServeHTTP(rw, r)
+		if rw.free != nil {
+			rw.free()
+		}
 		res := rw.rec
 		for k, v := range res.Header() {
 			w.Header()[k] = v
@@ -240,8 +259,22 @@ func (s *Service) admit(r *http.Request, key ed25519.PublicKey) (heard, known bo
 	return err == nil && live, false
 }
 
-// verified reads and checks a request; ok is false once it has answered.
+// playPath is the call that can start work on the media, which has a
+// limit of its own (Limits).
+const playPath = "/api/v1/federation/play"
+
+// verified reads and checks a request, within the limits on calls here
+// (MSFP core section 8.3); ok is false once it has answered. Before the
+// signature, a limit per network address, answered with the plain 404
+// of a failed check; then, for a known peer, its own limits (429
+// rate-limited) and all peers' (503 server-busy), signed, with
+// retryAfter.
 func (s *Service) verified(w http.ResponseWriter, r *http.Request) (Verified, []byte, bool) {
+	lim := s.lim()
+	if !lim.fromAddr(clientAddr(r), time.Now()) {
+		problem.Send(w, problem.NotFound, "")
+		return Verified{}, nil, false
+	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		problem.Send(w, problem.NotFound, "")
@@ -258,8 +291,28 @@ func (s *Service) verified(w http.ResponseWriter, r *http.Request) (Verified, []
 		problem.Send(w, problem.NotFound, "")
 		return Verified{}, nil, false
 	}
+	key := ""
 	if v.Known {
 		s.signsFor(w, v.Nonce)
+		key = b64.EncodeToString(v.Key)
+		if no := lim.call(key, r.URL.Path == playPath, time.Now()); no != nil {
+			sendRefusal(w, no)
+			return Verified{}, nil, false
+		}
+	}
+	free, no := lim.slots(r.Context(), key, v.Known)
+	if no != nil {
+		if v.Known {
+			sendRefusal(w, no)
+		} else {
+			problem.Send(w, problem.NotFound, "")
+		}
+		return Verified{}, nil, false
+	}
+	if rw, ok := w.(*refusalWriter); ok {
+		rw.free = free
+	} else {
+		free() // not a route's: nothing to hold the slots until it's done
 	}
 	return v, body, true
 }
@@ -421,6 +474,8 @@ var ErrUnknown = errors.New("federation: the other server doesn't know this one"
 type Reply struct {
 	Status  int
 	Problem string
+	// RetryAfter is a 429's or 503's retryAfter, seconds (0 for none).
+	RetryAfter int
 }
 
 // Paths of the calls that accept any certificate (tls.go).
@@ -433,7 +488,26 @@ const (
 // and hello accept any certificate; every other call wants one publicly
 // trusted or named by the peer, and asks the peer's hello once for what it
 // names now when it gets another.
+//
+// A peer that asked to wait (a signed 429 or 503 with retryAfter) isn't
+// called again before that time; after calls it didn't answer, calls
+// made in the background (Background) hold off, longer each time (MSFP
+// core section 8.3): ErrBackingOff. A code's server isn't known yet:
+// pair always goes.
 func (s *Service) call(ctx context.Context, p *store.Peer, path string, in, out any) (Reply, error) {
+	key := b64.EncodeToString(p.PublicKey)
+	lim := s.lim()
+	if path != pairPath && !lim.mayCall(key, background(ctx), time.Now()) {
+		return Reply{}, ErrBackingOff
+	}
+	r, err := s.callOnce(ctx, p, path, in, out)
+	if path != pairPath && ctx.Err() == nil {
+		lim.heard(key, err == nil, r.Status, r.RetryAfter, time.Now())
+	}
+	return r, err
+}
+
+func (s *Service) callOnce(ctx context.Context, p *store.Peer, path string, in, out any) (Reply, error) {
 	anyCert := path == pairPath || path == helloPath
 	r, err := s.exchange(ctx, s.conns(p, anyCert).client, p, path, in, out)
 	if anyCert || err == nil {
@@ -484,6 +558,9 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 			}
 			if json.Unmarshal(answer, &pd) == nil && len(pd.Type) <= 64 {
 				r.Problem = pd.Type
+			}
+			if r.Status == http.StatusTooManyRequests || r.Status == http.StatusServiceUnavailable {
+				r.RetryAfter = retryAfterOf(answer)
 			}
 		}
 		return r, nil
@@ -661,7 +738,7 @@ func (s *Service) CheckSoon(peers []*store.Peer) {
 		}
 		s.asked[p.ID] = now
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(Background(context.Background()), 20*time.Second)
 			defer cancel()
 			s.Check(ctx, p)
 		}()
@@ -845,6 +922,10 @@ func cleanKind(kind string) string {
 // titlesPage is how many titles a page holds at most.
 const titlesPage = 5000
 
+// pageWait is the longest a reading of a peer's titles waits when the
+// peer asks it to (a 429 or 503 with retryAfter) before reading on.
+const pageWait = time.Minute
+
 type titlesRequest struct {
 	Libraries []string `json:"libraries"`
 	After     string   `json:"after"`
@@ -990,6 +1071,11 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 	for len(libs) > 0 {
 		var answer titlesAnswer
 		r, err := s.call(ctx, p, "/api/v1/federation/titles", titlesRequest{Libraries: libs, After: after, Since: since}, &answer)
+		// Asked to wait a moment: the same page again, once it's time
+		// (never sooner); asked longer, the next reading.
+		if err == nil && r.Status != http.StatusOK && s.waitTurn(ctx, r, pageWait) {
+			continue
+		}
 		switch {
 		case err != nil:
 			return 0, err
@@ -1080,7 +1166,7 @@ func (s *Service) SyncAll(ctx context.Context) {
 			continue
 		}
 		// Each peer in its own time: a slow one doesn't hold the others up.
-		peerCtx, cancel := context.WithTimeout(ctx, syncTimeout)
+		peerCtx, cancel := context.WithTimeout(Background(ctx), syncTimeout)
 		n, err := s.SyncTitles(peerCtx, p)
 		cancel()
 		if err != nil {
@@ -1095,7 +1181,7 @@ func (s *Service) SyncAll(ctx context.Context) {
 // want of it changed).
 func (s *Service) SyncSoon(p *store.Peer) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(Background(context.Background()), 10*time.Minute)
 		defer cancel()
 		if _, err := s.SyncTitles(ctx, p); err != nil {
 			s.Logger.Info("federation: a peer's titles couldn't be read", "name", p.Name, "error", err)

@@ -337,6 +337,9 @@ type fedShared struct {
 	seen  *federation.Nonces
 	http  *http.Client
 	certs *federation.Certificates
+	// limits are the limits on federation calls, and the memory of peers
+	// that asked to wait.
+	limits *federation.Limits
 }
 
 // federationService is federation on this server, or nil when the site has
@@ -354,7 +357,7 @@ func federationService(cfg *config.Config, sh *shared) *federation.Service {
 	}
 	db := sh.db
 	return &federation.Service{Store: db, Key: sh.fed.key, Address: address, HTTP: sh.fed.http, Seen: sh.fed.seen,
-		Certificates: sh.fed.certs, Logger: sh.logger, Name: func(ctx context.Context) string {
+		Certificates: sh.fed.certs, Limits: sh.fed.limits, Logger: sh.logger, Name: func(ctx context.Context) string {
 			if b, err := db.Branding(ctx); err == nil && b.On && b.Name != "" {
 				return b.Name
 			}

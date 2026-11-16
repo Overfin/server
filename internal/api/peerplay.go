@@ -270,7 +270,8 @@ func (pb Playback) tellRemote(rm *playback.Remote, positionMs int64, paused bool
 		return
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		// On its schedule: held off while the paired server doesn't answer.
+		ctx, cancel := context.WithTimeout(federation.Background(context.Background()), 15*time.Second)
 		defer cancel()
 		peer, err := pb.Library.Provisioner.Store.PeerByID(ctx, rm.PeerID)
 		if err != nil {
@@ -439,6 +440,11 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	reply, err := fed.CallReply(ctx, peer, "/api/v1/federation/play", peerPlayRequest{Title: key, Capabilities: req.Capabilities.ForPeer(),
 		StartPositionMs: req.StartPositionMs, MaxBitrateKbps: roundKbps(kbps), AudioLanguage: wantAudio, SubtitleLanguage: wantSubtitles,
 		AudioTrack: req.AudioTrack, SubtitleTrack: req.SubtitleTrack}, &out)
+	if errors.Is(err, federation.ErrBackingOff) {
+		// It asked to wait: busy now, the viewer may try again later.
+		problem.Send(w, problem.ServerBusy, "")
+		return
+	}
 	if err != nil {
 		pb.Logger.Warn("a paired server couldn't start a playback", "peer", peer.Name, "err", err)
 		problem.Send(w, problem.NotPlayable, "")
@@ -520,7 +526,8 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 
 // peerRefusal is what the viewer is told of a paired server's refusal to
 // play: its limit for this server reached, or all its transcodes taken, is
-// busy, for now (409 stream-limit-reached, 503); a title it can't play
+// busy, for now (409 stream-limit-reached, 503, and 429 when it's asked
+// too often); a title it can't play
 // (409 not-playable), or any other refusal, isn't playable. A 409 of
 // another type, or none, is busy: what every 409 meant to Overfin's
 // viewer side before it read the type.
@@ -528,7 +535,7 @@ func peerRefusal(r federation.Reply) problem.Type {
 	switch {
 	case r.Status == http.StatusConflict && r.Problem == string(problem.NotPlayable):
 		return problem.NotPlayable
-	case r.Status == http.StatusConflict, r.Status == http.StatusServiceUnavailable:
+	case r.Status == http.StatusConflict, r.Status == http.StatusServiceUnavailable, r.Status == http.StatusTooManyRequests:
 		return problem.ServerBusy
 	}
 	return problem.NotPlayable

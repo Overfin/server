@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/overfin/server/internal/federation"
+	"github.com/overfin/server/internal/problem"
 )
 
 // A playback started on a paired server right after one stopped there
@@ -85,6 +88,22 @@ func TestPeerPreviewsChecked(t *testing.T) {
 		}
 		if !cleanPeerText(&out) || out.Trickplay != nil {
 			t.Errorf("%s: kept", name)
+		}
+	}
+}
+
+// A paired server asked too often (429) is busy for now, as when it's
+// full (503) or its limit for this server is reached (409).
+func TestPeerRefusalBusy(t *testing.T) {
+	for r, want := range map[federation.Reply]problem.Type{
+		{Status: 429, Problem: "rate-limited", RetryAfter: 3}: problem.ServerBusy,
+		{Status: 503, Problem: "server-busy"}:                 problem.ServerBusy,
+		{Status: 409}:                                         problem.ServerBusy,
+		{Status: 409, Problem: "not-playable"}:                problem.NotPlayable,
+		{Status: 404}:                                         problem.NotPlayable,
+	} {
+		if got := peerRefusal(r); got != want {
+			t.Errorf("%+v: %s", r, got)
 		}
 	}
 }
