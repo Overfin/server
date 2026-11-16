@@ -265,6 +265,10 @@ export interface TitleSummary {
 
 /** A title's page: a series with its seasons, a season with its episodes. */
 export interface Title extends TitleSummary {
+  /** Who directed and wrote an episode, the job as character ("Director", "Writer"); its guest stars are in cast (since 0.9). */
+  crew?: { id?: string; name: string; character?: string; image?: ImageRef }[];
+  /** A film's or an episode's copies the profile may see: picture and languages as the player names them, forced subtitles aside (since 0.9). */
+  copies?: { video?: string; audio?: string[]; subtitles?: string[] }[];
   /** The profile said it isn't interested in this film or series (since 0.9). */
   notInterested?: boolean;
   /** A film's or a series' place on the server by its value, among the titles of its kind the profile may see, 1 the most valued (since 0.9). */

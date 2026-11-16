@@ -4941,8 +4941,8 @@ components:
         ratings:
           type: array
           description: >-
-            Its users' scores, by source (TMDB's for now), for a film or a
-            series. A score from few votes means little.
+            Its users' scores, by source (TMDB's for now), for a film, a
+            series or an episode. A score from few votes means little.
           items:
             type: object
             required: [source, value, votes]
@@ -5050,6 +5050,45 @@ components:
         - $ref: "#/components/schemas/TitleSummary"
         - type: object
           properties:
+            crew:
+              type: array
+              description: >-
+                Who directed and wrote an episode, its job as `character`
+                ("Director" or "Writer"); its guest stars are in `cast`. Since
+                0.9.
+              items:
+                type: object
+                required: [name]
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  character:
+                    type: string
+                  image:
+                    $ref: "#/components/schemas/ImageRef"
+            copies:
+              type: array
+              description: >-
+                A film's or an episode's copies the profile may see: each one's
+                picture as a neutral name ("2160p HDR · HEVC") and its audio and
+                subtitle languages named in themselves, as the player names
+                them, forced subtitles aside; copies alike shown once. Since
+                0.9.
+              items:
+                type: object
+                properties:
+                  video:
+                    type: string
+                  audio:
+                    type: array
+                    items:
+                      type: string
+                  subtitles:
+                    type: array
+                    items:
+                      type: string
             notInterested:
               type: boolean
               description: >-

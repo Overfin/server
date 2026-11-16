@@ -140,7 +140,11 @@ func fakeTMDB(t *testing.T) *Client {
 		case "/3/tv/1399/season/1":
 			io.WriteString(w, `{"season_number":1,"name":"Saison 1","overview":"Winter.","air_date":"2011-04-17",
 				"poster_path":"/season1abc.jpg","episodes":[
-				{"episode_number":1,"name":"Winter <b>is</b> coming","air_date":"2011-04-17","runtime":62,"still_path":"/still1abcd.jpg"},
+				{"episode_number":1,"name":"Winter <b>is</b> coming","air_date":"2011-04-17","runtime":62,"still_path":"/still1abcd.jpg",
+					"vote_average":8.1,"vote_count":420,
+					"crew":[{"id":44,"name":"Tim Van Patten","job":"Director","profile_path":"/tim12345.jpg"},{"id":45,"name":"David Benioff","job":"Teleplay"},
+						{"id":46,"name":"Someone","job":"Key Grip"}],
+					"guest_stars":[{"id":47,"name":"Guest <i>One</i>","character":"A knight","profile_path":"../bad.jpg"}]},
 				{"episode_number":2,"name":"The Kingsroad","air_date":"soon","still_path":null},
 				{"episode_number":3,"still_path":"../x.jpg"},{"episode_number":3,"name":"Twice"}]}`)
 		case "/3/tv/1399/season/2/episode/3/external_ids":
@@ -288,6 +292,16 @@ func TestClient(t *testing.T) {
 	// Plain text, checked dates and stills, each episode once.
 	if e := season.Episodes[0]; e.Name != "Winter is coming" || e.Runtime != 62 || e.Still != "/still1abcd.jpg" {
 		t.Errorf("episode 1: %+v", e)
+	}
+	// Its rating, who directed and wrote it (a teleplay is writing; a grip
+	// isn't kept), its guests (plain text, an unsafe photo dropped).
+	if e := season.Episodes[0]; e.Rating != 8.1 || e.Votes != 420 || len(e.Crew) != 2 ||
+		e.Crew[0] != (Person{ID: 44, Name: "Tim Van Patten", Character: "Director", Profile: "/tim12345.jpg"}) ||
+		e.Crew[1].Character != "Writer" || len(e.Guests) != 1 || e.Guests[0].Name != "Guest One" || e.Guests[0].Profile != "" {
+		t.Errorf("episode 1's details: %+v", e)
+	}
+	if e := season.Episodes[1]; e.Rating != 0 || e.Crew != nil || e.Guests != nil {
+		t.Errorf("episode 2 has none: %+v", e)
 	}
 	if e := season.Episodes[1]; e.AirDate != "" || e.Still != "" {
 		t.Errorf("episode 2: %+v", e)

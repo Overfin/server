@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,12 @@ type testTitle struct {
 		Image *struct{ URL string }
 	}
 	Seasons, Episodes []testTitle
+	Rank              *int
+	Crew              []struct{ ID, Name, Character string }
+	Copies            []struct {
+		Video            string
+		Audio, Subtitles []string
+	}
 }
 
 // Titles, whether a library has them or not: one page, TMDB's data only,
@@ -59,7 +66,10 @@ func TestTitles(t *testing.T) {
 		{Number: 1, Name: "L'hiver vient", AirDate: "2011-04-17"}, {Number: 2, Name: "La route", AirDate: "2011-04-24"},
 		{Number: 3, Name: "Lord Snow", AirDate: "2011-05-01"}}}, now)
 	st.SetSeason(ctx, "1399", store.Season{Number: 2, Name: "Saison 2", AirDate: "2012-04-01", Episodes: []store.Episode{
-		{ID: 63058, Number: 1, Name: "Le Nord", Overview: "Robb marche vers le sud.", AirDate: "2012-04-01"}, {Number: 2, Name: "Plus tard", AirDate: "2099-01-01"}}}, now)
+		{ID: 63058, Number: 1, Name: "Le Nord", Overview: "Robb marche vers le sud.", AirDate: "2012-04-01", Rating: 8.4, Votes: 120,
+			Guests: []store.CastMember{{TMDB: "48", Name: "Un invité", Character: "Un chevalier"}},
+			Crew:   []store.CastMember{{TMDB: "44", Name: "Alan Taylor", Character: "Director"}, {Name: "Bryan Cogman", Character: "Writer"}}},
+		{Number: 2, Name: "Plus tard", AirDate: "2099-01-01"}}}, now)
 	// Specials no library has, and a season TMDB lists without episodes:
 	// never shown.
 	st.SetSeason(ctx, "1399", store.Season{Number: 0, Name: "Épisodes spéciaux", Episodes: []store.Episode{{Number: 1, AirDate: "2011-01-01"}}}, now)
@@ -68,9 +78,13 @@ func TestTitles(t *testing.T) {
 	st.SetTitleRatings(ctx, store.RatedTitle{Kind: "series", TMDB: "1399"}, nil, "2011-04-17", "2011-04-17", now)
 	st.SetTitleRatings(ctx, store.RatedTitle{Kind: "movie", TMDB: "100"}, nil, "2024-01-01", "2024-03-01", now)
 
+	st.SetTitleRanks(ctx, map[string]store.TitleRank{"series/tmdb/1399": {Kind: "series", Rank: 4}})
 	var series testTitle
 	if code := get(t, srv, "/api/v1/titles/title_series_tmdb_1399", &series); code != 200 {
 		t.Fatalf("series: %d", code)
+	}
+	if series.Rank == nil || *series.Rank != 4 {
+		t.Errorf("series' rank: %v", series.Rank)
 	}
 	if series.Name != "Le Trône de fer" || series.Overview != "Neuf familles." || series.Availability != "partiallyAvailable" ||
 		series.EpisodeCount == nil || series.EpisodeCount.InLibrary != 2 || series.EpisodeCount.Aired != 4 || len(series.Seasons) != 2 || // no specials, no empty season
@@ -101,6 +115,12 @@ func TestTitles(t *testing.T) {
 	if code := get(t, srv, "/api/v1/titles/title_episode_tmdb_63058", &alone); code != 200 || alone.ID != "title_series_tmdb_1399_e63058" ||
 		alone.Name != "Le Nord" || alone.Kind != "episode" {
 		t.Errorf("episode alone: %d %+v", code, alone)
+	}
+	// Its TMDB rating, guests and crew, from its season's answer.
+	if len(alone.Ratings) != 1 || alone.Ratings[0].Value != 8.4 || alone.Ratings[0].Votes != 120 ||
+		len(alone.Cast) != 1 || alone.Cast[0].Name != "Un invité" ||
+		len(alone.Crew) != 2 || alone.Crew[0].ID != "person_tmdb_44" || alone.Crew[0].Character != "Director" || alone.Crew[1].Name != "Bryan Cogman" {
+		t.Errorf("episode's rating and people: %+v %+v %+v", alone.Ratings, alone.Cast, alone.Crew)
 	}
 	// Favorites are films and series: an episode is refused, though taking
 	// one off still works.
@@ -366,5 +386,32 @@ func TestOutsideSeriesSeasonsUnfetched(t *testing.T) {
 	if s1 := series.Seasons[0]; s1.ID != "title_series_tmdb_87108_s1" || s1.Name != "Saison 1" || s1.Availability != "missing" ||
 		s1.EpisodeCount == nil || s1.EpisodeCount.Aired != 5 {
 		t.Errorf("season 1: %+v", s1)
+	}
+}
+
+// A film's page lists its copies: each one's picture and languages named
+// in themselves, the same copy twice listed once.
+func TestTitleCopies(t *testing.T) {
+	var st *store.Store
+	srv, fake := newServerWith(t, options{store: &st})
+	fake.partnerSeesAll = true
+	ctx := context.Background()
+	id := func(n int) string { return fmt.Sprintf("%032x", n) }
+	st.PutCatalog(ctx, []store.CatalogItem{
+		{ID: id(1), Kind: "movie", Name: "Heat", SortName: "h", TMDB: "949", Video: "2160p HDR · HEVC", AudioTags: []string{"en", "fr-CA"}, SubtitleTags: []string{"fr"}},
+		{ID: id(2), Kind: "movie", Name: "Heat", SortName: "h", TMDB: "949", Video: "1080p · H.264", AudioTags: []string{"en"}},
+		{ID: id(3), Kind: "movie", Name: "Heat", SortName: "h", TMDB: "949", Video: "1080p · H.264", AudioTags: []string{"en"}},
+	}, 1)
+	st.RefreshTitleKeys(ctx)
+	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
+	det, _ := json.Marshal(store.TitleDetails{})
+	st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "949", Name: "Heat", Year: 1995}, det, time.Now())
+	var film testTitle
+	if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_949", &film); code != 200 {
+		t.Fatalf("film: %d", code)
+	}
+	if len(film.Copies) != 2 || film.Copies[0].Video != "2160p HDR · HEVC" || strings.Join(film.Copies[0].Audio, ",") != "English,Français (Canada)" ||
+		strings.Join(film.Copies[0].Subtitles, ",") != "Français" || film.Copies[1].Video != "1080p · H.264" || film.Copies[1].Subtitles != nil {
+		t.Errorf("copies: %+v", film.Copies)
 	}
 }

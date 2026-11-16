@@ -56,8 +56,7 @@ func keptSeasons(ctx context.Context, st *store.Store, series string) (map[int]*
 	for _, se := range kept {
 		full := &tmdb.SeasonFull{Number: se.Number, Name: se.Name, Overview: se.Overview, AirDate: se.AirDate, Poster: se.Poster}
 		for _, e := range se.Episodes {
-			full.Episodes = append(full.Episodes, tmdb.Episode{ID: e.ID, Number: e.Number, Name: e.Name, Overview: e.Overview,
-				AirDate: e.AirDate, Runtime: e.Runtime, Still: e.Still})
+			full.Episodes = append(full.Episodes, tmdbEpisode(e))
 		}
 		out[se.Number] = full
 	}
@@ -164,14 +163,49 @@ func ownSeasons(ctx context.Context, src TitleSource, series int) (map[int]*tmdb
 	return src.Seasons(ctx, series, numbers)
 }
 
+// storeEpisode is an episode as the store keeps it.
+func storeEpisode(e tmdb.Episode) store.Episode {
+	out := store.Episode{ID: e.ID, Number: e.Number, Name: e.Name, Overview: e.Overview, AirDate: e.AirDate, Runtime: e.Runtime,
+		Still: e.Still, Rating: e.Rating, Votes: e.Votes}
+	people := func(list []tmdb.Person) []store.CastMember {
+		var cast []store.CastMember
+		for _, p := range list {
+			m := store.CastMember{Name: p.Name, Character: p.Character, Profile: p.Profile}
+			if p.ID > 0 {
+				m.TMDB = strconv.Itoa(p.ID)
+			}
+			cast = append(cast, m)
+		}
+		return cast
+	}
+	out.Guests, out.Crew = people(e.Guests), people(e.Crew)
+	return out
+}
+
+// tmdbEpisode is a kept episode as TMDB's answer had it.
+func tmdbEpisode(e store.Episode) tmdb.Episode {
+	out := tmdb.Episode{ID: e.ID, Number: e.Number, Name: e.Name, Overview: e.Overview, AirDate: e.AirDate, Runtime: e.Runtime,
+		Still: e.Still, Rating: e.Rating, Votes: e.Votes}
+	people := func(list []store.CastMember) []tmdb.Person {
+		var cast []tmdb.Person
+		for _, m := range list {
+			p := tmdb.Person{Name: m.Name, Character: m.Character, Profile: m.Profile}
+			p.ID, _ = strconv.Atoi(m.TMDB)
+			cast = append(cast, p)
+		}
+		return cast
+	}
+	out.Guests, out.Crew = people(e.Guests), people(e.Crew)
+	return out
+}
+
 // storeSeasons are seasons as the store keeps them.
 func storeSeasons(seasons map[int]*tmdb.SeasonFull) []store.Season {
 	out := make([]store.Season, 0, len(seasons))
 	for _, se := range seasons {
 		season := store.Season{Number: se.Number, Name: se.Name, Overview: se.Overview, AirDate: se.AirDate, Poster: se.Poster}
 		for _, e := range se.Episodes {
-			season.Episodes = append(season.Episodes, store.Episode{ID: e.ID, Number: e.Number, Name: e.Name, Overview: e.Overview,
-				AirDate: e.AirDate, Runtime: e.Runtime, Still: e.Still})
+			season.Episodes = append(season.Episodes, storeEpisode(e))
 		}
 		out = append(out, season)
 	}

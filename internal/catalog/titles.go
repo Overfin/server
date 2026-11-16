@@ -369,8 +369,7 @@ func (a *Titles) keepSeason(ctx context.Context, series int, season *tmdb.Season
 	sk := "series/tmdb/" + strconv.Itoa(series) + "/s" + strconv.Itoa(n)
 	images[sk] = map[string]string{"poster": season.Poster}
 	for _, e := range season.Episodes {
-		kept.Episodes = append(kept.Episodes, store.Episode{ID: e.ID, Number: e.Number, Name: e.Name, Overview: e.Overview,
-			AirDate: e.AirDate, Runtime: e.Runtime, Still: e.Still})
+		kept.Episodes = append(kept.Episodes, storeEpisode(e))
 		images[sk+"/e"+strconv.Itoa(e.Number)] = map[string]string{"still": e.Still}
 	}
 	return a.Store.SetSeason(ctx, strconv.Itoa(series), kept, a.clock())

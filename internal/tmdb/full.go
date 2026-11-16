@@ -295,6 +295,13 @@ type Episode struct {
 	AirDate  string // YYYY-MM-DD, or ""
 	Runtime  int    // minutes, 0 when TMDB doesn't say
 	Still    string
+	// Rating and Votes are TMDB users' score of the episode (0 and 0 when
+	// it has none); Guests, its guest stars; Crew, who directed and wrote
+	// it (Character holds the job: "Director" or "Writer").
+	Rating float64
+	Votes  int
+	Guests []Person
+	Crew   []Person
 }
 
 // dateOnly is what a TMDB date looks like.
@@ -404,13 +411,63 @@ type rawSeason struct {
 
 // rawEpisode is one of a season's episodes as TMDB sends it.
 type rawEpisode struct {
-	ID            int    `json:"id"`
-	EpisodeNumber int    `json:"episode_number"`
-	Name          string `json:"name"`
-	Overview      string `json:"overview"`
-	AirDate       string `json:"air_date"`
-	Runtime       int    `json:"runtime"`
-	StillPath     string `json:"still_path"`
+	ID            int           `json:"id"`
+	EpisodeNumber int           `json:"episode_number"`
+	Name          string        `json:"name"`
+	Overview      string        `json:"overview"`
+	AirDate       string        `json:"air_date"`
+	Runtime       int           `json:"runtime"`
+	StillPath     string        `json:"still_path"`
+	VoteAverage   float64       `json:"vote_average"`
+	VoteCount     int           `json:"vote_count"`
+	GuestStars    []rawEpPerson `json:"guest_stars"`
+	Crew          []rawEpPerson `json:"crew"`
+}
+
+// rawEpPerson is a guest star or a crew member of an episode.
+type rawEpPerson struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	Character   string `json:"character"`
+	Job         string `json:"job"`
+	ProfilePath string `json:"profile_path"`
+}
+
+// episodePeople are at most this many guests, and this many of its crew.
+const episodePeople = 20
+
+// people cleans an episode's guests (with their character) or crew (only
+// those who directed or wrote it, the job as Character).
+func people(raw []rawEpPerson, crew bool) []Person {
+	var out []Person
+	seen := map[string]bool{}
+	for _, p := range raw {
+		role := p.Character
+		if crew {
+			switch p.Job {
+			case "Director":
+			case "Writer", "Screenplay", "Teleplay", "Story":
+				p.Job = "Writer"
+			default:
+				continue
+			}
+			role = p.Job
+		}
+		name := textclean.Plain(p.Name, 200)
+		if name == "" || seen[name+"|"+role] || len(out) == episodePeople {
+			continue
+		}
+		seen[name+"|"+role] = true
+		person := Person{Name: name, Character: textclean.Plain(role, 200)}
+		if ValidID(p.ID) {
+			person.ID = p.ID
+		}
+		if imagePath.MatchString(p.ProfilePath) {
+			person.Profile = p.ProfilePath
+		}
+		out = append(out, person)
+	}
+	return out
 }
 
 // lacks says whether a season, in a regional language, came without some
@@ -460,6 +517,10 @@ func (raw rawSeason) full(season int) (*SeasonFull, error) {
 		if imagePath.MatchString(e.StillPath) {
 			ep.Still = e.StillPath
 		}
+		if e.VoteAverage > 0 && e.VoteAverage <= 10 && e.VoteCount > 0 {
+			ep.Rating, ep.Votes = e.VoteAverage, e.VoteCount
+		}
+		ep.Guests, ep.Crew = people(e.GuestStars, false), people(e.Crew, true)
 		out.Episodes = append(out.Episodes, ep)
 	}
 	return out, nil

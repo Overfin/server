@@ -20,6 +20,7 @@ import (
 
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/lang"
+	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/textclean"
 	"github.com/overfin/server/internal/tracks"
@@ -428,6 +429,10 @@ func convert(raw jellyfin.IndexItem) (store.CatalogItem, bool) {
 			len(it.AudioLanguages) < maxAudioLanguages {
 			it.AudioLanguages = append(it.AudioLanguages, l)
 		}
+	}
+	// Its picture, named as the player names versions.
+	if v := playback.Describe(jellyfin.MediaSource{MediaStreams: raw.MediaStreams}); v != "Version" {
+		it.Video = v
 	}
 	// Its languages as the player lists them, for its title's sources.
 	audio, subtitles, _ := tracks.Read(raw.MediaStreams)

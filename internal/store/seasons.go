@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -69,6 +70,19 @@ type Episode struct {
 	AirDate  string
 	Runtime  int // minutes, 0 when unknown
 	Still    string
+	// Rating and Votes are TMDB users' score of it, 0 and 0 when none;
+	// Guests, its guest stars; Crew, who directed and wrote it (Character
+	// holds "Director" or "Writer").
+	Rating float64
+	Votes  int
+	Guests []CastMember
+	Crew   []CastMember
+}
+
+// episodePeople is how an episode's guests and crew are kept, as JSON.
+type episodePeople struct {
+	Guests []CastMember `json:"guests,omitempty"`
+	Crew   []CastMember `json:"crew,omitempty"`
 }
 
 // SetSeason replaces a series' season (by the series' TMDB ID), its
@@ -98,9 +112,17 @@ func setSeason(ctx context.Context, tx *sql.Tx, series string, se Season, at tim
 		return err
 	}
 	for _, e := range se.Episodes {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_episodes (series, season, episode, name, overview, air_date, runtime, still, tmdb_id)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, series, se.Number, e.Number, e.Name, e.Overview, nullString(e.AirDate),
-			nullInt(e.Runtime), nullString(e.Still), nullInt(e.ID)); err != nil {
+		var people, rating, votes any
+		if len(e.Guests)+len(e.Crew) > 0 {
+			b, _ := json.Marshal(episodePeople{Guests: e.Guests, Crew: e.Crew})
+			people = string(b)
+		}
+		if e.Votes > 0 {
+			rating, votes = e.Rating, e.Votes
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_episodes (series, season, episode, name, overview, air_date, runtime, still, tmdb_id,
+			rating, votes, people) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, series, se.Number, e.Number, e.Name, e.Overview, nullString(e.AirDate),
+			nullInt(e.Runtime), nullString(e.Still), nullInt(e.ID), rating, votes, people); err != nil {
 			return err
 		}
 	}
@@ -147,15 +169,23 @@ func (s *Store) SeasonByTMDB(ctx context.Context, series string, number int) (*S
 	}
 	se.FetchedAt = time.Unix(fetched, 0)
 	rows, err := s.read.QueryContext(ctx, `SELECT episode, name, overview, coalesce(air_date, ''), coalesce(runtime, 0),
-		coalesce(still, ''), coalesce(tmdb_id, 0) FROM catalog_episodes WHERE series = ? AND season = ? ORDER BY episode`, series, number)
+		coalesce(still, ''), coalesce(tmdb_id, 0), coalesce(rating, 0), coalesce(votes, 0), coalesce(people, '')
+		FROM catalog_episodes WHERE series = ? AND season = ? ORDER BY episode`, series, number)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var e Episode
-		if err := rows.Scan(&e.Number, &e.Name, &e.Overview, &e.AirDate, &e.Runtime, &e.Still, &e.ID); err != nil {
+		var people string
+		if err := rows.Scan(&e.Number, &e.Name, &e.Overview, &e.AirDate, &e.Runtime, &e.Still, &e.ID, &e.Rating, &e.Votes, &people); err != nil {
 			return nil, err
+		}
+		if people != "" {
+			var p episodePeople
+			if json.Unmarshal([]byte(people), &p) == nil {
+				e.Guests, e.Crew = p.Guests, p.Crew
+			}
 		}
 		se.Episodes = append(se.Episodes, e)
 	}

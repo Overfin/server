@@ -74,6 +74,13 @@ type titleDetail struct {
 	// NotInterested says the profile said it isn't interested in this film
 	// or series: its recommendations leave it out.
 	NotInterested bool `json:"notInterested,omitempty"`
+	// Crew are who directed and wrote an episode (Character holds
+	// "Director" or "Writer"); its guest stars are in Cast.
+	Crew []titleCast `json:"crew,omitempty"`
+	// Copies are a film's or an episode's copies the profile may see: each
+	// one's picture and languages, as the player names them (forced
+	// subtitles aside).
+	Copies []copyJSON `json:"copies,omitempty"`
 	// Rank is a film's or a series' place on the server by its value,
 	// among the titles of its kind the profile may see (1 the most
 	// valued); absent when it has none.
@@ -196,7 +203,7 @@ func summaryOf(t *store.TitleInfo) library.TitleSummary {
 	if t.Ref.Kind == "series" || t.Ref.Kind == "season" {
 		s.EpisodeCount = &library.EpisodeCount{InLibrary: t.Have, Aired: t.Aired}
 	}
-	if t.Score > 0 && (t.Ref.Kind == "movie" || t.Ref.Kind == "series") {
+	if t.Score > 0 && (t.Ref.Kind == "movie" || t.Ref.Kind == "series" || t.Ref.Kind == "episode") {
 		s.Ratings = []library.Rating{{Source: "tmdb", Value: math.Round(t.Score*10) / 10, Votes: t.Votes}}
 	}
 	ref := func(typ, path string, aspect *float64) *library.ImageRef {
@@ -546,6 +553,22 @@ func (l Library) title(w http.ResponseWriter, r *http.Request) {
 	}
 	if ref.Kind == "movie" || ref.Kind == "series" {
 		if out.NotInterested, err = st.IsNotInterested(ctx, p.ID, key); err != nil {
+			l.storeError(w, err)
+			return
+		}
+	}
+	for _, c := range t.Crew {
+		tc := titleCast{Name: c.Name, Character: c.Character}
+		if c.TMDB != "" {
+			tc.ID = personID(c.TMDB)
+		}
+		if id := images.ArtworkID("profile", c.Profile); id != "" {
+			tc.Image = &library.ImageRef{URL: "/api/v1/images/" + id}
+		}
+		out.Crew = append(out.Crew, tc)
+	}
+	if ref.Kind == "movie" || ref.Kind == "episode" {
+		if out.Copies, err = l.copiesFor(ctx, p, t.Items); err != nil {
 			l.storeError(w, err)
 			return
 		}

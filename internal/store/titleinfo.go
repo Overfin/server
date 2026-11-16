@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strconv"
@@ -197,6 +198,9 @@ type TitleInfo struct {
 	// Untranslated: its texts aren't kept in the language asked for yet;
 	// they're the default language's.
 	Untranslated bool
+	// Crew are who directed and wrote an episode (Character holds the
+	// job); its guest stars are in Details.Cast.
+	Crew []CastMember
 }
 
 // TitleInfos returns the titles of keys (those that parse), as of today
@@ -376,14 +380,21 @@ func (s *Store) titleInfo(ctx context.Context, r TitleRef, today string, b *info
 			tmdb, r.Season).Scan(&t.SeasonName); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
-		var still sql.NullString
+		var still, people sql.NullString
 		var runtime sql.NullInt64
-		err := s.read.QueryRowContext(ctx, `SELECT name, overview, coalesce(air_date, ''), runtime, still FROM catalog_episodes
+		err := s.read.QueryRowContext(ctx, `SELECT name, overview, coalesce(air_date, ''), runtime, still,
+			coalesce(rating, 0), coalesce(votes, 0), people FROM catalog_episodes
 			WHERE series = ? AND season = ? AND episode = ?`, tmdb, r.Season, r.Episode).
-			Scan(&t.Name, &t.Overview, &t.AirDate, &runtime, &still)
+			Scan(&t.Name, &t.Overview, &t.AirDate, &runtime, &still, &t.Score, &t.Votes, &people)
 		switch {
 		case err == nil:
 			t.Known, t.Still, t.Details.Runtime = true, still.String, int(runtime.Int64)
+			if people.Valid {
+				var p episodePeople
+				if json.Unmarshal([]byte(people.String), &p) == nil {
+					t.Details.Cast, t.Crew = p.Guests, p.Crew
+				}
+			}
 		case !errors.Is(err, sql.ErrNoRows):
 			return nil, err
 		}

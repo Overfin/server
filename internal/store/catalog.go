@@ -118,6 +118,9 @@ type CatalogItem struct {
 	// them: main audio tracks (with a region when known, "fr-CA") and
 	// subtitles, forced ones aside.
 	AudioTags, SubtitleTags []string
+	// Video is its picture's neutral name ("2160p HDR · HEVC"), as the
+	// player names versions; "" when unknown.
+	Video string
 	// EpisodeNumberEnd is the last episode a file holding several holds
 	// (S01E01-E02: 2); nil for one.
 	EpisodeNumberEnd *int
@@ -144,8 +147,8 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 	stmt, err := tx.PrepareContext(ctx, `INSERT INTO catalog_items (id, kind, name, sort_name, year,
 		series_id, season_id, season_number, episode_number, tmdb, imdb, tvdb, rating,
 		primary_tag, backdrop_tag, thumb_tag, seen, library_id, added_at, premiere_date, community_rating,
-		folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages, audio_tags, subtitle_tags)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages, audio_tags, subtitle_tags, video)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET kind = excluded.kind, name = excluded.name,
 			sort_name = excluded.sort_name, year = excluded.year, series_id = excluded.series_id,
 			season_id = excluded.season_id, season_number = excluded.season_number,
@@ -156,7 +159,7 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 			premiere_date = excluded.premiere_date, community_rating = excluded.community_rating,
 			folder_name = excluded.folder_name, file_name = excluded.file_name, runtime_ms = excluded.runtime_ms,
 			jellyfin_tmdb = excluded.jellyfin_tmdb, audio_languages = excluded.audio_languages,
-			audio_tags = excluded.audio_tags, subtitle_tags = excluded.subtitle_tags`)
+			audio_tags = excluded.audio_tags, subtitle_tags = excluded.subtitle_tags, video = excluded.video`)
 	if err != nil {
 		return err
 	}
@@ -179,7 +182,7 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 			nullString(it.PrimaryTag), nullString(it.BackdropTag), nullString(it.ThumbTag), pass,
 			nullString(it.LibraryID), added, nullString(it.PremiereDate), it.CommunityRating,
 			nullString(it.FolderName), nullString(it.FileName), nullInt64(it.RuntimeMs), nullString(it.TMDB),
-			jsonList(it.AudioLanguages), jsonList(it.AudioTags), jsonList(it.SubtitleTags)); err != nil {
+			jsonList(it.AudioLanguages), jsonList(it.AudioTags), jsonList(it.SubtitleTags), nullString(it.Video)); err != nil {
 			return err
 		}
 		if arrived {
