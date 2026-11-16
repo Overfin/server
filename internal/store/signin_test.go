@@ -195,3 +195,24 @@ func TestSetupLinks(t *testing.T) {
 		t.Error("an unknown choice was kept")
 	}
 }
+
+// A new password ends a setup link too, not only a reset link: whoever
+// finds an old one can't choose another password with it (rule 109).
+func TestNewPasswordEndsSetupLinks(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	u, err := s.CreateUser(ctx, "bob@example.org", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	week := time.Now().Add(7 * 24 * time.Hour)
+	if err := s.AddSetupLink(ctx, EmailLink{Subject: u.Subject, LinkHash: []byte("S"), Purpose: "setup", Expires: week}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPassword(ctx, u.Subject, "hash"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TakeEmailLink(ctx, "setup", []byte("S")); !errors.Is(err, ErrNotFound) {
+		t.Errorf("setup link after a new password: %v", err)
+	}
+}

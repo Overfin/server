@@ -155,8 +155,10 @@ func (s *Store) SetPassword(ctx context.Context, subject, hash string) error {
 	if err := oneRow(tx.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE subject = ?`, v, subject)); err != nil {
 		return err
 	}
-	// A link to choose a new password, asked before, no longer works.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM email_links WHERE subject = ? AND purpose = 'reset'`, subject); err != nil {
+	// A link to choose a new password, asked before or handed over by an
+	// admin (a setup link), no longer works: whoever finds it later can't
+	// choose another (rule 109).
+	if _, err := tx.ExecContext(ctx, `DELETE FROM email_links WHERE subject = ? AND purpose IN ('reset', 'setup', 'setup-sent')`, subject); err != nil {
 		return err
 	}
 	return tx.Commit()
