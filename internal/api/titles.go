@@ -737,7 +737,11 @@ func (l Library) markTitle(w http.ResponseWriter, r *http.Request, on, favorite 
 	if favorite {
 		err = st.SetFavorite(ctx, p.ID, key, first(t.Items), on, now)
 	} else {
-		titles := map[string]string{key: first(t.Items)}
+		item := first(t.Items)
+		if t.Ref.Kind == "episode" && item != "" {
+			item = st.RealItem(ctx, item) // a later episode's row isn't a Jellyfin item: its file is
+		}
+		titles := map[string]string{key: item}
 		episodes, eerr := l.episodesOf(ctx, t)
 		if eerr != nil {
 			l.storeError(w, eerr)
@@ -748,15 +752,30 @@ func (l Library) markTitle(w http.ResponseWriter, r *http.Request, on, favorite 
 		}
 		// An episode of a file holding several: the file's other episodes
 		// with it, as watching it to the end marks them.
+		// The file's first episode is the file's own item; RangeKeys only
+		// lists the episodes after it.
 		if t.Ref.Kind == "episode" {
 			for _, item := range t.Items {
-				more, rerr := st.RangeKeys(ctx, st.RealItem(ctx, item))
+				real := st.RealItem(ctx, item)
+				own, kerr := st.TitleKeys(ctx, []string{real})
+				if kerr != nil {
+					l.storeError(w, kerr)
+					return
+				}
+				more, rerr := st.RangeKeys(ctx, real)
 				if rerr != nil {
 					l.storeError(w, rerr)
 					return
 				}
+				if k := own[real]; k != "" && !strings.HasPrefix(k, "item/") {
+					if _, ok := titles[k]; !ok {
+						titles[k] = real
+					}
+				}
 				for _, k := range more {
-					titles[k] = ""
+					if _, ok := titles[k]; !ok {
+						titles[k] = ""
+					}
 				}
 			}
 		}

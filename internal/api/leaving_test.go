@@ -119,4 +119,13 @@ func TestSharedFileRow(t *testing.T) {
 	if err != nil || !states["series/tmdb/1877/s1/e1"].Played || !states["series/tmdb/1877/s1/e2"].Played || states["series/tmdb/1877/s1/e3"].Played {
 		t.Errorf("played: %+v %v", states, err)
 	}
+	// Unmarked from the second episode: the first goes with it, as both
+	// are one file.
+	if code, body := put(t, srv, "DELETE", "/api/v1/titles/title_series_tmdb_1877_s1_e2/played", ""); code != 200 {
+		t.Fatalf("unmark: %d %s", code, body)
+	}
+	states, err = st.PersonalStates(ctx, me.ActiveProfile.ID, []string{"series/tmdb/1877/s1/e1", "series/tmdb/1877/s1/e2"})
+	if err != nil || states["series/tmdb/1877/s1/e1"].Played || states["series/tmdb/1877/s1/e2"].Played {
+		t.Errorf("unmarked from the second episode: %+v %v", states, err)
+	}
 }
