@@ -1,6 +1,8 @@
 package valuation
 
 import (
+	"math/rand/v2"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -367,5 +369,31 @@ func TestRatingWithinKind(t *testing.T) {
 	}
 	if low, lowSeries := parts(t, m, "movie/tmdb/2")[Rating], parts(t, m, "series/tmdb/4")[Rating]; low != lowSeries {
 		t.Errorf("lowest film %v, lowest series %v", low, lowSeries)
+	}
+}
+
+// Titles that score the same keep one order, whatever order they come in:
+// a rank that changed at every pass would mean nothing.
+func TestScoredTiesHoldStill(t *testing.T) {
+	titles := []Title{
+		{Key: "movie:3"}, {Key: "movie:1"},
+		{Key: "series:9", InLibrary: true}, {Key: "series:9:s2", Series: "series:9", Season: 2}, {Key: "series:9:s1", Series: "series:9", Season: 1},
+		{Key: "series:2", InLibrary: true}, {Key: "series:2:s1", Series: "series:2", Season: 1},
+	}
+	var first []string
+	for n := 0; n < 20; n++ {
+		shuffled := slices.Clone(titles)
+		rand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+		var keys []string
+		for _, v := range (&Measured{Titles: shuffled}).Scored(Defaults()) {
+			keys = append(keys, v.Title.Key)
+		}
+		if first == nil {
+			first = keys
+			continue
+		}
+		if !slices.Equal(keys, first) {
+			t.Fatalf("the order changed: %v, then %v", first, keys)
+		}
 	}
 }

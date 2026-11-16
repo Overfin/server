@@ -10,6 +10,7 @@
 package valuation
 
 import (
+	"cmp"
 	"maps"
 	"math"
 	"sort"
@@ -712,11 +713,21 @@ func (m *Measured) Scored(w map[string]int) []Value {
 			out[i].Score, out[i].Place = whole[series], place+1
 		}
 	}
+	// Ties go by key: the titles come from maps, in no set order, and a
+	// rank that changed at each pass would mean nothing. A series' seasons
+	// stay together, in their place.
+	group := func(v Value) string { return cmp.Or(v.Title.Series, v.Title.Key) }
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Score != out[j].Score {
 			return out[i].Score > out[j].Score
 		}
-		return out[i].Place < out[j].Place
+		if gi, gj := group(out[i]), group(out[j]); gi != gj {
+			return gi < gj
+		}
+		if out[i].Place != out[j].Place {
+			return out[i].Place < out[j].Place
+		}
+		return out[i].Title.Key < out[j].Title.Key
 	})
 	return out
 }
