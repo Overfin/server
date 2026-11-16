@@ -79,17 +79,28 @@ func (s *Sync) Run(ctx context.Context) {
 	if err := s.Store.RefreshTitleKeys(ctx); err != nil && ctx.Err() == nil {
 		s.Logger.Error("catalog: computing title keys failed", "err", err)
 	}
+	// After a failure, longer each time (a read failing on the same page
+	// would read the library up to it again every few seconds), up to
+	// syncBackoffMax; at the usual pace again once a read works.
+	wait := s.Every
 	for {
-		s.once(ctx)
+		if s.once(ctx) != nil {
+			wait = min(max(wait*2, s.Every), syncBackoffMax)
+		} else {
+			wait = s.Every
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(s.Every):
+		case <-time.After(wait):
 		}
 	}
 }
 
-func (s *Sync) once(ctx context.Context) {
+// syncBackoffMax is the longest wait after failed reads.
+const syncBackoffMax = 5 * time.Minute
+
+func (s *Sync) once(ctx context.Context) error {
 	err := s.step(ctx)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -101,6 +112,7 @@ func (s *Sync) once(ctx context.Context) {
 	} else {
 		s.lastErr = ""
 	}
+	return err
 }
 
 // step reads what the feed says changed, or the whole library when it
