@@ -216,6 +216,7 @@ func TestKeeperPass(t *testing.T) {
 	writeFile(t, filepath.Join(media, "copy", "new.mkv"), data)
 	writeFile(t, filepath.Join(media, "old.mkv"), append(slices.Clone(data), 'x')) // another file
 	writeFile(t, filepath.Join(media, "broken.mkv"), []byte("not a video"))
+	writeFile(t, filepath.Join(media, "sound.mkv"), []byte("sound only"))
 	// Jellyfin made the old one's previews.
 	const old = "00027710370fdf733c764e3e7401f44e"
 	jfSets := filepath.Join(jfData, "data", "trickplay", "00", "00027710-370f-df73-3c76-4e3e7401f44e", "320 - 10x10")
@@ -226,6 +227,7 @@ func TestKeeperPass(t *testing.T) {
 		{ItemID: "11111111111111111111111111111111", SourceID: "11111111111111111111111111111111", Path: filepath.Join(media, "new.mkv")},
 		{ItemID: "22222222222222222222222222222222", SourceID: "22222222222222222222222222222222", Path: filepath.Join(media, "copy", "new.mkv")},
 		{ItemID: "33333333333333333333333333333333", SourceID: "33333333333333333333333333333333", Path: filepath.Join(media, "broken.mkv")},
+		{ItemID: "44444444444444444444444444444444", SourceID: "44444444444444444444444444444444", Path: filepath.Join(media, "sound.mkv"), NoVideo: true},
 	}
 	st, _ := NewStore(filepath.Join(dir, "previews"))
 	on := false
@@ -265,8 +267,12 @@ func TestKeeperPass(t *testing.T) {
 	if fp2, _, ok := k.ForVersion(ctx, "22222222222222222222222222222222", "22222222222222222222222222222222"); !ok || fp2 != fpNew {
 		t.Errorf("the copy: %v %v", fp2, ok)
 	}
+	// The broken one failed; the one without a picture wasn't even tried.
 	if failed, _ := db.PreviewsFailedSince(ctx, now.Add(-time.Hour)); len(failed) != 1 {
 		t.Errorf("failed: %v", failed)
+	}
+	if _, _, ok := k.ForVersion(ctx, "44444444444444444444444444444444", "44444444444444444444444444444444"); ok {
+		t.Error("previews of a file without video")
 	}
 
 	// The old file gone: its previews stay a week, then go.

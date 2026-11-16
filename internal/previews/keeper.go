@@ -118,7 +118,9 @@ func (k *Keeper) pass(ctx context.Context) error {
 			adopted++
 			return true
 		}
-		if !failed[fp] {
+		// A file without a picture (sound only, a broken release) has
+		// nothing to show: passed over, quietly.
+		if !failed[fp] && !f.NoVideo {
 			queue = append(queue, todo{fp: fp, path: f.Path, itemID: f.ItemID, added: newFile})
 		}
 		return true

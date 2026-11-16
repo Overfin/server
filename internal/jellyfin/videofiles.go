@@ -17,6 +17,9 @@ type VideoFile struct {
 	RunTimeTicks     int64
 	// Trickplay are the preview sets Jellyfin made of it, by width.
 	Trickplay []Trickplay
+	// NoVideo: Jellyfin read its streams and none is a video (a broken
+	// file, sound only); false while it hasn't read them.
+	NoVideo bool
 }
 
 // videoFilesPage is how many items a page of VideoFiles asks for.
@@ -37,6 +40,7 @@ func (c *Client) VideoFiles(ctx context.Context, admin Auth, each func(VideoFile
 					IsRemote     bool
 					Size         int64
 					RunTimeTicks int64
+					MediaStreams []struct{ Type string }
 				}
 				Trickplay map[string]map[string]struct {
 					Width, Height, TileWidth, TileHeight, ThumbnailCount, Interval int
@@ -61,6 +65,12 @@ func (c *Client) VideoFiles(ctx context.Context, admin Auth, each func(VideoFile
 					continue
 				}
 				f := VideoFile{ItemID: item, SourceID: source, Path: ms.Path, Size: ms.Size, RunTimeTicks: ms.RunTimeTicks}
+				f.NoVideo = len(ms.MediaStreams) > 0
+				for _, st := range ms.MediaStreams {
+					if st.Type == "Video" {
+						f.NoVideo = false
+					}
+				}
 				for src, byWidth := range it.Trickplay {
 					if s, err := NormalizeID(src); err != nil || s != source {
 						continue
