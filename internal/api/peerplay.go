@@ -70,7 +70,11 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ref, known := store.ParseTitleKey(req.Title)
-	if !known || (ref.Kind != "movie" && ref.Kind != "episode") || req.StartPositionMs < 0 || req.MaxBitrateKbps < 0 ||
+	// The same bounds as this server's own playbacks (a number past them
+	// would wrap when made into Jellyfin's ticks or bits).
+	if !known || (ref.Kind != "movie" && ref.Kind != "episode") || req.StartPositionMs < 0 || req.StartPositionMs > maxPositionMs ||
+		req.MaxBitrateKbps < 0 || req.MaxBitrateKbps > maxKbps ||
+		req.Capabilities.MaxBitrateKbps < 0 || req.Capabilities.MaxBitrateKbps > maxKbps ||
 		!languageTagRe.MatchString(req.AudioLanguage) || !languageTagRe.MatchString(req.SubtitleLanguage) {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
