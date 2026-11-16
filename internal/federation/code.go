@@ -6,8 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
+	"net/netip"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -83,9 +85,9 @@ func ParseCode(text string) (Code, error) {
 	if !ok || len(rest) > 2*(maxAddress+ed25519.PublicKeySize+SecretSize+8) {
 		return Code{}, ErrCode
 	}
-	b, err := base64.RawURLEncoding.DecodeString(rest)
+	b, ok := decode64(rest, -1)
 	fixed := ed25519.PublicKeySize + SecretSize + 8
-	if err != nil || len(b) <= fixed {
+	if !ok || len(b) <= fixed || binary.BigEndian.Uint64(b[fixed-8:fixed]) > maxInteger {
 		return Code{}, ErrCode
 	}
 	c := Code{
@@ -100,28 +102,72 @@ func ParseCode(text string) (Code, error) {
 	return c, nil
 }
 
-// checkAddress accepts a site's address: http or https, a host, nothing
-// else (no user, no query, no fragment), and short. Plain http is accepted
-// because every request and answer is signed either way, so a server can't
-// be impersonated over it; the panel says what it exposes. The host is a
-// plain name, IPv4 or bracketed IPv6 address, with an optional port, in
-// lower case, without its scheme's default port: one server, one way of
-// writing its address.
+// checkAddress accepts a site's address in MSFP's one form (section 5.2):
+// "http" or "https" in lower case, "://", a host, an optional port, and
+// nothing after (no path, not even "/", no "?", "#" or "@"); at most
+// maxAddress bytes. The host is a name (labels of a-z 0-9 -, 1 to 63
+// characters, not starting or ending with -, at most 253 in all), an IPv4
+// address as four numbers without leading zeros (a host whose last label
+// is all digits must be one), or a bracketed IPv6 address as RFC 5952
+// writes it. The port is 1 to 65535 without leading zeros, never the
+// scheme's default. Plain http is accepted because every request and
+// answer is signed either way, so a server can't be impersonated over it;
+// the panel says what it exposes. One server, one way of writing its
+// address.
 func checkAddress(address string) error {
-	u, err := url.Parse(address)
-	if err != nil || len(address) > maxAddress || (u.Scheme != "https" && u.Scheme != "http") ||
-		u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" ||
-		(u.Path != "" && u.Path != "/") || !hostRe.MatchString(u.Host) || u.Host != strings.ToLower(u.Host) ||
-		(u.Scheme == "https" && u.Port() == "443") || (u.Scheme == "http" && u.Port() == "80") {
-		return errors.New("federation: an address is http(s)://host, with nothing after it")
+	bad := errors.New("federation: an address is http(s)://host[:port], with nothing after it")
+	scheme, rest, ok := strings.Cut(address, "://")
+	if len(address) > maxAddress || !ok || (scheme != "https" && scheme != "http") || rest == "" ||
+		strings.ContainsAny(rest, "/?#@") {
+		return bad
+	}
+	host, port, hasPort := rest, "", false
+	if strings.HasPrefix(rest, "[") {
+		end := strings.Index(rest, "]")
+		if end < 0 {
+			return bad
+		}
+		host = rest[1:end]
+		if after := rest[end+1:]; after != "" {
+			if port, hasPort = strings.CutPrefix(after, ":"); !hasPort {
+				return bad
+			}
+		}
+		if a, err := netip.ParseAddr(host); err != nil || !a.Is6() || a.Zone() != "" || a.String() != host {
+			return bad
+		}
+	} else {
+		host, port, hasPort = strings.Cut(rest, ":")
+		labels := strings.Split(host, ".")
+		if last := labels[len(labels)-1]; last != "" && strings.Trim(last, "0123456789") == "" {
+			if a, err := netip.ParseAddr(host); err != nil || !a.Is4() || a.String() != host {
+				return bad
+			}
+		} else {
+			if len(host) > 253 {
+				return bad
+			}
+			for _, l := range labels {
+				if !labelRe.MatchString(l) {
+					return bad
+				}
+			}
+		}
+	}
+	if hasPort {
+		n, err := strconv.Atoi(port)
+		if !portRe.MatchString(port) || err != nil || n > 65535 ||
+			(scheme == "https" && n == 443) || (scheme == "http" && n == 80) {
+			return bad
+		}
 	}
 	return nil
 }
 
-// hostRe is a host as an address may name it: a name or an IPv4 address
-// (letters, digits, dots, hyphens), or a bracketed IPv6 address, with an
-// optional port.
-var hostRe = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*|\[[0-9a-f:.]+\])(:[0-9]{1,5})?$`)
+var (
+	labelRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+	portRe  = regexp.MustCompile(`^[1-9][0-9]{0,4}$`)
+)
 
 // Origin is an address as browsers name its origin: the host in lower case,
 // without its scheme's default port, nor a trailing slash; "" for one

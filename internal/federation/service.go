@@ -340,13 +340,13 @@ func (s *Service) pair(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	hash, err := b64.DecodeString(req.SecretHash)
-	if err != nil || len(hash) != 32 {
+	hash, ok := decode64(req.SecretHash, 32)
+	if !ok {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
 	name := cleanName(req.Name, req.Address)
-	_, err = s.Store.RedeemPairingCode(r.Context(), hash, v.Key, req.Address, name, func(secret []byte) bool {
+	_, err := s.Store.RedeemPairingCode(r.Context(), hash, v.Key, req.Address, name, func(secret []byte) bool {
 		return CheckPairingProof(secret, v.Key, req.Address, req.Proof)
 	})
 	switch {
@@ -545,7 +545,8 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 		// with, or were, signs its own; anything else may come from
 		// someone between the two. A code's server doesn't know us yet:
 		// its refusal is a stranger's, plain, and costs only that pairing.
-		signed := CheckResponse(p.PublicKey, nonce, res.StatusCode, answer, res.Header.Get(HeaderSignature)) == nil
+		sigText, _ := oneHeader(res.Header, HeaderSignature)
+		signed := CheckResponse(p.PublicKey, nonce, res.StatusCode, answer, sigText) == nil
 		if !signed && path != pairPath {
 			return Reply{}, fmt.Errorf("%w: a refusal not signed by its key (%d)", ErrUnreachable, res.StatusCode)
 		}
@@ -565,7 +566,7 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 		}
 		return r, nil
 	}
-	if CheckResponse(p.PublicKey, nonce, res.StatusCode, answer, res.Header.Get(HeaderSignature)) != nil {
+	if sigText, _ := oneHeader(res.Header, HeaderSignature); CheckResponse(p.PublicKey, nonce, res.StatusCode, answer, sigText) != nil {
 		return Reply{}, fmt.Errorf("%w: its answer isn't signed by its key", ErrUnreachable)
 	}
 	if err := json.Unmarshal(answer, out); err != nil {

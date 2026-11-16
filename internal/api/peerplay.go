@@ -207,7 +207,7 @@ func (pb Playback) peerStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req peerStopRequest
-	if json.Unmarshal(body, &req) != nil || !playIDRe.MatchString(req.ID) || req.PositionMs < 0 {
+	if json.Unmarshal(body, &req) != nil || !playIDRe.MatchString(req.ID) || req.PositionMs < 0 || req.PositionMs > maxPositionMs {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}

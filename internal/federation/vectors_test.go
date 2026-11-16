@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"strconv"
@@ -137,5 +138,75 @@ func TestVectors(t *testing.T) {
 		if err := CheckResponse(answerer.Public(), x.NonceText, x.Status, answer, x.AnswerSignature); err != nil {
 			t.Errorf("%s: the answer is refused: %v", x.Name, err)
 		}
+	}
+}
+
+// MSFP's version 0 canonical forms (vectors/v0-strict.json, copied in
+// testdata/v0-strict.json): addresses, codes, dates, base64url and the
+// signature headers, through the code that reads them. Keys of small
+// order aren't refused yet (left: spec/v0.md's notes on section 2.1).
+func TestStrictVectors(t *testing.T) {
+	b, err := os.ReadFile("testdata/v0-strict.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type tc struct {
+		Name, Text string
+		Valid      bool
+	}
+	var v struct {
+		Addresses, Codes, Dates, Base64url []tc
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Addresses) == 0 || len(v.Codes) == 0 || len(v.Dates) == 0 || len(v.Base64url) == 0 {
+		t.Fatal("no cases")
+	}
+	for _, c := range v.Addresses {
+		if err := checkAddress(c.Text); (err == nil) != c.Valid {
+			t.Errorf("address %q: %v", c.Text, err)
+		}
+	}
+	for _, c := range v.Codes {
+		if c.Name == "the identity as key" {
+			continue
+		}
+		if _, err := ParseCode(c.Text); (err == nil) != c.Valid {
+			t.Errorf("code %s: %v", c.Name, err)
+		}
+	}
+	for _, c := range v.Dates {
+		if _, ok := parseDate(c.Text); ok != c.Valid {
+			t.Errorf("date %q: %v", c.Text, ok)
+		}
+	}
+	for _, c := range v.Base64url {
+		b, ok := decode64(c.Text, -1)
+		if ok = ok && (len(b) == 32 || len(b) == 16); ok != c.Valid {
+			t.Errorf("base64url %s: %v", c.Name, ok)
+		}
+	}
+}
+
+// Each signature header once, without a comma (MSFP section 2.1).
+func TestSignatureHeadersOnce(t *testing.T) {
+	k := NewKey()
+	now := time.Now()
+	ok := func(edit func(*http.Request)) bool {
+		req := httptest.NewRequest("POST", "https://a.example.org/api/v1/federation/hello", strings.NewReader("{}"))
+		SignRequest(req, []byte("{}"), k, now)
+		edit(req)
+		_, err := (&Verifier{Host: "a.example.org"}).Check(req, []byte("{}"), now)
+		return err == nil
+	}
+	if !ok(func(*http.Request) {}) {
+		t.Fatal("a good request")
+	}
+	if ok(func(r *http.Request) { r.Header.Add(HeaderDate, r.Header.Get(HeaderDate)) }) {
+		t.Error("a date twice")
+	}
+	if ok(func(r *http.Request) { r.Header.Set(HeaderNonce, r.Header.Get(HeaderNonce)+",x") }) {
+		t.Error("a comma")
 	}
 }

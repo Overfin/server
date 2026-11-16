@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,6 +57,43 @@ var b64 = base64.RawURLEncoding
 // answers every one the same way.
 var ErrSignature = errors.New("federation: not a valid signature")
 
+// decode64 decodes base64url in MSFP's one form (section 2.1): no
+// padding, no white space, unused bits zero, n bytes (any, for n < 0);
+// re-encoding gives the same text.
+func decode64(s string, n int) ([]byte, bool) {
+	b, err := b64.DecodeString(s)
+	if err != nil || (n >= 0 && len(b) != n) || b64.EncodeToString(b) != s {
+		return nil, false
+	}
+	return b, true
+}
+
+// maxInteger is the largest integer MSFP writes: 2^53 − 1.
+const maxInteger = 1<<53 - 1
+
+// dateRe is a positive decimal integer in MSFP's one form: no sign, no
+// leading zero, nothing else.
+var dateRe = regexp.MustCompile(`^[1-9][0-9]{0,15}$`)
+
+// parseDate reads an Overfin-Date (section 2.1).
+func parseDate(s string) (int64, bool) {
+	if !dateRe.MatchString(s) {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	return n, err == nil && n <= maxInteger
+}
+
+// oneHeader is a signature header sent exactly once, its value without a
+// comma (section 2.1); false otherwise.
+func oneHeader(h http.Header, name string) (string, bool) {
+	v := h.Values(name)
+	if len(v) != 1 || strings.Contains(v[0], ",") {
+		return "", false
+	}
+	return v[0], true
+}
+
 func requestMessage(method, host, target, date, nonce string, body []byte) []byte {
 	sum := sha256.Sum256(body)
 	return []byte(requestLabel + method + "\n" + strings.ToLower(host) + "\n" + target + "\n" +
@@ -91,8 +129,8 @@ func SignResponse(k Key, nonce string, status int, body []byte) string {
 // CheckResponse checks an answer's signature against the key the
 // requester knows the other server by.
 func CheckResponse(peer ed25519.PublicKey, nonce string, status int, body []byte, signature string) error {
-	sig, err := b64.DecodeString(signature)
-	if err != nil || len(peer) != ed25519.PublicKeySize ||
+	sig, ok := decode64(signature, ed25519.SignatureSize)
+	if !ok || len(peer) != ed25519.PublicKeySize ||
 		!ed25519.Verify(peer, responseMessage(nonce, status, body), sig) {
 		return ErrSignature
 	}
@@ -140,13 +178,20 @@ type Verified struct {
 // request was signed by the key it names, for this server, recently, and
 // never seen before: who that key belongs to is the caller's question.
 func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified, error) {
-	key, err := b64.DecodeString(r.Header.Get(HeaderKey))
-	if err != nil || len(key) != ed25519.PublicKeySize {
+	// Each header once, each value in its one form (MSFP section 2.1).
+	keyText, ok1 := oneHeader(r.Header, HeaderKey)
+	date, ok2 := oneHeader(r.Header, HeaderDate)
+	nonce, ok3 := oneHeader(r.Header, HeaderNonce)
+	sigText, ok4 := oneHeader(r.Header, HeaderSignature)
+	if !ok1 || !ok2 || !ok3 || !ok4 {
 		return Verified{}, ErrSignature
 	}
-	date := r.Header.Get(HeaderDate)
-	when, err := strconv.ParseInt(date, 10, 64)
-	if err != nil {
+	key, ok := decode64(keyText, ed25519.PublicKeySize)
+	if !ok {
+		return Verified{}, ErrSignature
+	}
+	when, ok := parseDate(date)
+	if !ok {
 		return Verified{}, ErrSignature
 	}
 	if d := now.Sub(time.Unix(when, 0)); d > MaxSkew || d < -MaxSkew {
@@ -155,12 +200,11 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 	if v.Seen != nil && v.Seen.before(when) {
 		return Verified{}, ErrSignature
 	}
-	nonce := r.Header.Get(HeaderNonce)
-	if n, err := b64.DecodeString(nonce); err != nil || len(n) != 16 {
+	if _, ok := decode64(nonce, 16); !ok {
 		return Verified{}, ErrSignature
 	}
-	sig, err := b64.DecodeString(r.Header.Get(HeaderSignature))
-	if err != nil {
+	sig, ok := decode64(sigText, ed25519.SignatureSize)
+	if !ok {
 		return Verified{}, ErrSignature
 	}
 	msg := requestMessage(r.Method, v.Host, r.URL.RequestURI(), date, nonce, body)
@@ -278,8 +322,8 @@ func PairingProof(secret []byte, redeemer ed25519.PublicKey, address string) str
 
 // CheckPairingProof checks a PairingProof in constant time.
 func CheckPairingProof(secret []byte, redeemer ed25519.PublicKey, address, proof string) bool {
-	got, err := b64.DecodeString(proof)
-	if err != nil {
+	got, ok := decode64(proof, sha256.Size)
+	if !ok {
 		return false
 	}
 	want, _ := b64.DecodeString(PairingProof(secret, redeemer, address))

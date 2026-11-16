@@ -60,6 +60,10 @@ func TestPeerTicketMediaRules(t *testing.T) {
 	if code := ask("GET", "bytes=0-"); code != http.StatusOK {
 		t.Errorf("a range of a paired server: %d", code)
 	}
+	// stop's position is 0 to 8,640,000,000 (MSFP section 9.7).
+	if status, err := a.Call(ctx, bOnA, "/api/v1/federation/stop", map[string]any{"id": s.ID, "positionMs": 8_640_000_001}, &struct{}{}); status != http.StatusBadRequest {
+		t.Errorf("stop past the bound: %d %v", status, err)
+	}
 
 	// This server's own viewer: its browser's Range goes on as before.
 	status, body := post(t, srv, "/api/v1/playback", fmt.Sprintf(`{"itemId":"item_%032x","capabilities":{}}`, 1))
