@@ -88,6 +88,10 @@ Between servers on plain `http://`, requests are still signed, so neither
 can be impersonated, but what they say (titles, tickets) can be read on
 the way. The panel says so. The full rules are SECURITY.md's 94 to 100.
 
+Building your own server that pairs with Overfin? Servers speak MSFP, the
+Media Server Federation Protocol: its specification and test vectors are
+at [github.com/C0PT3R/msfp-spec](https://github.com/C0PT3R/msfp-spec).
+
 ## Where it stands
 
 Pairing, sharing, the titles on the site and playback both ways work, and
