@@ -16,6 +16,7 @@ import (
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/problem"
+	"github.com/overfin/server/internal/slots"
 )
 
 // Stream serves what a playback session plays: the media file, rewritten
@@ -55,7 +56,8 @@ func (s Stream) trickplay(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	st, _ := s.stream(w, r)
+	st, _, done := s.stream(w, r)
+	defer done()
 	if st == nil {
 		return
 	}
@@ -84,21 +86,47 @@ func fileName(s string) bool {
 	return s != "." && s != ".." && fileNameRe.MatchString(s)
 }
 
-// stream finds the playback behind a ticket, for its own session only.
-func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream, *jellyfin.Auth) {
+// Bounds of what a paired server fetches at once of its playbacks here
+// (MSFP media, section 2.4): per ticket and per paired server. Over them,
+// a fetch waits a moment in a short queue, or is refused with 503.
+var (
+	servedPerTicket = &slots.Slots{Size: 8, Queue: 8, Wait: 10 * time.Second}
+	servedPerPeer   = &slots.Slots{Size: 64, Queue: 64, Wait: 10 * time.Second}
+)
+
+// peerTicket says whether a playback here is a paired server's viewer's.
+func peerTicket(st *playback.Stream) bool {
+	return strings.HasPrefix(st.SessionID, playback.PeerPrefix)
+}
+
+func nothing() {}
+
+// stream finds the playback behind a ticket, for its own session only,
+// and gives what to call once the request is answered (it frees a paired
+// server's slots).
+func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream, *jellyfin.Auth, func()) {
+	st, a, done := s.find(w, r)
+	if done == nil {
+		done = nothing
+	}
+	return st, a, done
+}
+
+func (s Stream) find(w http.ResponseWriter, r *http.Request) (*playback.Stream, *jellyfin.Auth, func()) {
 	ticket := r.PathValue("ticket")
 	if !ticketRe.MatchString(ticket) {
 		problem.Send(w, problem.NotFound, "")
-		return nil, nil
+		return nil, nil, nil
 	}
 	// A paired server's viewer, through that server: no session here.
 	if st, ok := s.Playback.Tickets.ByPeerTicket(ticket, time.Now()); ok {
 		// Asked by that server, never by a browser (rule 46): a browser
 		// says where a request comes from. And only while the pairing
-		// lasts: an ended one ends its playbacks.
-		if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" || r.Header.Get("Sec-Fetch-Mode") != "" {
+		// lasts: an ended one ends its playbacks. GET only (MSFP media,
+		// section 2.2): a paired server never sends HEAD.
+		if r.Method != http.MethodGet || r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" || r.Header.Get("Sec-Fetch-Mode") != "" {
 			problem.Send(w, problem.NotFound, "")
-			return nil, nil
+			return nil, nil, nil
 		}
 		st2 := s.Playback.Library.Provisioner.Store
 		peer, err := st2.PeerByID(r.Context(), strings.TrimPrefix(st.ProfileID, playback.PeerPrefix))
@@ -107,16 +135,27 @@ func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream
 				s.Playback.end(st, "pairing ended", "")
 			}
 			problem.Send(w, problem.NotFound, "")
-			return nil, nil
+			return nil, nil, nil
 		}
 		// Nor once its library is no longer offered to that server.
 		if offered, err := st2.ItemOfferedTo(r.Context(), peer.ID, st.ItemID); err == nil && !offered {
 			s.Playback.end(st, "no longer shared", "")
 			problem.Send(w, problem.NotFound, "")
-			return nil, nil
+			return nil, nil, nil
+		}
+		one, ok := servedPerTicket.Take(r.Context(), st.ID)
+		if !ok {
+			problem.Send(w, problem.ServerBusy, "")
+			return nil, nil, nil
+		}
+		all, ok := servedPerPeer.Take(r.Context(), peer.ID)
+		if !ok {
+			one()
+			problem.Send(w, problem.ServerBusy, "")
+			return nil, nil, nil
 		}
 		a := st.Auth
-		return st, &a
+		return st, &a, func() { all(); one() }
 	}
 	// This server's own viewers ask from its own site: a request another
 	// site starts (a link, an embedded video) goes no further, so it never
@@ -124,12 +163,12 @@ func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream
 	// for paired servers' viewers).
 	if site := r.Header.Get("Sec-Fetch-Site"); site == "cross-site" || site == "same-site" {
 		problem.Send(w, problem.NotFound, "")
-		return nil, nil
+		return nil, nil, nil
 	}
 	l := s.Playback.Library
 	c := l.Sessions.Current(w, r)
 	if c == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	p := c.Profile
 	// The ticket works only in the session that started the playback
@@ -138,11 +177,11 @@ func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream
 	st, ok := s.Playback.Tickets.ByTicket(ticket, c.Session.ID, p.ID, time.Now())
 	if !ok {
 		problem.Send(w, problem.NotFound, "")
-		return nil, nil
+		return nil, nil, nil
 	}
 	// As the playback's own device, so its transcode is the one served.
 	a := st.Auth
-	return st, &a
+	return st, &a, nil
 }
 
 func (s Stream) serve(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +190,8 @@ func (s Stream) serve(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	st, a := s.stream(w, r)
+	st, a, done := s.stream(w, r)
+	defer done()
 	if st == nil {
 		return
 	}
@@ -223,7 +263,9 @@ func (s Stream) proxy(w http.ResponseWriter, r *http.Request, st *playback.Strea
 	rangeHeader := ""
 	if allowRange {
 		if rh := r.Header.Get("Range"); rh != "" {
-			if !validRange(rh) {
+			// A paired server's, exactly MSFP's three forms (media section
+			// 2.1); a browser's, any one range Jellyfin answers.
+			if (peerTicket(st) && !validPeerRange(rh)) || !validRange(rh) {
 				w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
 				return
 			}
@@ -368,7 +410,8 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	st, _ := s.stream(w, r)
+	st, _, done := s.stream(w, r)
+	defer done()
 	if st == nil {
 		return
 	}
@@ -419,7 +462,8 @@ func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	st, _ := s.stream(w, r)
+	st, _, done := s.stream(w, r)
+	defer done()
 	if st == nil {
 		return
 	}
@@ -469,4 +513,11 @@ func validRange(h string) bool {
 	a, _ := strconv.ParseInt(from, 10, 64)
 	b, _ := strconv.ParseInt(to, 10, 64)
 	return a <= b
+}
+
+// validPeerRange says whether a Range header is one of MSFP's three forms
+// (media section 2.1): never several ranges, "bytes=-" or "bytes=-0".
+func validPeerRange(h string) bool {
+	_, ok := parseRange(h)
+	return ok
 }

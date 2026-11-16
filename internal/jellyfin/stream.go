@@ -64,7 +64,14 @@ func (c *Client) ReadSmall(ctx context.Context, a Auth, path string, query url.V
 	return c.readSmall(ctx, streamClient, a, path, query, max)
 }
 
+// smallReadTime bounds a small read whole, its answer and its body (MSFP
+// media, section 2.4: a playlist or a subtitle part is read within a
+// bounded time). A film's own stream has no such bound.
+var smallReadTime = 2 * time.Minute
+
 func (c *Client) readSmall(ctx context.Context, client *http.Client, a Auth, path string, query url.Values, max int) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, smallReadTime)
+	defer cancel()
 	res, err := c.open(ctx, client, a, path, query, "")
 	if err != nil {
 		return nil, err

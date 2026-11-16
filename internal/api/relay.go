@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/overfin/server/internal/outbound"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/problem"
+	"github.com/overfin/server/internal/slots"
 	"github.com/overfin/server/internal/store"
 )
 
@@ -76,10 +78,42 @@ type relayed struct {
 	pgs      bool
 }
 
+// Bounds of what a paired server's playbacks fetch at once (MSFP media,
+// section 2.4), on this server as the viewer's: per playback (a player
+// asks one segment at a time, or holds one range of the file open, and
+// opens another when it seeks) and per paired server. Over them, a fetch
+// waits a moment in a short queue, or is refused with 503.
+var (
+	relayPerPlayback = &slots.Slots{Size: 8, Queue: 8, Wait: 10 * time.Second}
+	relayPerPeer     = &slots.Slots{Size: 64, Queue: 64, Wait: 10 * time.Second}
+)
+
+// smallReadTime bounds the time a playlist, a subtitle part or a sheet
+// takes to read whole, from either side's upstream (MSFP media, section
+// 2.4). The file and segments last as long as their playback.
+var smallReadTime = 2 * time.Minute
+
+// relaySlots takes a fetch's slots, for its playback and its paired
+// server, and gives the function that frees them; false when it couldn't.
+func relaySlots(ctx context.Context, st *playback.Stream) (func(), bool) {
+	one, ok := relayPerPlayback.Take(ctx, st.ID)
+	if !ok {
+		return nil, false
+	}
+	all, ok := relayPerPeer.Take(ctx, st.Remote.PeerID)
+	if !ok {
+		one()
+		return nil, false
+	}
+	return func() { all(); one() }, true
+}
+
 // relay answers a browser's request for a paired server's stream with
 // what that server gives, checked as anything from Jellyfin is: playlists
-// naming only files of the stream, subtitles sanitized, media passed on
-// with the headers streaming needs.
+// within MSFP's subset, subtitles sanitized, media passed on with the
+// headers streaming needs, a 206 only for the range asked (MSFP media,
+// section 2). A failed fetch is a 404 to the browser, never the paired
+// server's body; its 416 and 503 are passed on as such.
 func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Stream, what relayed) {
 	rm := st.Remote
 	if rm == nil || rm.Base == "" {
@@ -91,8 +125,10 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 	defer cancel()
 	media := !what.playlist && !what.vtt && !what.pgs
 	rh := r.Header.Get("Range")
+	var br byteRange
 	if rh != "" && media {
-		if !validRange(rh) {
+		var ok bool
+		if br, ok = parseRange(rh); !ok {
 			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
 			return
 		}
@@ -106,7 +142,18 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 		}
 		free = sync.OnceFunc(free)
 		defer free()
+		var stop context.CancelFunc
+		ctx, stop = context.WithTimeout(ctx, smallReadTime)
+		defer stop()
 	}
+	free, ok := relaySlots(ctx, st)
+	if !ok {
+		if ctx.Err() == nil {
+			problem.Send(w, problem.ServerBusy, "")
+		}
+		return
+	}
+	defer free()
 	res, prob, err := s.relayGet(ctx, st, what.path, rh)
 	if err != nil {
 		if prob == problem.ServerBusy && ctx.Err() == nil {
@@ -116,9 +163,33 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 		return
 	}
 	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
+	switch res.StatusCode {
+	case http.StatusOK, http.StatusPartialContent:
+	case http.StatusRequestedRangeNotSatisfiable:
+		if rh != "" {
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
 		problem.Send(w, problem.NotFound, "")
 		return
+	case http.StatusServiceUnavailable:
+		problem.Send(w, problem.ServerBusy, "")
+		return
+	default:
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	// What the paired server says it sends, and what is read of it: a
+	// 206 only for the range asked, and never more than its length.
+	length := res.ContentLength
+	if res.StatusCode == http.StatusPartialContent {
+		n, ok := checkPartial(rh, br, res.Header)
+		if !ok {
+			l.Logger.Warn("refused a paired server's part of a stream: not the range asked", "playback", st.ID)
+			problem.Send(w, problem.NotFound, "")
+			return
+		}
+		length = n
 	}
 	if !media {
 		limit := int64(maxPlaylist)
@@ -130,7 +201,7 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 		}
 		body, err := io.ReadAll(io.LimitReader(res.Body, limit+1))
 		if err != nil || int64(len(body)) > limit {
-			problem.Send(w, problem.NotPlayable, "")
+			problem.Send(w, problem.NotFound, "")
 			return
 		}
 		contentType := "application/vnd.apple.mpegurl"
@@ -143,7 +214,7 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 			kept, err := relayedPlaylist(body, subset)
 			if err != nil {
 				l.Logger.Warn("refused a paired server's playlist", "playback", st.ID, "err", err)
-				problem.Send(w, problem.NotPlayable, "")
+				problem.Send(w, problem.NotFound, "")
 				return
 			}
 			body = kept
@@ -187,7 +258,77 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 			}
 		}
 	}()
-	_, _ = io.Copy(w, res.Body)
+	body := io.Reader(res.Body)
+	if length >= 0 {
+		body = io.LimitReader(res.Body, length)
+	}
+	_, _ = io.Copy(w, body)
+}
+
+// byteRange is a Range header of one of MSFP media section 2.1's three
+// forms: bytes=first-last, bytes=first- (last -1), bytes=-count
+// (suffix, first and last unused).
+type byteRange struct {
+	first, last int64
+	suffix      int64
+}
+
+// parseRange reads a Range header of MSFP media section 2.1: one range of
+// bytes, each number 1 to 15 digits; never several ranges, "bytes=-",
+// "bytes=-0", or a first byte past the last.
+func parseRange(h string) (byteRange, bool) {
+	if !rangeRe.MatchString(h) {
+		return byteRange{}, false
+	}
+	from, to, _ := strings.Cut(strings.TrimPrefix(h, "bytes="), "-")
+	a, errA := strconv.ParseInt(from, 10, 64)
+	b, errB := strconv.ParseInt(to, 10, 64)
+	switch {
+	case from == "" && to == "":
+		return byteRange{}, false
+	case from == "":
+		return byteRange{suffix: b}, errB == nil && b >= 1
+	case to == "":
+		return byteRange{first: a, last: -1}, errA == nil
+	}
+	return byteRange{first: a, last: b}, errA == nil && errB == nil && a <= b
+}
+
+var contentRangeRe = regexp.MustCompile(`^bytes (\d{1,15})-(\d{1,15})/(\d{1,15}|\*)$`)
+
+// checkPartial says whether a 206's headers answer the range asked
+// (MSFP media, section 2.1), and gives its length: Content-Range
+// "bytes start-end/total" (total "*" when unknown) with start ≤ end <
+// total, start the range's first byte (total − count, or 0, for the last
+// count bytes), end at most its last; Content-Length, when given, end −
+// start + 1. A 206 to a request without a range never does.
+func checkPartial(rangeHeader string, br byteRange, h http.Header) (int64, bool) {
+	m := contentRangeRe.FindStringSubmatch(h.Get("Content-Range"))
+	if rangeHeader == "" || m == nil || len(h.Values("Content-Range")) != 1 {
+		return 0, false
+	}
+	start, _ := strconv.ParseInt(m[1], 10, 64)
+	end, _ := strconv.ParseInt(m[2], 10, 64)
+	total := int64(-1)
+	if m[3] != "*" {
+		total, _ = strconv.ParseInt(m[3], 10, 64)
+	}
+	if start > end || (total >= 0 && end >= total) {
+		return 0, false
+	}
+	switch {
+	case br.suffix > 0:
+		if total < 0 || start != max(total-br.suffix, 0) {
+			return 0, false
+		}
+	case start != br.first || (br.last >= 0 && end > br.last):
+		return 0, false
+	}
+	n := end - start + 1
+	if cl := h.Values("Content-Length"); len(cl) > 1 || (len(cl) == 1 && cl[0] != strconv.FormatInt(n, 10)) {
+		return 0, false
+	}
+	return n, true
 }
 
 // live is a request's context that a playback's end cancels too: a
@@ -280,6 +421,13 @@ func (s Stream) relaySheet(w http.ResponseWriter, r *http.Request, st *playback.
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
+		ctx, stop := context.WithTimeout(ctx, smallReadTime)
+		defer stop()
+		free, ok := relaySlots(ctx, st)
+		if !ok {
+			return nil, errors.New("too many fetches of this playback at once")
+		}
+		defer free()
 		res, _, err := s.relayGet(ctx, st, "trickplay/"+strconv.Itoa(n), "")
 		if err != nil {
 			return nil, err

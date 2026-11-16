@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 const userID = "b691e62a7c7244b6934a160398466052"
@@ -107,5 +108,27 @@ func TestRejectsMalformedIDFromUpstream(t *testing.T) {
 	c, _ := New(srv.URL, "test")
 	if _, err := c.CreateUser(context.Background(), Auth{}, "x", "y"); err == nil {
 		t.Error("a malformed ID from upstream was accepted")
+	}
+}
+
+// A small read (a playlist, a subtitle part) is read whole within a
+// bounded time, its answer and its body together (MSFP media, section
+// 2.4): one that trickles is cut.
+func TestReadSmallHasATimeLimit(t *testing.T) {
+	defer func(d time.Duration) { smallReadTime = d }(smallReadTime)
+	smallReadTime = 100 * time.Millisecond
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("#EXTM3U\n"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "test")
+	start := time.Now()
+	if _, err := c.ReadSmall(context.Background(), Auth{}, "/x.m3u8", nil, 1<<20); err == nil || time.Since(start) > 2*time.Second {
+		t.Fatalf("%v after %v", err, time.Since(start))
 	}
 }
