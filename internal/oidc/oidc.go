@@ -153,6 +153,15 @@ func (p *Provider) Check(ctx context.Context) error {
 // example because the user logged out, was disabled, or the code was used.
 var ErrRevoked = errors.New("oidc: grant refused")
 
+// ErrUnverified: the provider answered a refresh, but with an ID token
+// that doesn't check out (signature, claims, another user). Not an outage:
+// the login isn't accepted on the strength of what it said before.
+var ErrUnverified = errors.New("oidc: the refreshed ID token doesn't check out")
+
+// errKeys wraps a failure to get the provider's signing keys, which may
+// be the provider out of reach.
+var errKeys = errors.New("oidc: the signing keys couldn't be read")
+
 // LogoutURL is the provider's end-of-session address, if it has one.
 func (p *Provider) LogoutURL(ctx context.Context) string {
 	m, err := p.discover(ctx)
@@ -305,10 +314,13 @@ func (p *Provider) Refresh(ctx context.Context, refreshToken, subject string) (*
 	if tok.IDToken != "" {
 		got, err := p.verify(ctx, m, tok.IDToken, "")
 		if err != nil {
-			return nil, err
+			if errors.Is(err, errKeys) {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%w: %w", ErrUnverified, err)
 		}
 		if got.Subject != subject {
-			return nil, errors.New("oidc: refreshed token is for another user")
+			return nil, fmt.Errorf("%w: it's for another user", ErrUnverified)
 		}
 		login.Groups, login.AuthTime = got.Groups, got.AuthTime
 		if p.GroupsClaim != "" && login.Groups == nil {
@@ -337,7 +349,7 @@ func (p *Provider) verify(ctx context.Context, m *metadata, token, nonce string)
 	}
 	key, err := p.key(ctx, m, header.Kid)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", errKeys, err)
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {

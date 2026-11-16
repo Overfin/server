@@ -90,8 +90,12 @@ func TestRecheckGroups(t *testing.T) {
 }
 
 // recheckIdP answers refreshes with or without an ID token and groups.
-func recheckIdP(t *testing.T, idToken bool, groups []string) *httptest.Server {
+func recheckIdP(t *testing.T, idToken bool, groups []string, audience ...string) *httptest.Server {
 	t.Helper()
+	aud := "overfin"
+	if len(audience) > 0 {
+		aud = audience[0]
+	}
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	enc := func(v any) string { b, _ := json.Marshal(v); return base64.RawURLEncoding.EncodeToString(b) }
 	var srv *httptest.Server
@@ -108,7 +112,7 @@ func recheckIdP(t *testing.T, idToken bool, groups []string) *httptest.Server {
 			out := map[string]string{"refresh_token": "rt"}
 			if idToken {
 				now := time.Now()
-				claims := map[string]any{"iss": srv.URL, "aud": "overfin", "sub": "sub", "exp": now.Add(time.Minute).Unix(), "iat": now.Unix()}
+				claims := map[string]any{"iss": srv.URL, "aud": aud, "sub": "sub", "exp": now.Add(time.Minute).Unix(), "iat": now.Unix()}
 				if groups != nil {
 					claims["groups"] = groups
 				}
@@ -122,4 +126,27 @@ func recheckIdP(t *testing.T, idToken bool, groups []string) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// A re-check the provider answers with an ID token that doesn't check out
+// (here, for another app) refuses the login at once: the grace is for a
+// provider out of reach, not for one saying something wrong.
+func TestRecheckUnverified(t *testing.T) {
+	ctx := context.Background()
+	srv := recheckIdP(t, true, []string{"members"}, "another-app")
+	box, _ := seal.New(make([]byte, 32))
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "t.db"), box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	_, token, err := st.CreateLogin(ctx, "sub", []string{"members"}, "rt", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Auth{Store: st, Logger: slog.New(slog.DiscardHandler), LoginLifetime: time.Hour, NeedGroups: true,
+		Provider: &oidc.Provider{Issuer: srv.URL, ClientID: "overfin", ClientSecret: "s", GroupsClaim: "groups", HTTP: srv.Client()}}
+	if a.current(ctx, token) != nil {
+		t.Error("accepted on a token that doesn't check out")
+	}
 }

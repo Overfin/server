@@ -228,7 +228,7 @@ func TestRefresh(t *testing.T) {
 	if _, err := p.Refresh(ctx, "revoked", "user-1"); !errors.Is(err, ErrRevoked) {
 		t.Errorf("revoked: %v", err)
 	}
-	if _, err := p.Refresh(ctx, "other-user", "user-1"); err == nil || errors.Is(err, ErrRevoked) {
+	if _, err := p.Refresh(ctx, "other-user", "user-1"); !errors.Is(err, ErrUnverified) {
 		t.Errorf("another user's token: %v", err)
 	}
 }

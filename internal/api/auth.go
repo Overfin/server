@@ -173,6 +173,11 @@ func (a *Auth) current(ctx context.Context, token string) *store.Login {
 	case errors.Is(err, oidc.ErrRevoked):
 		_ = a.Store.DeleteLogin(ctx, l.ID)
 		return nil
+	case errors.Is(err, oidc.ErrUnverified):
+		// The provider answered, with something that doesn't check out:
+		// no grace (that's for a provider out of reach), refused now.
+		a.Logger.Error("re-checking a login: the provider's new ID token doesn't check out; refusing it", "err", err)
+		return nil
 	case err != nil:
 		if time.Since(l.Checked) < outageGrace {
 			a.Logger.Warn("re-checking a login failed; still accepting it for now", "err", err)
