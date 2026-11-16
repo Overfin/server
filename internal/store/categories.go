@@ -264,9 +264,12 @@ func (s *Store) LibraryLanguages(ctx context.Context) ([]string, error) {
 // itemIn is the filter as SQL, for the catalog_items row named table.
 func (f CategoryFilter) itemIn(table string) (string, []any) {
 	cond, args := f.Rules.itemFits(table)
+	// An excepted category's rules that can't be told (a title with no
+	// library, NULL, against a library rule) don't except it: NOT NULL
+	// would leave the title out of this category too.
 	for _, x := range f.Except {
 		c, a := x.itemFits(table)
-		cond, args = cond+" AND NOT "+c, append(args, a...)
+		cond, args = cond+" AND NOT coalesce("+c+", 0)", append(args, a...)
 	}
 	return "(" + cond + ")", args
 }
