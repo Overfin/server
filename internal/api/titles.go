@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"math"
@@ -957,6 +958,23 @@ func (l Library) nextEpisode(ctx context.Context, p *store.Profile, ep store.Tit
 				}
 			}
 		}
+	}
+	// Not one the same file holds (S01E01-E02: after E01 comes E03, the
+	// file having played both).
+	if len(keys) > 0 {
+		self := ep.Key()
+		shared, err := st.SharedFiles(ctx, append([]string{self}, keys...))
+		if err != nil {
+			return nil, err
+		}
+		file := cmp.Or(shared[self], self)
+		kept := keys[:0]
+		for _, k := range keys {
+			if shared[k] != file {
+				kept = append(kept, k)
+			}
+		}
+		keys = kept
 	}
 	if len(keys) == 0 {
 		return nil, nil

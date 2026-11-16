@@ -417,7 +417,9 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 		pb.Logger.Warn("a paired server couldn't start a playback", "peer", peer.Name, "err", err)
 		problem.Send(w, problem.NotPlayable, "")
 		return
-	case status == http.StatusConflict:
+	case status == http.StatusConflict, status == http.StatusServiceUnavailable:
+		// Its limit for this server reached, or all its transcodes taken:
+		// busy, for now.
 		problem.Send(w, problem.ServerBusy, "")
 		return
 	case status != http.StatusOK:
