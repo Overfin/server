@@ -1039,8 +1039,10 @@ func (s *Store) NewTitles(ctx context.Context, since int64, limit int) (keys []s
 	return keys, last, rows.Err()
 }
 
-// PeerTold records what a peer was told: the titles it now holds of ours
-// (present), and those told gone, forgotten.
+// PeerTold records what a peer was told it holds of ours (present). Those
+// told gone stay recorded: the peer may not have kept that answer (its
+// reading failed later), and asks again; telling it gone again tells it
+// nothing it didn't know.
 func (s *Store) PeerTold(ctx context.Context, peerID string, present []PeerTitle, gone []string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1052,11 +1054,7 @@ func (s *Store) PeerTold(ctx context.Context, peerID string, present []PeerTitle
 			return err
 		}
 	}
-	for _, k := range gone {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM peer_sent WHERE peer_id = ? AND title_key = ?`, peerID, k); err != nil {
-			return err
-		}
-	}
+	_ = gone
 	return tx.Commit()
 }
 

@@ -477,3 +477,30 @@ func TestSyncTitlesPeerForgotUs(t *testing.T) {
 		t.Fatalf("still: %+v", p)
 	}
 }
+
+// A accepted while B couldn't hear it: B still waits, and refuses A's
+// readings. A asks it where things stand rather than give up on it: both
+// end up paired.
+func TestRefusedWhileNotToldAccepted(t *testing.T) {
+	ctx := context.Background()
+	a, b := newServer(t, "A"), newServer(t, "B")
+	code, _, _ := a.s.NewCode(ctx, "")
+	aOnB, _ := b.s.UseCode(ctx, code)
+	bOnA, err := a.s.Accept(ctx, onlyPeer(t, a).ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// B never heard it.
+	if ok, err := b.s.Store.SetPeerState(ctx, aOnB.ID, store.PeerPaired, store.PeerTheirs); err != nil || !ok {
+		t.Fatalf("setting B back: %v %v", ok, err)
+	}
+	if _, err := a.s.TheirLibraries(ctx, bOnA); err == nil {
+		t.Fatal("B answered before it knew it was paired")
+	}
+	if got, _ := a.s.Store.PeerByID(ctx, bOnA.ID); got.State != store.PeerPaired {
+		t.Errorf("A's view of B: %s", got.State)
+	}
+	if got, _ := b.s.Store.PeerByID(ctx, aOnB.ID); got.State != store.PeerPaired {
+		t.Errorf("B's view of A after A asked: %s", got.State)
+	}
+}

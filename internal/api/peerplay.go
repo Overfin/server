@@ -417,7 +417,7 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	var out sessionJSON
 	remoteStops.wait(ctx, peer.ID, 5*time.Second)
 	status, err := fed.Call(ctx, peer, "/api/v1/federation/play", peerPlayRequest{Title: key, Capabilities: req.Capabilities.ForPeer(),
-		StartPositionMs: req.StartPositionMs, MaxBitrateKbps: kbps, AudioLanguage: wantAudio, SubtitleLanguage: wantSubtitles,
+		StartPositionMs: req.StartPositionMs, MaxBitrateKbps: roundKbps(kbps), AudioLanguage: wantAudio, SubtitleLanguage: wantSubtitles,
 		AudioTrack: req.AudioTrack, SubtitleTrack: req.SubtitleTrack}, &out)
 	switch {
 	case err != nil:
@@ -749,3 +749,13 @@ var peerIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 // segmentKinds are the skip markers there are (Jellyfin's, in lower case).
 var segmentKinds = []string{"intro", "outro", "recap", "preview", "commercial"}
+
+// roundKbps is a bitrate as a paired server is told it: in whole Mbps
+// from 1 Mbps up (an exact number could tell one viewer's device from
+// another), never 0, which would mean no cap.
+func roundKbps(kbps int) int {
+	if kbps < 1000 {
+		return kbps
+	}
+	return kbps / 1000 * 1000
+}

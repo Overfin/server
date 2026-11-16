@@ -1081,14 +1081,16 @@ func canonicalTMDB(id string) bool {
 	return err == nil && strconv.Itoa(n) == id && tmdb.ValidID(n)
 }
 
-// forgotUs marks gone a peer whose signed answer says it no longer knows
-// this server (it ended the pairing while we couldn't hear it): its titles
-// leave our listings at once, rather than wait for a Check by hand.
+// forgotUs is a peer refusing us, signed, where a pairing should answer:
+// it may have ended the pairing while we couldn't hear it, or not have
+// heard yet that we accepted. It's asked where things stand (Check), which
+// marks it gone only when it doesn't know us at all, and tells it we're
+// paired otherwise; rather than wait for a Check by hand.
 func (s *Service) forgotUs(ctx context.Context, p *store.Peer) {
 	if p.State == store.PeerGone {
 		return
 	}
-	if ok, err := s.Store.SetPeerState(ctx, p.ID, p.State, store.PeerGone); err == nil && ok {
-		s.Logger.Info("federation: a peer no longer knows this server", "name", p.Name)
+	if _, err := s.Check(ctx, p); err != nil {
+		s.Logger.Info("federation: asking a peer that refused us where things stand", "name", p.Name, "err", err)
 	}
 }
