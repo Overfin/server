@@ -67,6 +67,11 @@ type Service struct {
 	// its peers (nil: none).
 	Certificates *Certificates
 
+	// PeerChanged, when set, is told a peer's ID once its pairing ended,
+	// it is no longer paired, or what we offer it changed: its playbacks
+	// here end at once (MSFP playback, section 6.3).
+	PeerChanged func(peerID string)
+
 	verifier *Verifier
 	mu       sync.Mutex
 	asked    map[string]time.Time // CheckSoon's, by peer ID
@@ -127,6 +132,13 @@ func (p Plugin) Register(r *plugin.Registrar) error {
 		return err
 	}
 	return r.HandlePublic("POST /api/v1/federation/titles", SignRefusals(http.HandlerFunc(p.S.titles)))
+}
+
+// changed tells PeerChanged, when set.
+func (s *Service) changed(peerID string) {
+	if s.PeerChanged != nil {
+		s.PeerChanged(peerID)
+	}
 }
 
 // forgotten says whether a key is a server's whose pairing with this one
@@ -324,6 +336,7 @@ func (s *Service) hello(w http.ResponseWriter, r *http.Request) {
 			problem.Send(w, problem.Internal, "")
 			return
 		}
+		s.changed(p.ID)
 		s.Logger.Info("federation: a peer ended the pairing", "name", p.Name)
 		s.answer(w, v.Nonce, helloMessage{State: helloEnded})
 		return
@@ -552,6 +565,7 @@ func (s *Service) End(ctx context.Context, id string) error {
 	if err := s.Store.DeletePeer(ctx, id); err != nil {
 		return err
 	}
+	s.changed(id)
 	s.Logger.Info("federation: pairing ended", "name", p.Name)
 	var answer helloMessage
 	if _, err := s.call(ctx, p, helloPath, helloMessage{State: helloEnded}, &answer); err != nil {
@@ -575,6 +589,7 @@ func (s *Service) Check(ctx context.Context, p *store.Peer) (*store.Peer, error)
 			if _, err := s.Store.SetPeerState(ctx, p.ID, p.State, store.PeerGone); err != nil {
 				return p, err
 			}
+			s.changed(p.ID)
 			s.Logger.Info("federation: a peer no longer knows this server", "name", p.Name)
 		}
 	case r.Status != http.StatusOK:
@@ -790,7 +805,11 @@ func (s *Service) SetOffers(ctx context.Context, p *store.Peer, ids []string) er
 			keep = append(keep, l.ID)
 		}
 	}
-	return s.Store.SetPeerOffers(ctx, p.ID, keep)
+	if err := s.Store.SetPeerOffers(ctx, p.ID, keep); err != nil {
+		return err
+	}
+	s.changed(p.ID)
+	return nil
 }
 
 // SetWants sets which of a paired peer's libraries we want, out of those

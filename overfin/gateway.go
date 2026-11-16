@@ -293,6 +293,7 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	// a live code; with neither, everything is a plain 404.
 	if fed := federationService(cfg, sh); fed != nil {
 		b.fed, fedNow = fed, fed
+		fed.PeerChanged = pb.PeerChanged
 		plugins = append(plugins, federation.Plugin{S: fed})
 	}
 	if cfg.Plugins.Enabled("library") {

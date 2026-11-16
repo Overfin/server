@@ -525,6 +525,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 			HTTP: federation.NewHTTPClient(), Name: func(context.Context) string { return "B" }, Logger: logger}
 		*o.federation = fed
 		pb.Federation = func() *federation.Service { return fed }
+		fed.PeerChanged = pb.PeerChanged
 	}
 	if o.playback != nil {
 		*o.playback = pb

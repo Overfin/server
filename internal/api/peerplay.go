@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/overfin/server/internal/textclean"
 	"github.com/overfin/server/internal/tracks"
 	"net/http"
@@ -839,4 +840,36 @@ func roundKbps(kbps int) int {
 		return kbps
 	}
 	return kbps / 1000 * 1000
+}
+
+// PeerChanged ends at once what a paired server may no longer play here,
+// after its pairing ended or changed: all its playbacks when it is no
+// longer paired, those of a library no longer offered to it otherwise; and
+// this server's own people's playbacks from it, when it is no longer
+// paired. A ticket stops working then, not at its next request (MSFP
+// playback, section 6.3).
+func (pb Playback) PeerChanged(peerID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	st := pb.Library.Provisioner.Store
+	peer, err := st.PeerByID(ctx, peerID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		pb.Logger.Warn("a paired server's playbacks couldn't be checked", "err", err)
+		return
+	}
+	paired := err == nil && peer.State == store.PeerPaired
+	for _, s := range pb.Tickets.Where(func(s *playback.Stream) bool { return s.ProfileID == playback.PeerPrefix+peerID }) {
+		if !paired {
+			pb.end(s, "pairing ended", "")
+			continue
+		}
+		if offered, err := st.ItemOfferedTo(ctx, peerID, s.ItemID); err == nil && !offered {
+			pb.end(s, "no longer shared", "")
+		}
+	}
+	if !paired {
+		for _, s := range pb.Tickets.Where(func(s *playback.Stream) bool { return s.Remote != nil && s.Remote.PeerID == peerID }) {
+			pb.end(s, "pairing ended", "")
+		}
+	}
 }
