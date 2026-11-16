@@ -39,6 +39,23 @@ func TestEpisodeRanges(t *testing.T) {
 	if err != nil || len(shared) != 1 || shared["series/tmdb/1/s1/e2"] != "series/tmdb/1/s1/e1" {
 		t.Errorf("shared: %v %v", shared, err)
 	}
+	// Indexed again, the same: the row stays as it was, its key kept and
+	// nothing told to paired servers; the file's video is its too.
+	var changesBefore, changesAfter int
+	s.db.QueryRowContext(ctx, `SELECT count(*) FROM title_changes WHERE title_key = 'series/tmdb/1/s1/e2'`).Scan(&changesBefore)
+	file.Video = "1080p · H.264"
+	if err := s.PutCatalog(ctx, []CatalogItem{file}, 1); err != nil {
+		t.Fatal(err)
+	}
+	var key, video string
+	s.db.QueryRowContext(ctx, `SELECT coalesce(title_key, ''), coalesce(video, '') FROM catalog_items WHERE id = ?`, second).Scan(&key, &video)
+	if key != "series/tmdb/1/s1/e2" || video != "1080p · H.264" {
+		t.Errorf("the second episode's row indexed again: key %q, video %q", key, video)
+	}
+	s.db.QueryRowContext(ctx, `SELECT count(*) FROM title_changes WHERE title_key = 'series/tmdb/1/s1/e2'`).Scan(&changesAfter)
+	if changesAfter != changesBefore {
+		t.Errorf("the second episode told as changed again: %d changes, %d before", changesAfter, changesBefore)
+	}
 	// Indexed again as one episode: the row goes.
 	file.EpisodeNumberEnd = nil
 	if err := s.PutCatalog(ctx, []CatalogItem{file}, 1); err != nil {

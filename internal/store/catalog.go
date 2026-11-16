@@ -195,24 +195,40 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 			}
 		}
 		// A file of several episodes: a row for each one after its first,
-		// as the item is, pointing to it.
+		// as the item is, pointing to it. Kept from one pass to the next
+		// (their title key too, which RefreshTitleKeys sets): deleted and
+		// made again, each would be told to paired servers as changed, and
+		// go missing from listings until the keys are set again.
 		if it.Kind == "episode" {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM catalog_items WHERE range_of = ?`, it.ID); err != nil {
+			first, last := 0, -1
+			if it.EpisodeNumber != nil && it.EpisodeNumberEnd != nil {
+				first, last = *it.EpisodeNumber+1, min(*it.EpisodeNumberEnd, *it.EpisodeNumber+maxRange)
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM catalog_items WHERE range_of = ? AND NOT (episode_number BETWEEN ? AND ?)`,
+				it.ID, first, last); err != nil {
 				return err
 			}
-			if it.EpisodeNumber != nil && it.EpisodeNumberEnd != nil {
-				for n := *it.EpisodeNumber + 1; n <= *it.EpisodeNumberEnd && n <= *it.EpisodeNumber+maxRange; n++ {
-					if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_items (id, kind, name, sort_name, year,
-							series_id, season_id, season_number, episode_number, tmdb, imdb, tvdb, rating,
-							primary_tag, backdrop_tag, thumb_tag, seen, library_id, added_at, premiere_date, community_rating,
-							folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages, audio_tags, subtitle_tags, range_of)
-						SELECT ?, kind, name, sort_name, year, series_id, season_id, season_number, ?, tmdb, imdb, tvdb, rating,
-							primary_tag, backdrop_tag, thumb_tag, seen, library_id, added_at, premiere_date, community_rating,
-							folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages, audio_tags, subtitle_tags, id
-						FROM catalog_items WHERE id = ?
-						ON CONFLICT (id) DO NOTHING`, rangeID(it.ID, n), n, it.ID); err != nil {
-						return err
-					}
+			for n := first; n <= last; n++ {
+				if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_items (id, kind, name, sort_name, year,
+						series_id, season_id, season_number, episode_number, tmdb, imdb, tvdb, rating,
+						primary_tag, backdrop_tag, thumb_tag, seen, library_id, added_at, premiere_date, community_rating,
+						folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages, audio_tags, subtitle_tags, video, range_of)
+					SELECT ?, kind, name, sort_name, year, series_id, season_id, season_number, ?, tmdb, imdb, tvdb, rating,
+						primary_tag, backdrop_tag, thumb_tag, seen, library_id, added_at, premiere_date, community_rating,
+						folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages, audio_tags, subtitle_tags, video, id
+					FROM catalog_items WHERE id = ? AND true
+					ON CONFLICT (id) DO UPDATE SET kind = excluded.kind, name = excluded.name, sort_name = excluded.sort_name,
+						year = excluded.year, series_id = excluded.series_id, season_id = excluded.season_id,
+						season_number = excluded.season_number, episode_number = excluded.episode_number, tmdb = excluded.tmdb,
+						imdb = excluded.imdb, tvdb = excluded.tvdb, rating = excluded.rating, primary_tag = excluded.primary_tag,
+						backdrop_tag = excluded.backdrop_tag, thumb_tag = excluded.thumb_tag, seen = excluded.seen,
+						library_id = excluded.library_id, added_at = excluded.added_at, premiere_date = excluded.premiere_date,
+						community_rating = excluded.community_rating, folder_name = excluded.folder_name,
+						file_name = excluded.file_name, runtime_ms = excluded.runtime_ms, jellyfin_tmdb = excluded.jellyfin_tmdb,
+						audio_languages = excluded.audio_languages, audio_tags = excluded.audio_tags,
+						subtitle_tags = excluded.subtitle_tags, video = excluded.video, range_of = excluded.range_of`,
+					rangeID(it.ID, n), n, it.ID); err != nil {
+					return err
 				}
 			}
 		}
