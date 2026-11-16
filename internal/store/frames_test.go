@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -83,4 +84,22 @@ func equal(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// A frame goes once its episode left the libraries, and only after a
+// week's margin.
+func TestTrimFrames(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	old := time.Now().Add(-30 * 24 * time.Hour)
+	s.PutFrame(ctx, "series/tmdb/1/s1/e1", strings.Repeat("a", 32), strings.Repeat("1", 32), []byte("jpg"), old)
+	s.PutFrame(ctx, "series/tmdb/1/s1/e2", strings.Repeat("a", 32), strings.Repeat("2", 32), []byte("jpg"), time.Now())
+	if err := s.TrimFrames(ctx, time.Now().Add(-7*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	s.db.QueryRowContext(ctx, `SELECT count(*) FROM episode_frames`).Scan(&n)
+	if n != 1 {
+		t.Errorf("%d frames left, want the recent one only", n)
+	}
 }

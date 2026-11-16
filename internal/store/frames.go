@@ -87,3 +87,12 @@ func (s *Store) SkipFrame(ctx context.Context, titleKey, item string, until time
 		titleKey, item, until.Add(-retry).Unix())
 	return err
 }
+
+// TrimFrames deletes the frames of episodes no library has any more, made
+// before keptAfter (a week's margin: an episode missing for a moment, the
+// index being read again, keeps its frame).
+func (s *Store) TrimFrames(ctx context.Context, keptAfter time.Time) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM episode_frames WHERE tried_at < ?
+		AND NOT EXISTS (SELECT 1 FROM catalog_items c WHERE c.title_key = episode_frames.title_key)`, keptAfter.Unix())
+	return err
+}

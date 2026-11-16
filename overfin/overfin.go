@@ -1061,6 +1061,14 @@ func purgeExpired(ctx context.Context, db *store.Store, logger *slog.Logger) {
 		if err := db.DeleteExpiredPairingCodes(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("purging expired pairing codes failed", "err", err)
 		}
+		// Arrived wishes past a year weigh nothing; frames of episodes gone
+		// from the libraries serve nothing.
+		if err := db.ForgetArrivals(ctx, time.Now().AddDate(-1, 0, 0)); err != nil && ctx.Err() == nil {
+			logger.Error("purging old wish arrivals failed", "err", err)
+		}
+		if err := db.TrimFrames(ctx, time.Now().Add(-7*24*time.Hour)); err != nil && ctx.Err() == nil {
+			logger.Error("purging frames of episodes gone failed", "err", err)
+		}
 		if err := db.DeleteUnusedUploads(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("purging unused artwork uploads failed", "err", err)
 		}
