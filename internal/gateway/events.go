@@ -29,6 +29,7 @@ type Revocations struct {
 	mu      sync.Mutex
 	revoked map[[sha256.Size]byte]int64 // the login cookie's hash: when it'd have expired
 	seq     int64
+	last    []byte // the hash revocation seq carried: told back, so a restored backend is noticed
 }
 
 // Revoked says whether the login cookie login was ended.
@@ -52,7 +53,9 @@ func (rv *Revocations) add(seq int64, hash []byte, expires int64) {
 	if len(hash) == sha256.Size {
 		rv.revoked[[sha256.Size]byte(hash)] = expires
 	}
-	rv.seq = max(rv.seq, seq)
+	if seq > rv.seq {
+		rv.seq, rv.last = seq, hash
+	}
 	now := time.Now().Unix()
 	if len(rv.revoked)%1024 == 0 {
 		for k, e := range rv.revoked {
@@ -70,9 +73,16 @@ func (rv *Revocations) Follow(ctx context.Context, backend http.RoundTripper, lo
 	client := &http.Client{Transport: backend}
 	for ctx.Err() == nil {
 		rv.mu.Lock()
-		since := rv.seq
+		since, at := rv.seq, rv.last
 		rv.mu.Unlock()
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://backend/link/v1/events?since="+strconv.FormatInt(since, 10), nil)
+		// The start of the last revocation's hash too: a backend restored
+		// from a backup, then given new ones up to the same number, has
+		// another there, and starts the count again (reset).
+		q := "since=" + strconv.FormatInt(since, 10)
+		if len(at) >= 8 {
+			q += "&at=" + hex.EncodeToString(at[:8])
+		}
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://backend/link/v1/events?"+q, nil)
 		if resp, err := client.Do(req); err == nil {
 			if resp.StatusCode == http.StatusOK {
 				if rv.Access != nil {
@@ -118,7 +128,7 @@ func (rv *Revocations) event(line []byte) {
 		// The backend's numbers started again (its database restored):
 		// count from its first, the revocations heard kept.
 		rv.mu.Lock()
-		rv.seq = 0
+		rv.seq, rv.last = 0, nil
 		rv.mu.Unlock()
 	case "revoked":
 		if h, err := hex.DecodeString(e.Hash); err == nil {

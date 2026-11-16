@@ -1,6 +1,10 @@
 package store
 
-import "context"
+import (
+	"context"
+	"database/sql"
+	"errors"
+)
 
 // Revoked is a login ended before its time: its cookie's SHA-256, when it
 // would have expired, and its number.
@@ -28,6 +32,17 @@ func (s *Store) RevokedLogins(ctx context.Context, since int64, limit int) ([]Re
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// RevocationHash is the cookie hash revocation seq carries; false when
+// there's none (trimmed, its login past its time, or never given).
+func (s *Store) RevocationHash(ctx context.Context, seq int64) ([]byte, bool, error) {
+	var h []byte
+	err := s.read.QueryRowContext(ctx, `SELECT token_hash FROM revoked_logins WHERE seq = ?`, seq).Scan(&h)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	return h, err == nil, err
 }
 
 // TrimRevokedLogins forgets the revocations past when their logins would

@@ -1,6 +1,7 @@
 package overfin
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -61,7 +62,18 @@ func eventsHandler(db *store.Store) http.Handler {
 		if err != nil {
 			return
 		}
-		if since > last {
+		// Or asked from one this database numbers too, but whose hash isn't
+		// the one the gateway heard (at: the start of it, hex): restored,
+		// then given as many new revocations as it had lost.
+		restored := since > last
+		if at, err := hex.DecodeString(r.URL.Query().Get("at")); err == nil && len(at) > 0 && since > 0 && !restored {
+			h, ok, err := db.RevocationHash(r.Context(), since)
+			if err != nil {
+				return
+			}
+			restored = ok && !bytes.HasPrefix(h, at)
+		}
+		if restored {
 			since = 0
 			if enc.Encode(map[string]string{"type": "reset"}) != nil {
 				return

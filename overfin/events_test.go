@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -121,5 +122,19 @@ func TestEventsRevokedAndPing(t *testing.T) {
 	// again, and every revocation comes.
 	if again, _ := read("1000"); len(again) != 2 {
 		t.Errorf("after a restore: %v", again)
+	}
+	// Asked from a number this database gave too, but whose revocation
+	// isn't the one the gateway heard of (restored, then as many new ones
+	// as were lost): it starts again as well. The same one: nothing new.
+	last, _ := strconv.ParseInt(all[1], 10, 64)
+	h, ok, err := db.RevocationHash(ctx, last)
+	if err != nil || !ok {
+		t.Fatalf("hash of %d: %v %v", last, ok, err)
+	}
+	if after, _ := read(all[1] + "&at=" + hex.EncodeToString(h[:8])); len(after) != 0 {
+		t.Errorf("the one heard of: %v", after)
+	}
+	if again, _ := read(all[1] + "&at=00000000deadbeef"); len(again) != 2 {
+		t.Errorf("another one under that number: %v", again)
 	}
 }

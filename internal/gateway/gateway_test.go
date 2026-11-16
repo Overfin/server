@@ -465,6 +465,7 @@ type resetBackend struct {
 	fakeBackend
 	mu     sync.Mutex
 	asked  []string
+	at     []string
 	revoke string
 }
 
@@ -474,6 +475,7 @@ func (e *resetBackend) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	e.mu.Lock()
 	e.asked = append(e.asked, r.URL.Query().Get("since"))
+	e.at = append(e.at, r.URL.Query().Get("at"))
 	e.mu.Unlock()
 	sum := sha256.Sum256([]byte(e.revoke))
 	line := `{"type":"reset"}` + "\n" + `{"type":"revoked","seq":3,"hash":"` + hex.EncodeToString(sum[:]) + `","expires":` + strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10) + "}\n"
@@ -505,5 +507,11 @@ func TestRevocationsReset(t *testing.T) {
 	defer b.mu.Unlock()
 	if !rv.Revoked("ended after the restore") || len(b.asked) < 2 || b.asked[0] != "50" || b.asked[1] != "3" {
 		t.Errorf("revoked %v, asked from %v", rv.Revoked("ended after the restore"), b.asked)
+	}
+	// With the start of the hash it heard under that number, for the
+	// backend to tell another restore apart; none before hearing one.
+	sum := sha256.Sum256([]byte("ended after the restore"))
+	if len(b.at) < 2 || b.at[0] != "" || b.at[1] != hex.EncodeToString(sum[:8]) {
+		t.Errorf("told back: %v", b.at)
 	}
 }

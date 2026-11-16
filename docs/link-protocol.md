@@ -227,7 +227,7 @@ before the site:
 | Route | Answer |
 |---|---|
 | `GET /link/v1/egress?addr=<host:port>` | 204 if the backend asked for that address in the last minute, else 403 (section 11) |
-| `GET /link/v1/events?since=<n>` | the events stream (section 8) |
+| `GET /link/v1/events?since=<n>&at=<hex>` | the events stream (section 8); `at`, the first 8 bytes of revocation n's hash, once one was heard |
 | `GET /link/v1/artwork/{id}?width=…` | a title's TMDB artwork at that width, without a profile's check, for the cache's prefetch (section 10) |
 
 ## 8. Events
@@ -253,7 +253,9 @@ object a line (`application/x-ndjson`), on a stream the gateway keeps open.
   A restarted gateway starts from 0 and gets every revocation still live.
 - **`reset`**: the gateway asked from past the last number the backend's
   database ever gave (it was restored from a backup, its numbers start
-  again lower). The backend sends `reset` first, then every revocation
+  again lower), or from a number whose revocation isn't the one it heard
+  (`at`, the first 8 bytes of that one's hash: restored, then given as
+  many new ones as were lost). The backend sends `reset` first, then every revocation
   still live from its first; the gateway counts from those numbers. Without
   it, revocations made after the restore would carry numbers the gateway
   thinks it has heard of, and wait for its next restart.
@@ -403,8 +405,8 @@ Each line is a property a test can check. **Tested** names the test today;
 | Egress never dials loopback, link-local, unspecified or multicast addresses | `TestUnreached` |
 | Reconnecting waits vary by a fifth | `TestJittered` |
 | Egress refused for another version, an unpaired key, an unreachable address; the minute expires | `TestEgressRefusals` |
-| Events: revocations numbered, resumed after a number; a ping when quiet; asked from past the last number ever given, all again | `TestEventsRevokedAndPing` |
-| After a reset, the gateway counts from the backend's numbers: none missed | `TestRevocationsReset` |
+| Events: revocations numbered, resumed after a number; a ping when quiet; asked from past the last number ever given, or from one whose hash isn't the one heard, all again | `TestEventsRevokedAndPing` |
+| After a reset, the gateway counts from the backend's numbers: none missed; it tells back the hash it heard | `TestRevocationsReset` |
 | The down pages name nothing behind the gateway | `TestDownPages` |
 | Rate limits, 429 with `Retry-After` | `TestLimits`, `TestLimitAnswer` |
 
