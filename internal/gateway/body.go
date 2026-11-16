@@ -36,7 +36,9 @@ func wholeBody(next http.Handler) http.Handler {
 				return
 			}
 			w.Header().Set("Content-Type", "application/problem+json")
-			w.Header().Set("Connection", "close")
+			if r.ProtoMajor == 1 {
+				w.Header().Set("Connection", "close") // HTTP/2 would close the visitor's other streams too
+			}
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"type":"invalid-request","title":"The request's body didn't arrive","status":400}` + "\n"))
 			return

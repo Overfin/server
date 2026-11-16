@@ -21,19 +21,19 @@ import (
 const maxStreams = 250
 
 // h2Config is both sides' HTTP/2 settings: frames larger than the default
-// 16 KiB (fewer of them for video), 4 MiB windows for each request, at most
+// 16 KiB (fewer of them for video), 1 MiB windows for each request, at most
 // maxStreams requests at once, and a ping when the connection goes quiet,
-// so a dead link is noticed. The connection's window is room for every
-// request's at once (Go's own client default, 1 GiB): a window comes back
-// only as its response is read, so with one stream's size a single
-// response nobody reads (a paused viewer's film) held up every other.
-// It's credit, not memory: what's held is at most a stream's window each.
+// so a dead link is noticed. The connection's window has room for every
+// request's at once (250 × 1 MiB): a window comes back only as its
+// response is read, so with one stream's size a single response nobody
+// reads (a paused viewer's film) held up every other. What responses
+// nobody reads hold in memory is then 256 MiB at most.
 func h2Config() *http.HTTP2Config {
 	return &http.HTTP2Config{
 		MaxConcurrentStreams:          maxStreams,
 		MaxReadFrameSize:              1 << 20,
-		MaxReceiveBufferPerConnection: 1 << 30,
-		MaxReceiveBufferPerStream:     4<<20 - 1,
+		MaxReceiveBufferPerConnection: 256 << 20,
+		MaxReceiveBufferPerStream:     1 << 20,
 		SendPingTimeout:               15 * time.Second,
 		PingTimeout:                   10 * time.Second,
 	}
