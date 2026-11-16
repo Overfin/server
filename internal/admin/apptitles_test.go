@@ -3,6 +3,8 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -114,12 +116,17 @@ func TestAppTitles(t *testing.T) {
 
 	// Pages.
 	first := get(scoreOnly, "?limit=2", 200)
-	if len(first.Titles) != 2 || first.Next != "2" {
+	if len(first.Titles) != 2 || first.Next == "" {
 		t.Fatalf("first page: %+v", first)
 	}
-	if rest := get(scoreOnly, "?limit=2&cursor="+first.Next, 200); len(rest.Titles) != 1 || rest.Next != "" {
+	if rest := get(scoreOnly, "?limit=2&cursor="+url.QueryEscape(first.Next), 200); len(rest.Titles) != 1 || rest.Next != "" {
 		t.Errorf("second page: %+v", rest)
 	}
+	// A place from before still works; a cursor made up is refused.
+	if rest := get(scoreOnly, "?limit=2&cursor=2", 200); len(rest.Titles) != 1 {
+		t.Errorf("an old cursor: %+v", rest)
+	}
+	get(scoreOnly, "?cursor=nonsense!", 400)
 
 	// A discovery list: its titles only, in its order (films and series
 	// side by side, by place); a season by its series' place.
@@ -248,5 +255,48 @@ func TestAppTitlesWishedListed(t *testing.T) {
 		if !listed["10"] || !listed["11"] || !listed["12"] || !listed["13"] || listed["14"] {
 			t.Errorf("%q: listed %v, want 10 to 13", query, listed)
 		}
+	}
+}
+
+// A title leaving between two pages doesn't make the next page skip one:
+// the cursor names the last title given, not a place.
+func TestAppTitlesPagesWhileChanging(t *testing.T) {
+	ctx := context.Background()
+	p, b, db, _ := signedInPanel(t)
+	now := time.Now()
+	_, prof, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: strings.Repeat("1", 32), JellyfinUsername: "of-1", JellyfinToken: "t"})
+	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
+	var items []store.CatalogItem
+	for i, name := range []string{"Alpha", "Beta", "Gamma"} {
+		items = append(items, store.CatalogItem{ID: id(i), Kind: "movie", Name: name, SortName: strings.ToLower(name), TMDB: strconv.Itoa(i + 1), RuntimeMs: 6_000_000, AddedAt: now})
+	}
+	db.PutCatalog(ctx, items, 1)
+	db.RefreshTitleKeys(ctx)
+	for i := range items {
+		db.RecordPlay(ctx, prof.ID, "movie/tmdb/"+strconv.Itoa(i+1), id(i), 0, true, now)
+	}
+	rec := b.do("POST", "/admin/api/apps", `{"name":"Overtide","scopes":["score"]}`, nil)
+	var made struct{ Key string }
+	json.Unmarshal(rec.Body.Bytes(), &made)
+	app := &browser{h: b.h, cookies: map[string]string{}}
+	page := func(cursor string) appTitlesPage {
+		t.Helper()
+		rec := app.do("GET", "/apps/v1/titles?sort=name&inLibrary=true&limit=1&cursor="+url.QueryEscape(cursor), "", map[string]string{"Authorization": "Bearer " + made.Key})
+		var out appTitlesPage
+		if json.Unmarshal(rec.Body.Bytes(), &out); rec.Code != 200 {
+			t.Fatalf("%d %s", rec.Code, rec.Body)
+		}
+		return out
+	}
+	first := page("")
+	if len(first.Titles) != 1 || first.Titles[0].Name != "Alpha" {
+		t.Fatalf("first: %+v", first)
+	}
+	db.DeleteCatalog(ctx, []string{id(0)})
+	p.valued.mu.Lock()
+	p.valued.m = nil // measured anew, as a minute later
+	p.valued.mu.Unlock()
+	if second := page(first.Next); len(second.Titles) != 1 || second.Titles[0].Name != "Beta" {
+		t.Errorf("second: %+v", second)
 	}
 }

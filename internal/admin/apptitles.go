@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strconv"
@@ -143,13 +145,20 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
+	// The cursor names the last title given (its key and what it sorts
+	// by), so the next page starts after it even when the list changed
+	// between pages (a title gone, a score moved); a bare number, from
+	// before, is a place in the list.
+	var after *titlesCursor
 	if s := q.Get("cursor"); s != "" {
-		n, err := strconv.Atoi(s)
-		if err != nil || n < 0 {
+		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+			start = n
+		} else if c, ok := readTitlesCursor(s); ok {
+			after = &c
+		} else {
 			invalid(w, "cursor: as given in next")
 			return
 		}
-		start = n
 	}
 	var inLibrary *bool
 	if s := q.Get("inLibrary"); s != "" {
@@ -225,36 +234,62 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		}
 		rows = suggestionOrder(outSoon(rows, releases, p.clock()))
 	}
-	less := func(i, j int) bool {
+	lessV := func(x, y valuation.Value) bool {
 		if sortBy == "list" {
-			a, _ := position(rows[i].Key)
-			b, _ := position(rows[j].Key)
+			a, _ := position(x.Key)
+			b, _ := position(y.Key)
 			if a != b {
 				return a < b
 			}
-			ri, _ := store.ParseTitleKey(rows[i].Key)
-			rj, _ := store.ParseTitleKey(rows[j].Key)
-			if ri.Season != rj.Season {
-				return ri.Season < rj.Season
+			rx, _ := store.ParseTitleKey(x.Key)
+			ry, _ := store.ParseTitleKey(y.Key)
+			if rx.Season != ry.Season {
+				return rx.Season < ry.Season
 			}
 		}
-		if sortBy == "score" && rows[i].Score != rows[j].Score {
-			return rows[i].Score < rows[j].Score
+		if sortBy == "score" && x.Score != y.Score {
+			return x.Score < y.Score
 		}
-		if a, b := store.Fold(rows[i].Name), store.Fold(rows[j].Name); a != b {
+		if a, b := store.Fold(x.Name), store.Fold(y.Name); a != b {
 			return a < b
 		}
-		return rows[i].Key < rows[j].Key
+		return x.Key < y.Key
+	}
+	// before says whether x comes before y in the order asked.
+	before := func(x, y valuation.Value) bool {
+		if order == "desc" {
+			return lessV(y, x)
+		}
+		return lessV(x, y)
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		if list == "suggestions" {
 			return false // already in order
 		}
-		if order == "desc" {
-			return less(j, i)
-		}
-		return less(i, j)
+		return before(rows[i], rows[j])
 	})
+	if after != nil {
+		last := valuation.Value{Title: &valuation.Title{Key: after.Key, Name: after.Name}, Score: after.Score}
+		start = len(rows)
+		for i, v := range rows {
+			if list == "suggestions" {
+				// No order to compare by: after the title itself, else
+				// at its place then.
+				if v.Key == after.Key {
+					start = i + 1
+					break
+				}
+				continue
+			}
+			if before(last, v) {
+				start = i
+				break
+			}
+		}
+		if list == "suggestions" && start == len(rows) && after.Place < len(rows) {
+			start = after.Place
+		}
+	}
 	stats := map[string]*titleStatsJSON{}
 	if want["stats"] {
 		stats = titleStats(f)
@@ -311,8 +346,9 @@ func (p *Panel) appTitles(w http.ResponseWriter, r *http.Request) {
 		out = append(out, j)
 	}
 	page := map[string]any{"titles": out, "generatedAt": p.clock().UTC().Format(time.RFC3339)}
-	if next := start + len(out); next < len(rows) {
-		page["next"] = strconv.Itoa(next)
+	if next := start + len(out); next < len(rows) && len(out) > 0 {
+		v := rows[next-1]
+		page["next"] = titlesCursor{Key: v.Key, Name: v.Name, Score: v.Score, Place: next}.String()
 	}
 	writeJSON(w, http.StatusOK, page)
 }
@@ -442,4 +478,28 @@ func titleStats(f *store.ValuationFacts) map[string]*titleStatsJSON {
 		out[key] = s
 	}
 	return out
+}
+
+// titlesCursor is /apps/v1/titles' cursor: the last title a page gave, by
+// what the list sorts on, and its place after it (for suggestions, whose
+// order isn't a comparison).
+type titlesCursor struct {
+	Key   string  `json:"k"`
+	Name  string  `json:"n"`
+	Score float64 `json:"s"`
+	Place int     `json:"p"`
+}
+
+func (c titlesCursor) String() string {
+	b, _ := json.Marshal(c)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func readTitlesCursor(s string) (titlesCursor, bool) {
+	var c titlesCursor
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil || len(b) > 2048 || json.Unmarshal(b, &c) != nil || c.Key == "" || c.Place < 0 {
+		return titlesCursor{}, false
+	}
+	return c, true
 }
