@@ -162,7 +162,9 @@ written whole (a new file renamed into place), mode 0600.
   server. Prior knowledge, no HTTP/1, no TLS of its own (the link's is
   under it).
 - Settings, both sides: frames up to 1 MiB; flow-control windows of
-  4 MiB − 1 per stream and per connection; a ping when the connection is
+  1 MiB per stream and 256 MiB per connection, room for every stream's at
+  once, so responses nobody reads (a paused film) never hold up the
+  others, and hold 256 MiB at most; a ping when the connection is
   quiet for 15 s, and the connection dropped if a ping goes unanswered for
   10 s. At most 250 requests at once on the link, every visitor's
   together (the backend's limit, as the HTTP/2 server; Go's own default,
@@ -204,8 +206,15 @@ operations) → the image cache (`/api/v1/images/`) → the link.
   `X-Real-Ip`; `Upgrade` and `Connection` (nothing upgrades through the
   link). Each name goes whatever number of times it was sent.
 - Set by the gateway: `Overfin-Client-Addr` (section 12);
-  `X-Forwarded-Proto: https` when the visitor came over TLS.
-- The backend sees `Host: backend` on every request.
+  `X-Forwarded-Proto: https` when the visitor came over TLS, to the
+  gateway or to a trusted proxy in front of it that says so (its last
+  `X-Forwarded-Proto`).
+- The backend sees the visitor's `Host` (the gateway's own requests say
+  `backend`).
+- A request's body (64 KiB at most, the backend's cap) is read whole at
+  the gateway, within 20 s, before the request takes a stream: a visitor
+  sending a byte now and then holds its own connection only (a 400
+  otherwise).
 - The backend never reads a visitor's bytes: the gateway reads the request
   once and writes it again over HTTP/2, so the two can't split a request
   differently (no smuggling between them).

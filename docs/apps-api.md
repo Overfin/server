@@ -39,7 +39,9 @@ otherwise; each with the `categories` it fits, by what TMDB says of it, as
 `GET /apps/v1/categories` lists them).
 Sorting: `sort=score` (keys with the value only) or `name`, `order=asc` or
 `desc`; a list (`list=`) without `sort` keeps its own order. Pages of `limit` rows (100 by default, at most 1000); the next one
-at `cursor=` what `next` says. An app that frees space (such as Overtide)
+at `cursor=` what `next` says, unchanged: it names the last title given,
+so a list that changes between pages (a title gone, a score moved) skips
+or repeats none. An app that frees space (such as Overtide)
 asks for the least valuable titles the libraries have, as above; an app
 that adds titles (such as Overtide), for `list=suggestions`.
 
@@ -101,6 +103,9 @@ the accounts that watched some of it, `favorites` the profiles that keep
 it as a favorite. Every title someone watched is listed,
 and `changedAt` is only the day (midnight UTC). With `since`, only the
 titles changed on that day or later.
+
+With `since`, totals going down count as changes too (a favorite taken
+off, plays forgotten): a title nobody watches any more comes with zeros.
 
 With **what came and went**, an app that removes titles also reads the
 **measures** (`GET /apps/v1/measures`: over the last 90 days, how much of
