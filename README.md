@@ -12,7 +12,7 @@ a Jellyfin account.
   <img src="docs/screenshots/phone.jpg" alt="The home page on a phone" width="24%">
 </p>
 <p>
-  <img src="docs/screenshots/film.jpg" alt="A series' page: poster, logo, rating, play and list buttons, its seasons" width="48%">
+  <img src="docs/screenshots/film.jpg" alt="A film's page: poster, logo, rating, play and list buttons, its cast" width="48%">
   <img src="docs/screenshots/library.jpg" alt="A category: its genres to choose from, recently added, and a row per genre" width="48%">
 </p>
 
