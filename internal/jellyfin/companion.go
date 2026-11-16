@@ -27,7 +27,8 @@ func (c *Client) PluginInfo(ctx context.Context, admin Auth) (plugin, server str
 }
 
 // SubtitleStretch fetches one subtitle track of a version between two
-// times (seconds, the file's own) from Overfin's plugin, which reads the
+// times (seconds from the file's start; a Matroska file's own) from
+// Overfin's plugin, which reads the
 // file from there: text as WebVTT, pictures (PGS) as a .sup stream. item,
 // source and index come from Overfin's own stream state; anything larger
 // than max bytes is refused.
