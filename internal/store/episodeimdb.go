@@ -19,6 +19,9 @@ type EpisodeToLink struct {
 // for those it gave none, since noneBefore (TMDB often adds it a while
 // after an episode airs): never asked first, then the oldest. An episode
 // that hasn't aired has no IMDb ID to give yet.
+// An episode TMDB gave no IMDb ID is asked again sooner (noneBefore) only
+// within a year of airing, when TMDB may still add it; an older one waits
+// like the rest (before): asked monthly, it would be asked forever.
 func (s *Store) EpisodesToLink(ctx context.Context, now, before, noneBefore time.Time, limit int) ([]EpisodeToLink, error) {
 	var out []EpisodeToLink
 	err := s.each(ctx, func(rows *sql.Rows) error {
@@ -30,13 +33,14 @@ func (s *Store) EpisodesToLink(ctx context.Context, now, before, noneBefore time
 		return nil
 	}, `SELECT o.series, o.tmdb_id, o.season, o.episode FROM own_episodes o
 		LEFT JOIN episode_imdb i ON i.series = o.series AND i.tmdb_id = o.tmdb_id
-		WHERE (i.checked_at IS NULL OR i.checked_at < ? OR (i.imdb IS NULL AND i.checked_at < ?))
+		WHERE (i.checked_at IS NULL OR i.checked_at < ? OR (i.imdb IS NULL AND i.checked_at < ?
+				AND EXISTS (SELECT 1 FROM catalog_episodes r WHERE r.series = o.series AND r.tmdb_id = o.tmdb_id AND r.air_date >= ?)))
 			AND EXISTS (SELECT 1 FROM catalog_items c WHERE c.kind = 'series' AND c.tmdb = o.series)
 			AND EXISTS (SELECT 1 FROM catalog_episodes e WHERE e.series = o.series AND e.tmdb_id = o.tmdb_id
 				AND e.air_date IS NOT NULL AND e.air_date <= ?)
 		GROUP BY o.series, o.tmdb_id
 		ORDER BY i.checked_at IS NOT NULL, i.checked_at, o.series, o.season, o.episode
-		LIMIT ?`, before.Unix(), noneBefore.Unix(), now.UTC().Format(time.DateOnly), limit)
+		LIMIT ?`, before.Unix(), noneBefore.Unix(), now.UTC().AddDate(-1, 0, 0).Format(time.DateOnly), now.UTC().Format(time.DateOnly), limit)
 	return out, err
 }
 

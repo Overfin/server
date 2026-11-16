@@ -76,14 +76,15 @@ func TestEpisodeIMDb(t *testing.T) {
 	if err := job.Once(ctx); err != nil || src.asked != 3 {
 		t.Errorf("again: asked %d, %v", src.asked, err)
 	}
-	// An episode TMDB gave none (the third) is asked again sooner; the
-	// others once TMDB's data is old, by when the fourth has aired.
+	// An episode TMDB gave none (the third) is asked again sooner only
+	// within a year of airing: this one aired in 2011, so it waits like
+	// the others, until TMDB's data is old, by when the fourth has aired.
 	job.now = func() time.Time { return time.Now().Add(noneAgain + time.Hour) }
-	if err := job.Once(ctx); err != nil || src.asked != 4 {
-		t.Errorf("none again: asked %d, %v", src.asked, err)
+	if err := job.Once(ctx); err != nil || src.asked != 3 {
+		t.Errorf("none again, long aired: asked %d, %v", src.asked, err)
 	}
 	job.now = func() time.Time { return time.Now().Add(TitlesFresh + time.Hour) }
-	if err := job.Once(ctx); err != nil || src.asked != 8 {
+	if err := job.Once(ctx); err != nil || src.asked != 7 {
 		t.Errorf("once old: asked %d, %v: %v", src.asked, err, src.log)
 	}
 	job.now = nil
