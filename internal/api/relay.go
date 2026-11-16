@@ -5,10 +5,12 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"image"
 	_ "image/jpeg" // the sheets of seek-bar previews
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -210,7 +212,7 @@ func (s Stream) relayGet(ctx context.Context, st *playback.Stream, path, rangeHe
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rm.Base+path, nil)
 	if err != nil {
-		return nil, problem.NotFound, err
+		return nil, problem.NotFound, withoutURL(err)
 	}
 	if rangeHeader != "" {
 		req.Header.Set("Range", rangeHeader)
@@ -227,9 +229,20 @@ func (s Stream) relayGet(ctx context.Context, st *playback.Stream, path, rangeHe
 		}
 	}
 	if err != nil {
-		return nil, problem.ServerBusy, err
+		return nil, problem.ServerBusy, withoutURL(err)
 	}
 	return res, "", nil
+}
+
+// withoutURL is err without the URL Go's HTTP client puts in it: a paired
+// server's stream URL holds its ticket, which never goes into logs (MSFP
+// media, section 1).
+func withoutURL(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return fmt.Errorf("%s: %w", ue.Op, ue.Err)
+	}
+	return err
 }
 
 // maxPeerSheet bounds a paired server's sheet of seek-bar previews, as

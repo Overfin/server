@@ -1,6 +1,10 @@
 package api
 
-import "testing"
+import (
+	"net/http"
+	"strings"
+	"testing"
+)
 
 // A paired server's playlist passes only when it names files of the same
 // stream, by name: no path, no other server (rule 14).
@@ -53,5 +57,17 @@ func TestRelayURLs(t *testing.T) {
 		if _, ok := keepPeerURLs(&bad, "https://b.example.org"); ok {
 			t.Errorf("accepted %s", u)
 		}
+	}
+}
+
+// A failed relay's error, which gets logged, never holds the paired
+// server's stream URL: it carries the ticket (MSFP media).
+func TestRelayErrorWithoutTicket(t *testing.T) {
+	_, err := http.Get("http://127.0.0.1:1/api/v1/stream/SECRETTICKET/file")
+	if err == nil || !strings.Contains(err.Error(), "SECRETTICKET") {
+		t.Fatalf("Go's error should hold the URL: %v", err)
+	}
+	if got := withoutURL(err).Error(); strings.Contains(got, "SECRETTICKET") || !strings.Contains(got, "Get") {
+		t.Errorf("logged as %q", got)
 	}
 }
