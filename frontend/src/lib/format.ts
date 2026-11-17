@@ -12,12 +12,15 @@ export function toLocalInput(iso?: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** numberIn reads a number field. Empty, or not a number, it refuses with
- * a message naming the field, so nothing is saved as 0 or "no limit" by
- * mistake; zero, when given, says what 0 means there. */
+/** numberIn reads a number field: the panel's are all whole numbers.
+ * Empty, not a number, or with decimals, it refuses with a message naming
+ * the field, so nothing is saved as 0 or "no limit" by mistake, and the
+ * server isn't sent what it can't read; zero, when given, says what 0
+ * means there. */
 export function numberIn(value: unknown, label: string, zero?: string): number {
   const v = String(value ?? '').trim();
   if (v === '' || !Number.isFinite(Number(v))) throw new Error(`${label}: enter a number${zero ? ` (${zero})` : ''}.`);
+  if (!Number.isInteger(Number(v))) throw new Error(`${label}: enter a whole number, without decimals.`);
   return Number(v);
 }
 

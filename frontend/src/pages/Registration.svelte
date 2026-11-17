@@ -6,6 +6,7 @@
   import { PageHead, Card, Setting, Status, Busy, Loading } from '@overfin/ui';
   import { api } from '../lib/api';
   import { message, numberIn } from '../lib/format';
+  import { unsaved } from '../lib/router.svelte';
   import type { FeaturesState, Registration } from '../lib/types-people';
   import Invites from '../parts/people/Invites.svelte';
 
@@ -22,6 +23,10 @@
   let special = $state(false);
   // With an identity provider: accounts only by invitation.
   let only = $state(false);
+
+  // Leaving with changes not saved asks first.
+  $effect(() => unsaved(() => reg ? String(minLength) !== String(reg.rules.minLength) || digit !== reg.rules.digit || special !== reg.rules.special || copiedSetup !== reg.copiedSetup
+    : !!features && only !== (features.features.modules?.invites?.required === 'on')));
 
   async function load() {
     reg = await api<Registration>('GET', '/admin/api/registration').catch(() => null);
@@ -85,11 +90,11 @@
     </Card>
     {#if reg.mail}
       <Card title="Setup links you copy" description="Someone you add chooses their password from a setup link. Emailed by Overfin, opening it proves their address; copied and handed over by you, it doesn't, so they confirm it by email.">
-        <Setting label="Until their address is confirmed" hint="Reminder: they sign in at once and the site asks them to confirm it. Wait: they confirm it before signing in, so a mistyped address keeps them out until you correct it.">
+        <Setting label="Until their address is confirmed" hint="Sign in, reminded: they sign in at once and the site asks them to confirm it. Wait to sign in: they confirm it before signing in, so a mistyped address keeps them out until you correct it.">
           {#snippet children(ids)}
             <select bind:value={copiedSetup} aria-labelledby={ids.label} aria-describedby={ids.hint}>
-              <option value="reminder">They use the site, with a reminder</option>
-              <option value="hold">They wait until it's confirmed</option>
+              <option value="reminder">Sign in, reminded</option>
+              <option value="hold">Wait to sign in</option>
             </select>
           {/snippet}
         </Setting>
