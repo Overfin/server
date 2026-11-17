@@ -5,6 +5,7 @@
   import { Card, Setting, Status, Busy, ask, toast } from '@overfin/ui';
   import { api } from '../../lib/api';
   import { message } from '../../lib/format';
+  import { unsaved } from '../../lib/router.svelte';
   import type { Languages, Line } from '../../lib/types-server';
 
   let { l }: { l: Languages } = $props();
@@ -16,6 +17,7 @@
   // svelte-ignore state_referenced_locally
   let def = $state(l.default);
   let st = $state<Line>({ text: '', kind: '' });
+  $effect(() => unsaved(() => def !== saved.default || [...offered].sort().join() !== [...saved.offered].sort().join()));
   // The default is one of those ticked: unticked, the first ticked.
   const choices = $derived(l.choices.filter((c) => offered.includes(c.tag)));
 

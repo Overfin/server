@@ -4,6 +4,7 @@
   import { Card, Badge, Setting, Status, Busy, toast } from '@overfin/ui';
   import { api } from '../../lib/api';
   import { message } from '../../lib/format';
+  import { unsaved } from '../../lib/router.svelte';
   import type { Line, Previews } from '../../lib/types-server';
 
   let { pv, reload }: { pv: Previews; reload: () => void } = $props();
@@ -11,10 +12,14 @@
   // svelte-ignore state_referenced_locally
   let on = $state(pv.on);
   let st = $state<Line>({ text: '', kind: '' });
+  $effect(() => unsaved(() => on !== pv.on));
 
   async function save() {
     st = { text: '', kind: '' }; // an earlier failure's line goes
-    if (on === pv.on) return;
+    if (on === pv.on) {
+      toast('Nothing to save.');
+      return;
+    }
     const out = await api<Previews>('PUT', '/admin/api/previews', { on });
     const who = out.own ? 'Overfin' : 'Jellyfin';
     toast(out.on ? `${who} makes previews now.` : `${who} makes no more previews.`);
