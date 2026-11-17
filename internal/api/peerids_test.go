@@ -97,14 +97,12 @@ func TestPeerTracksOfTheCopy(t *testing.T) {
 	if status != 200 || s.AudioTrack != "a1" || s.SubtitleTrack != "" {
 		t.Fatalf("tracks the copy doesn't have: %d %+v", status, s)
 	}
-	for _, c := range x.fake.calls {
-		if strings.Contains(c, "audio=9") {
-			t.Fatalf("Jellyfin heard of a9: %v", x.fake.calls)
-		}
+	if x.fake.called("PlaybackInfo audio=9") != 0 {
+		t.Fatal("Jellyfin heard of a9")
 	}
 	s, status = x.play(map[string]any{"audioTrack": "a2", "subtitleTrack": "s3"})
 	if status != 200 || s.AudioTrack != "a2" || s.SubtitleTrack != "s3" || x.fake.called("PlaybackInfo audio=2") == 0 {
-		t.Fatalf("the copy's tracks: %d %+v %v", status, s, x.fake.calls)
+		t.Fatalf("the copy's tracks: %d %+v", status, s)
 	}
 	// The forced track, as subtitles; off.
 	if s, _ = x.play(map[string]any{"subtitleTrack": "s5"}); s.SubtitleTrack != "s5" {
@@ -115,5 +113,32 @@ func TestPeerTracksOfTheCopy(t *testing.T) {
 	}
 	if _, status = x.play(map[string]any{"audioTrack": "s1"}); status != 400 {
 		t.Fatalf("malformed: %d", status)
+	}
+}
+
+// A paired server's capabilities in another case are unknown values
+// (MSFP playback, section 2.1): "H264" lets nothing play as it is. This
+// server's own site is read leniently.
+func TestPeerCapabilitiesExactCase(t *testing.T) {
+	x := newPeerPlayer(t)
+	direct := func() string {
+		t.Helper()
+		x.fake.mu.Lock()
+		defer x.fake.mu.Unlock()
+		b, _ := json.Marshal(x.fake.lastAsked["DeviceProfile"].(map[string]any)["DirectPlayProfiles"])
+		return string(b)
+	}
+	caps := func(container, codec string) map[string]any {
+		return map[string]any{"capabilities": map[string]any{"containers": []string{container}, "videoCodecs": []string{codec}}}
+	}
+	if _, status := x.play(caps("MKV", "H264")); status != 200 || strings.Contains(strings.ToLower(direct()), "h264") {
+		t.Fatalf("another case: %d %s", status, direct())
+	}
+	if _, status := x.play(caps("mkv", "h264")); status != 200 || !strings.Contains(direct(), `"VideoCodec":"h264"`) {
+		t.Fatalf("exact: %d %s", status, direct())
+	}
+	code, _ := post(t, x.srv, "/api/v1/playback", `{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{"containers":["MKV"],"videoCodecs":["H264"]}}`)
+	if code != 201 || !strings.Contains(direct(), `"VideoCodec":"h264"`) {
+		t.Fatalf("the site's own: %d %s", code, direct())
 	}
 }

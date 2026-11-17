@@ -317,3 +317,14 @@ func TestCapabilitiesForPeer(t *testing.T) {
 		t.Errorf("a small screen: %d", z.MaxHeight)
 	}
 }
+
+// A paired server's capabilities count only as MSFP writes them: exact
+// case, known values, each once.
+func TestCapabilitiesExact(t *testing.T) {
+	c := Capabilities{Containers: []string{"MP4", "mp4", "webm", "mp4"}, VideoCodecs: []string{"H264", "hevc"},
+		AudioCodecs: []string{"AAC", "opus"}, HDR: []string{"HDR10", "hlg"}, MaxHeight: 1080}.Exact()
+	if strings.Join(c.Containers, ",") != "mp4,webm" || strings.Join(c.VideoCodecs, ",") != "hevc" ||
+		strings.Join(c.AudioCodecs, ",") != "opus" || strings.Join(c.HDR, ",") != "hlg" || c.MaxHeight != 1080 {
+		t.Errorf("exact: %+v", c)
+	}
+}

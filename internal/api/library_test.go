@@ -62,6 +62,7 @@ type fakeJellyfin struct {
 	badAuth   int
 	lastQury  url.Values
 	calls     []string       // playstate and encoding calls, in order
+	lastAsked map[string]any // the body of the last PlaybackInfo
 	lastToken string         // the token of the last library call
 	pgs       []byte         // the PGS track it extracts (subtitle 4)
 	stretches []string       // subtitle stretches asked of the plugin: "track from to token"
@@ -266,6 +267,7 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if n, ok := asked["AudioStreamIndex"].(float64); ok && asked["MediaSourceId"] == fmt.Sprintf("%032x", 1) {
 			streamed = int(n)
 		}
+		f.lastAsked = asked
 		f.calls = append(f.calls, fmt.Sprintf("PlaybackInfo audio=%v subtitles=%v streamed=%d", asked["AudioStreamIndex"], asked["SubtitleStreamIndex"], streamed))
 		if f.notPlayable {
 			json.NewEncoder(w).Encode(map[string]any{"ErrorCode": "NoCompatibleStream"})

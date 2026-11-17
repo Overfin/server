@@ -123,7 +123,8 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 		kbps = 120_000
 	}
 	pr.MaxStreamingBitrate = kbps * 1000
-	pr.DeviceProfile = playback.DeviceProfile(req.Capabilities, pr.MaxStreamingBitrate)
+	// Its values exactly as MSFP writes them; another case is unknown.
+	pr.DeviceProfile = playback.DeviceProfile(req.Capabilities.Exact(), pr.MaxStreamingBitrate)
 
 	// The pairing's streams all taken: refused before asking Jellyfin
 	// anything (Admit refuses it again, under its lock).

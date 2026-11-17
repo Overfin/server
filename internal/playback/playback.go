@@ -60,6 +60,28 @@ func known(values, allowed []string) []string {
 	return out
 }
 
+// Exact keeps, of capabilities a paired server sent, only the values
+// written exactly as MSFP lists them (playback section 2.1): "H264" is an
+// unknown value there, ignored. This server's own apps are read more
+// leniently (DeviceProfile lowercases): the site and the app send
+// lowercase anyway.
+func (c Capabilities) Exact() Capabilities {
+	exact := func(values, allowed []string) []string {
+		var out []string
+		for _, v := range values {
+			if slices.Contains(allowed, v) && !slices.Contains(out, v) {
+				out = append(out, v)
+			}
+		}
+		return out
+	}
+	c.Containers = exact(c.Containers, knownContainers)
+	c.VideoCodecs = exact(c.VideoCodecs, knownVideoCodecs)
+	c.AudioCodecs = exact(c.AudioCodecs, knownAudioCodecs)
+	c.HDR = exact(c.HDR, knownHDR)
+	return c
+}
+
 // DeviceProfile translates capabilities into Jellyfin's device profile.
 // Whatever the client claims, transcoding to H.264 and AAC in HLS stays
 // available as the fallback every browser can play.
