@@ -1,10 +1,14 @@
 package federation
 
 import (
+	"bytes"
+	"compress/gzip"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/overfin/server/internal/outbound"
 )
 
 // A route that crashes frees its slots, and its refusal is signed: an
@@ -101,5 +105,51 @@ func TestEndedForgottenOnTheEndingSideOnly(t *testing.T) {
 	}
 	if forgotten, _ := b.s.Store.PeerForgotten(ctx, aOnB.PublicKey); forgotten {
 		t.Error("B, told it ended, remembers A as forgotten")
+	}
+}
+
+// No content coding (MSFP section 3): peers are never asked for one, and
+// an answer sent coded is refused like a badly signed one; "identity" is
+// none.
+func TestNoContentCoding(t *testing.T) {
+	if !outbound.Transport().DisableCompression {
+		t.Error("the transport asks for gzip")
+	}
+	_, b, _, aOnB := pairedPair(t)
+	k := NewKey()
+	coding := ""
+	var asked []string
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.Header.Get("Accept-Encoding"))
+		body := []byte(`{"state":"paired"}`)
+		if coding == "gzip" {
+			var z bytes.Buffer
+			zw := gzip.NewWriter(&z)
+			_, _ = zw.Write(body)
+			_ = zw.Close()
+			body = z.Bytes()
+		}
+		if coding != "" {
+			w.Header().Set("Content-Encoding", coding)
+		}
+		w.Header().Set(HeaderSignature, SignResponse(k, r.Header.Get(HeaderNonce), 200, body))
+		_, _ = w.Write(body)
+	}))
+	defer fake.Close()
+	b.s.HTTP = NewHTTPClient()
+	peer := *aOnB
+	peer.Address, peer.PublicKey = fake.URL, k.Public()
+	var answer helloMessage
+	for c, ok := range map[string]bool{"": true, "identity": true, "gzip": false, "br": false} {
+		coding = c
+		_, err := b.s.call(t.Context(), &peer, helloPath, helloMessage{State: "paired"}, &answer)
+		if (err == nil) != ok {
+			t.Errorf("Content-Encoding %q: %v", c, err)
+		}
+	}
+	for _, a := range asked {
+		if a != "" {
+			t.Errorf("asked with Accept-Encoding %q", a)
+		}
 	}
 }

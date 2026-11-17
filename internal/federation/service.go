@@ -582,6 +582,12 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 		return Reply{}, fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
 	defer res.Body.Close()
+	// No content coding (MSFP section 3): an answer sent coded, or
+	// unpacked on the way (a client that asked for gzip), is refused
+	// like a badly signed one.
+	if ce := res.Header.Get("Content-Encoding"); res.Uncompressed || ce != "" && !strings.EqualFold(ce, "identity") {
+		return Reply{}, fmt.Errorf("%w: a coded answer", ErrUnreachable)
+	}
 	answer, err := io.ReadAll(io.LimitReader(res.Body, maxAnswer))
 	if err != nil {
 		return Reply{}, fmt.Errorf("%w: %v", ErrUnreachable, err)

@@ -321,6 +321,9 @@ func TestRelayHoles(t *testing.T) {
 				w.Header().Set("Content-Encoding", "gzip")
 				w.Header().Set("Content-Length", strconv.Itoa(gz.Len()))
 				_, _ = w.Write(gz.Bytes())
+			case "ident.ts":
+				w.Header().Set("Content-Encoding", "identity")
+				_, _ = w.Write([]byte{0x47, 0, 0, 0})
 			case "whole.ts":
 				w.Header().Set("Content-Range", "bytes 5-9/10")
 				_, _ = w.Write([]byte("0123456789"))
@@ -368,6 +371,9 @@ func TestRelayHoles(t *testing.T) {
 	}
 	if _, ok := encodings.Load("gzip"); ok {
 		t.Errorf("A asked B for gzip")
+	}
+	if res, got := get("GET", "ident.ts", ""); res.StatusCode != 200 || len(got) != 4 {
+		t.Errorf("Content-Encoding identity: %d", res.StatusCode)
 	}
 	if res, _ := get("GET", "typed.ts", ""); res.Header.Get("Content-Type") != "application/octet-stream" {
 		t.Errorf("a playlist's type passed on: %q", res.Header.Get("Content-Type"))
@@ -546,5 +552,26 @@ func TestOwnHeadReadsNothing(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != 200 {
 		t.Errorf("HEAD: %d", res.StatusCode)
+	}
+}
+
+// Federation answers are never coded, whatever the caller asks (MSFP
+// section 3, "Content codings: none").
+func TestFederationAnswersUncoded(t *testing.T) {
+	x := pairForPlay(t, true)
+	for _, path := range []string{"/api/v1/federation/hello", "/api/v1/federation/titles", "/api/v1/federation/nothing"} {
+		req, _ := http.NewRequest("POST", x.srvB.URL+path, strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept-Encoding", "gzip, br")
+		tr := x.srvB.Client().Transport.(*http.Transport).Clone()
+		tr.DisableCompression = true
+		res, err := (&http.Client{Transport: tr}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if ce := res.Header.Get("Content-Encoding"); ce != "" {
+			t.Errorf("%s answered coded: %s", path, ce)
+		}
 	}
 }

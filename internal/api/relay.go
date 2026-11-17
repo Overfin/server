@@ -173,7 +173,7 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 		return
 	}
 	defer res.Body.Close()
-	if res.Header.Get("Content-Encoding") != "" {
+	if ce := res.Header.Get("Content-Encoding"); res.Uncompressed || ce != "" && !strings.EqualFold(ce, "identity") {
 		// Asked for none: what is sent is the bytes themselves.
 		l.Logger.Warn("refused a paired server's stream: encoded", "playback", st.ID)
 		problem.Send(w, problem.NotFound, "")
