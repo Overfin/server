@@ -127,15 +127,15 @@
     {/each}
   </ul>
 {/if}
-{#if t.kind === 'series' && t.tmdb}
+<!-- With TMDB's own order alone there is nothing to choose: no section,
+     unless files sit at numbers it doesn't have. -->
+{#if t.kind === 'series' && t.tmdb && (ordersFailure || (orders && (orders.orders.length > 1 || orders.unplaced)))}
   <h3>Episode order</h3>
   {#if orders?.unplaced}<p class="hint">{`${orders.unplaced} ${orders.unplaced === 1 ? 'file is' : 'files are'} at numbers TMDB's order doesn't have: no order can place ${orders.unplaced === 1 ? 'it' : 'them'}.`}</p>{/if}
   <ul class="list top">
     {#if ordersFailure}
       <li class="error">{ordersFailure}</li>
-    {:else if !orders}
-      <li class="hint">Reading TMDB…</li>
-    {:else}
+    {:else if orders}
       {#each orders.orders as o (o.id)}
         <li class="order">
           <div class="order-text">
