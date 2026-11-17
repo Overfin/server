@@ -507,7 +507,16 @@ func (s *Service) call(ctx context.Context, p *store.Peer, path string, in, out 
 	}
 	r, err := s.callOnce(ctx, p, path, in, out)
 	if path != pairPath && ctx.Err() == nil {
-		lim.heard(key, err == nil, r.Status, r.RetryAfter, lim.now())
+		status := r.Status
+		if path == playPath && err == nil && r.RetryAfter == 0 {
+			// play's own refusal (its transcodes all taken: a signed
+			// 503 without retryAfter) is an answer about that title,
+			// not a server overloaded: the viewer is told "busy now",
+			// and the other calls (other playbacks' progress among them)
+			// don't hold off for it.
+			status = http.StatusOK
+		}
+		lim.heard(key, err == nil, status, r.RetryAfter, lim.now())
 	}
 	return r, err
 }

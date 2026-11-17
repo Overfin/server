@@ -447,8 +447,11 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 		return
 	}
 	if err != nil {
+		// No answer, or none signed (its host's own 429 among them):
+		// busy for now, as MSFP core section 8.3 says; only its signed
+		// refusal says a title isn't playable.
 		pb.Logger.Warn("a paired server couldn't start a playback", "peer", peer.Name, "err", err)
-		problem.Send(w, problem.NotPlayable, "")
+		problem.Send(w, problem.ServerBusy, "")
 		return
 	}
 	if reply.Status != http.StatusOK {

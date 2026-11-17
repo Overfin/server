@@ -475,3 +475,24 @@ func publicIDs(t *testing.T, owner *store.Store, ids ...string) []string {
 	}
 	return out
 }
+
+// B's host refusing A's play unsigned (a gateway's plain 429), or B not
+// answering, is busy for now to A's viewer, not "can't be played".
+func TestPeerPlayUnansweredIsBusy(t *testing.T) {
+	x := pairForPlayWith(t, true, func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v1/federation/play" {
+				w.Header().Set("Retry-After", "5")
+				http.Error(w, "Too many requests. Try again in a moment.", http.StatusTooManyRequests)
+				return
+			}
+			h.ServeHTTP(w, r)
+		})
+	})
+	status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
+	var p struct{ Type string }
+	_ = json.Unmarshal([]byte(body), &p)
+	if status != http.StatusServiceUnavailable || p.Type != "server-busy" {
+		t.Fatalf("an unsigned 429 from B's host: %d %s", status, p.Type)
+	}
+}

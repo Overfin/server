@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"sync"
 	"testing"
@@ -263,5 +264,37 @@ func TestAddressLimitIPv6AndMemory(t *testing.T) {
 	}
 	if n := len(l.addrs); n > maxAddrBuckets {
 		t.Errorf("%d addresses remembered", n)
+	}
+}
+
+// play refused by the peer's own rules (its transcodes all taken: a
+// signed 503 without retryAfter) is an answer: the viewer is told busy,
+// and the other calls, in the background, don't hold off for it.
+func TestPlayBusyIsAnAnswer(t *testing.T) {
+	ctx := context.Background()
+	_, b, _, aOnB := pairedPair(t)
+	k := NewKey()
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := []byte(`{"type":"server-busy","title":"busy","status":503}`)
+		w.Header().Set(HeaderSignature, SignResponse(k, r.Header.Get(HeaderNonce), 503, body))
+		w.WriteHeader(503)
+		_, _ = w.Write(body)
+	}))
+	defer fake.Close()
+	peer := *aOnB
+	peer.Address, peer.PublicKey = fake.URL, k.Public()
+	for range 5 {
+		if r, err := b.s.call(ctx, &peer, playPath, struct{}{}, &struct{}{}); err != nil || r.Status != 503 {
+			t.Fatalf("play: %+v %v", r, err)
+		}
+	}
+	var answer librariesAnswer
+	if _, err := b.s.call(Background(ctx), &peer, "/api/v1/federation/libraries", struct{}{}, &answer); errors.Is(err, ErrBackingOff) {
+		t.Fatalf("background calls held off after play's refusals: %v", err)
+	}
+	// Another call's busy without retryAfter is the server overloaded:
+	// background calls hold off.
+	if _, err := b.s.call(Background(ctx), &peer, "/api/v1/federation/libraries", struct{}{}, &answer); !errors.Is(err, ErrBackingOff) {
+		t.Fatalf("background calls after a busy libraries: %v", err)
 	}
 }
