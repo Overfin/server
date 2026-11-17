@@ -162,7 +162,17 @@ type built struct {
 	fed *federation.Service
 }
 
+// leftovers stops, once per process, the playbacks on paired servers a
+// former run of it left (Playback.StopLeftovers).
+var leftovers sync.Once
+
 func build(cfg *config.Config, sh *shared) (*built, error) {
+	// Checked at every build, a reload's too, not only at start.
+	if backendMode {
+		if err := backendIdentity(cfg); err != nil {
+			return nil, err
+		}
+	}
 	logger, db, k := sh.logger, sh.db, sh.keys
 	if cfg.Mail.Enabled() {
 		sh.mail.Store(senderFor(cfg.Mail, cfg.Secrets.MailPassword, sh.db))
@@ -295,8 +305,10 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 		b.fed, fedNow = fed, fed
 		fed.PeerChanged = pb.PeerChanged
 		plugins = append(plugins, federation.Plugin{S: fed})
-		// What this server played on paired servers before it started.
-		go pb.StopLeftovers(context.Background())
+		// What this server played on paired servers before it started:
+		// once, at the first build with federation, before anyone plays
+		// (later builds, a reload or a panel save, have live playbacks).
+		leftovers.Do(func() { pb.StopLeftovers(context.Background()) })
 	}
 	if cfg.Plugins.Enabled("library") {
 		plugins = append(plugins, lib)
