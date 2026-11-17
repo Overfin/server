@@ -102,3 +102,34 @@ func TestLocalLoginTries(t *testing.T) {
 		t.Errorf("another address: %d", rec.Code)
 	}
 }
+
+// The sign-in page: its icon, the panel's, reachable signed out; the
+// cursor in the username at first, in the password after a wrong one (the
+// username is kept); the form no wider than a phone.
+func TestLocalLoginPage(t *testing.T) {
+	h := localPanel(t)
+	get := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", path, nil)
+		req.RemoteAddr = "192.168.1.5:4000"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	first := get("/admin/login").Body.String()
+	if !strings.Contains(first, `<link rel="icon" href="/admin/logo.svg">`) {
+		t.Errorf("no icon: %s", first)
+	}
+	if rec := get("/admin/logo.svg"); rec.Code != 200 {
+		t.Errorf("the icon signed out: %d", rec.Code)
+	}
+	if !strings.Contains(first, `required autofocus value=""`) || strings.Contains(first, `current-password" required autofocus`) {
+		t.Errorf("at first, the cursor isn't in the username: %s", first)
+	}
+	wrong := localSignInTry(h, "192.168.1.6:4000", "operator", "wrong-pass-2026!", "").Body.String()
+	if !strings.Contains(wrong, `current-password" required autofocus`) || strings.Contains(wrong, `required autofocus value=`) {
+		t.Errorf("after a wrong password, the cursor isn't in the password: %s", wrong)
+	}
+	if css := get("/admin/login.css").Body.String(); !strings.Contains(css, "form{box-sizing:border-box;") {
+		t.Errorf("the form's width doesn't count its padding: %s", css)
+	}
+}

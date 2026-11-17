@@ -67,13 +67,13 @@ func (l *localTries) failed(addr netip.Addr, now time.Time) {
 
 var localPage = template.Must(template.New("login").Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Control panel</title><link rel="stylesheet" href="/admin/theme.css">
+<title>Control panel</title><link rel="icon" href="/admin/logo.svg"><link rel="stylesheet" href="/admin/theme.css">
 <link rel="stylesheet" href="/admin/login.css"></head><body>
 <form method="post" action="/admin/login">
 <h1>Control panel</h1>
 {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
-<label>Username<input name="username" autocomplete="username" spellcheck="false" required autofocus value="{{.Username}}"></label>
-<label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+<label>Username<input name="username" autocomplete="username" spellcheck="false" required{{if not .Username}} autofocus{{end}} value="{{.Username}}"></label>
+<label>Password<input name="password" type="password" autocomplete="current-password" required{{if .Username}} autofocus{{end}}></label>
 <input type="hidden" name="return" value="{{.Return}}">
 <button type="submit">Sign in</button>
 </form></body></html>`))
@@ -81,7 +81,7 @@ var localPage = template.Must(template.New("login").Parse(`<!doctype html>
 // localCSS is the sign-in form's look (the panel's policy allows no
 // inline style).
 const localCSS = `body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:system-ui,sans-serif;background:var(--bg,#f4f5f8);color:var(--text,#1c1d22)}
-form{width:min(22rem,calc(100vw - 2rem));display:grid;gap:.9rem;padding:1.5rem;border-radius:12px;background:var(--panel,#fff);border:1px solid var(--border,#e2e5eb);box-shadow:var(--shadow-s,0 1px 3px #0002)}
+form{box-sizing:border-box;width:min(22rem,calc(100vw - 2rem));display:grid;gap:.9rem;padding:1.5rem;border-radius:12px;background:var(--panel,#fff);border:1px solid var(--border,#e2e5eb);box-shadow:var(--shadow-s,0 1px 3px #0002)}
 h1{margin:0 0 .3rem;font-size:1.3rem}label{display:grid;gap:.3rem;font-size:.95rem}
 input{font:inherit;color:inherit;background:var(--bg,#fff);padding:.55rem .7rem;border:1px solid var(--border-strong,#8884);border-radius:8px}
 button{font:inherit;font-weight:600;padding:.6rem;border:0;border-radius:8px;background:var(--accent,#3b6fd8);color:var(--on-accent,#fff);cursor:pointer}
