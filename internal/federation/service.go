@@ -1158,6 +1158,11 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 		case r.Status != http.StatusOK:
 			return 0, ErrUnreachable
 		}
+		if len(answer.Titles)+len(answer.Gone) > titlesPage {
+			// Past what a page holds (MSFP catalog, section 3.1): a peer
+			// filling this server's database, not one paging.
+			return 0, fmt.Errorf("%w: a page of more than %d titles", ErrUnreachable, titlesPage)
+		}
 		if first {
 			// The first page says which kind of answer this reading is, and
 			// up to which change: later pages are read at the same one.
@@ -1276,7 +1281,7 @@ func cleanTags(tags []string) []string {
 		if len(out) == 12 {
 			break
 		}
-		if len(t) < 2 || len(t) > 12 || slices.Contains(out, t) || strings.IndexFunc(t, func(r rune) bool {
+		if len(t) < 2 || len(t) > 12 || slices.ContainsFunc(out, func(o string) bool { return strings.EqualFold(o, t) }) || strings.IndexFunc(t, func(r rune) bool {
 			return !(r == '-' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9')
 		}) >= 0 {
 			continue

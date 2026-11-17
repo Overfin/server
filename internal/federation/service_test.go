@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -554,4 +555,47 @@ func pub(t *testing.T, owner *server, ids ...string) []string {
 		out[i] = m[id]
 	}
 	return out
+}
+
+// A page of titles past what a page holds (MSFP catalog, section 3.1) is
+// a failed reading, nothing of it kept: a peer filling this server's
+// database, not one paging. Tags of the same language in another case
+// are kept once.
+func TestSyncTitlesPageTooLarge(t *testing.T) {
+	ctx := context.Background()
+	a, b, _, aOnB := pairedPair(t)
+	lib := pub(t, a, "films")[0]
+	k := NewKey()
+	var n atomic.Int64
+	n.Store(titlesPage + 1)
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body []byte
+		switch r.URL.Path {
+		case "/api/v1/federation/libraries":
+			body, _ = json.Marshal(map[string]any{"libraries": []map[string]string{{"id": lib, "name": "Films", "kind": "movies"}}})
+		default:
+			titles := []map[string]any{}
+			for i := range n.Load() {
+				titles = append(titles, map[string]any{"key": fmt.Sprintf("movie/tmdb/%d", i+1), "kind": "movie", "library": lib,
+					"audio": []string{"fr", "FR", "Fr-ca", "fr-CA"}})
+			}
+			body, _ = json.Marshal(map[string]any{"titles": titles})
+		}
+		w.Header().Set(HeaderSignature, SignResponse(k, r.Header.Get(HeaderNonce), 200, body))
+		_, _ = w.Write(body)
+	}))
+	defer fake.Close()
+	peer := *aOnB
+	peer.Address, peer.PublicKey = fake.URL, k.Public()
+	if got, err := b.s.SyncTitles(ctx, &peer); err == nil {
+		t.Fatalf("a page of %d titles read: %d", titlesPage+1, got)
+	}
+	n.Store(1)
+	if got, err := b.s.SyncTitles(ctx, &peer); err != nil || got != 1 {
+		t.Fatalf("one title: %d %v", got, err)
+	}
+	got, err := b.s.Store.TitlesOfPeer(ctx, peer.ID)
+	if err != nil || len(got) != 1 || len(got[0].Audio) != 2 {
+		t.Fatalf("kept: %+v %v", got, err)
+	}
 }
