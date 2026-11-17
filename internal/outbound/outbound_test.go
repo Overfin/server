@@ -49,7 +49,7 @@ func TestRefused(t *testing.T) {
 		"0.0.0.0": true, "::": true, "224.0.0.1": true, "ff02::1": true, "::ffff:127.0.0.1": true,
 		"::ffff:169.254.169.254": true, "0.1.2.3": true, "255.255.255.255": true, "240.0.0.1": true,
 		"::ffff:255.255.255.255": true,
-		"10.1.2.3": false, "192.168.1.5": false, "172.16.0.1": false, "fd00::1": false,
+		"10.1.2.3":               false, "192.168.1.5": false, "172.16.0.1": false, "fd00::1": false,
 		"192.0.2.1": false, "2001:db8::1": false,
 	} {
 		if got := Refused(netip.MustParseAddr(addr)); got != want {
