@@ -32,11 +32,16 @@ type peerJSON struct {
 	Offers int `json:"offers"`
 	Wants  int `json:"wants"`
 	Titles int `json:"titles"`
+	// Unusable: its key, as stored, isn't one MSFP accepts (of small
+	// order, say): no request from it, nor answer, is accepted. An honest
+	// server's key never is.
+	Unusable bool `json:"unusable,omitempty"`
 }
 
 func peerOf(p *store.Peer) peerJSON {
 	j := peerJSON{ID: p.ID, Name: p.Name, Address: p.Address, State: p.State,
-		Fingerprint: federation.Fingerprint(p.PublicKey), CreatedAt: p.Created.Format(time.RFC3339)}
+		Fingerprint: federation.Fingerprint(p.PublicKey), CreatedAt: p.Created.Format(time.RFC3339),
+		Unusable: !federation.ValidKey(p.PublicKey)}
 	if p.Paired != nil {
 		j.PairedAt = p.Paired.Format(time.RFC3339)
 	}

@@ -187,3 +187,33 @@ func TestSharingPanel(t *testing.T) {
 		t.Fatalf("A's count: %+v", s.Peers)
 	}
 }
+
+// A stored peer whose key MSFP refuses (one of small order: never an
+// honest server's) is shown unusable in the panel; an honest one isn't.
+func TestFederationPanelUnusableKey(t *testing.T) {
+	a, s := fedPanel(t, "A")
+	ctx := context.Background()
+	identity := make([]byte, 32)
+	identity[0] = 1
+	if _, err := s.Store.AddPeer(ctx, identity, "https://b.example.org", "B"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Store.AddPeer(ctx, federation.NewKey().Public(), "https://c.example.org", "C"); err != nil {
+		t.Fatal(err)
+	}
+	var st struct {
+		Peers []struct {
+			Name     string
+			Unusable bool
+		}
+	}
+	rec := a.do("GET", "/admin/api/federation", "", nil)
+	if json.Unmarshal(rec.Body.Bytes(), &st) != nil || len(st.Peers) != 2 {
+		t.Fatalf("state: %d %s", rec.Code, rec.Body)
+	}
+	for _, p := range st.Peers {
+		if p.Unusable != (p.Name == "B") {
+			t.Errorf("%s: unusable %v", p.Name, p.Unusable)
+		}
+	}
+}

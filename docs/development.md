@@ -19,9 +19,11 @@ Your own build in the compose stack: in the repository,
 `OVERFIN_BACKEND_IMAGE=overfin-backend:dev` in the .env beside compose.yaml,
 and `docker compose up -d`.
 
-Go with the standard library and three dependencies (a TOML parser, a
-pure-Go SQLite, and the Go team's golang.org/x/crypto for getting
-certificates from Let's Encrypt), besides overfin-web, which the official
+Go with the standard library and four dependencies (a TOML parser, a
+pure-Go SQLite, the Go team's golang.org/x/crypto for getting
+certificates from Let's Encrypt, and filippo.io/edwards25519, the group
+arithmetic inside the standard library's Ed25519, for MSFP's strict key
+and signature checks), besides overfin-web, which the official
 build bundles. CI runs formatting, vet, staticcheck, govulncheck, the tests
 with the race detector, and a check that the API specification matches the
 routes.

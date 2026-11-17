@@ -130,8 +130,7 @@ func SignResponse(k Key, nonce string, status int, body []byte) string {
 // requester knows the other server by.
 func CheckResponse(peer ed25519.PublicKey, nonce string, status int, body []byte, signature string) error {
 	sig, ok := decode64(signature, ed25519.SignatureSize)
-	if !ok || len(peer) != ed25519.PublicKeySize ||
-		!ed25519.Verify(peer, responseMessage(nonce, status, body), sig) {
+	if !ok || !verify(peer, responseMessage(nonce, status, body), sig) {
 		return ErrSignature
 	}
 	return nil
@@ -186,8 +185,10 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 	if !ok1 || !ok2 || !ok3 || !ok4 {
 		return Verified{}, ErrSignature
 	}
+	// A key MSFP accepts (section 2.1), wherever it's learnt: here for
+	// pair, and checked again (from memory) on every other request.
 	key, ok := decode64(keyText, ed25519.PublicKeySize)
-	if !ok {
+	if !ok || !ValidKey(key) {
 		return Verified{}, ErrSignature
 	}
 	when, ok := parseDate(date)
@@ -208,7 +209,7 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 		return Verified{}, ErrSignature
 	}
 	msg := requestMessage(r.Method, v.Host, r.URL.RequestURI(), date, nonce, body)
-	if !ed25519.Verify(key, msg, sig) {
+	if !verify(key, msg, sig) {
 		return Verified{}, ErrSignature
 	}
 	// Only once the signature is good, and the key one this server hears,

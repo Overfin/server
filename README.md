@@ -163,7 +163,7 @@ browser ──▶ the site (overfin-web, or your own)
 go test ./...
 ```
 
-Go, with three dependencies besides overfin-web; the control panel is a
+Go, with four dependencies besides overfin-web; the control panel is a
 Svelte app in `frontend/`. How to run it from the sources, and more, is in
 [Development](docs/development.md).
 

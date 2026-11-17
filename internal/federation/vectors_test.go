@@ -2,6 +2,7 @@ package federation
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -142,9 +143,8 @@ func TestVectors(t *testing.T) {
 }
 
 // MSFP's version 0 canonical forms (vectors/v0-strict.json, copied in
-// testdata/v0-strict.json): addresses, codes, dates, base64url and the
-// signature headers, through the code that reads them. Keys of small
-// order aren't refused yet (left: spec/v0.md's notes on section 2.1).
+// testdata/v0-strict.json): addresses, codes, dates, base64url, keys and
+// signatures, through the code that reads them.
 func TestStrictVectors(t *testing.T) {
 	b, err := os.ReadFile("testdata/v0-strict.json")
 	if err != nil {
@@ -155,13 +155,63 @@ func TestStrictVectors(t *testing.T) {
 		Valid      bool
 	}
 	var v struct {
-		Addresses, Codes, Dates, Base64url []tc
+		Addresses, Codes, Dates, Base64url, Keys []tc
+		Signatures                               []struct {
+			Name, Public, Message, Signature string
+			Valid                            bool
+		}
 	}
 	if err := json.Unmarshal(b, &v); err != nil {
 		t.Fatal(err)
 	}
-	if len(v.Addresses) == 0 || len(v.Codes) == 0 || len(v.Dates) == 0 || len(v.Base64url) == 0 {
+	if len(v.Addresses) == 0 || len(v.Codes) == 0 || len(v.Dates) == 0 || len(v.Base64url) == 0 ||
+		len(v.Keys) == 0 || len(v.Signatures) == 0 {
 		t.Fatal("no cases")
+	}
+	for _, c := range v.Keys {
+		key, _ := decode64(c.Text, 32)
+		if ValidKey(key) != c.Valid {
+			t.Errorf("key %s: valid %v", c.Name, !c.Valid)
+		}
+		// And as a request's Overfin-Key, and a code's key.
+		req := httptest.NewRequest("POST", "https://a.example.org/api/v1/federation/pair", strings.NewReader("{}"))
+		SignRequest(req, []byte("{}"), NewKey(), time.Now())
+		req.Header.Set(HeaderKey, c.Text)
+		if _, err := (&Verifier{Host: "a.example.org"}).Check(req, []byte("{}"), time.Now()); err == nil {
+			t.Errorf("key %s: a request signed by another key passes", c.Name)
+		}
+		code := Code{Address: "https://a.example.org", Key: key, Secret: make([]byte, SecretSize), Expires: time.Unix(1800000000, 0)}
+		if _, err := ParseCode(code.String()); (err == nil) != c.Valid {
+			t.Errorf("key %s in a code: %v", c.Name, err)
+		}
+	}
+	for _, c := range v.Signatures {
+		public, _ := decode64(c.Public, 32)
+		if got := CheckResponse(public, "", 0, nil, c.Signature) == nil; got {
+			t.Errorf("signature %s: an answer's check passes a request's message", c.Name)
+		}
+		sig, _ := decode64(c.Signature, 64)
+		if verify(public, []byte(c.Message), sig) != c.Valid {
+			t.Errorf("signature %s: valid %v", c.Name, !c.Valid)
+		}
+		// Through the check of a request, as it arrives: the message is
+		// that of v0.json's hello exchange.
+		lines := strings.Split(c.Message, "\n")
+		req := httptest.NewRequest(lines[1], "http://"+lines[2]+lines[3], strings.NewReader(""))
+		req.Header.Set(HeaderKey, c.Public)
+		req.Header.Set(HeaderDate, lines[4])
+		req.Header.Set(HeaderNonce, lines[5])
+		req.Header.Set(HeaderSignature, c.Signature)
+		date, _ := strconv.ParseInt(lines[4], 10, 64)
+		at := time.Unix(date, 0)
+		body := []byte(`{"state":"paired"}`)
+		if lines[6] != hexSum(body) {
+			t.Fatalf("signature %s: the body isn't the one signed", c.Name)
+		}
+		_, err := (&Verifier{Host: lines[2], Seen: NewNonces(at.Add(-time.Minute))}).Check(req, body, at)
+		if (err == nil) != c.Valid {
+			t.Errorf("signature %s, in a request: %v", c.Name, err)
+		}
 	}
 	for _, c := range v.Addresses {
 		if err := checkAddress(c.Text); (err == nil) != c.Valid {
@@ -169,9 +219,6 @@ func TestStrictVectors(t *testing.T) {
 		}
 	}
 	for _, c := range v.Codes {
-		if c.Name == "the identity as key" {
-			continue
-		}
 		if _, err := ParseCode(c.Text); (err == nil) != c.Valid {
 			t.Errorf("code %s: %v", c.Name, err)
 		}
@@ -209,4 +256,9 @@ func TestSignatureHeadersOnce(t *testing.T) {
 	if ok(func(r *http.Request) { r.Header.Set(HeaderNonce, r.Header.Get(HeaderNonce)+",x") }) {
 		t.Error("a comma")
 	}
+}
+
+func hexSum(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }

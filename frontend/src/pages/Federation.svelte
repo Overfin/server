@@ -19,6 +19,7 @@
     offers: number;
     wants: number;
     titles: number;
+    unusable?: boolean;
   }
   interface Lib {
     id: string;
@@ -243,6 +244,7 @@
   const kindOf = (l: Lib) => (kinds[l.kind] && kinds[l.kind].toLowerCase() !== l.name.toLowerCase() ? kinds[l.kind] : '');
 
   function stateText(p: Peer): string {
+    if (p.unusable) return "Unusable: its key isn't a valid one. Remove it, and pair again if it's yours";
     switch (p.state) {
       case 'ours':
         return 'Waiting for you to accept';

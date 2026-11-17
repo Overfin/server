@@ -96,7 +96,8 @@ func ParseCode(text string) (Code, error) {
 		Expires: time.Unix(int64(binary.BigEndian.Uint64(b[fixed-8:fixed])), 0),
 		Address: string(b[fixed:]),
 	}
-	if checkAddress(c.Address) != nil {
+	// A key MSFP accepts (section 2.1): never one of small order.
+	if checkAddress(c.Address) != nil || !ValidKey(c.Key) {
 		return Code{}, ErrCode
 	}
 	return c, nil
