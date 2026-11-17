@@ -599,3 +599,38 @@ func TestSyncTitlesPageTooLarge(t *testing.T) {
 		t.Fatalf("kept: %+v %v", got, err)
 	}
 }
+
+// A paired server paging on and on: a reading keeps maxPeerTitles at most.
+func TestSyncTitlesBounded(t *testing.T) {
+	ctx := context.Background()
+	defer func(was int) { maxPeerTitles = was }(maxPeerTitles)
+	maxPeerTitles = 12_000
+	a, b, _, aOnB := pairedPair(t)
+	lib := pub(t, a, "films")[0]
+	k := NewKey()
+	var pages atomic.Int64
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body []byte
+		if r.URL.Path == "/api/v1/federation/libraries" {
+			body, _ = json.Marshal(map[string]any{"libraries": []map[string]string{{"id": lib, "name": "Films", "kind": "movies"}}})
+		} else {
+			p := pages.Add(1)
+			titles := []map[string]any{}
+			for i := range titlesPage {
+				titles = append(titles, map[string]any{"key": fmt.Sprintf("movie/tmdb/%d", p*10_000+int64(i)+1), "kind": "movie", "library": lib})
+			}
+			body, _ = json.Marshal(map[string]any{"titles": titles, "next": fmt.Sprintf("movie/tmdb/%d", p*10_000+titlesPage)})
+		}
+		w.Header().Set(HeaderSignature, SignResponse(k, r.Header.Get(HeaderNonce), 200, body))
+		_, _ = w.Write(body)
+	}))
+	defer fake.Close()
+	peer := *aOnB
+	peer.Address, peer.PublicKey = fake.URL, k.Public()
+	if got, err := b.s.SyncTitles(ctx, &peer); err == nil {
+		t.Fatalf("an endless list read: %d", got)
+	}
+	if n := pages.Load(); n > 3 {
+		t.Errorf("%d pages asked", n)
+	}
+}

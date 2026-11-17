@@ -965,6 +965,11 @@ func cleanKind(kind string) string {
 // ours hold, by title key, a page at a time; never a file, a path or
 // Jellyfin's IDs. Its own server then shows them as one more source.
 
+// maxPeerTitles bounds the titles one reading of a paired server keeps:
+// far above any real library's films, series, seasons and episodes, and a
+// bound on what a paired server can put in this server's database.
+var maxPeerTitles = 1_000_000
+
 // titlesPage is how many titles a page holds at most.
 const titlesPage = 5000
 
@@ -1198,6 +1203,9 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 			}
 		}
 		count += len(page)
+		if count > maxPeerTitles {
+			return 0, fmt.Errorf("%w: more than %d titles", ErrUnreachable, maxPeerTitles)
+		}
 		if answer.Next == "" || answer.Next <= after {
 			break
 		}
