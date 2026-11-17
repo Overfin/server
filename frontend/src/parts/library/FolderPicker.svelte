@@ -1,6 +1,7 @@
-<!-- Browses folders as Jellyfin sees them, and picks one. -->
+<!-- Browses folders as Jellyfin sees them, and picks one, in a window of
+     its own (over the library's). -->
 <script lang="ts">
-  import { toast } from '@overfin/ui';
+  import { Modal, toast } from '@overfin/ui';
   import { api } from '../../lib/api';
   import { message } from '../../lib/format';
   import { icons } from '../../lib/icons';
@@ -25,15 +26,13 @@
   open('');
 </script>
 
-<div class="box">
+<Modal title="Add a folder" description="As Jellyfin sees it: type a path, or open folders from here." {close}>
   {#if shown}
     {@const d = shown}
     <div class="row">
-      <input class="mono" placeholder="/media/films" autocomplete="off" spellcheck="false" bind:value={typed}
+      <input class="mono" placeholder="/media/films" autocomplete="off" spellcheck="false" aria-label="Folder" bind:value={typed}
         onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); open(typed); } }} />
       <button type="button" onclick={() => open(typed)}>Go</button>
-      <button type="button" class="primary" disabled={!d.path} onclick={() => pick(d.path)}>Choose this folder</button>
-      <button type="button" class="ghost" onclick={close}>Cancel</button>
     </div>
     <ul class="list">
       {#if d.parent !== ''}
@@ -46,4 +45,9 @@
       {#if !d.folders.length}<li><div class="hint">No folders in here.</div></li>{/if}
     </ul>
   {/if}
-</div>
+  {#snippet foot()}
+    <span class="grow"></span>
+    <button type="button" onclick={close}>Cancel</button>
+    <button type="button" class="primary" disabled={!shown?.path} onclick={() => pick(shown!.path)}>Choose this folder</button>
+  {/snippet}
+</Modal>

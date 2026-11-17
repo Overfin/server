@@ -50,7 +50,9 @@
     {/each}
   </ul>
   <div class="actions-row"><button type="button" class="small" onclick={() => (picking = true)}>Add a folder</button></div>
-  {#if picking}
-    <FolderPicker pick={(f) => { if (!folders.includes(f)) folders.push(f); picking = false; }} close={() => (picking = false)} />
-  {/if}
 </FormModal>
+<!-- A window of its own, over this one: Escape there closes the chooser
+     only, and the folders picked so far stay. -->
+{#if picking}
+  <FolderPicker pick={(f) => { if (!folders.includes(f)) folders.push(f); picking = false; }} close={() => (picking = false)} />
+{/if}
