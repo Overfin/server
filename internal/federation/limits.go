@@ -58,6 +58,9 @@ var ErrBackingOff = fmt.Errorf("%w: it asked to wait, or didn't answer lately", 
 
 // Limits holds federation's limits. Its zero value is ready to use.
 type Limits struct {
+	// Now is the clock, time.Now unless a test sets it.
+	Now func() time.Time
+
 	mu    sync.Mutex
 	addrs map[netip.Addr]*bucket
 	peers map[string]*bucket // by key
@@ -86,6 +89,13 @@ func (b *bucket) take(now time.Time, rate, burst float64) (ok bool, retryAfter i
 		return true, 0
 	}
 	return false, max(1, min(maxRetryAfter, int(math.Ceil((1-b.tokens)/rate))))
+}
+
+func (l *Limits) now() time.Time {
+	if l.Now != nil {
+		return l.Now()
+	}
+	return time.Now()
 }
 
 func (l *Limits) bucketOf(m map[string]*bucket, k string, now time.Time, burst float64) *bucket {
@@ -176,7 +186,7 @@ func (l *Limits) call(key string, play bool, now time.Time) *refusal {
 // they allow; it gives what frees them, or the refusal.
 func (l *Limits) slots(ctx context.Context, key string, known bool) (func(), *refusal) {
 	l.mu.Lock()
-	l.sweep(time.Now())
+	l.sweep(l.now())
 	own, all := l.peerSlots, l.allSlots
 	l.mu.Unlock()
 	freeOwn := func() {}

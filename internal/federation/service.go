@@ -271,7 +271,7 @@ const playPath = "/api/v1/federation/play"
 // retryAfter.
 func (s *Service) verified(w http.ResponseWriter, r *http.Request) (Verified, []byte, bool) {
 	lim := s.lim()
-	if !lim.fromAddr(clientAddr(r), time.Now()) {
+	if !lim.fromAddr(clientAddr(r), lim.now()) {
 		problem.Send(w, problem.NotFound, "")
 		return Verified{}, nil, false
 	}
@@ -295,7 +295,7 @@ func (s *Service) verified(w http.ResponseWriter, r *http.Request) (Verified, []
 	if v.Known {
 		s.signsFor(w, v.Nonce)
 		key = b64.EncodeToString(v.Key)
-		if no := lim.call(key, r.URL.Path == playPath, time.Now()); no != nil {
+		if no := lim.call(key, r.URL.Path == playPath, lim.now()); no != nil {
 			sendRefusal(w, no)
 			return Verified{}, nil, false
 		}
@@ -497,12 +497,12 @@ const (
 func (s *Service) call(ctx context.Context, p *store.Peer, path string, in, out any) (Reply, error) {
 	key := b64.EncodeToString(p.PublicKey)
 	lim := s.lim()
-	if path != pairPath && !lim.mayCall(key, background(ctx), time.Now()) {
+	if path != pairPath && !lim.mayCall(key, background(ctx), lim.now()) {
 		return Reply{}, ErrBackingOff
 	}
 	r, err := s.callOnce(ctx, p, path, in, out)
 	if path != pairPath && ctx.Err() == nil {
-		lim.heard(key, err == nil, r.Status, r.RetryAfter, time.Now())
+		lim.heard(key, err == nil, r.Status, r.RetryAfter, lim.now())
 	}
 	return r, err
 }
