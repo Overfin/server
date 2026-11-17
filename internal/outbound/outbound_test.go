@@ -2,12 +2,14 @@ package outbound
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
 	"testing"
 )
 
@@ -138,5 +140,34 @@ func TestAllowLoopback(t *testing.T) {
 	}
 	if !Refused(netip.MustParseAddr("169.254.169.254")) || !Refused(netip.MustParseAddr("0.0.0.0")) {
 		t.Error("allow_loopback let link-local or unspecified through")
+	}
+}
+
+// MSFP's destination vectors (vectors/v1/strict.json, copied as it is):
+// each address refused or taken as they say.
+func TestDestinationVectors(t *testing.T) {
+	raw, err := os.ReadFile("testdata/v1-strict.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct {
+		Destinations []struct {
+			Text   string
+			Valid  bool
+			Reason string
+		}
+	}
+	if err := json.Unmarshal(raw, &v); err != nil || len(v.Destinations) == 0 {
+		t.Fatalf("vectors: %v", err)
+	}
+	for _, d := range v.Destinations {
+		ip, err := netip.ParseAddr(d.Text)
+		if err != nil {
+			t.Errorf("%s: %v", d.Text, err)
+			continue
+		}
+		if Refused(ip) == d.Valid {
+			t.Errorf("%s: refused %v, want valid %v (%s)", d.Text, Refused(ip), d.Valid, d.Reason)
+		}
 	}
 }

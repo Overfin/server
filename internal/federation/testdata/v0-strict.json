@@ -240,7 +240,7 @@
     },
     {
       "name": "the same member twice, once escaped",
-      "text": "{\"state\":\"paired\",\"state\":\"ended\"}",
+      "text": "{\"state\":\"paired\",\"st\\u0061te\":\"ended\"}",
       "valid": false,
       "reason": "member \"state\" twice"
     },
@@ -258,12 +258,12 @@
     },
     {
       "name": "a surrogate pair, escaped",
-      "hex": "7b226e616d65223a22f09f8eac227d",
+      "text": "{\"name\":\"\\ud83c\\udfac\"}",
       "valid": true
     },
     {
       "name": "a noncharacter, escaped",
-      "hex": "7b226e616d65223a22efbfbf227d",
+      "text": "{\"name\":\"\\uffff\"}",
       "valid": false,
       "reason": "a noncharacter"
     },
