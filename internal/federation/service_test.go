@@ -683,7 +683,7 @@ func TestTheirLibrariesOddOnes(t *testing.T) {
 			{"id":"a b","name":"Spaced","kind":"movies"},
 			{"id":"","name":"Empty"},
 			"lib_C", 7,
-			{"id":"lib_B","name":"Mixed​\u0001 one","kind":"TVSHOWS"},
+			{"id":"lib_B","name":"Mixed\u200b\u0001 one","kind":"TVSHOWS"},
 			{"id":"lib_N","name":42,"kind":7}],
 			"limits":{"streams":"two"}}`)
 		w.Header().Set(HeaderSignature, SignResponse(k, r.Header.Get(HeaderNonce), 200, body))

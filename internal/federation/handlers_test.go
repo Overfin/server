@@ -42,7 +42,7 @@ func TestDecodeJSONObjectsOnly(t *testing.T) {
 func TestCleanNameOrder(t *testing.T) {
 	for in, want := range map[string]string{
 		"a\tb\u0085c":                    "a b c",
-		"  Films​ de B \n":               "Films de B",
+		"  Films\u200b de B \n":               "Films de B",
 		strings.Repeat("a", 79) + " bcd": strings.Repeat("a", 79),
 		"  ":                             "films.example.org",
 		"x\u0000y":                       "xy",
