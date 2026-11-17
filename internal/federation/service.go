@@ -413,7 +413,9 @@ func (s *Service) hello(w http.ResponseWriter, r *http.Request) {
 	}
 	switch msg.State {
 	case helloEnded:
-		if err := s.Store.DeletePeer(ctx, p.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
+		// Forgotten without its key remembered: only the side that ends
+		// remembers (MSFP section 7.4, step 3).
+		if err := s.Store.PeerEnded(ctx, p.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
 			problem.Send(w, problem.Internal, "")
 			return
 		}

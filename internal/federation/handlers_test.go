@@ -83,3 +83,23 @@ func TestCheckRefusesQueries(t *testing.T) {
 		t.Errorf("without a query: %v", err)
 	}
 }
+
+// The side that ends a pairing remembers the other's key; the side told
+// "ended" forgets the ender without remembering it (MSFP section 7.4,
+// step 3): its next hello is a stranger's, not "unknown", signed.
+func TestEndedForgottenOnTheEndingSideOnly(t *testing.T) {
+	ctx := t.Context()
+	a, b, bOnA, aOnB := pairedPair(t)
+	if err := a.s.End(ctx, bOnA.ID); err != nil {
+		t.Fatal(err)
+	}
+	if forgotten, _ := a.s.Store.PeerForgotten(ctx, bOnA.PublicKey); !forgotten {
+		t.Error("A, which ended it, doesn't remember B")
+	}
+	if _, err := b.s.Store.PeerByID(ctx, aOnB.ID); err == nil {
+		t.Fatal("B still has A")
+	}
+	if forgotten, _ := b.s.Store.PeerForgotten(ctx, aOnB.PublicKey); forgotten {
+		t.Error("B, told it ended, remembers A as forgotten")
+	}
+}

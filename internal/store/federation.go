@@ -313,6 +313,18 @@ func (s *Store) PeerSeen(ctx context.Context, id string) error {
 // Its key is remembered, by its hash (PeerForgotten): its requests are
 // answered "unknown", signed.
 func (s *Store) DeletePeer(ctx context.Context, id string) error {
+	return s.deletePeer(ctx, id, true)
+}
+
+// PeerEnded removes a peer that ended the pairing itself (its hello
+// "ended"), without remembering its key: the side that ends remembers,
+// the other just forgets it (MSFP section 7.4, step 3), so a new code
+// pairs the two again either way. ErrNotFound if there's none.
+func (s *Store) PeerEnded(ctx context.Context, id string) error {
+	return s.deletePeer(ctx, id, false)
+}
+
+func (s *Store) deletePeer(ctx context.Context, id string, remember bool) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -326,9 +338,11 @@ func (s *Store) DeletePeer(ctx context.Context, id string) error {
 		return err
 	}
 	hash := sha256.Sum256(key)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO forgotten_peers (key_hash, forgotten_at) VALUES (?, ?)
-		ON CONFLICT (key_hash) DO UPDATE SET forgotten_at = excluded.forgotten_at`, hash[:], s.now().Unix()); err != nil {
-		return err
+	if remember {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO forgotten_peers (key_hash, forgotten_at) VALUES (?, ?)
+			ON CONFLICT (key_hash) DO UPDATE SET forgotten_at = excluded.forgotten_at`, hash[:], s.now().Unix()); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM peers WHERE id = ?`, id); err != nil {
 		return err
