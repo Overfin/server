@@ -85,6 +85,8 @@ type fakeJellyfin struct {
 	// onPlaybackInfo, when set, runs as PlaybackInfo is asked (something
 	// happening while a playback opens).
 	onPlaybackInfo func()
+	// streamStatus, when set, is how a file played as it is is answered.
+	streamStatus int
 }
 
 func (f *fakeJellyfin) setTrickplay(none bool, set map[string]int) {
@@ -119,6 +121,14 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// A file played as it is: a first part, then it flows until the reader
 	// goes away, as a film would.
 	if strings.HasSuffix(r.URL.Path, "/stream") {
+		f.mu.Lock()
+		status := f.streamStatus
+		f.mu.Unlock()
+		if status != 0 {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte("Jellyfin's own words"))
+			return
+		}
 		w.Header().Set("Content-Type", "video/mp4")
 		w.Write(make([]byte, 64*1024))
 		w.(http.Flusher).Flush()

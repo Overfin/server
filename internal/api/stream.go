@@ -227,7 +227,9 @@ func (s Stream) serve(w http.ResponseWriter, r *http.Request) {
 		case strings.HasSuffix(name, ".mp3"):
 			contentType = "audio/mpeg"
 		}
-		s.proxy(w, r, st, *a, up, false, contentType)
+		// A paired server may ask a segment by range too (MSFP media,
+		// section 2.1); a browser here, the whole segment.
+		s.proxy(w, r, st, *a, up, peerTicket(st), contentType)
 	}
 }
 
@@ -239,12 +241,16 @@ func (s Stream) playlist(w http.ResponseWriter, r *http.Request, st *playback.St
 	l := s.Playback.Library
 	body, err := l.Jellyfin.ReadSmall(r.Context(), a, up.Path, up.Query, maxPlaylist)
 	if err != nil {
-		l.upstreamError(w, err)
+		s.upstreamError(w, st, err)
 		return
 	}
 	rw, err := rewrite(body, up)
 	if err != nil {
 		l.Logger.Warn("refused an upstream playlist", "playback", st.ID, "err", err)
+		if peerTicket(st) {
+			problem.Send(w, problem.NotFound, "") // a media status (MSFP core, section 8.4)
+			return
+		}
 		problem.Send(w, problem.NotPlayable, "")
 		return
 	}
@@ -287,10 +293,23 @@ func (s Stream) proxy(w http.ResponseWriter, r *http.Request, st *playback.Strea
 	l := s.Playback.Library
 	res, err := l.Jellyfin.Open(ctx, a, up.Path, up.Query, rangeHeader)
 	if err != nil {
-		l.upstreamError(w, err)
+		s.upstreamError(w, st, err)
 		return
 	}
 	defer res.Body.Close()
+	// To a paired server, only the statuses MSFP media has (core section
+	// 8.4): what else Jellyfin answers is a 404, its 5xx a 503.
+	if peerTicket(st) {
+		switch code := res.StatusCode; {
+		case code == http.StatusOK, code == http.StatusPartialContent, code == http.StatusRequestedRangeNotSatisfiable:
+		case code >= 500:
+			problem.Send(w, problem.ServerBusy, "")
+			return
+		default:
+			problem.Send(w, problem.NotFound, "")
+			return
+		}
+	}
 
 	h := w.Header()
 	contentType := forceType
@@ -393,7 +412,7 @@ func (s Stream) stretch(w http.ResponseWriter, r *http.Request, st *playback.Str
 	to := float64((part + 1) * StretchSeconds)
 	body, err := l.Jellyfin.SubtitleStretch(r.Context(), l.Service.Admin(), st.ItemID, st.SourceID, index, from, to, limit)
 	if err != nil {
-		l.upstreamError(w, err)
+		s.upstreamError(w, st, err)
 		return nil
 	}
 	return body
@@ -530,4 +549,33 @@ func validPeerRange(h string) bool {
 // query is a 404).
 func hasQuery(r *http.Request) bool {
 	return r.URL.RawQuery != "" || r.URL.ForceQuery
+}
+
+// upstreamError answers a failed Jellyfin call for a stream: to a paired
+// server, only MSFP media's statuses (core section 8.4), a 404 for what
+// Jellyfin refused, a 503 for the rest; to this server's own viewers, as
+// any other call.
+func (s Stream) upstreamError(w http.ResponseWriter, st *playback.Stream, err error) {
+	l := s.Playback.Library
+	if !peerTicket(st) {
+		l.upstreamError(w, err)
+		return
+	}
+	var se *jellyfin.StatusError
+	switch {
+	case errors.Is(err, context.Canceled):
+	case errors.As(err, &se) && se.Status >= 400 && se.Status < 500:
+		if se.Status == http.StatusUnauthorized && l.Service != nil {
+			// Jellyfin refused the account's token: a new one, as for any call.
+			go func() {
+				if err := l.Service.Refused(context.Background()); err != nil {
+					l.Logger.Error("renewing the Jellyfin account's token failed", "err", err)
+				}
+			}()
+		}
+		problem.Send(w, problem.NotFound, "")
+	default:
+		l.Logger.Warn("a paired server's stream: Jellyfin failed", "playback", st.ID, "err", err)
+		problem.Send(w, problem.ServerBusy, "")
+	}
 }

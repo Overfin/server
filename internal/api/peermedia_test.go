@@ -65,6 +65,19 @@ func TestPeerTicketMediaRules(t *testing.T) {
 	if code := ask("GET", "bytes=0-"); code != http.StatusOK {
 		t.Errorf("a range of a paired server: %d", code)
 	}
+	// Only MSFP media's statuses: what else Jellyfin answers is a 404,
+	// its 5xx a 503, never passed on as it is (core section 8.4).
+	for jf, want := range map[int]int{400: 404, 403: 404, 500: 503, 502: 503} {
+		fake.mu.Lock()
+		fake.streamStatus = jf
+		fake.mu.Unlock()
+		if code := ask("GET", ""); code != want {
+			t.Errorf("Jellyfin's %d to a paired server: %d, want %d", jf, code, want)
+		}
+	}
+	fake.mu.Lock()
+	fake.streamStatus = 0
+	fake.mu.Unlock()
 	// stop's position is 0 to 8,640,000,000 (MSFP section 9.7).
 	if status, err := a.Call(ctx, bOnA, "/api/v1/federation/stop", map[string]any{"id": s.ID, "positionMs": 8_640_000_001}, &struct{}{}); status != http.StatusBadRequest {
 		t.Errorf("stop past the bound: %d %v", status, err)
@@ -445,5 +458,62 @@ func TestRelaySmallSlotFreedBeforeSending(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Errorf("a playlist waited for slow viewers' subtitles")
+	}
+}
+
+// A paired server's Range on a segment is one of MSFP's three forms, or
+// a 416 (media section 2.1).
+func TestPeerSegmentRange(t *testing.T) {
+	ctx := context.Background()
+	var st *store.Store
+	var b *federation.Service
+	srv, _ := newServerWith(t, options{store: &st, federation: &b})
+	st.PutCatalog(ctx, []store.CatalogItem{
+		{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "949", LibraryID: "films"},
+	}, 1)
+	st.RefreshTitleKeys(ctx)
+	st.SetLibraries(ctx, []store.Library{{ID: "films", Item: []byte(`{"Name":"Films"}`)}})
+	a, bOnA, _ := viewer(t, b, srv.Client())
+	var s peerSession
+	if status, err := a.Call(ctx, bOnA, "/api/v1/federation/play", map[string]any{"title": "movie/tmdb/949", "capabilities": map[string]any{}}, &s); status != 200 {
+		t.Fatalf("play: %d %v", status, err)
+	}
+	get := func(u, rangeHeader string) (int, string) {
+		req, _ := http.NewRequest("GET", u, nil)
+		if rangeHeader != "" {
+			req.Header.Set("Range", rangeHeader)
+		}
+		res, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+		return res.StatusCode, string(body)
+	}
+	base := strings.TrimSuffix(s.Stream.URL, "master.m3u8")
+	code, master := get(s.Stream.URL, "")
+	if code != 200 {
+		t.Fatalf("master: %d %s", code, master)
+	}
+	variant := ""
+	for _, l := range strings.Split(master, "\n") {
+		if l != "" && !strings.HasPrefix(l, "#") {
+			variant = l
+		}
+	}
+	code, media := get(base+variant, "")
+	segment := ""
+	for _, l := range strings.Split(media, "\n") {
+		if l != "" && !strings.HasPrefix(l, "#") {
+			segment = l
+			break
+		}
+	}
+	if code != 200 || segment == "" {
+		t.Fatalf("variant %q: %d %s", variant, code, media)
+	}
+	if code, _ := get(base+segment, "bytes=0-1,5-9"); code != http.StatusRequestedRangeNotSatisfiable {
+		t.Errorf("several ranges on a segment: %d", code)
 	}
 }
