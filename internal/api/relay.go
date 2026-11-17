@@ -157,8 +157,13 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 	// before a slow viewer reads it.
 	freeSmall := func() {}
 	if !media {
-		f, ok := subtitleSlot(r)
+		// Within the small read's time, not the request's: waiting, it
+		// holds this playback's relay slots.
+		f, ok := subtitleSlotWithin(ctx)
 		if !ok {
+			if r.Context().Err() == nil {
+				problem.Send(w, problem.ServerBusy, "")
+			}
 			return
 		}
 		freeSmall = sync.OnceFunc(f)
@@ -234,6 +239,11 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 				return
 			}
 			body = kept
+			if what.path == "master.m3u8" {
+				// What it names is fetched as a playlist, and checked as
+				// one, whatever its name (players read it as one).
+				rm.NamePlaylists(uriLines(kept))
+			}
 		case what.vtt:
 			vtt, ok := playback.SanitizeVTT(body)
 			if !ok {
@@ -543,7 +553,6 @@ func relayedPlaylist(body []byte, subset []string) ([]byte, error) {
 	}
 	var out strings.Builder
 	uris := 0
-	master := slices.Contains(subset, "#EXT-X-STREAM-INF")
 	for _, line := range lines {
 		switch {
 		case line == "":
@@ -564,10 +573,6 @@ func relayedPlaylist(body []byte, subset []string) ([]byte, error) {
 			}
 		case !fileName(line):
 			return nil, errors.New("an address that isn't the stream's")
-		case master && !strings.HasSuffix(line, ".m3u8"):
-			// What a master playlist names is fetched as a playlist, so
-			// it is checked as one here (relay goes by the name).
-			return nil, errors.New("a master playlist naming something else than playlists")
 		default:
 			uris++
 		}
@@ -578,6 +583,17 @@ func relayedPlaylist(body []byte, subset []string) ([]byte, error) {
 		out.WriteByte('\n')
 	}
 	return []byte(out.String()), nil
+}
+
+// uriLines are a checked playlist's URI lines.
+func uriLines(playlist []byte) []string {
+	var out []string
+	for _, line := range strings.Split(string(playlist), "\n") {
+		if line != "" && !strings.HasPrefix(line, "#") {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 // lineBreaking says whether a character may end a line for some player,

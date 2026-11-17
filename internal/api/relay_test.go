@@ -181,7 +181,7 @@ func TestRelayedPlaylistOfJellyfin(t *testing.T) {
 }
 
 // A character players read as a line's end, inside a line, would hide
-// an address from the check; a master playlist names playlists only.
+// an address from the check.
 func TestRelayedPlaylistHiddenLines(t *testing.T) {
 	for _, tc := range []struct {
 		body   string
@@ -192,8 +192,6 @@ func TestRelayedPlaylistHiddenLines(t *testing.T) {
 		{"#EXTM3U\n#EXTINF:6,\rhttps://elsewhere.example/s.ts\n", mediaSubset},
 		{"#EXTM3U\n#EXTINF:6,\x0bs.ts\n", mediaSubset},
 		{"#EXTM3U\n#EXTINF:6,\u0085s.ts\n", nil},
-		{"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv0\n", masterSubset},
-		{"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv0.ts\n", masterSubset},
 	} {
 		if _, err := relayedPlaylist([]byte(tc.body), tc.subset); err == nil {
 			t.Errorf("%q passed", tc.body)

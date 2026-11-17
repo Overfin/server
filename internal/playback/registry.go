@@ -308,6 +308,35 @@ type Remote struct {
 	// Paused is what the paired server last heard: a pause or a resume
 	// is told at once.
 	Paused atomic.Bool
+
+	mu        sync.Mutex
+	playlists map[string]bool // what its master playlist named
+}
+
+// maxPlaylists bounds the names a paired server's master playlist may
+// have this server fetch as playlists.
+const maxPlaylists = 64
+
+// NamePlaylists remembers the names a checked master playlist named:
+// they are fetched as playlists (checked as such), whatever their names.
+func (r *Remote) NamePlaylists(names []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.playlists == nil {
+		r.playlists = map[string]bool{}
+	}
+	for _, n := range names {
+		if len(r.playlists) < maxPlaylists {
+			r.playlists[n] = true
+		}
+	}
+}
+
+// Playlist says whether a name is one a master playlist named.
+func (r *Remote) Playlist(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.playlists[name]
 }
 
 // Due reports whether the paired server should be told now: every

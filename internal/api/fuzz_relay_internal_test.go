@@ -45,7 +45,7 @@ func FuzzRelayedPlaylist(f *testing.F) {
 				}
 				continue
 			}
-			if !fileName(line) || master && !strings.HasSuffix(line, ".m3u8") {
+			if !fileName(line) {
 				t.Fatalf("an address kept: %q", line)
 			}
 		}

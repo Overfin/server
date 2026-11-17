@@ -321,6 +321,12 @@ func TestRelayHoles(t *testing.T) {
 				w.Header().Set("Content-Encoding", "gzip")
 				w.Header().Set("Content-Length", strconv.Itoa(gz.Len()))
 				_, _ = w.Write(gz.Bytes())
+			case "master.m3u8":
+				_, _ = w.Write([]byte("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nlow\n#EXT-X-STREAM-INF:BANDWIDTH=2\nbad\n"))
+			case "low":
+				_, _ = w.Write([]byte("#EXTM3U\n#EXTINF:6,\nseg0.ts\n"))
+			case "bad":
+				_, _ = w.Write([]byte("#EXTM3U\n#EXTINF:6,\nseg0.ts\n#EXTINF:6,\nhttps://elsewhere.example/s.ts\n"))
 			case "ident.ts":
 				w.Header().Set("Content-Encoding", "identity")
 				_, _ = w.Write([]byte{0x47, 0, 0, 0})
@@ -371,6 +377,20 @@ func TestRelayHoles(t *testing.T) {
 	}
 	if _, ok := encodings.Load("gzip"); ok {
 		t.Errorf("A asked B for gzip")
+	}
+	// An honest peer's master may name its variants anything: what it
+	// names is fetched as a playlist, and checked as one.
+	if res, got := get("GET", "low", ""); res.StatusCode != 404 {
+		t.Errorf("a variant no master named yet: %d %.60q", res.StatusCode, got)
+	}
+	if res, got := get("GET", "master.m3u8", ""); res.StatusCode != 200 || !strings.Contains(got, "low") {
+		t.Fatalf("master: %d %q", res.StatusCode, got)
+	}
+	if res, got := get("GET", "low", ""); res.StatusCode != 200 || res.Header.Get("Content-Type") != "application/vnd.apple.mpegurl" || !strings.Contains(got, "seg0.ts") {
+		t.Errorf("a variant named low: %d %q %.80q", res.StatusCode, res.Header.Get("Content-Type"), got)
+	}
+	if res, got := get("GET", "bad", ""); res.StatusCode != 404 {
+		t.Errorf("a variant naming another server, relayed: %d %.80q", res.StatusCode, got)
 	}
 	if res, got := get("GET", "ident.ts", ""); res.StatusCode != 200 || len(got) != 4 {
 		t.Errorf("Content-Encoding identity: %d", res.StatusCode)
@@ -573,5 +593,43 @@ func TestFederationAnswersUncoded(t *testing.T) {
 		if ce := res.Header.Get("Content-Encoding"); ce != "" {
 			t.Errorf("%s answered coded: %s", path, ce)
 		}
+	}
+}
+
+// Every slot for whole reads taken (slow peers, slow viewers): a relayed
+// playlist waits for one no longer than a small read may take, then is
+// busy, rather than holding its playback's relay slots meanwhile.
+func TestRelaySmallSlotWaitBounded(t *testing.T) {
+	x := pairForPlayWith(t, true, func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/small.m3u8") {
+				_, _ = io.WriteString(w, "#EXTM3U\n#EXTINF:6,\nseg0.ts\n")
+				return
+			}
+			h.ServeHTTP(w, r)
+		})
+	})
+	status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{},"audioLanguage":"fr"}`)
+	var s peerSession
+	_ = json.Unmarshal([]byte(body), &s)
+	if status != 201 {
+		t.Fatalf("play on A: %d %s", status, body)
+	}
+	defer api.SetSmallReadTime(200 * time.Millisecond)()
+	free := api.TakeSubtitleSlots()
+	defer free()
+	req, _ := http.NewRequest("GET", x.srvA.URL+strings.TrimSuffix(s.Stream.URL, "file")+"small.m3u8", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Remote-User", subject)
+	c := *client(x.srvA, subject)
+	c.Timeout = 3 * time.Second
+	start := time.Now()
+	res, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("waited: %v", err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusServiceUnavailable || time.Since(start) > 2*time.Second {
+		t.Errorf("%d after %v", res.StatusCode, time.Since(start))
 	}
 }

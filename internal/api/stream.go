@@ -196,7 +196,7 @@ func (s Stream) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st.Remote != nil {
-		s.relay(w, r, st, relayed{path: name, playlist: strings.HasSuffix(name, ".m3u8")})
+		s.relay(w, r, st, relayed{path: name, playlist: strings.HasSuffix(name, ".m3u8") || st.Remote.Playlist(name)})
 		return
 	}
 	dec := st.Decision
@@ -370,11 +370,14 @@ var subtitleReads = make(chan struct{}, 4)
 
 // subtitleSlot takes a slot, and gives the function that frees it; false
 // when the request ended while waiting.
-func subtitleSlot(r *http.Request) (func(), bool) {
+func subtitleSlot(r *http.Request) (func(), bool) { return subtitleSlotWithin(r.Context()) }
+
+// subtitleSlotWithin is subtitleSlot, waiting as long as ctx lasts.
+func subtitleSlotWithin(ctx context.Context) (func(), bool) {
 	select {
 	case subtitleReads <- struct{}{}:
 		return func() { <-subtitleReads }, true
-	case <-r.Context().Done():
+	case <-ctx.Done():
 		return nil, false
 	}
 }
