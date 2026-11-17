@@ -531,3 +531,32 @@ func TestRevocationsReset(t *testing.T) {
 		t.Errorf("told back: %v", b.at)
 	}
 }
+
+// uriBackend records the request targets the backend gets.
+type uriBackend struct {
+	fakeBackend
+	got []string
+}
+
+func (b *uriBackend) RoundTrip(r *http.Request) (*http.Response, error) {
+	b.got = append(b.got, r.URL.RequestURI())
+	return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+}
+
+// A query that doesn't parse whole is refused here: the proxy would drop
+// it, and the backend, seeing none, serve a paired server's stream that
+// refuses any query. One that parses reaches the backend as it was.
+func TestQueriesPassWholeOrNot(t *testing.T) {
+	b := &uriBackend{fakeBackend: fakeBackend{connected: true}}
+	h := Handler(b, "1.0", nil, nil, quiet)
+	for _, q := range []string{"?;", "?%zz", "?a=1;b=2"} {
+		if rec := do(h, "GET", "/api/v1/stream/abcdefghijklmnop/file"+q, "203.0.113.5:1234"); rec.Code != 404 {
+			t.Errorf("%s: %d", q, rec.Code)
+		}
+	}
+	do(h, "GET", "/api/v1/stream/abcdefghijklmnop/file?a=1", "203.0.113.5:1234")
+	do(h, "GET", "/api/v1/stream/abcdefghijklmnop/file?", "203.0.113.5:1234")
+	if len(b.got) != 2 || b.got[0] != "/api/v1/stream/abcdefghijklmnop/file?a=1" || !strings.HasSuffix(b.got[1], "?") {
+		t.Errorf("the backend got %q", b.got)
+	}
+}

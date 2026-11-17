@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"strings"
 
 	"github.com/overfin/server/api"
@@ -94,13 +95,22 @@ func Handler(b Backend, version string, revoked *Revocations, cache *Cache, logg
 	return stripInternal(withClientAddr(Limit(canonical(mux))))
 }
 
+// cleanQuery says whether a query parses whole: the proxy would drop
+// what doesn't ("?;", "?%zz"), and the backend then see none, so a route
+// refusing any query (a paired server's stream, MSFP media section 2)
+// would take it.
+func cleanQuery(raw string) bool {
+	_, err := url.ParseQuery(raw)
+	return err == nil
+}
+
 // canonical lets through only a path written one way: no encoded slash
 // or backslash, no backslash, no empty or dot segment, no control
 // character. The gateway's routes and refusals, and the backend's, then
 // read the same path; any other spelling gets a plain 404 here.
 func canonical(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !canonicalPath(r.URL.Path, r.URL.EscapedPath()) {
+		if !canonicalPath(r.URL.Path, r.URL.EscapedPath()) || !cleanQuery(r.URL.RawQuery) {
 			notFound(w)
 			return
 		}
