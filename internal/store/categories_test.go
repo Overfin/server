@@ -211,3 +211,34 @@ func TestReplaceLibraryID(t *testing.T) {
 		t.Errorf("offers: %v", offers)
 	}
 }
+
+// A library renamed to the name a deleted one had (Jellyfin's ID comes
+// from the name) keeps its own public ID and offers, never takes that
+// one's.
+func TestReplaceLibraryIDOverAGoneOne(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	renamed, newID := strings.Repeat("b", 32), strings.Repeat("a", 32)
+	peerX, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://x.example.org", "X")
+	peerY, _ := s.AddPeer(ctx, bytes.Repeat([]byte{4}, 32), "https://y.example.org", "Y")
+	// "a…" was offered to X, then deleted; "b…" is offered to Y.
+	s.SetPeerOffers(ctx, peerX.ID, []string{newID})
+	s.SetPeerOffers(ctx, peerY.ID, []string{renamed})
+	ids, err := s.PublicLibraryIDs(ctx, []string{newID, renamed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplaceLibraryID(ctx, renamed, newID); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := s.PublicLibraryIDs(ctx, []string{newID})
+	if after[newID] != ids[renamed] {
+		t.Errorf("public ID %s, want the renamed library's %s (the gone one's: %s)", after[newID], ids[renamed], ids[newID])
+	}
+	if offers, _ := s.PeerOffers(ctx, peerX.ID); len(offers) != 0 {
+		t.Errorf("X offered the renamed library: %v", offers)
+	}
+	if offers, _ := s.PeerOffers(ctx, peerY.ID); len(offers) != 1 || offers[0] != newID {
+		t.Errorf("Y's offers: %v", offers)
+	}
+}

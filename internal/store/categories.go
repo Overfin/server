@@ -439,12 +439,19 @@ func (s *Store) ReplaceLibraryID(ctx context.Context, old, new string) error {
 		WHERE EXISTS (SELECT 1 FROM json_each(categories.rules, '$.libraries') WHERE value = ?)`, old, new, old); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE OR IGNORE peer_offers SET library_id = ? WHERE library_id = ?`, new, old); err != nil {
-		return err
-	}
-	// The same library to paired servers: its public ID follows it.
-	if _, err := tx.ExecContext(ctx, `UPDATE OR IGNORE federation_libraries SET library_id = ? WHERE library_id = ?`, new, old); err != nil {
-		return err
+	// What still names the new ID is a library gone before (once named
+	// so, then deleted): it goes, so the renamed library keeps its own
+	// offers and public ID, never takes that one's.
+	for _, q := range []string{
+		`DELETE FROM peer_offers WHERE library_id = ?2`,
+		`UPDATE peer_offers SET library_id = ?2 WHERE library_id = ?1`,
+		// The same library to paired servers: its public ID follows it.
+		`DELETE FROM federation_libraries WHERE library_id = ?2`,
+		`UPDATE federation_libraries SET library_id = ?2 WHERE library_id = ?1`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, old, new); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
