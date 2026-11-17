@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -53,6 +54,27 @@ func peerOf(p *store.Peer) peerJSON {
 		j.SeenAt = p.Seen.Format(time.RFC3339)
 	}
 	return j
+}
+
+// peerCounted is peerOf with what's offered and wanted, and its titles
+// (counts, PeerTitleCounts), as the list shows them.
+func (p *Panel) peerCounted(ctx context.Context, pe *store.Peer, counts map[string]int) (peerJSON, error) {
+	j := peerOf(pe)
+	offers, err := p.Store.PeerOffers(ctx, pe.ID)
+	if err != nil {
+		return j, err
+	}
+	wants, err := p.Store.PeerWants(ctx, pe.ID)
+	if err != nil {
+		return j, err
+	}
+	j.Offers, j.Wants, j.Titles = len(offers), len(wants), counts[pe.ID]
+	for _, w := range wants {
+		if w.Gone {
+			j.WantsGone++
+		}
+	}
+	return j, nil
 }
 
 type codeJSON struct {
@@ -114,22 +136,10 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 	}
 	outPeers := []peerJSON{}
 	for _, pe := range peers {
-		j := peerOf(pe)
-		offers, err := p.Store.PeerOffers(ctx, pe.ID)
+		j, err := p.peerCounted(ctx, pe, counts)
 		if err != nil {
-			p.fail(w, "reading offers", err)
+			p.fail(w, "reading offers and wants", err)
 			return
-		}
-		wants, err := p.Store.PeerWants(ctx, pe.ID)
-		if err != nil {
-			p.fail(w, "reading wants", err)
-			return
-		}
-		j.Offers, j.Wants, j.Titles = len(offers), len(wants), counts[pe.ID]
-		for _, w := range wants {
-			if w.Gone {
-				j.WantsGone++
-			}
 		}
 		outPeers = append(outPeers, j)
 	}
@@ -260,8 +270,19 @@ func (p *Panel) checkPeer(w http.ResponseWriter, r *http.Request, _ *session) {
 		p.fail(w, "checking a peer", err)
 		return
 	}
-	j := map[string]any{"peer": peerOf(peer)}
+	unreachable := err != nil
+	counts, err := p.Store.PeerTitleCounts(r.Context())
 	if err != nil {
+		p.fail(w, "counting peers' titles", err)
+		return
+	}
+	pj, err := p.peerCounted(r.Context(), peer, counts)
+	if err != nil {
+		p.fail(w, "reading offers and wants", err)
+		return
+	}
+	j := map[string]any{"peer": pj}
+	if unreachable {
 		j["unreachable"] = true
 	}
 	writeJSON(w, http.StatusOK, j)

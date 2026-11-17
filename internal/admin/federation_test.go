@@ -188,6 +188,11 @@ func TestSharingPanel(t *testing.T) {
 	if s := readState(t, a); s.Peers[0].Offers != 1 {
 		t.Fatalf("A's count: %+v", s.Peers)
 	}
+	// Check answers with the same counts the list shows.
+	rec = b.do("POST", "/admin/api/federation/peers/"+aOnB.ID+"/check", "{}", nil)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"wants":1`) {
+		t.Fatalf("check: %d %s", rec.Code, rec.Body)
+	}
 }
 
 // A stored peer whose key MSFP refuses (one of small order: never an
