@@ -3,6 +3,7 @@ module github.com/overfin/server
 go 1.26.11
 
 require (
+	filippo.io/edwards25519 v1.1.1
 	github.com/BurntSushi/toml v1.6.0
 	github.com/overfin/web v0.99.15
 	golang.org/x/crypto v0.58.0
@@ -10,7 +11,6 @@ require (
 )
 
 require (
-	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
