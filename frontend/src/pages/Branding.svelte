@@ -5,6 +5,7 @@
   import { PageHead, Card, Setting, Badge, Status, Busy, Notice, Loading, toast } from '@overfin/ui';
   import { api } from '../lib/api';
   import { message } from '../lib/format';
+  import { unsaved } from '../lib/router.svelte';
   import BrandingFile from '../parts/library/BrandingFile.svelte';
   import type { Branding, Home } from '../lib/types-library';
 
@@ -23,6 +24,9 @@
   let missing = $state(false);
   let failure = $state('');
   let homeFailure = $state('');
+
+  // Leaving with changes not saved asks first.
+  $effect(() => unsaved(() => (!!b && (on !== b.on || name.trim() !== b.name)) || (!!home && missing !== home.missingTitles)));
 
   function settle(next: Branding) {
     b = next;

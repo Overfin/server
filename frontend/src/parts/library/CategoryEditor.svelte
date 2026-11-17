@@ -70,10 +70,12 @@
   }
 </script>
 
+<!-- The window scrolls: a list in it shows whole, no scroll box of its own
+     (the Tags list keeps its search instead). -->
 {#snippet group(label: string, hint: string, values: [string, string][], picked: string[], set: (v: string[]) => void, aria: string, shown?: (v: string) => boolean)}
   <div class="setting stack">
     <div><div class="label">{label}</div>{#if hint}<div class="hint">{hint}</div>{/if}</div>
-    <div class="checks">
+    <div class="checks all">
       {#each values as [v, text] (v)}
         <label class="inline" hidden={shown ? !shown(v) : false}>
           <input type="checkbox" checked={picked.includes(v)} aria-label={`${aria}: ${text}`}

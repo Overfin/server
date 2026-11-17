@@ -7,6 +7,7 @@
   import { news } from '../lib/news.svelte';
   import { ago, message } from '../lib/format';
   import { route } from '../lib/router.svelte';
+  import { reveal } from '../lib/detail';
   import type { Template } from '../lib/types';
   import type { Account, Person } from '../lib/types-people';
   import { lastActive, nameOf, statusKind, statusText, subline } from '../parts/people/names';
@@ -28,24 +29,35 @@
   let search = $state('');
   let filter = $state('');
   let adding = $state(false);
+  let detail = $state<HTMLElement>();
+  function pick(id: string) {
+    selected = id;
+    reveal(detail);
+  }
   // Just added: their setup link's window opens next.
   let justAdded = $state<Person | null>(null);
 
-  async function load(id = selected) {
+  // What the lists last were: a check in the background shows only a change.
+  let was = '';
+
+  async function load(id = selected, background = false) {
     try {
       const [accounts, tmpl, ppl] = await Promise.all([
-        api<{ items: Account[]; directory: string }>('GET', '/admin/api/accounts'),
-        api<{ items: Template[] }>('GET', '/admin/api/templates'),
+        api<{ items: Account[]; directory: string }>('GET', '/admin/api/accounts', undefined, background),
+        api<{ items: Template[] }>('GET', '/admin/api/templates', undefined, background),
         // Only with managed sign-in: who may sign in, by email.
-        api<{ items: Person[] }>('GET', '/admin/api/people').then((r) => r.items).catch(() => null),
+        api<{ items: Person[] }>('GET', '/admin/api/people', undefined, background).then((r) => r.items).catch(() => null),
       ]);
+      const now = JSON.stringify([accounts, tmpl.items, ppl]);
+      if (background && now === was) return;
+      was = now;
       items = accounts.items;
       directory = accounts.directory;
       templates = tmpl.items;
       people = ppl;
       selected = id;
     } catch (err) {
-      problem = message(err);
+      if (!background) problem = message(err); // in the background: next time
     }
   }
 
@@ -63,6 +75,15 @@
   const waiting = $derived(people ? people.filter((x) => !x.accountId) : []);
 
   load();
+  // People added, changed or removed elsewhere (another tab, another
+  // admin) show within 15 s; not while a window is open here, so a form
+  // isn't swept away.
+  $effect(() => {
+    const timer = setInterval(() => {
+      if (!document.hidden && !document.documentElement.classList.contains('modal-open')) load(selected, true);
+    }, 15000);
+    return () => clearInterval(timer);
+  });
   // Reloaded when the panel hears of an invitation used or an account made.
   let heard = news.changed;
   $effect(() => {
@@ -109,12 +130,12 @@
             {#each shown as a (a.id)}
               {@const kids = a.profiles.filter((p) => p.kind === 'kids').length}
               <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-              <tr data-id={a.id} class:selected={a.id === selected} onclick={() => (selected = a.id)}>
+              <tr data-id={a.id} class:selected={a.id === selected} onclick={() => pick(a.id)}>
                 <td>
                   <div class="who">
                     <Avatar name={nameOf(a)} />
                     <div>
-                      <button type="button" class="pick name" aria-pressed={a.id === selected} onclick={(e) => { e.stopPropagation(); selected = a.id; }}>{nameOf(a)}</button>
+                      <button type="button" class="pick name" aria-pressed={a.id === selected} onclick={(e) => { e.stopPropagation(); pick(a.id); }}>{nameOf(a)}</button>
                       <div class="hint">{subline(a) || (a.person ? '' : 'name unknown')}</div>
                     </div>
                   </div>
@@ -143,7 +164,7 @@
         </Card>
       {/if}
     </div>
-    <aside class="detail" aria-label="The account">
+    <aside class="detail" aria-label="The account" bind:this={detail}>
       {#if current}
         {#key current}
           <AccountDetail account={current} {templates} {people} reload={(id) => load(id)} />

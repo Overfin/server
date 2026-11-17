@@ -40,6 +40,16 @@ func TestNoticeSettings(t *testing.T) {
 	if body := b.do("GET", "/admin/api/notices", "", nil).Body.String(); !strings.Contains(body, `"signed":true`) || strings.Contains(body, out.Secret) {
 		t.Errorf("after the key: %s", body)
 	}
+	// Signing stops: the key goes, posts go unsigned.
+	if rec := b.do("DELETE", "/admin/api/notices/secret", "", nil); rec.Code != 204 {
+		t.Errorf("stop signing: %d %s", rec.Code, rec.Body)
+	}
+	if body := b.do("GET", "/admin/api/notices", "", nil).Body.String(); !strings.Contains(body, `"signed":false`) {
+		t.Errorf("after stopping: %s", body)
+	}
+	if _, ok, _ := db.NoticeSecret(t.Context()); ok {
+		t.Error("the key is still stored")
+	}
 	// Testing with nowhere to send says so.
 	if rec := b.do("POST", "/admin/api/notices/test", `{"days":7}`, nil); rec.Code != 400 || !strings.Contains(rec.Body.String(), "choose where") {
 		t.Errorf("test: %d %s", rec.Code, rec.Body)

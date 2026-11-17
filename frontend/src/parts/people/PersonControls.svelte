@@ -24,6 +24,10 @@
   }
 
   async function toggleAdmin() {
+    const question = x.admin
+      ? `Take away ${x.email}'s admin? They can't open the control panel any more.`
+      : `Make ${x.email} an admin? They get the whole control panel: people, settings, everything here.`;
+    if (!(await ask(question, { yes: x.admin ? 'Remove admin' : 'Make admin', danger: !x.admin }))) return;
     await api('PATCH', `/admin/api/people/${x.id}`, { admin: !x.admin });
     toast(x.admin ? `${x.email} is no longer an admin.` : `${x.email} is an admin now.`);
     reload();

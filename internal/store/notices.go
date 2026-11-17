@@ -90,6 +90,12 @@ func (s *Store) NewNoticeSecret(ctx context.Context) ([]byte, error) {
 	return k, err
 }
 
+// DropNoticeSecret removes the signing key: webhook posts go unsigned.
+func (s *Store) DropNoticeSecret(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM meta WHERE name = 'notice-secret'`)
+	return err
+}
+
 // NoticesDue lists the accounts, not disabled, whose access ends after
 // from and no later than until, and that haven't had a notice of kind for
 // that end ("expiring", "expired" or "warned", the person's own).

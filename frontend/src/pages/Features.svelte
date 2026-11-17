@@ -6,6 +6,7 @@
   import { PageHead, Card, Setting, Busy, Notice, Loading, toast } from '@overfin/ui';
   import { api, ApiError } from '../lib/api';
   import { featureName, message, numberIn } from '../lib/format';
+  import { leaveFreely, unsaved } from '../lib/router.svelte';
   import type { FeatureSettings, FeaturesState } from '../lib/types-people';
 
   const DRAFT = 'overfin-panel-draft';
@@ -70,8 +71,15 @@
   }
 
   const dirty = $derived(data !== null && baseline !== '' && JSON.stringify(collect()) !== baseline);
+  // Leaving with unsaved changes asks first.
+  $effect(() => unsaved(() => dirty));
+
+  // Whether Seerr is connected (Server): wishes for it wait until it is,
+  // so choosing it says so.
+  let seerrConnected = $state(true);
 
   async function start() {
+    api<{ url: string }>('GET', '/admin/api/seerr').then((r) => (seerrConnected = !!r.url), () => (seerrConnected = false));
     try {
       const s = await api<FeaturesState>('GET', '/admin/api/features');
       try { draft = JSON.parse(sessionStorage.getItem(DRAFT) || 'null'); } catch { draft = null; }
@@ -122,6 +130,7 @@
       if (err instanceof ApiError && err.type === 'step-up-required') {
         // Changes need a recent sign-in: keep them, sign in, come back.
         sessionStorage.setItem(DRAFT, JSON.stringify(wanted));
+        leaveFreely();
         location.href = '/admin/login?return=/admin/%23/features';
         return;
       }
@@ -207,6 +216,9 @@
           </select>
         {/snippet}
       </Setting>
+      {#if values['wishes.to'] === 'seerr' && !seerrConnected}
+        <Notice warn>Seerr isn't connected (Server, Seerr): wishes wait until it is.</Notice>
+      {/if}
       {#if values['wishes.to'] === 'seerr'}
         <Setting label="Wishes a day" hint="How many wishes Overfin requests in Seerr in 24 hours, in its turns: Seerr has no pace of its own. From 1 to 100." sub>
           {#snippet children(ids)}<input type="number" min="1" max="100" bind:value={values['wishes.perDay']} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}

@@ -4,6 +4,7 @@
   import { Card, Badge, Field, Status, Busy, ask, toast } from '@overfin/ui';
   import { api } from '../../lib/api';
   import { message } from '../../lib/format';
+  import { unsaved } from '../../lib/router.svelte';
   import type { Line, Seerr } from '../../lib/types-server';
 
   let { sr, reload }: { sr: Seerr; reload: () => void } = $props();
@@ -14,6 +15,7 @@
   // svelte-ignore state_referenced_locally
   let st = $state<Line>({ text: sr.url ? 'Seerr is connected.' : 'Not connected.', kind: '' });
   const fail = (err: Error) => (st = { text: message(err), kind: 'error' });
+  $effect(() => unsaved(() => url.trim() !== sr.url || key !== ''));
 
   async function send(body: { url: string; key: string }) {
     if (!body.url.trim() && !sr.url) {

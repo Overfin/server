@@ -4,6 +4,7 @@
   import { Card, Badge, Setting, Status, Busy, ask, toast } from '@overfin/ui';
   import { api } from '../../lib/api';
   import { message } from '../../lib/format';
+  import { unsaved } from '../../lib/router.svelte';
   import type { Line, Ratings } from '../../lib/types-server';
 
   let { rt, reload }: { rt: Ratings; reload: () => void } = $props();
@@ -54,6 +55,7 @@
   };
   // svelte-ignore state_referenced_locally
   let st = $state<Line>(describe(rt));
+  $effect(() => unsaved(() => key.trim() !== '' || country !== saved.country || shown !== saved.shown));
 
   async function save() {
     if (country === saved.country && shown === saved.shown) return;

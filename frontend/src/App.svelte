@@ -6,7 +6,7 @@
   import { api } from './lib/api';
   import { message, setLanguageNames } from './lib/format';
   import { icons } from './lib/icons';
-  import { route } from './lib/router.svelte';
+  import { mayLeave, leaveFreely, route } from './lib/router.svelte';
   import { watchNews } from './lib/news.svelte';
   import Server from './pages/Server.svelte';
   import Features from './pages/Features.svelte';
@@ -63,10 +63,28 @@
     (err) => (problem = message(err)),
   );
 
+  // Each page its own tab title: tabs and history tell them apart, and a
+  // screen reader hears the page change.
+  $effect(() => {
+    document.title = signedOut ? 'Signed out · Overfin control panel' : `${pages[tab].label} · Overfin control panel`;
+  });
+
+  // Signing in again comes back to the page left.
+  let back = $state('/admin/');
+  let again = $state<HTMLAnchorElement>();
+
   async function signOut() {
+    if (!(await mayLeave())) return;
+    leaveFreely();
+    back = `/admin/${location.hash}`;
     await api('POST', '/admin/api/logout', {}).catch(() => {});
     signedOut = true;
   }
+
+  // Signed out: the focus goes to the way back in, not to nowhere.
+  $effect(() => {
+    if (signedOut) again?.focus();
+  });
 </script>
 
 {#if signedOut}
@@ -74,7 +92,7 @@
     <div class="center">
       <h1>Signed out</h1>
       <p class="muted">You left the control panel.</p>
-      <p><a class="button" href="/admin/login?return=/admin/">Sign in again</a></p>
+      <p><a class="button" bind:this={again} href={`/admin/login?return=${encodeURIComponent(back)}`}>Sign in again</a></p>
     </div>
   </main>
 {:else if problem}

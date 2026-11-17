@@ -4,6 +4,7 @@
   import { Card, Badge, Field, Status, Busy, ask, toast } from '@overfin/ui';
   import { api } from '../../lib/api';
   import { message } from '../../lib/format';
+  import { unsaved } from '../../lib/router.svelte';
   import type { Line, Mail } from '../../lib/types-server';
 
   let { m, reload }: { m: Mail; reload: () => void } = $props();
@@ -23,6 +24,8 @@
   const on = Boolean(m.host);
   let st = $state<Line>({ text: on ? 'Invitations and forgotten passwords work by email.' : 'Without email, you add people yourself and set their passwords.', kind: '' });
   const fail = (err: Error) => (st = { text: message(err), kind: 'error' });
+  $effect(() => unsaved(() => host.trim() !== (m.host || '') || tls !== (m.tls || 'starttls') || String(port) !== String(m.port || '') ||
+    from.trim() !== (m.from || '') || username.trim() !== (m.username || '') || password !== ''));
 
   type Body = { host: string; port: number; tls: string; from: string; username: string; password: string };
   async function send(body: Body) {

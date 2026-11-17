@@ -347,6 +347,7 @@ func (p *Panel) handler() http.Handler {
 		mux.HandleFunc("PUT /admin/api/notices", p.signedIn(p.setNoticeSettings))
 		mux.HandleFunc("POST /admin/api/notices/test", p.signedIn(p.testNotices))
 		mux.HandleFunc("POST /admin/api/notices/secret", p.signedIn(p.newNoticeSecret))
+		mux.HandleFunc("DELETE /admin/api/notices/secret", p.signedIn(p.dropNoticeSecret))
 	}
 	mux.HandleFunc("GET /admin/api/categories", p.signedIn(p.categories))
 	mux.HandleFunc("POST /admin/api/categories", p.signedIn(p.createCategory))
