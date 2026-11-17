@@ -59,6 +59,12 @@ control panel, under **Federation**:
    library, what you **offer** and what you **want**. Only what one offers and the other wants is shared. A pairing
    where one side offers nothing works too.
 
+Other servers know your libraries by IDs of their own, made when you
+first offer each one; never Jellyfin's. Overfin servers older than
+November 2026 used Jellyfin's: once both of you run a newer one, what you
+wanted of each other is marked **no longer offered**, and the peer's row
+says to choose again. Open **Sharing** and tick the libraries again.
+
 Ending a pairing (**End**) is one click, and it ends on both servers at once.
 
 ## Limits

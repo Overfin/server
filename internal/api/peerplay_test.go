@@ -190,7 +190,7 @@ func pairForPlayWith(t *testing.T, trustB bool, wrapB func(http.Handler) http.Ha
 	x.stA.SetPeerState(ctx, bOnA.ID, store.PeerTheirs, store.PeerPaired)
 	x.bOnA, _ = x.stA.PeerByID(ctx, bOnA.ID)
 	x.b.SetOffers(ctx, x.aOnB, []string{"films"})
-	if err := x.a.SetWants(ctx, x.bOnA, []string{"films"}); err != nil {
+	if err := x.a.SetWants(ctx, x.bOnA, publicIDs(t, x.stB, "films")); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := x.a.SyncTitles(ctx, x.bOnA); err != nil || n != 1 {
@@ -332,7 +332,7 @@ func TestPeerTitlesListed(t *testing.T) {
 	stA.SetPeerState(ctx, bOnA.ID, store.PeerTheirs, store.PeerPaired)
 	bOnA, _ = stA.PeerByID(ctx, bOnA.ID)
 	b.SetOffers(ctx, aOnB, []string{"films"})
-	if err := a.SetWants(ctx, bOnA, []string{"films"}); err != nil {
+	if err := a.SetWants(ctx, bOnA, publicIDs(t, stB, "films")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.SyncTitles(ctx, bOnA); err != nil {
@@ -378,7 +378,7 @@ func TestPeerTitlesListed(t *testing.T) {
 		t.Fatalf("all titles on A (each once): %v", got)
 	}
 	// A's own name for the entry.
-	if err := stA.LabelPeerWant(ctx, bOnA.ID, "films", "Their films"); err != nil {
+	if err := stA.LabelPeerWant(ctx, bOnA.ID, publicIDs(t, stB, "films")[0], "Their films"); err != nil {
 		t.Fatal(err)
 	}
 	get(t, srvA, "/api/v1/libraries", &libs)
@@ -459,4 +459,19 @@ func TestPlayFromPeerOverNamedCertificate(t *testing.T) {
 	if status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`); status == 201 {
 		t.Fatalf("a playback over a certificate B no longer names: %d %s", status, body)
 	}
+}
+
+// publicIDs is the IDs paired servers know an owner's libraries by, by
+// its own (Jellyfin's) IDs.
+func publicIDs(t *testing.T, owner *store.Store, ids ...string) []string {
+	t.Helper()
+	m, err := owner.PublicLibraryIDs(context.Background(), ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = m[id]
+	}
+	return out
 }

@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -422,11 +424,14 @@ type PeerLibrary struct {
 	// Label is our operator's own name for its entry in the site's menu,
 	// "" for the one made of the peer's names; never sent to peers.
 	Label string `json:"-"`
+	// Gone, for one we want: it wasn't in the peer's offer at our last
+	// reading of its libraries (RenamePeerWants).
+	Gone bool `json:"-"`
 }
 
 // PeerWants lists the peer's libraries we want, by name.
 func (s *Store) PeerWants(ctx context.Context, peerID string) ([]PeerLibrary, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT library_id, name, kind, coalesce(label, '') FROM peer_wants WHERE peer_id = ? ORDER BY name, library_id`, peerID)
+	rows, err := s.read.QueryContext(ctx, `SELECT library_id, name, kind, coalesce(label, ''), NOT offered FROM peer_wants WHERE peer_id = ? ORDER BY name, library_id`, peerID)
 	if err != nil {
 		return nil, err
 	}
@@ -434,7 +439,7 @@ func (s *Store) PeerWants(ctx context.Context, peerID string) ([]PeerLibrary, er
 	out := []PeerLibrary{}
 	for rows.Next() {
 		var l PeerLibrary
-		if err := rows.Scan(&l.ID, &l.Name, &l.Kind, &l.Label); err != nil {
+		if err := rows.Scan(&l.ID, &l.Name, &l.Kind, &l.Label, &l.Gone); err != nil {
 			return nil, err
 		}
 		out = append(out, l)
@@ -477,7 +482,7 @@ func (s *Store) SetPeerWants(ctx context.Context, peerID string, libs []PeerLibr
 		menuID := hex.EncodeToString(sum[:16])
 		if _, err := tx.ExecContext(ctx, `INSERT INTO peer_wants (peer_id, library_id, name, kind, menu_id)
 			VALUES (?, ?, ?, ?, ?)
-			ON CONFLICT (peer_id, library_id) DO UPDATE SET name = excluded.name, kind = excluded.kind`,
+			ON CONFLICT (peer_id, library_id) DO UPDATE SET name = excluded.name, kind = excluded.kind, offered = 1`,
 			peerID, l.ID, l.Name, l.Kind, menuID); err != nil {
 			return err
 		}
@@ -486,7 +491,8 @@ func (s *Store) SetPeerWants(ctx context.Context, peerID string, libs []PeerLibr
 }
 
 // RenamePeerWants keeps what a peer now calls the libraries we want of it
-// (those it still offers), and what it calls itself.
+// (those it still offers, libs: all it offers), and what it calls
+// itself; those it no longer offers are marked gone.
 func (s *Store) RenamePeerWants(ctx context.Context, peerID, name string, libs []PeerLibrary) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -497,6 +503,14 @@ func (s *Store) RenamePeerWants(ctx context.Context, peerID, name string, libs [
 		if _, err := tx.ExecContext(ctx, `UPDATE peers SET name = ? WHERE id = ?`, name, peerID); err != nil {
 			return err
 		}
+	}
+	ids := make([]string, len(libs))
+	for i, l := range libs {
+		ids[i] = l.ID
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE peer_wants SET offered = library_id IN (SELECT value FROM json_each(?)) WHERE peer_id = ?`,
+		jsonList(ids), peerID); err != nil {
+		return err
 	}
 	for _, l := range libs {
 		if _, err := tx.ExecContext(ctx, `UPDATE peer_wants SET name = ?, kind = ? WHERE peer_id = ? AND library_id = ?`,
@@ -569,7 +583,8 @@ type PeerTitle struct {
 // TitlesInLibraries lists, in key order after after, at most limit of the
 // identified titles the given libraries hold (films, series, seasons,
 // episodes; files TMDB doesn't know are left out), each once, with one of
-// the libraries holding it.
+// the libraries holding it, by its public ID (PublicLibraryIDs, which
+// must have given each library one).
 func (s *Store) TitlesInLibraries(ctx context.Context, libraries []string, after string, limit int) ([]PeerTitle, error) {
 	return s.titlesIn(ctx, libraries, nil, after, limit)
 }
@@ -595,10 +610,14 @@ func (s *Store) titlesIn(ctx context.Context, libraries, keys []string, after st
 		args = append(args, jsonList(keys))
 	}
 	args = append(args, limit)
-	rows, err := s.read.QueryContext(ctx, `SELECT title_key, min(kind), min(library_id) FROM catalog_items
-		WHERE title_key > ? AND library_id IN (`+marks+`) AND kind IN ('movie', 'series', 'season', 'episode')
-			AND title_key NOT LIKE 'item/%'`+only+`
-		GROUP BY title_key ORDER BY title_key LIMIT ?`, args...)
+	// The library given is one holding it, by the ID paired servers know
+	// it by (PublicLibraryIDs: only libraries that have one are read), the
+	// first in byte order.
+	rows, err := s.read.QueryContext(ctx, `SELECT c.title_key, min(c.kind), min(f.public_id) FROM catalog_items c
+		JOIN federation_libraries f ON f.library_id = c.library_id
+		WHERE c.title_key > ? AND c.library_id IN (`+marks+`) AND c.kind IN ('movie', 'series', 'season', 'episode')
+			AND c.title_key NOT LIKE 'item/%'`+strings.ReplaceAll(only, "title_key", "c.title_key")+`
+		GROUP BY c.title_key ORDER BY c.title_key LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1079,4 +1098,39 @@ func (s *Store) ItemOfferedTo(ctx context.Context, peerID, itemID string) (bool,
 	err := s.read.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM catalog_items i JOIN peer_offers o ON o.library_id = i.library_id
 		WHERE i.id = ? AND o.peer_id = ?)`, itemID, peerID).Scan(&ok)
 	return ok, err
+}
+
+// PublicLibraryIDs gives our libraries' IDs as paired servers know them
+// (MSFP version 0, section 9.3), by our own (Jellyfin's) IDs: random,
+// made the first time a library is asked for (first offered), then kept.
+func (s *Store) PublicLibraryIDs(ctx context.Context, libraryIDs []string) (map[string]string, error) {
+	out := map[string]string{}
+	if len(libraryIDs) == 0 {
+		return out, nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	for _, id := range libraryIDs {
+		public := randomPublicID()
+		if _, err := tx.ExecContext(ctx, `INSERT INTO federation_libraries (library_id, public_id) VALUES (?, ?)
+			ON CONFLICT (library_id) DO NOTHING`, id, public); err != nil {
+			return nil, err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT public_id FROM federation_libraries WHERE library_id = ?`, id).Scan(&public); err != nil {
+			return nil, err
+		}
+		out[id] = public
+	}
+	return out, tx.Commit()
+}
+
+// randomPublicID is a library's public ID: 128 random bits in base64url,
+// after "lib_".
+func randomPublicID() string {
+	b := make([]byte, 16)
+	rand.Read(b) // crypto/rand.Read never fails on supported systems
+	return "lib_" + base64.RawURLEncoding.EncodeToString(b)
 }

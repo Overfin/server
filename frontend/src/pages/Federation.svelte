@@ -20,6 +20,7 @@
     wants: number;
     titles: number;
     unusable?: boolean;
+    wantsGone?: number;
   }
   interface Lib {
     id: string;
@@ -239,7 +240,9 @@
   const limitsText = (l: Limits) =>
     `${plural(l.streams, 'stream')} at once, ${plural(l.transcodes, 'transcode')} among them, ${l.bitrateKbps ? `${l.bitrateKbps} kbps at most` : 'no bitrate cap'}`;
 
-  const shareText = (p: Peer) => `Offers ${plural(p.offers, 'library', 'libraries')} · wants ${p.wants}${p.wants ? ` (${plural(p.titles, 'title')})` : ''}`;
+  const shareText = (p: Peer) =>
+    `Offers ${plural(p.offers, 'library', 'libraries')} · wants ${p.wants}${p.wants ? ` (${plural(p.titles, 'title')})` : ''}` +
+    (p.wantsGone ? ` · ${p.wantsGone} no longer offered: choose again in Sharing` : '');
   // The kind, unless the name already says it ("Films").
   const kindOf = (l: Lib) => (kinds[l.kind] && kinds[l.kind].toLowerCase() !== l.name.toLowerCase() ? kinds[l.kind] : '');
 

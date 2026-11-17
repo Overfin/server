@@ -10,6 +10,7 @@ package federation
 
 import (
 	"crypto/ed25519"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base32"
@@ -50,6 +51,21 @@ func (k Key) Public() ed25519.PublicKey {
 }
 
 func (k Key) sign(message []byte) []byte { return ed25519.Sign(k.private, message) }
+
+// idLabel starts the key that makes opaque IDs (OpaqueID), so it is never
+// the signing key itself.
+const idLabel = "overfin-federation-1 ids\n"
+
+// OpaqueID is an ID for a peer, made from one of ours that it must never
+// see nor compute (MSFP section 9.5: version IDs): a MAC, under a key
+// derived from this server's own, of what it is, for whom, and our ID.
+// The same for the same three, across restarts; 128 bits, base64url.
+func (k Key) OpaqueID(what, peerID, id string) string {
+	secret := sha256.Sum256(append([]byte(idLabel), k.private.Seed()...))
+	mac := hmac.New(sha256.New, secret[:])
+	mac.Write([]byte(what + "\n" + peerID + "\n" + id))
+	return b64.EncodeToString(mac.Sum(nil)[:16])
+}
 
 // fingerprintBytes is how much of the key's SHA-256 the fingerprint shows:
 // 15 bytes, 120 bits, 24 characters. Faking a fingerprint means finding

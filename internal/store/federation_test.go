@@ -3,9 +3,12 @@ package store
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -179,12 +182,17 @@ func TestPeerTitles(t *testing.T) {
 	if err := s.RefreshTitleKeys(ctx); err != nil {
 		t.Fatal(err)
 	}
+	public, err := s.PublicLibraryIDs(ctx, []string{"films", "films4k"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	got, err := s.TitlesInLibraries(ctx, []string{"films", "films4k"}, "", 1)
-	if err != nil || len(got) != 1 || got[0].Key != "movie/tmdb/14160" {
+	if err != nil || len(got) != 1 || got[0].Key != "movie/tmdb/14160" || got[0].Library != public["films"] {
 		t.Fatalf("first page: %+v, %v", got, err)
 	}
 	got, _ = s.TitlesInLibraries(ctx, []string{"films", "films4k"}, got[0].Key, 10)
-	if len(got) != 1 || got[0].Key != "movie/tmdb/949" || got[0].Library != "films" {
+	// Heat is in both: the library given is the first of their public IDs.
+	if len(got) != 1 || got[0].Key != "movie/tmdb/949" || got[0].Library != min(public["films"], public["films4k"]) {
 		t.Fatalf("second page (Heat once, the unidentified file and the other library left out): %+v", got)
 	}
 	// Its languages: both copies'.
@@ -443,5 +451,61 @@ func TestPeerAddressesNormalized(t *testing.T) {
 	}
 	if got, _ := s.PeerByID(ctx, p.ID); got.Address != "https://films.example.org" {
 		t.Errorf("address: %q", got.Address)
+	}
+}
+
+// Our libraries' public IDs: random, 128 bits in base64url, each made once
+// and kept, never Jellyfin's; a library renamed (another Jellyfin ID) keeps
+// its own.
+func TestPublicLibraryIDs(t *testing.T) {
+	s, ctx := openTest(t), context.Background()
+	first, err := s.PublicLibraryIDs(ctx, []string{"f137a2cd", "e5e5e5e5"})
+	if err != nil || len(first) != 2 || first["f137a2cd"] == first["e5e5e5e5"] {
+		t.Fatalf("made: %v, %v", first, err)
+	}
+	for id, pub := range first {
+		raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(pub, "lib_"))
+		if err != nil || len(raw) != 16 || !strings.HasPrefix(pub, "lib_") || strings.Contains(pub, id) {
+			t.Fatalf("%s: %q", id, pub)
+		}
+	}
+	again, _ := s.PublicLibraryIDs(ctx, []string{"e5e5e5e5", "f137a2cd"})
+	if !maps.Equal(first, again) {
+		t.Fatalf("not kept: %v, then %v", first, again)
+	}
+	if err := s.ReplaceLibraryID(ctx, "f137a2cd", "0d0d0d0d"); err != nil {
+		t.Fatal(err)
+	}
+	if renamed, _ := s.PublicLibraryIDs(ctx, []string{"0d0d0d0d"}); renamed["0d0d0d0d"] != first["f137a2cd"] {
+		t.Fatalf("renamed: %v, was %v", renamed, first)
+	}
+}
+
+// A library we want that a peer no longer offers is marked so at our
+// next reading of its libraries, and back once it offers it again.
+func TestPeerWantsGone(t *testing.T) {
+	s, ctx := openTest(t), context.Background()
+	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A")
+	s.SetPeerWants(ctx, p.ID, []PeerLibrary{{ID: "x", Name: "Films", Kind: "movies"}, {ID: "y", Name: "Series", Kind: "tvshows"}})
+	gone := func() []string {
+		w, _ := s.PeerWants(ctx, p.ID)
+		var out []string
+		for _, l := range w {
+			if l.Gone {
+				out = append(out, l.ID)
+			}
+		}
+		return out
+	}
+	if g := gone(); len(g) != 0 {
+		t.Fatalf("at first: %v", g)
+	}
+	s.RenamePeerWants(ctx, p.ID, "", []PeerLibrary{{ID: "y", Name: "Séries", Kind: "tvshows"}, {ID: "z", Name: "New"}})
+	if g := gone(); len(g) != 1 || g[0] != "x" {
+		t.Fatalf("after x left the offer: %v", g)
+	}
+	s.SetPeerWants(ctx, p.ID, []PeerLibrary{{ID: "x", Name: "Films", Kind: "movies"}, {ID: "z", Name: "New"}})
+	if g := gone(); len(g) != 0 {
+		t.Fatalf("chosen again: %v", g)
 	}
 }

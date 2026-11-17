@@ -35,7 +35,7 @@ func pairedPair(t *testing.T) (a, b *server, bOnA, aOnB *store.Peer) {
 	if err := a.s.SetOffers(ctx, bOnA, []string{"films"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.s.SetWants(ctx, aOnB, []string{"films"}); err != nil {
+	if err := b.s.SetWants(ctx, aOnB, pub(t, a, "films")); err != nil {
 		t.Fatal(err)
 	}
 	return a, b, bOnA, aOnB

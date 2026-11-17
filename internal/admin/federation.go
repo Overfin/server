@@ -32,6 +32,10 @@ type peerJSON struct {
 	Offers int `json:"offers"`
 	Wants  int `json:"wants"`
 	Titles int `json:"titles"`
+	// WantsGone counts the libraries we want of it that it no longer
+	// offered at our last reading (it stopped, or changed its IDs): to
+	// choose again.
+	WantsGone int `json:"wantsGone,omitempty"`
 	// Unusable: its key, as stored, isn't one MSFP accepts (of small
 	// order, say): no request from it, nor answer, is accepted. An honest
 	// server's key never is.
@@ -122,6 +126,11 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 			return
 		}
 		j.Offers, j.Wants, j.Titles = len(offers), len(wants), counts[pe.ID]
+		for _, w := range wants {
+			if w.Gone {
+				j.WantsGone++
+			}
+		}
 		outPeers = append(outPeers, j)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"available": true, "address": s.Address,
@@ -369,7 +378,7 @@ func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
 	}
 	for _, w := range wants {
 		if !slices.ContainsFunc(theirs, func(l store.PeerLibrary) bool { return l.ID == w.ID }) {
-			outTheirs = append(outTheirs, lib{ID: w.ID, Name: w.Name, Kind: w.Kind, Picked: true, Gone: reachable,
+			outTheirs = append(outTheirs, lib{ID: w.ID, Name: w.Name, Kind: w.Kind, Picked: true, Gone: reachable || w.Gone,
 				Label: w.Label, Shown: w.Name + " (" + peer.Name + ")"})
 		}
 	}

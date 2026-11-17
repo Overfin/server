@@ -177,7 +177,9 @@ func TestSharingPanel(t *testing.T) {
 	if !sh.Reachable || len(sh.Theirs) != 1 || sh.Theirs[0].Name != "Films" {
 		t.Fatalf("B sees: %s", rec.Body)
 	}
-	if rec := b.do("PUT", "/admin/api/federation/peers/"+aOnB.ID+"/sharing", `{"offer":[],"want":["films","series"]}`, nil); rec.Code != 204 {
+	// By the ID A gives it (never Jellyfin's "films"), and one A doesn't
+	// offer.
+	if rec := b.do("PUT", "/admin/api/federation/peers/"+aOnB.ID+"/sharing", `{"offer":[],"want":["`+sh.Theirs[0].ID+`","series"]}`, nil); rec.Code != 204 {
 		t.Fatalf("B wants: %d %s", rec.Code, rec.Body)
 	}
 	if s := readState(t, b); s.Peers[0].Wants != 1 {
@@ -215,5 +217,25 @@ func TestFederationPanelUnusableKey(t *testing.T) {
 		if p.Unusable != (p.Name == "B") {
 			t.Errorf("%s: unusable %v", p.Name, p.Unusable)
 		}
+	}
+}
+
+// A library we want that the peer no longer offers (it changed its
+// library IDs, say) is counted on the peer's row, to choose again.
+func TestFederationPanelWantsGone(t *testing.T) {
+	a, s := fedPanel(t, "A")
+	ctx := context.Background()
+	p, err := s.Store.AddPeer(ctx, federation.NewKey().Public(), "https://b.example.org", "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Store.SetPeerWants(ctx, p.ID, []store.PeerLibrary{{ID: "old", Name: "Films", Kind: "movies"}})
+	s.Store.RenamePeerWants(ctx, p.ID, "", []store.PeerLibrary{{ID: "lib_new", Name: "Films", Kind: "movies"}})
+	var st struct {
+		Peers []struct{ WantsGone int }
+	}
+	rec := a.do("GET", "/admin/api/federation", "", nil)
+	if json.Unmarshal(rec.Body.Bytes(), &st) != nil || len(st.Peers) != 1 || st.Peers[0].WantsGone != 1 {
+		t.Fatalf("state: %d %s", rec.Code, rec.Body)
 	}
 }

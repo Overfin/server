@@ -260,10 +260,10 @@ func TestSharing(t *testing.T) {
 	if again, _ := b.s.Store.PeerByID(ctx, aOnB.ID); again.Theirs == nil || *again.Theirs != (store.PeerLimits{Streams: 3, Transcodes: 1, BitrateKbps: 8000}) {
 		t.Fatalf("B's view of A's limits: %+v", again.Theirs)
 	}
-	if err := b.s.SetWants(ctx, aOnB, []string{"series", "home"}); err != nil {
+	if err := b.s.SetWants(ctx, aOnB, pub(t, a, "series", "home")); err != nil {
 		t.Fatal(err)
 	}
-	if w, _ := b.s.Store.PeerWants(ctx, aOnB.ID); len(w) != 1 || w[0].ID != "series" {
+	if w, _ := b.s.Store.PeerWants(ctx, aOnB.ID); len(w) != 1 || w[0].ID != pub(t, a, "series")[0] {
 		t.Fatalf("B wants what A doesn't offer: %+v", w)
 	}
 
@@ -292,9 +292,9 @@ func TestSyncTitles(t *testing.T) {
 	bOnA, _ := a.s.Accept(ctx, onlyPeer(t, a).ID)
 	aOnB, _ = b.s.Store.PeerByID(ctx, aOnB.ID)
 	a.s.SetOffers(ctx, bOnA, []string{"films"})
-	b.s.SetWants(ctx, aOnB, []string{"films"})
+	b.s.SetWants(ctx, aOnB, pub(t, a, "films"))
 	// Asking for the library A doesn't offer, too: ignored.
-	b.s.Store.SetPeerWants(ctx, aOnB.ID, []store.PeerLibrary{{ID: "films", Name: "Films"}, {ID: "private", Name: "Privé"}})
+	b.s.Store.SetPeerWants(ctx, aOnB.ID, []store.PeerLibrary{{ID: pub(t, a, "films")[0], Name: "Films"}, {ID: pub(t, a, "private")[0], Name: "Privé"}})
 	n, err := b.s.SyncTitles(ctx, aOnB)
 	if err != nil || n != 1 {
 		t.Fatalf("synced %d, %v", n, err)
@@ -327,7 +327,7 @@ func TestSyncTitlesChanges(t *testing.T) {
 	bOnA, _ := a.s.Accept(ctx, onlyPeer(t, a).ID)
 	aOnB, _ = b.s.Store.PeerByID(ctx, aOnB.ID)
 	a.s.SetOffers(ctx, bOnA, []string{"films"})
-	b.s.SetWants(ctx, aOnB, []string{"films"})
+	b.s.SetWants(ctx, aOnB, pub(t, a, "films"))
 	keys := func() string {
 		got, _ := b.s.Store.TitlesOfPeer(ctx, aOnB.ID)
 		var out []string
@@ -364,10 +364,10 @@ func TestSyncTitlesChanges(t *testing.T) {
 	}
 	// A offers more: the whole list again.
 	a.s.SetOffers(ctx, bOnA, []string{"films", "more"})
-	b.s.SetWants(ctx, aOnB, []string{"films"})
+	b.s.SetWants(ctx, aOnB, pub(t, a, "films"))
 	sync(1, "after A's offer changed")
 	// B wants more: the whole list again.
-	b.s.SetWants(ctx, aOnB, []string{"films", "more"})
+	b.s.SetWants(ctx, aOnB, pub(t, a, "films", "more"))
 	sync(2, "after B's wants changed")
 	// Changes forgotten up to now: B is still up to date, so nothing.
 	a.s.Store.TrimTitleChanges(ctx, time.Now().Add(time.Hour))
@@ -452,7 +452,7 @@ func TestSyncTitlesOnlyWhatsOffered(t *testing.T) {
 	bOnA, _ := a.s.Accept(ctx, onlyPeer(t, a).ID)
 	aOnB, _ = b.s.Store.PeerByID(ctx, aOnB.ID)
 	a.s.SetOffers(ctx, bOnA, []string{"films"})
-	b.s.SetWants(ctx, aOnB, []string{"films", "private"})
+	b.s.SetWants(ctx, aOnB, pub(t, a, "films", "private"))
 	if n, err := b.s.SyncTitles(ctx, aOnB); err != nil || n != 1 {
 		t.Fatalf("first reading: %d, %v", n, err)
 	}
@@ -485,7 +485,7 @@ func TestSyncTitlesPeerForgotUs(t *testing.T) {
 	bOnA, _ := a.s.Accept(ctx, onlyPeer(t, a).ID)
 	aOnB, _ = b.s.Store.PeerByID(ctx, aOnB.ID)
 	a.s.SetOffers(ctx, bOnA, []string{"films"})
-	b.s.SetWants(ctx, aOnB, []string{"films"})
+	b.s.SetWants(ctx, aOnB, pub(t, a, "films"))
 	a.s.Store.DeletePeer(ctx, bOnA.ID) // A ended it; B didn't hear
 	if _, err := b.s.SyncTitles(ctx, aOnB); !errors.Is(err, ErrUnknown) {
 		t.Fatalf("reading from a peer that forgot us: %v", err)
@@ -539,4 +539,19 @@ func TestLoopbackPeerRefused(t *testing.T) {
 	}
 	noPeers(t, a)
 	noPeers(t, b)
+}
+
+// pub is the IDs a peer knows the owner's libraries by, by the owner's own
+// (Jellyfin's) IDs.
+func pub(t *testing.T, owner *server, ids ...string) []string {
+	t.Helper()
+	m, err := owner.s.Store.PublicLibraryIDs(context.Background(), ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = m[id]
+	}
+	return out
 }

@@ -152,7 +152,8 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 	o, ok := pb.open(w, r, openArgs{req: startRequest{AudioTrack: req.AudioTrack, SubtitleTrack: req.SubtitleTrack,
 		StartPositionMs: req.StartPositionMs}, pr: pr, kbps: kbps, item: item, uid: uid, ja: ja,
 		wantAudio: req.AudioLanguage, wantSubtitles: req.SubtitleLanguage, lim: lim, device: peer.Name,
-		accountID: id, profileID: id, sessionID: id, urlBase: fed.Address, origin: origin(peer.Address)})
+		accountID: id, profileID: id, sessionID: id, urlBase: fed.Address, origin: origin(peer.Address),
+		versionID: func(sourceID string) string { return "ver_" + fed.Key.OpaqueID("version", peer.ID, sourceID) }})
 	if !ok {
 		return
 	}

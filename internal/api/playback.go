@@ -1019,6 +1019,11 @@ type openArgs struct {
 	// its address for another server's viewers; origin, then, is the site
 	// those viewers fetch it from (Stream.Origin).
 	urlBase, origin string
+	// versionID, when set, is a version's ID as the playback's viewer
+	// knows it (a paired server's: never Jellyfin's, MSFP section 9.5);
+	// nil for this server's own site, which knows them as "ver_" and
+	// Jellyfin's.
+	versionID func(sourceID string) string
 }
 
 // opened is a copy opened: its playback registered, and the session's
@@ -1170,10 +1175,14 @@ func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*op
 	}
 	started = true // the device is the playback's now, freed when it ends
 
+	versionID := o.versionID
+	if versionID == nil {
+		versionID = func(id string) string { return "ver_" + id }
+	}
 	out := sessionJSON{
 		ID: s.ID, Method: dec.Method,
 		PositionMs: req.StartPositionMs, DurationMs: dec.Source.RunTimeTicks / 10_000,
-		VersionID: "ver_" + sourceID, MaxBitrateKbps: kbps,
+		VersionID: versionID(sourceID), MaxBitrateKbps: kbps,
 	}
 	base := o.urlBase + "/api/v1/stream/" + s.Ticket + "/"
 	if dec.Protocol == "hls" {
@@ -1183,7 +1192,7 @@ func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*op
 	}
 	for _, src := range info.MediaSources {
 		if id, err := jellyfin.NormalizeID(src.Id); err == nil {
-			out.Versions = append(out.Versions, versionJSON{ID: "ver_" + id, Name: playback.Describe(src)})
+			out.Versions = append(out.Versions, versionJSON{ID: versionID(id), Name: playback.Describe(src)})
 		}
 	}
 	// The tracks as the player lists them (tracks.Read), read again from

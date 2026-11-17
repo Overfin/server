@@ -442,5 +442,9 @@ func (s *Store) ReplaceLibraryID(ctx context.Context, old, new string) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE OR IGNORE peer_offers SET library_id = ? WHERE library_id = ?`, new, old); err != nil {
 		return err
 	}
+	// The same library to paired servers: its public ID follows it.
+	if _, err := tx.ExecContext(ctx, `UPDATE OR IGNORE federation_libraries SET library_id = ? WHERE library_id = ?`, new, old); err != nil {
+		return err
+	}
 	return tx.Commit()
 }

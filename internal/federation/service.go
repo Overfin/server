@@ -822,6 +822,19 @@ func (s *Service) libraries(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.Internal, "")
 		return
 	}
+	// By the IDs peers know them by, never Jellyfin's (MSFP section 9.3).
+	ids := make([]string, len(offered))
+	for i, l := range offered {
+		ids[i] = l.ID
+	}
+	public, err := s.Store.PublicLibraryIDs(ctx, ids)
+	if err != nil {
+		problem.Send(w, problem.Internal, "")
+		return
+	}
+	for i := range offered {
+		offered[i].ID = public[offered[i].ID]
+	}
 	s.Store.PeerSeen(ctx, p.ID)
 	s.answer(w, v.Nonce, librariesAnswer{Name: s.Name(r.Context()), Libraries: offered, Limits: &p.Limits})
 }
@@ -889,6 +902,10 @@ func (s *Service) SetOffers(ctx context.Context, p *store.Peer, ids []string) er
 		}
 	}
 	if err := s.Store.SetPeerOffers(ctx, p.ID, keep); err != nil {
+		return err
+	}
+	// Each gets its public ID when first offered.
+	if _, err := s.Store.PublicLibraryIDs(ctx, keep); err != nil {
 		return err
 	}
 	s.changed(p.ID)
@@ -977,11 +994,21 @@ func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.Internal, "")
 		return
 	}
-	// Only libraries we offer it: anything else asked is ignored.
+	public, err := s.Store.PublicLibraryIDs(ctx, offered)
+	if err != nil {
+		problem.Send(w, problem.Internal, "")
+		return
+	}
+	ours := map[string]string{}
+	for id, pub := range public {
+		ours[pub] = id
+	}
+	// Only libraries we offer it, by the IDs it knows them by: anything
+	// else asked is ignored (Jellyfin's IDs included).
 	libs := []string{}
 	for _, l := range req.Libraries {
-		if slices.Contains(offered, l) && !slices.Contains(libs, l) {
-			libs = append(libs, l)
+		if id, ok := ours[l]; ok && !slices.Contains(libs, id) {
+			libs = append(libs, id)
 		}
 	}
 	head, floor, err := s.Store.TitleChanges(ctx)
@@ -1056,21 +1083,32 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 		return 0, err
 	}
 	libs := []string{}
-	for _, w := range wants {
-		libs = append(libs, w.ID)
-	}
-	if len(libs) > 0 {
+	if len(wants) > 0 {
 		// Its names and ours of it, as it gives them now.
-		if _, err := s.TheirLibraries(ctx, p); err != nil {
+		theirs, err := s.TheirLibraries(ctx, p)
+		if err != nil {
 			return 0, err
+		}
+		// Only those it still offers: one it no longer does (or whose ID
+		// it changed) waits for our operator to choose again, and its
+		// titles go with this reading.
+		for _, w := range wants {
+			if slices.ContainsFunc(theirs, func(l store.PeerLibrary) bool { return l.ID == w.ID }) {
+				libs = append(libs, w.ID)
+			}
 		}
 	}
 	// Only what changed since we last read, when the peer can tell: the
 	// whole list after a first pairing, a change of what we want, or when
-	// the peer no longer knows that far back.
+	// the peer no longer knows that far back. A reading of fewer than we
+	// want is a whole one, and isn't one to ask since next time.
 	since, wantsGen, err := s.Store.PeerTitlesRead(ctx, p.ID)
 	if err != nil {
 		return 0, err
+	}
+	partial := len(libs) != len(wants)
+	if partial {
+		since = 0
 	}
 	// Each page is kept as it comes (a peer may hold any number); with
 	// the whole list, those the peer no longer has go once the last page
@@ -1144,6 +1182,9 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 	}
 	// Next time, what changed since; a peer that gives no seq (an older
 	// Overfin) gets asked for the whole list each time.
+	if partial {
+		seq = 0
+	}
 	if err := s.Store.SetPeerTitlesRead(ctx, p.ID, seq, wantsGen); err != nil {
 		return 0, err
 	}
