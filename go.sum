@@ -1,5 +1,5 @@
-filippo.io/edwards25519 v1.1.0 h1:FNf4tywRC1HmFuKW5xopWpigGjJKiJSV0Cqo0cJWDaA=
-filippo.io/edwards25519 v1.1.0/go.mod h1:BxyFTGdWcka3PhytdK4V28tE5sGfRvvvRV7EaN4VDT4=
+filippo.io/edwards25519 v1.1.1 h1:YpjwWWlNmGIDyXOn8zLzqiD+9TyIlPhGFG96P39uBpw=
+filippo.io/edwards25519 v1.1.1/go.mod h1:BxyFTGdWcka3PhytdK4V28tE5sGfRvvvRV7EaN4VDT4=
 github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=
 github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/dustin/go-humanize v1.1.0 h1:dbKTrvD0klcbBV/h4AWJdMuZogJACoMlvWIWZ5b2xWg=
@@ -14,10 +14,6 @@ github.com/mattn/go-isatty v0.0.24 h1:tGZZoVgT/KiqK1c8ocVLeDS8BSWMRd47J3Lbz7vsRe
 github.com/mattn/go-isatty v0.0.24/go.mod h1:nMCL3Zebbrt45jsMDgnfIwz6ydEQApk5oEI3HqDio6A=
 github.com/ncruces/go-strftime v1.1.0 h1:vtPmPWMkb539RGV9WpWT9EwJGvrOCKvMNI4obWL47Hk=
 github.com/ncruces/go-strftime v1.1.0/go.mod h1:yVaq7iwCN09vHRrKBrrflXT0M9tTMG2KmZ9Fj7xeG/g=
-github.com/overfin/web v0.99.14 h1:QsMje4j7TS7E4BJLqozJlUvknkt5qyVsut22mVn77Sc=
-github.com/overfin/web v0.99.14/go.mod h1:QCD5oC/OiOhhhJo84vtvDZlDGhQgQ4scKzdqo8z+8M8=
-github.com/overfin/web v0.99.15 h1:HxPBpFWDMTTp25/4p5SkISMV6DVf4QU4rqyTf5c5D8w=
-github.com/overfin/web v0.99.15/go.mod h1:QCD5oC/OiOhhhJo84vtvDZlDGhQgQ4scKzdqo8z+8M8=
 github.com/overfin/web v0.99.16 h1:simEVlfIWfEnE+UTT3gVdUfxcLzrKrr3KaFMYW+L8FI=
 github.com/overfin/web v0.99.16/go.mod h1:QCD5oC/OiOhhhJo84vtvDZlDGhQgQ4scKzdqo8z+8M8=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
