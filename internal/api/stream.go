@@ -323,6 +323,9 @@ func (s Stream) proxy(w http.ResponseWriter, r *http.Request, st *playback.Strea
 		}
 	}
 	w.WriteHeader(res.StatusCode)
+	if r.Method == http.MethodHead {
+		return // the headers only: the file isn't read through for nothing
+	}
 	// io.Copy streams in small chunks: memory stays flat however long the
 	// film. If the client goes away, or the playback ends, the context ends
 	// the upstream read too. While the response is open, flowing or held

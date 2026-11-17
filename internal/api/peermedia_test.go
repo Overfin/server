@@ -517,3 +517,34 @@ func TestPeerSegmentRange(t *testing.T) {
 		t.Errorf("several ranges on a segment: %d", code)
 	}
 }
+
+// This server's own viewer's HEAD of a file played as it is gets the
+// headers, without the file being read through from Jellyfin.
+func TestOwnHeadReadsNothing(t *testing.T) {
+	ctx := context.Background()
+	var st *store.Store
+	srv, fake := newServerWith(t, options{store: &st})
+	fake.setDirect(true)
+	st.PutCatalog(ctx, []store.CatalogItem{
+		{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "949", LibraryID: "films"},
+	}, 1)
+	status, body := post(t, srv, "/api/v1/playback", fmt.Sprintf(`{"itemId":"item_%032x","capabilities":{}}`, 1))
+	var own peerSession
+	_ = json.Unmarshal([]byte(body), &own)
+	if status != 201 {
+		t.Fatalf("own playback: %d %s", status, body)
+	}
+	req, _ := http.NewRequest("HEAD", srv.URL+own.Stream.URL, nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Remote-User", subject)
+	c := *client(srv, subject)
+	c.Timeout = 3 * time.Second
+	res, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("HEAD: %v", err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Errorf("HEAD: %d", res.StatusCode)
+	}
+}
