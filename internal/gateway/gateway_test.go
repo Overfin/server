@@ -24,6 +24,7 @@ import (
 
 	"github.com/overfin/server/internal/edge"
 	"github.com/overfin/server/internal/link"
+	"github.com/overfin/server/internal/problem"
 )
 
 // fakeBackend answers with the path and the visitor's address it got.
@@ -558,5 +559,17 @@ func TestQueriesPassWholeOrNot(t *testing.T) {
 	do(h, "GET", "/api/v1/stream/abcdefghijklmnop/file?", "203.0.113.5:1234")
 	if len(b.got) != 2 || b.got[0] != "/api/v1/stream/abcdefghijklmnop/file?a=1" || !strings.HasSuffix(b.got[1], "?") {
 		t.Errorf("the backend got %q", b.got)
+	}
+}
+
+// The gateway's 404 is the backend's, byte for byte: a refused path can't
+// be told from a federation call whose signature failed there.
+func TestNotFoundIsTheBackends(t *testing.T) {
+	h := Handler(&fakeBackend{connected: true}, "1.0", nil, nil, quiet)
+	rec := do(h, "POST", "/api/v1/federation/nothing", "203.0.113.5:1234")
+	want := httptest.NewRecorder()
+	problem.Send(want, problem.NotFound, "")
+	if rec.Code != 404 || rec.Body.String() != want.Body.String() || rec.Header().Get("Content-Type") != want.Header().Get("Content-Type") {
+		t.Errorf("%d %q %q, want %q %q", rec.Code, rec.Header().Get("Content-Type"), rec.Body.String(), want.Header().Get("Content-Type"), want.Body.String())
 	}
 }

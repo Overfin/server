@@ -182,8 +182,15 @@ func refused(p string) bool {
 }
 
 func notFound(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	// The backend's own 404, byte for byte: a path refused here can't be
+	// told from one the backend refused, a federation call whose
+	// signature failed among them (MSFP section 3, "Probing").
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusNotFound)
-	_, _ = w.Write([]byte("Not found\n"))
+	_, _ = w.Write([]byte(notFoundBody))
 }
+
+// notFoundBody is problem.Send's not-found body.
+const notFoundBody = `{"type":"not-found","title":"Not found","status":404}` + "\n"
