@@ -73,23 +73,56 @@ var ErrRefused = errors.New("an address Overfin doesn't connect to for a paired 
 
 // Refused says whether ip is one Overfin never dials for a peer:
 // loopback (unless allowed), link-local (a cloud's metadata service among
-// them), unspecified, multicast, and IPv4's "this network" (0.0.0.0/8),
-// reserved block (240.0.0.0/4) and broadcast in it. An IPv4-mapped IPv6
-// address is judged as the IPv4 one.
+// them), the clouds' metadata services outside it, unspecified,
+// multicast, and IPv4's "this network" (0.0.0.0/8), reserved block
+// (240.0.0.0/4) and broadcast in it. An IPv4-mapped IPv6 address is
+// judged as the IPv4 one, and so is the IPv4 address inside a NAT64
+// (64:ff9b::/96, 64:ff9b:1::/48) or 6to4 (2002::/16) one, which reaches it.
 func Refused(ip netip.Addr) bool {
 	ip = ip.Unmap()
+	if v4, ok := embeddedV4(ip); ok && Refused(v4) {
+		return true
+	}
 	if ip.IsLoopback() {
 		return !loopback.Load()
 	}
 	return !ip.IsValid() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
 		ip.IsMulticast() || ip.IsInterfaceLocalMulticast() ||
-		thisNetwork.Contains(ip) || reservedV4.Contains(ip)
+		thisNetwork.Contains(ip) || reservedV4.Contains(ip) || metadata[ip]
 }
 
 var (
 	thisNetwork = netip.MustParsePrefix("0.0.0.0/8")
 	reservedV4  = netip.MustParsePrefix("240.0.0.0/4") // with 255.255.255.255
+	nat64       = netip.MustParsePrefix("64:ff9b::/96")
+	nat64Local  = netip.MustParsePrefix("64:ff9b:1::/48")
+	sixToFour   = netip.MustParsePrefix("2002::/16")
+	// Clouds' metadata services outside link-local: Alibaba's (in
+	// 100.64.0.0/10), Azure's (a public address), AWS's over IPv6 (a
+	// unique-local one).
+	metadata = map[netip.Addr]bool{
+		netip.MustParseAddr("100.100.100.200"): true,
+		netip.MustParseAddr("168.63.129.16"):   true,
+		netip.MustParseAddr("fd00:ec2::254"):   true,
+	}
 )
+
+// embeddedV4 is the IPv4 address a NAT64 or 6to4 address reaches: the last
+// 32 bits of a NAT64 one (RFC 6052's /96, the one in use), bits 16 to 47 of
+// a 6to4 one.
+func embeddedV4(ip netip.Addr) (netip.Addr, bool) {
+	if !ip.Is6() {
+		return netip.Addr{}, false
+	}
+	b := ip.As16()
+	switch {
+	case nat64.Contains(ip), nat64Local.Contains(ip):
+		return netip.AddrFrom4([4]byte(b[12:16])), true
+	case sixToFour.Contains(ip):
+		return netip.AddrFrom4([4]byte(b[2:6])), true
+	}
+	return netip.Addr{}, false
+}
 
 // lookup finds a name's addresses (a variable: tests give their own).
 var lookup = net.DefaultResolver.LookupNetIP

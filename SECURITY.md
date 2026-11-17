@@ -814,9 +814,12 @@ anyone. Paired servers are not trusted at all (rule 94).
      is checked first, on the gateway's egress (rule 132) as on a single
      Overfin, and when Overfin reads its own certificate (rule 99).
      Overfin never dials, for a peer, loopback, link-local (a cloud's
-     metadata service among them), unspecified or multicast addresses,
-     IPv4's 0.0.0.0/8 or 240.0.0.0/4, or broadcast. An IPv4-mapped IPv6
-     address counts as its IPv4 one. Private ranges are allowed: paired
+     metadata service among them), the clouds' metadata services outside
+     it (100.100.100.200, 168.63.129.16, fd00:ec2::254), unspecified or
+     multicast addresses, IPv4's 0.0.0.0/8 or 240.0.0.0/4, or broadcast.
+     An IPv4-mapped IPv6 address counts as its IPv4 one, and so does a
+     NAT64 (64:ff9b::/96, 64:ff9b:1::/48) or 6to4 (2002::/16) address
+     for the IPv4 one it reaches. Private ranges are allowed: paired
      servers may share a LAN. A name is looked up once per connection,
      every address it gives must pass, and the address dialed is the one
      checked, never looked up again. Redirects are never followed. One
