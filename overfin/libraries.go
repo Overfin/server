@@ -11,8 +11,17 @@ import (
 )
 
 // libraries manages the libraries of Overfin's own Jellyfin for the
-// control panel, with the key Overfin made there.
-type libraries struct{ g *gateway }
+// control panel, with the key Overfin made there. own are folders the
+// folder chooser leaves out: in the backend, Jellyfin shares the
+// container with Overfin, and its folders aren't media.
+type libraries struct {
+	g   *gateway
+	own map[string]bool
+}
+
+// backendFolders are the backend image's own folders (backend/Dockerfile):
+// Overfin's data, secrets and pairing, Jellyfin's settings and cache.
+var backendFolders = map[string]bool{"/data": true, "/secrets": true, "/pairing": true, "/config": true, "/cache": true}
 
 // kinds are the libraries Overfin makes, by Jellyfin's names for them.
 var kinds = map[string]string{"films": "movies", "series": "tvshows"}
@@ -166,9 +175,18 @@ func (l libraries) Browse(ctx context.Context, dir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	paths := make([]string, len(folders))
-	for i, f := range folders {
-		paths[i] = f.Path
+	paths := make([]string, 0, len(folders))
+	for _, f := range folders {
+		if !l.own[f.Path] {
+			paths = append(paths, f.Path)
+		}
 	}
 	return paths, nil
+}
+
+func newLibraries(g *gateway) libraries {
+	if backendMode {
+		return libraries{g: g, own: backendFolders}
+	}
+	return libraries{g: g}
 }
