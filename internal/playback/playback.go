@@ -26,14 +26,16 @@ import (
 // Capabilities is what the playing device can handle, in the API's simple
 // form.
 type Capabilities struct {
-	Containers       []string `json:"containers"`
-	VideoCodecs      []string `json:"videoCodecs"`
-	AudioCodecs      []string `json:"audioCodecs"`
-	MaxHeight        int      `json:"maxHeight"`
-	HDR              []string `json:"hdr"`
-	Subtitles        []string `json:"subtitles"`
-	MaxAudioChannels int      `json:"maxAudioChannels"`
-	MaxBitrateKbps   int      `json:"maxBitrateKbps"`
+	// Each left out when empty, as MSFP wants it sent to a paired server
+	// (never null): those are the only capabilities ever written.
+	Containers       []string `json:"containers,omitempty"`
+	VideoCodecs      []string `json:"videoCodecs,omitempty"`
+	AudioCodecs      []string `json:"audioCodecs,omitempty"`
+	MaxHeight        int      `json:"maxHeight,omitempty"`
+	HDR              []string `json:"hdr,omitempty"`
+	Subtitles        []string `json:"subtitles,omitempty"`
+	MaxAudioChannels int      `json:"maxAudioChannels,omitempty"`
+	MaxBitrateKbps   int      `json:"maxBitrateKbps,omitempty"`
 }
 
 // Known values. Unknown ones are ignored, as the API promises, so a client can

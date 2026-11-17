@@ -2,11 +2,13 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/overfin/server/internal/federation"
+	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/problem"
 )
 
@@ -105,5 +107,19 @@ func TestPeerRefusalBusy(t *testing.T) {
 		if got := peerRefusal(r); got != want {
 			t.Errorf("%+v: %s", r, got)
 		}
+	}
+}
+
+// A play request as the viewer's side sends it holds no null and no
+// empty optional member (MSFP section 2): nothing said is left out.
+func TestPeerPlayRequestNoNull(t *testing.T) {
+	b, _ := json.Marshal(peerPlayRequest{Title: "movie/tmdb/949", Capabilities: playback.Capabilities{}.ForPeer()})
+	if string(b) != `{"title":"movie/tmdb/949","capabilities":{}}` {
+		t.Errorf("empty: %s", b)
+	}
+	full := playback.Capabilities{Containers: []string{"mp4"}, VideoCodecs: []string{"h264"}, Subtitles: []string{"vtt"}}.ForPeer()
+	b, _ = json.Marshal(peerPlayRequest{Title: "movie/tmdb/949", Capabilities: full, AudioLanguage: "fr"})
+	if strings.Contains(string(b), "null") || strings.Contains(string(b), `""`) {
+		t.Errorf("with capabilities: %s", b)
 	}
 }

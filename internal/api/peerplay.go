@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"github.com/overfin/server/internal/textclean"
 	"github.com/overfin/server/internal/tracks"
@@ -33,18 +32,20 @@ import (
 // asks here (rule 97). Everything personal (what they watch, where they
 // are, their address) stays on their server.
 
+// peerPlayRequest is MSFP's play (version 0, section 9.5). Its optional
+// members are left out when empty, never sent as "" or null.
 type peerPlayRequest struct {
 	// Title is the title key: a film's or an episode's.
 	Title           string                `json:"title"`
 	Capabilities    playback.Capabilities `json:"capabilities"`
-	StartPositionMs int64                 `json:"startPositionMs"`
-	MaxBitrateKbps  int                   `json:"maxBitrateKbps"`
+	StartPositionMs int64                 `json:"startPositionMs,omitempty"`
+	MaxBitrateKbps  int                   `json:"maxBitrateKbps,omitempty"`
 	// AudioLanguage and SubtitleLanguage are the viewer's, as tags: the
 	// copy and the tracks are picked by them.
-	AudioLanguage    string `json:"audioLanguage"`
-	SubtitleLanguage string `json:"subtitleLanguage"`
-	AudioTrack       string `json:"audioTrack"`
-	SubtitleTrack    string `json:"subtitleTrack"`
+	AudioLanguage    string `json:"audioLanguage,omitempty"`
+	SubtitleLanguage string `json:"subtitleLanguage,omitempty"`
+	AudioTrack       string `json:"audioTrack,omitempty"`
+	SubtitleTrack    string `json:"subtitleTrack,omitempty"`
 }
 
 var languageTagRe = regexp.MustCompile(`^[A-Za-z0-9-]{0,12}$`)
@@ -68,7 +69,7 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req peerPlayRequest
-	if json.Unmarshal(body, &req) != nil {
+	if federation.DecodeJSON(body, &req) != nil {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
@@ -207,7 +208,7 @@ func (pb Playback) peerStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req peerStopRequest
-	if json.Unmarshal(body, &req) != nil || !playIDRe.MatchString(req.ID) || req.PositionMs < 0 || req.PositionMs > maxPositionMs {
+	if federation.DecodeJSON(body, &req) != nil || !playIDRe.MatchString(req.ID) || req.PositionMs < 0 || req.PositionMs > maxPositionMs {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
@@ -238,7 +239,7 @@ func (pb Playback) peerProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req peerProgressRequest
-	if json.Unmarshal(body, &req) != nil || !playIDRe.MatchString(req.ID) || req.PositionMs < 0 || req.PositionMs > maxPositionMs {
+	if federation.DecodeJSON(body, &req) != nil || !playIDRe.MatchString(req.ID) || req.PositionMs < 0 || req.PositionMs > maxPositionMs {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}

@@ -38,13 +38,21 @@ func jpegOf(t *testing.T, w, h int) []byte {
 	return b.Bytes()
 }
 
+// Members by their exact names: federation answers are read so.
 type previewSession struct {
-	ID        string
-	Stream    struct{ URL string }
+	ID     string `json:"id"`
+	Stream struct {
+		URL string `json:"url"`
+	} `json:"stream"`
 	Trickplay *struct {
-		TileWidth, TileHeight, Columns, Rows, IntervalMs, TileCount int
-		Sheets                                                      []string
-	}
+		TileWidth  int      `json:"tileWidth"`
+		TileHeight int      `json:"tileHeight"`
+		Columns    int      `json:"columns"`
+		Rows       int      `json:"rows"`
+		IntervalMs int      `json:"intervalMs"`
+		TileCount  int      `json:"tileCount"`
+		Sheets     []string `json:"sheets"`
+	} `json:"trickplay"`
 }
 
 // startOnA starts Heat on A, which only B has.

@@ -51,10 +51,13 @@ func viewer(t *testing.T, b *federation.Service, client *http.Client) (*federati
 	return a, bOnA, aOnB
 }
 
+// Members by their exact names: federation answers are read so.
 type peerSession struct {
-	ID     string
-	Method string
-	Stream struct{ URL string }
+	ID     string `json:"id"`
+	Method string `json:"method"`
+	Stream struct {
+		URL string `json:"url"`
+	} `json:"stream"`
 }
 
 // A's viewer plays B's film straight from B: the stream answers A's site

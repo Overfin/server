@@ -2,7 +2,6 @@ package federation
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -301,7 +300,7 @@ func retryAfterOf(body []byte) int {
 	var p struct {
 		RetryAfter int `json:"retryAfter"` // a fraction or a string: not one
 	}
-	if json.Unmarshal(body, &p) != nil || p.RetryAfter < 1 || p.RetryAfter > maxRetryAfter {
+	if DecodeJSON(body, &p) != nil || p.RetryAfter < 1 || p.RetryAfter > maxRetryAfter {
 		return 0
 	}
 	return p.RetryAfter

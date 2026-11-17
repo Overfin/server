@@ -336,7 +336,7 @@ func (s *Service) pair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req pairRequest
-	if json.Unmarshal(body, &req) != nil || checkAddress(req.Address) != nil {
+	if DecodeJSON(body, &req) != nil || checkAddress(req.Address) != nil {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -378,8 +378,13 @@ func (s *Service) hello(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
+	// state is required, and a string (MSFP section 9.2): "State" is
+	// another member.
 	var msg helloMessage
-	if json.Unmarshal(body, &msg) != nil {
+	var state struct {
+		State *string `json:"state"`
+	}
+	if DecodeJSON(body, &msg) != nil || DecodeJSON(body, &state) != nil || state.State == nil {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -557,7 +562,7 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 			var pd struct {
 				Type string `json:"type"`
 			}
-			if json.Unmarshal(answer, &pd) == nil && len(pd.Type) <= 64 {
+			if DecodeJSON(answer, &pd) == nil && len(pd.Type) <= 64 {
 				r.Problem = pd.Type
 			}
 			if r.Status == http.StatusTooManyRequests || r.Status == http.StatusServiceUnavailable {
@@ -569,7 +574,7 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 	if sigText, _ := oneHeader(res.Header, HeaderSignature); CheckResponse(p.PublicKey, nonce, res.StatusCode, answer, sigText) != nil {
 		return Reply{}, fmt.Errorf("%w: its answer isn't signed by its key", ErrUnreachable)
 	}
-	if err := json.Unmarshal(answer, out); err != nil {
+	if err := DecodeJSON(answer, out); err != nil {
 		return Reply{}, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
 	return Reply{Status: http.StatusOK}, nil
@@ -802,13 +807,13 @@ func (s *Service) OfferedTo(ctx context.Context, peerID string) ([]store.PeerLib
 // libraries answers a paired peer with what we offer it, and nothing
 // else: any other caller gets the plain 404.
 func (s *Service) libraries(w http.ResponseWriter, r *http.Request) {
-	v, _, ok := s.verified(w, r)
+	v, body, ok := s.verified(w, r)
 	if !ok {
 		return
 	}
 	ctx := r.Context()
 	p, err := s.Store.PeerByKey(ctx, v.Key)
-	if err != nil || p.State != store.PeerPaired {
+	if err != nil || p.State != store.PeerPaired || DecodeJSON(body, &struct{}{}) != nil {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -963,7 +968,7 @@ func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req titlesRequest
-	if json.Unmarshal(body, &req) != nil || len(req.After) > 512 {
+	if DecodeJSON(body, &req) != nil || len(req.After) > 512 {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -989,7 +994,8 @@ func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.Internal, "")
 		return
 	}
-	answer := titlesAnswer{Seq: head}
+	// titles is a list, empty or not: never null (MSFP section 2).
+	answer := titlesAnswer{Seq: head, Titles: []store.PeerTitle{}}
 	// Only what changed, when we still know what changed since then, and
 	// what we offer it hasn't changed since.
 	// Read since the offers last changed (that change has a number of its
@@ -1000,7 +1006,10 @@ func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
 			problem.Send(w, problem.Internal, "")
 			return
 		}
-		answer.Changes, answer.Titles, answer.Gone = true, present, gone
+		answer.Changes, answer.Gone = true, gone
+		if present != nil {
+			answer.Titles = present
+		}
 		if err := s.Store.PeerTold(ctx, p.ID, present, gone); err != nil {
 			problem.Send(w, problem.Internal, "")
 			return
@@ -1015,7 +1024,9 @@ func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
 			problem.Send(w, problem.Internal, "")
 			return
 		}
-		answer.Titles = page
+		if page != nil {
+			answer.Titles = page
+		}
 		if err := s.Store.PeerTold(ctx, p.ID, page, nil); err != nil {
 			problem.Send(w, problem.Internal, "")
 			return
