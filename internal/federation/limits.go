@@ -199,15 +199,23 @@ func (l *Limits) call(key string, play bool, now time.Time) *refusal {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.sweep(now)
-	if ok, after := l.bucketOf(l.peers, key, now, peerBurst).take(now, peerRate, peerBurst); !ok {
+	// Each bucket is taken from only once all have a token: a call one of
+	// them refuses costs the others nothing.
+	peer := l.bucketOf(l.peers, key, now, peerBurst)
+	if ok, after := peer.take(now, peerRate, peerBurst); !ok {
 		return &refusal{problem.RateLimited, after}
 	}
 	if play {
 		if ok, after := l.bucketOf(l.plays, key, now, playBurst).take(now, playRate, playBurst); !ok {
+			peer.tokens++
 			return &refusal{problem.RateLimited, after}
 		}
 	}
 	if ok, after := l.all.take(now, allRate, allBurst); !ok {
+		peer.tokens++
+		if play {
+			l.plays[key].tokens++
+		}
 		return &refusal{problem.ServerBusy, after}
 	}
 	return nil

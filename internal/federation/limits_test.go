@@ -298,3 +298,25 @@ func TestPlayBusyIsAnAnswer(t *testing.T) {
 		t.Fatalf("background calls after a busy libraries: %v", err)
 	}
 }
+
+// A call refused by one limit costs the others nothing: a peer refused
+// while the server is full keeps its own allowance.
+func TestRefusedCallsCostNothing(t *testing.T) {
+	var l Limits
+	now := time.Unix(1_800_000_000, 0)
+	l.Now = func() time.Time { return now }
+	l.call("k", false, now) // makes the buckets
+	drain(&l, func(l *Limits) *bucket { return l.all })
+	for range 300 {
+		if no := l.call("k", true, now); no == nil || no.problem != "server-busy" {
+			t.Fatalf("the server full: %+v", no)
+		}
+	}
+	l.all.tokens = allBurst
+	if b := l.peers["k"]; b.tokens < peerBurst-2 {
+		t.Errorf("the peer's own allowance spent by refused calls: %v", b.tokens)
+	}
+	if b := l.plays["k"]; b.tokens < playBurst-1 {
+		t.Errorf("its play allowance spent by refused calls: %v", b.tokens)
+	}
+}
