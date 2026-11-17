@@ -38,6 +38,13 @@
     reload(a.id);
   }
 
+  // Disabling asks first; enabling doesn't.
+  async function toggleDisabled() {
+    const disable = a.status !== 'disabled';
+    if (disable && !(await ask(`Disable ${nameOf(a)}'s account? Nobody can use it until it's enabled again.`, { yes: 'Disable', danger: true }))) return;
+    await patch({ disabled: disable }, disable ? 'Account disabled.' : 'Account enabled.');
+  }
+
   async function remove() {
     if (!(await ask(`Delete ${nameOf(a)}'s account, its profiles and what they hold? This can't be undone.`, { yes: 'Delete', danger: true }))) return;
     await api('DELETE', `/admin/api/accounts/${a.id}`);
@@ -137,7 +144,7 @@
 {/if}
 
 <div class="danger-zone">
-  <Busy action={() => patch({ disabled: a.status !== 'disabled' }, a.status === 'disabled' ? 'Account enabled.' : 'Account disabled.')}>
+  <Busy action={toggleDisabled}>
     {a.status === 'disabled' ? 'Enable account' : 'Disable account'}
   </Busy>
   <Busy kind="danger" action={remove}>Delete account</Busy>

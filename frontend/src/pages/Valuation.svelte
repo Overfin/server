@@ -1,10 +1,11 @@
 <!-- Valuation: how much each criterion counts in the titles' values, with
      the most and least valuable titles updated as the sliders move. -->
 <script lang="ts">
-  import { PageHead, Card, Setting, Status, Busy, Notice, Loading, toast } from '@overfin/ui';
+  import { PageHead, Card, Setting, Status, Busy, Notice, Loading, ask, toast } from '@overfin/ui';
   import { api } from '../lib/api';
   import { message, plural } from '../lib/format';
-  import { route } from '../lib/router.svelte';
+  import { route, unsaved } from '../lib/router.svelte';
+  import { reveal } from '../lib/detail';
   import type { Valuation, Valued } from '../lib/types-library';
   import MeasuresCard from '../parts/library/MeasuresCard.svelte';
 
@@ -41,8 +42,15 @@
   let least = $state<Valued[] | null>(null);
   let found = $state<Valued[] | null>(null);
   let selected = $state('');
+  let detail = $state<HTMLElement>();
+  function pick(id: string) {
+    selected = id;
+    reveal(detail);
+  }
 
   const changed = $derived(!!data && data.criteria.some((c) => weights[c.name] !== saved[c.name]));
+  // Leaving with sliders moved and not saved asks first.
+  $effect(() => unsaved(() => changed));
   const current = $derived([...(most || []), ...(least || []), ...(found || [])].find((t) => t.id === selected));
 
   api<Valuation>('GET', '/admin/api/valuation').then(
@@ -93,6 +101,7 @@
   }
 
   async function reset() {
+    if (!(await ask('Put every weight back to its default? The weights saved now are lost.', { yes: 'Reset', danger: true }))) return;
     const res = await api<Valuation>('PUT', '/admin/api/valuation', { reset: true });
     for (const c of data!.criteria) {
       const w = res.criteria.find((x) => x.name === c.name)!.weight;
@@ -157,8 +166,8 @@
       <tbody>
         {#each rows || [] as t (t.id)}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-          <tr data-id={t.id} class:selected={t.id === selected} onclick={() => (selected = t.id)}>
-            <td><button type="button" class="pick name" aria-pressed={t.id === selected} onclick={(e) => { e.stopPropagation(); selected = t.id; }}>{valuedName(t)}</button>{#if !t.inLibrary}<div class="hint">Not in the libraries</div>{/if}</td>
+          <tr data-id={t.id} class:selected={t.id === selected} onclick={() => pick(t.id)}>
+            <td><button type="button" class="pick name" aria-pressed={t.id === selected} onclick={(e) => { e.stopPropagation(); pick(t.id); }}>{valuedName(t)}</button>{#if !t.inLibrary}<div class="hint">Not in the libraries</div>{/if}</td>
             <td class="num">{t.score.toFixed(1)}</td>
           </tr>
         {:else}
@@ -218,7 +227,7 @@
         {@render list('Title', found, search.trim() ? 'Nothing matches.' : 'Search any title, in the libraries or not.')}
       </section>
     </div>
-    <aside class="detail" aria-label="Why this value">
+    <aside class="detail" aria-label="Why this value" bind:this={detail}>
       {#if current}
         {@const t = current}
         <div class="detail-head"><div>
