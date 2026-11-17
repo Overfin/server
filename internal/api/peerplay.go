@@ -102,13 +102,11 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 
 	var pr jellyfin.PlaybackRequest
 	pr.StartTimeTicks = req.StartPositionMs * 10_000
-	if req.AudioTrack != "" {
-		n, ok := trackIndex(req.AudioTrack, 'a')
-		if !ok {
-			problem.Send(w, problem.InvalidRequest, "")
-			return
-		}
-		pr.AudioStreamIndex = &n
+	// A malformed track is refused; a well-formed one is Jellyfin's to
+	// hear only once it is one of the copy's (open, peerTracks).
+	if _, ok := trackIndex(req.AudioTrack, 'a'); req.AudioTrack != "" && !ok {
+		problem.Send(w, problem.InvalidRequest, "")
+		return
 	}
 	off := -1
 	pr.SubtitleStreamIndex = &off
@@ -152,7 +150,7 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 	o, ok := pb.open(w, r, openArgs{req: startRequest{AudioTrack: req.AudioTrack, SubtitleTrack: req.SubtitleTrack,
 		StartPositionMs: req.StartPositionMs}, pr: pr, kbps: kbps, item: item, uid: uid, ja: ja,
 		wantAudio: req.AudioLanguage, wantSubtitles: req.SubtitleLanguage, lim: lim, device: peer.Name,
-		accountID: id, profileID: id, sessionID: id, urlBase: fed.Address, origin: origin(peer.Address),
+		accountID: id, profileID: id, sessionID: id, urlBase: fed.Address, origin: origin(peer.Address), peerTracks: true,
 		versionID: func(sourceID string) string { return "ver_" + fed.Key.OpaqueID("version", peer.ID, sourceID) }})
 	if !ok {
 		return

@@ -86,3 +86,34 @@ func TestPeerVersionIDsOpaque(t *testing.T) {
 		t.Fatalf("the site's own: %d %s", code, body)
 	}
 }
+
+// A paired server's audioTrack or subtitleTrack that isn't one of the
+// copy's counts as none asked for (MSFP playback, section 2.6): Jellyfin
+// never hears of it, and the answer says what plays. One of the copy's
+// plays; a malformed one is refused.
+func TestPeerTracksOfTheCopy(t *testing.T) {
+	x := newPeerPlayer(t)
+	s, status := x.play(map[string]any{"audioTrack": "a9", "subtitleTrack": "s9"})
+	if status != 200 || s.AudioTrack != "a1" || s.SubtitleTrack != "" {
+		t.Fatalf("tracks the copy doesn't have: %d %+v", status, s)
+	}
+	for _, c := range x.fake.calls {
+		if strings.Contains(c, "audio=9") {
+			t.Fatalf("Jellyfin heard of a9: %v", x.fake.calls)
+		}
+	}
+	s, status = x.play(map[string]any{"audioTrack": "a2", "subtitleTrack": "s3"})
+	if status != 200 || s.AudioTrack != "a2" || s.SubtitleTrack != "s3" || x.fake.called("PlaybackInfo audio=2") == 0 {
+		t.Fatalf("the copy's tracks: %d %+v %v", status, s, x.fake.calls)
+	}
+	// The forced track, as subtitles; off.
+	if s, _ = x.play(map[string]any{"subtitleTrack": "s5"}); s.SubtitleTrack != "s5" {
+		t.Fatalf("forced: %+v", s)
+	}
+	if s, _ = x.play(map[string]any{"subtitleTrack": "off", "subtitleLanguage": "en"}); s.SubtitleTrack != "" {
+		t.Fatalf("off: %+v", s)
+	}
+	if _, status = x.play(map[string]any{"audioTrack": "s1"}); status != 400 {
+		t.Fatalf("malformed: %d", status)
+	}
+}

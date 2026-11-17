@@ -1024,6 +1024,11 @@ type openArgs struct {
 	// nil for this server's own site, which knows them as "ver_" and
 	// Jellyfin's.
 	versionID func(sourceID string) string
+	// peerTracks: req's tracks are a paired server's, checked against
+	// the copy's own before Jellyfin hears of them; one the copy doesn't
+	// have counts as none asked for (MSFP playback, section 2.6). This
+	// server's own site sets pr.AudioStreamIndex itself.
+	peerTracks bool
 }
 
 // opened is a copy opened: its playback registered, and the session's
@@ -1102,7 +1107,23 @@ func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*op
 	shownSubtitle := ""
 	again := false
 	wantAudio, wantSubtitles := o.wantAudio, o.wantSubtitles
-	audioTracks, subtitleTracks, _ := tracks.Read(dec.Source.MediaStreams)
+	audioTracks, subtitleTracks, forcedTracks := tracks.Read(dec.Source.MediaStreams)
+	if o.peerTracks {
+		if n, ok := trackIndex(req.AudioTrack, 'a'); ok {
+			if _, listed := tracks.Find(audioTracks, n); listed {
+				pr.AudioStreamIndex, again = &n, true
+			} else {
+				req.AudioTrack = ""
+			}
+		}
+		if n, ok := trackIndex(req.SubtitleTrack, 's'); ok {
+			_, text := tracks.Find(subtitleTracks, n)
+			_, forced := tracks.Find(forcedTracks, n)
+			if !text && !forced {
+				req.SubtitleTrack = ""
+			}
+		}
+	}
 	if req.AudioTrack == "" && wantAudio != "" {
 		if t, ok := tracks.Pick(audioTracks, wantAudio); ok && t.Index != defaultAudio(dec.Source) {
 			n := t.Index
@@ -1197,7 +1218,7 @@ func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*op
 	}
 	// The tracks as the player lists them (tracks.Read), read again from
 	// the version streamed.
-	audioTracks, subtitleTracks, forcedTracks := tracks.Read(dec.Source.MediaStreams)
+	audioTracks, subtitleTracks, forcedTracks = tracks.Read(dec.Source.MediaStreams)
 	for _, a := range audioTracks {
 		out.AudioTracks = append(out.AudioTracks, trackJSON{ID: "a" + strconv.Itoa(a.Index), Label: a.Name,
 			Language: a.Language, Channels: a.Channels, Role: roleJSON(a.Role), Default: a.Default})
