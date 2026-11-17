@@ -32,12 +32,17 @@ var ErrJSON = errors.New("federation: not a valid body")
 // maxDepth bounds how deeply a body nests: MSFP's bodies are shallow.
 const maxDepth = 64
 
-// DecodeJSON reads a federation body into v (a pointer), as MSFP section
-// 2.1 says.
+// DecodeJSON reads a federation body, a JSON object, into v (a pointer),
+// as MSFP section 2.1 says.
 func DecodeJSON(body []byte, v any) error {
 	tree, err := strictTree(body)
 	if err != nil {
 		return err
+	}
+	// Every MSFP body, request or answer, is an object (core section
+	// 8.1): "null", a list or a string isn't one.
+	if _, ok := tree.(map[string]any); !ok {
+		return ErrJSON
 	}
 	exact, err := json.Marshal(keepExact(tree, reflect.TypeOf(v)))
 	if err != nil {

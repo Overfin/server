@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -183,10 +184,27 @@ func (rw *refusalWriter) WriteHeader(status int)      { rw.rec.WriteHeader(statu
 func SignRefusals(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rw := &refusalWriter{rec: httptest.NewRecorder()}
-		h.ServeHTTP(rw, r)
-		if rw.free != nil {
-			rw.free()
-		}
+		func() {
+			// Its slots are freed whatever happens, and a crash is a
+			// signed 500 (the server's own recovery, outside, would
+			// answer unsigned: no answer, to a paired server).
+			defer func() {
+				if rw.free != nil {
+					rw.free()
+				}
+			}()
+			defer func() {
+				if v := recover(); v != nil {
+					if v == http.ErrAbortHandler {
+						panic(v)
+					}
+					slog.Error("federation: a route crashed", "path", r.URL.Path, "panic", fmt.Sprint(v), "stack", string(debug.Stack()))
+					rw.rec = httptest.NewRecorder()
+					problem.Send(rw.rec, problem.Internal, "")
+				}
+			}()
+			h.ServeHTTP(rw, r)
+		}()
 		res := rw.rec
 		for k, v := range res.Header() {
 			w.Header()[k] = v
@@ -448,16 +466,20 @@ func viewOf(p *store.Peer) string {
 
 // cleanName keeps a peer's name short and printable, or its host when
 // it gives none.
+// In MSFP core section 9.1's order: each run of white space one space,
+// then other control and format characters removed, both ends trimmed,
+// cut to maxName code points and trimmed again.
 func cleanName(name, address string) string {
+	name = strings.Join(strings.FieldsFunc(name, func(r rune) bool { return unicode.Is(unicode.White_Space, r) }), " ")
 	name = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return -1
 		}
 		return r
 	}, name)
-	name = strings.Join(strings.Fields(name), " ")
+	name = strings.TrimSpace(name)
 	if r := []rune(name); len(r) > maxName {
-		name = string(r[:maxName])
+		name = strings.TrimSpace(string(r[:maxName]))
 	}
 	if name == "" {
 		u, _ := url.Parse(address)
@@ -1013,7 +1035,10 @@ func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req titlesRequest
-	if DecodeJSON(body, &req) != nil || len(req.After) > 512 {
+	var required struct {
+		Libraries *[]string `json:"libraries"` // required (MSFP catalog, section 3)
+	}
+	if DecodeJSON(body, &req) != nil || DecodeJSON(body, &required) != nil || required.Libraries == nil || len(req.After) > 512 {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
