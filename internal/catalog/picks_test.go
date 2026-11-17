@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,6 +73,9 @@ func TestPicks(t *testing.T) {
 	now := time.Now()
 	acct, prof, err := st.CreateAccount(ctx, "subject-1", store.NewOwner{Name: "Me", JellyfinUserID: "jf-1", JellyfinUsername: "of-1", JellyfinToken: "token-1"})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetRatingsCountry(ctx, "US"); err != nil {
 		t.Fatal(err)
 	}
 	st.PutCatalog(ctx, []store.CatalogItem{{ID: id(1), Kind: "movie", Name: "Film", SortName: "film", TMDB: "7"}}, 1)
@@ -161,5 +165,30 @@ func TestPicks(t *testing.T) {
 	}
 	if series, _ := st.ListTitles(ctx, "liked", "series", "", nil, 0, 10); len(series) != 0 {
 		t.Errorf("liked, not asked: %+v", series)
+	}
+}
+
+// With no ratings country (none chosen, none from the server's region),
+// there's no region: the regional list is empty, and TMDB isn't asked.
+func TestPicksNoCountry(t *testing.T) {
+	box, _ := seal.New(bytes.Repeat([]byte{9}, 32))
+	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "t.db"), box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	src := &fakePicks{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if err := NewPicks(func() PickSource { return src }, st, logger, time.Hour, 0).Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if regional, _ := st.ListTitles(ctx, "regional", "movie", "", nil, 0, 10); len(regional) != 0 {
+		t.Errorf("regional: %+v", regional)
+	}
+	for _, a := range src.asked {
+		if strings.HasPrefix(a, "providers") || strings.HasPrefix(a, "streaming") || strings.HasPrefix(a, "home") {
+			t.Errorf("asked %q", a)
+		}
 	}
 }

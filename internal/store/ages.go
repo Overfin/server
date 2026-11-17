@@ -12,7 +12,9 @@ import (
 //
 // A title's age is its rating's in the server's ratings country, when it
 // has one there; else the middle of the others' (the higher of the two
-// middle ones, with an even count). With several ratings in one country
+// middle ones, with an even count). With no ratings country (none chosen,
+// none from the server's region: RatingsCountry), every title gets the
+// middle of its countries'. With several ratings in one country
 // (a cut, say), the highest counts.
 //
 // Ratings that only advise parents (PG and the like) have no age by law:
@@ -91,7 +93,8 @@ func RatingAge(kind, country, certification string) (int, bool) {
 }
 
 // TitleAge is a title's age from its ratings (by country): the ratings
-// country's when it has one, else the middle of the others'.
+// country's when it has one, else the middle of the others'; country ""
+// is none, and the middle of all of them counts.
 func TitleAge(kind string, ratings map[string][]string, country string) (int, bool) {
 	// One age per country: its highest.
 	byCountry := map[string]int{}

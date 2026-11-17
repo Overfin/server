@@ -43,6 +43,10 @@ func TestTitleAge(t *testing.T) {
 		// What says nothing of age, or a country not in the table.
 		{"movie", map[string][]string{"US": {"NR"}, "XX": {"9"}}, "US", 0, false},
 		{"movie", nil, "US", 0, false},
+		// No ratings country: the middle of all of them.
+		{"movie", map[string][]string{"US": {"PG-13"}, "FR": {"TP"}, "DE": {"16"}}, "", 13, true},
+		{"series", map[string][]string{"US": {"TV-MA"}}, "", 17, true},
+		{"movie", map[string][]string{"US": {"NR"}}, "", 0, false},
 	} {
 		if got, ok := TitleAge(tc.kind, tc.ratings, tc.country); got != tc.want || ok != tc.ok {
 			t.Errorf("%v in %s: %d %v, want %d %v", tc.ratings, tc.country, got, ok, tc.want, tc.ok)
@@ -116,6 +120,9 @@ func TestTitleAgesKept(t *testing.T) {
 func TestAgesFromCeilings(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
+	if err := s.SetRatingsCountry(ctx, "US"); err != nil {
+		t.Fatal(err)
+	}
 	acct, _, err := s.CreateAccount(ctx, "subject-1", owner("1"))
 	if err != nil {
 		t.Fatal(err)

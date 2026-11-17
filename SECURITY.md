@@ -243,10 +243,11 @@ anyone. Paired servers are not trusted at all (rule 94).
     Overfin's caches too, the gateway's included (rule 128). A person's photo goes to any profile: people carry
     no rating, library or tag.
 40. A title's age is Overfin's own, from TMDB's ratings, never the media
-    server's: its rating in the operator's ratings country when it has one,
-    else the middle of its ratings elsewhere, each turned into the youngest
-    age it allows by a table Overfin ships (ratings that only advise
-    parents count as 8). A title with no such age has none.
+    server's: its rating in the ratings country when it has one (the
+    operator's choice, else the region of the server's languages, else
+    none), else the middle of its ratings elsewhere, each turned into the
+    youngest age it allows by a table Overfin ships (ratings that only
+    advise parents count as 8). A title with no such age has none.
 41. A kids profile sees and wishes for only titles for its age, which the
     owner chooses, everywhere: search, discover, lists, title pages,
     images, playback. A title without an age is hidden from it.

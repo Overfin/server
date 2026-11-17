@@ -68,7 +68,11 @@ export interface Seerr {
 export interface Ratings {
   token: { set: boolean; inEnv: boolean };
   source: boolean;
+  // The ratings country that applies ('' none), the operator's choice ('':
+  // follow the server's region), and that region ('' none).
   country: string;
+  chosen: string;
+  region: string;
   countries: string[];
   shown: string;
   fetched: number;

@@ -36,16 +36,27 @@
 
   let names: Intl.DisplayNames | null = null;
   try { names = new Intl.DisplayNames([navigator.language, 'en'], { type: 'region' }); } catch { names = null; }
+  const countryName = (cc: string) => `${(names && names.of(cc)) || cc} (${cc})`;
   // svelte-ignore state_referenced_locally
-  const countries = (rt.countries.length ? rt.countries : [rt.country])
-    .map((cc) => [cc, `${(names && names.of(cc)) || cc} (${cc})`])
+  const countries = (rt.countries.length ? rt.countries : rt.chosen ? [rt.chosen] : [])
+    .map((cc) => [cc, countryName(cc)])
     .sort((a, b) => a[1].localeCompare(b[1]));
+  // '' follows the server's region, from its languages.
   // svelte-ignore state_referenced_locally
-  let saved = $state({ country: rt.country, shown: rt.shown });
+  const follow = rt.region ? `The server's region: ${countryName(rt.region)}` : 'The server\'s region: none (the middle of countries\' ratings)';
   // svelte-ignore state_referenced_locally
-  let country = $state(rt.country);
+  let saved = $state({ country: rt.chosen, shown: rt.shown });
+  // svelte-ignore state_referenced_locally
+  let country = $state(rt.chosen);
   // svelte-ignore state_referenced_locally
   let shown = $state(rt.shown);
+  // svelte-ignore state_referenced_locally
+  let applied = $state({ country: rt.country, chosen: rt.chosen });
+  const appliedText = $derived(applied.chosen
+    ? `Now ${countryName(applied.country)}, chosen here.`
+    : applied.country
+      ? `Now ${countryName(applied.country)}, from the server's region (its languages).`
+      : 'Now none: the middle of countries\' ratings. The server\'s languages give no region Overfin reads ratings in.');
 
   const describe = (r: Ratings): Line => {
     if (!r.source && !r.token.set) return { text: 'Without TMDB, no title can be rated, so kids profiles see nothing.', kind: 'error' };
@@ -60,12 +71,13 @@
   async function save() {
     if (country === saved.country && shown === saved.shown) return;
     if (country !== saved.country &&
-      !(await ask('Every kids profile will need new limits from its account\'s owner, and sees nothing until then. Change the country?', { yes: 'Change' }))) {
+      !(await ask('Titles\' ages will be worked out again: what kids profiles and categories show may change. Change the country?', { yes: 'Change' }))) {
       country = saved.country;
       return;
     }
     const out = await api<Ratings>('PUT', '/admin/api/ratings', { country, shown });
-    saved = { country: out.country, shown: out.shown };
+    saved = { country: out.chosen, shown: out.shown };
+    applied = { country: out.country, chosen: out.chosen };
     st = describe(out);
     toast('TMDB settings saved.');
   }
@@ -88,9 +100,10 @@
     <p class="hint">Free, once: sign up at <a href="https://www.themoviedb.org/signup" target="_blank" rel="noopener">themoviedb.org</a>, then in your account's <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">Settings → API</a>, ask for API access (personal use is fine), then copy the API Read Access Token: the long one, not the API key.</p>
   {/if}
   <Status text={keySt.text} kind={keySt.kind} />
-  <Setting label="Ratings country" hint="Titles' ages, for kids profiles and categories, go by this country's ratings first; a title with none there gets the middle of the other countries'.">
+  <Setting label="Ratings country" hint={`Titles' ages, for kids profiles and categories, go by this country's ratings first; a title with none there gets the middle of the other countries'. ${appliedText}`}>
     {#snippet children(ids)}
       <select bind:value={country} aria-labelledby={ids.label} aria-describedby={ids.hint}>
+        <option value="">{follow}</option>
         {#each countries as [cc, label] (cc)}<option value={cc}>{label}</option>{/each}
       </select>
     {/snippet}

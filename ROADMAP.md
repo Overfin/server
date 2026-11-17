@@ -860,7 +860,8 @@ nothing beyond what that needs.
   - **Sources** only bring titles into view: TMDB's recommendations for
     what people here watch and mark as favourites, the genres accounts
     said they like (Tastes), and what's out in the server's country (its
-    ratings country; 2026-11-06): titles out in the last year on its
+    ratings country; 2026-11-06; none, and nothing here, when there's no
+    ratings country, 2026-11-17): titles out in the last year on its
     15 most shown streaming services, foreign ones too, and films released
     at home there in the last 90 days. TMDB knows what's out where, not
     what people watch where (one popularity, worldwide), so the order is

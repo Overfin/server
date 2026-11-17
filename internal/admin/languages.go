@@ -32,10 +32,20 @@ func (p *Panel) setLanguages(w http.ResponseWriter, r *http.Request, s *session)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": detail})
 		return
 	}
+	// The ratings country may follow the languages (the server's region).
+	country, err := p.Store.RatingsCountry(r.Context())
+	if err != nil {
+		p.fail(w, "changing the languages", err)
+		return
+	}
 	changed, err := p.Store.SetLanguages(r.Context(), req.Offered, req.Default)
 	if err != nil {
 		p.fail(w, "changing the languages", err)
 		return
+	}
+	if now, err := p.Store.RatingsCountry(r.Context()); err == nil && now != country {
+		p.accessChanged()
+		p.Logger.Info("the ratings country follows the server's region", "country", now)
 	}
 	p.Logger.Info("the languages changed in the control panel", "offered", req.Offered, "default", req.Default, "by", s.logID)
 	if changed && p.OnLanguage != nil {

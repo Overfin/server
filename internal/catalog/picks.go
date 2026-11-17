@@ -117,8 +117,13 @@ func (k *Picks) regional(ctx context.Context, src PickSource) error {
 	if err != nil {
 		return err
 	}
-	now := k.clock()
 	l := newList()
+	// No ratings country (none chosen, none from the server's region): no
+	// region to ask TMDB for, and the list is empty.
+	if country == "" {
+		return k.save(ctx, "regional", l)
+	}
+	now := k.clock()
 	read := func(kind string, fetch func(page int) (*tmdb.Page, error)) error {
 		for page := 1; page <= regionPages; page++ {
 			p, err := fetch(page)

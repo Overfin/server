@@ -8,8 +8,13 @@
   app to install.
 - **Profiles**, each with its own history and an optional PIN. **Kids
   profiles** see only titles for their age, which the account's owner
-  sets: a title's age comes from TMDB's ratings, those of the country you
-  choose first, else the middle of other countries'. Everything else is
+  sets: a title's age comes from TMDB's ratings, those of the ratings
+  country first, else the middle of other countries'. The ratings country
+  is the one you choose in the panel (Server, TMDB), else the server's
+  region, from its languages (fr-CA gives Canada, en-GB the United
+  Kingdom); when no language gives a region Overfin reads ratings in,
+  there is none, and every title gets the middle of its countries'
+  ratings. Everything else is
   hidden everywhere, not just greyed out, and can't be played. The owner
   can also keep any profile to some categories or libraries, or hide tags
   from it.

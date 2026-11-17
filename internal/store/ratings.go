@@ -25,46 +25,93 @@ type RatingLevel struct {
 // never within any ceiling, and never one.
 const NotRated = "NR"
 
-// DefaultRatingsCountry is the ratings country until the operator picks one.
-const DefaultRatingsCountry = "US"
-
-// RatingsCountry is the country whose certifications apply.
+// RatingsCountry is the country whose certifications apply: the
+// operator's choice (ChosenRatingsCountry), else the server's region
+// (RegionRatingsCountry); "" when neither gives one, and every title then
+// gets the middle of its countries' ratings (TitleAge).
 func (s *Store) RatingsCountry(ctx context.Context) (string, error) {
-	var v []byte
-	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'ratings-country'`).Scan(&v)
-	if errors.Is(err, sql.ErrNoRows) {
-		return DefaultRatingsCountry, nil
+	chosen, ok, err := s.ChosenRatingsCountry(ctx)
+	if err != nil || ok {
+		return chosen, err
 	}
-	return string(v), err
+	return s.RegionRatingsCountry(ctx)
 }
 
-// SetRatingsCountry changes the ratings country, and works titles' ages
-// out again: they go by its ratings first.
-func (s *Store) SetRatingsCountry(ctx context.Context, country string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	var old []byte
-	err = tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'ratings-country'`).Scan(&old)
+// ChosenRatingsCountry is the ratings country the operator picked; ok is
+// false when they picked none.
+func (s *Store) ChosenRatingsCountry(ctx context.Context) (country string, ok bool, err error) {
+	var v []byte
+	err = s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'ratings-country'`).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
-		old, err = []byte(DefaultRatingsCountry), nil
+		return "", false, nil
+	}
+	return string(v), err == nil, err
+}
+
+// RegionRatingsCountry is the server's region, from the languages the
+// operator set: the region of the first one that has one, the default
+// first, then the others in their order ("fr-CA" gives "CA"), provided
+// Overfin reads that country's ratings of films and series (RatingAge);
+// "" when none does, or the languages aren't set yet.
+func (s *Store) RegionRatingsCountry(ctx context.Context) (string, error) {
+	offered, def, set, err := s.Languages(ctx)
+	if err != nil || !set {
+		return "", err
+	}
+	for _, tag := range append([]string{def}, offered...) {
+		if c := tagRegion(tag); c != "" {
+			return c, nil
+		}
+	}
+	return "", nil
+}
+
+// tagRegion is a language tag's region ("pt-BR" gives "BR"), when Overfin
+// has ages for its films' and series' ratings; "" otherwise.
+func tagRegion(tag string) string {
+	_, region, ok := strings.Cut(tag, "-")
+	if !ok {
+		return ""
+	}
+	region = strings.ToUpper(region)
+	if filmAges[region] == nil || tvAges[region] == nil {
+		return ""
+	}
+	return region
+}
+
+// SetRatingsCountry changes the operator's choice of ratings country, ""
+// to follow the server's region, and works titles' ages out again when
+// the country that applies changes: they go by its ratings first.
+func (s *Store) SetRatingsCountry(ctx context.Context, country string) error {
+	old, err := s.RatingsCountry(ctx)
+	if err != nil {
+		return err
+	}
+	chosen, ok, err := s.ChosenRatingsCountry(ctx)
+	if err != nil {
+		return err
+	}
+	switch {
+	case country == "" && ok:
+		_, err = s.db.ExecContext(ctx, `DELETE FROM meta WHERE name = 'ratings-country'`)
+	case country != "" && (!ok || chosen != country):
+		_, err = s.db.ExecContext(ctx, `INSERT INTO meta (name, value) VALUES ('ratings-country', ?)
+			ON CONFLICT (name) DO UPDATE SET value = excluded.value`, []byte(country))
 	}
 	if err != nil {
 		return err
 	}
-	if string(old) == country {
-		return nil
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO meta (name, value) VALUES ('ratings-country', ?)
-		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, []byte(country)); err != nil {
+	return s.refreshAgesIfMoved(ctx, old)
+}
+
+// refreshAgesIfMoved works titles' ages out again when the ratings country
+// is no longer old.
+func (s *Store) refreshAgesIfMoved(ctx context.Context, old string) error {
+	now, err := s.RatingsCountry(ctx)
+	if err != nil || now == old {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	// Titles' ages go by the ratings country first.
 	return s.RefreshTitleAges(ctx)
 }
 

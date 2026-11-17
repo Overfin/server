@@ -227,6 +227,8 @@ func TestTitles(t *testing.T) {
 	if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_100", nil); code != 404 {
 		t.Errorf("unrated, for a kid: %d", code)
 	}
+	// The certification shown is the ratings country's.
+	st.SetRatingsCountry(ctx, "US")
 	st.SetTitleRatings(ctx, store.RatedTitle{Kind: "movie", TMDB: "100"}, map[string][]string{"US": {"G"}}, "2024-01-01", "2024-03-01", now)
 	var rated testTitle
 	if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_100", &rated); code != 200 || rated.Certification != "G" || rated.Age == nil || *rated.Age != 0 {

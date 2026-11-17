@@ -1015,7 +1015,12 @@ func (p *Panel) setSeerr(w http.ResponseWriter, r *http.Request, s *session) {
 // their certifications fetched. Without a source for TMDB's data, kids
 // profiles see nothing.
 type ratingsJSON struct {
+	// Country is the ratings country that applies, "" none; Chosen is the
+	// operator's choice, "" to follow the server's region (Region, ""
+	// when the languages give none).
 	Country   string   `json:"country"`
+	Chosen    string   `json:"chosen"`
+	Region    string   `json:"region"`
 	Countries []string `json:"countries"`
 	// Shown is which titles no library has are shown: all, released,
 	// home (see store.TitlesShown).
@@ -1038,6 +1043,12 @@ func (p *Panel) ratingsState(ctx context.Context) (ratingsJSON, error) {
 	}
 	var err error
 	if out.Country, err = p.Store.RatingsCountry(ctx); err != nil {
+		return out, err
+	}
+	if out.Chosen, _, err = p.Store.ChosenRatingsCountry(ctx); err != nil {
+		return out, err
+	}
+	if out.Region, err = p.Store.RegionRatingsCountry(ctx); err != nil {
 		return out, err
 	}
 	if out.Countries, err = p.Store.RatingCountries(ctx); err != nil {
@@ -1066,9 +1077,9 @@ func (p *Panel) ratings(w http.ResponseWriter, r *http.Request, s *session) {
 // titlesShown are the choices for which titles no library has are shown.
 var titlesShown = []string{"all", "released", "home"}
 
-// setRatings changes the ratings country, to one TMDB has scales for
-// (kids profiles' ceilings are cleared with it), and which titles no
-// library has are shown.
+// setRatings changes the ratings country, to one TMDB has scales for, or
+// "" to follow the server's region, and which titles no library has are
+// shown.
 func (p *Panel) setRatings(w http.ResponseWriter, r *http.Request, s *session) {
 	var req struct {
 		Country string `json:"country"`
@@ -1085,9 +1096,9 @@ func (p *Panel) setRatings(w http.ResponseWriter, r *http.Request, s *session) {
 	// The country only checked when it changes: before TMDB's scales are
 	// known (a fresh server, no token yet), the list is empty, and the
 	// titles shown could never change.
-	current, _ := p.Store.RatingsCountry(ctx)
+	current, _, _ := p.Store.ChosenRatingsCountry(ctx)
 	countries, err := p.Store.RatingCountries(ctx)
-	if err == nil && req.Country != current && !slices.Contains(countries, req.Country) {
+	if err == nil && req.Country != "" && req.Country != current && !slices.Contains(countries, req.Country) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": "TMDB has no ratings for this country"})
 		return
 	}

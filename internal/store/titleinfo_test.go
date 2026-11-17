@@ -143,6 +143,9 @@ func TestContinueTitles(t *testing.T) {
 func TestTitleCertification(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
+	if err := s.SetRatingsCountry(ctx, "US"); err != nil {
+		t.Fatal(err)
+	}
 	s.SetRatingScales(ctx, "movie", map[string][]RatingLevel{"US": {{Certification: "G", Position: 1}, {Certification: "PG-13", Position: 3}}})
 	s.SetTitleRatings(ctx, RatedTitle{"movie", "1"}, map[string][]string{"US": {"G", "PG-13"}, "FR": {"12"}}, "", "", time.Now())
 	s.SetTitleRatings(ctx, RatedTitle{"series", "2"}, map[string][]string{"US": {"TV-MA"}}, "", "", time.Now())

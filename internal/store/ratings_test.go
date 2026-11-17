@@ -11,6 +11,9 @@ import (
 func TestRatings(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
+	if err := s.SetRatingsCountry(ctx, "US"); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now()
 	us := []RatingLevel{{"NR", "", 0}, {"G", "", 1}, {"PG", "", 2}, {"PG-13", "", 3}, {"R", "", 4}}
 	tv := []RatingLevel{{"TV-Y", "", 1}, {"TV-PG", "", 3}, {"TV-14", "", 4}}
@@ -118,5 +121,97 @@ func TestRatings(t *testing.T) {
 	}
 	if got := allowed(Ceiling{99}); len(got) != 0 {
 		t.Errorf("after the purge: %v", got)
+	}
+}
+
+// With no country chosen, the ratings country is the server's region:
+// the first of its languages with a region Overfin reads ratings in;
+// none otherwise, never the US. A choice wins over it, and titles' ages
+// follow whichever applies.
+func TestRatingsCountryFromRegion(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	country := func() string {
+		t.Helper()
+		c, err := s.RatingsCountry(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	age := func() int {
+		t.Helper()
+		var a int
+		if err := s.db.QueryRowContext(ctx, `SELECT age FROM title_ages WHERE kind = 'movie' AND tmdb = '1'`).Scan(&a); err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	// 0 in France, 13 in the US, 14 in Canada, 18 in Germany: the middle
+	// is 14 (the higher of 13 and 14).
+	s.SetTitleRatings(ctx, RatedTitle{"movie", "1"}, map[string][]string{"FR": {"TP"}, "US": {"PG-13"}, "CA": {"14A"}, "DE": {"18"}}, "", "", time.Now())
+
+	// Languages not set yet: none.
+	if c := country(); c != "" {
+		t.Errorf("fresh: %q", c)
+	}
+	for _, tc := range []struct {
+		offered []string
+		def     string
+		want    string
+	}{
+		{[]string{"fr-CA"}, "fr-CA", "CA"},
+		{[]string{"en-US", "en-GB"}, "en-GB", "GB"},
+		{[]string{"pt-BR"}, "pt-BR", "BR"},
+		// No region.
+		{[]string{"fr"}, "fr", ""},
+		// A region Overfin has no ages for.
+		{[]string{"pl-PL"}, "pl-PL", ""},
+		// The first with one, the default first.
+		{[]string{"pl-PL", "de-DE"}, "pl-PL", "DE"},
+	} {
+		if _, err := s.SetLanguages(ctx, tc.offered, tc.def); err != nil {
+			t.Fatal(err)
+		}
+		if c := country(); c != tc.want {
+			t.Errorf("%v: %q, want %q", tc.offered, c, tc.want)
+		}
+	}
+	// Ages follow the region as the languages change.
+	if a := age(); a != 18 {
+		t.Errorf("in Germany: %d", a)
+	}
+	if _, err := s.SetLanguages(ctx, []string{"fr"}, "fr"); err != nil {
+		t.Fatal(err)
+	}
+	if a := age(); a != 14 {
+		t.Errorf("no country: %d", a)
+	}
+	if _, err := s.SetLanguages(ctx, []string{"fr-FR"}, "fr-FR"); err != nil {
+		t.Fatal(err)
+	}
+	if a := age(); a != 0 {
+		t.Errorf("in France: %d", a)
+	}
+
+	// A choice wins, whatever the languages.
+	if err := s.SetRatingsCountry(ctx, "US"); err != nil {
+		t.Fatal(err)
+	}
+	if c := country(); c != "US" || age() != 13 {
+		t.Errorf("chosen: %q, age %d", c, age())
+	}
+	if _, err := s.SetLanguages(ctx, []string{"en-CA"}, "en-CA"); err != nil {
+		t.Fatal(err)
+	}
+	if c, ok, _ := s.ChosenRatingsCountry(ctx); c != "US" || !ok || country() != "US" || age() != 13 {
+		t.Errorf("chosen, languages changed: %q %v %q", c, ok, country())
+	}
+	// "" follows the region again.
+	if err := s.SetRatingsCountry(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.ChosenRatingsCountry(ctx); ok || country() != "CA" || age() != 14 {
+		t.Errorf("following again: %v %q, age %d", ok, country(), age())
 	}
 }

@@ -13,8 +13,9 @@ import (
 
 // Languages are the languages the operator offers (regional tags, such as
 // "fr-CA") and the default among them. Until the operator sets them, they
-// come from TMDB's language and the ratings country ("fr" in "CA" gives
-// fr-CA), else English (United States). set is false until then.
+// come from TMDB's language and the ratings country the operator chose
+// ("fr" in "CA" gives fr-CA), else English (United States). set is false
+// until then.
 func (s *Store) Languages(ctx context.Context) (offered []string, def string, set bool, err error) {
 	var list, d []byte
 	err = s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'languages'`).Scan(&list)
@@ -31,7 +32,8 @@ func (s *Store) Languages(ctx context.Context) (offered []string, def string, se
 	if err != nil {
 		return nil, "", false, err
 	}
-	country, err := s.RatingsCountry(ctx)
+	// The chosen one only: the server's region comes from these languages.
+	country, _, err := s.ChosenRatingsCountry(ctx)
 	if err != nil {
 		return nil, "", false, err
 	}
@@ -45,9 +47,14 @@ func (s *Store) Languages(ctx context.Context) (offered []string, def string, se
 // SetLanguages saves the languages offered and the default, which must be
 // one of them. TMDB is asked in the default (its regional tag); when that
 // changes, its data is fetched again (SetTMDBLanguage), and changed
-// reports it.
+// reports it. When the ratings country follows the server's region and
+// that moves with them, titles' ages are worked out again.
 func (s *Store) SetLanguages(ctx context.Context, offered []string, def string) (changed bool, err error) {
 	old, err := s.TMDBLanguage(ctx)
+	if err != nil {
+		return false, err
+	}
+	oldCountry, err := s.RatingsCountry(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -56,6 +63,9 @@ func (s *Store) SetLanguages(ctx context.Context, offered []string, def string) 
 			ON CONFLICT (name) DO UPDATE SET value = excluded.value`, name, []byte(value)); err != nil {
 			return false, err
 		}
+	}
+	if err := s.refreshAgesIfMoved(ctx, oldCountry); err != nil {
+		return false, err
 	}
 	if def != old {
 		return true, s.SetTMDBLanguage(ctx, def)
