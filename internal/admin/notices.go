@@ -95,3 +95,13 @@ func (p *Panel) newNoticeSecret(w http.ResponseWriter, r *http.Request, s *sessi
 	p.Logger.Info("a new webhook key was made in the control panel", "by", s.logID)
 	writeJSON(w, http.StatusOK, map[string]string{"secret": hex.EncodeToString(key)})
 }
+
+// dropNoticeSecret removes the webhook's key: posts go unsigned again.
+func (p *Panel) dropNoticeSecret(w http.ResponseWriter, r *http.Request, s *session) {
+	if err := p.Store.DropNoticeSecret(r.Context()); err != nil {
+		p.fail(w, "removing the webhook's key", err)
+		return
+	}
+	p.Logger.Info("the webhook's key was removed in the control panel", "by", s.logID)
+	w.WriteHeader(http.StatusNoContent)
+}

@@ -4,6 +4,7 @@
   import { PageHead, Card, Field, Setting, Badge, Status, Busy, Secret, Loading, Notice, ask, toast } from '@overfin/ui';
   import { api } from '../lib/api';
   import { message, numberIn } from '../lib/format';
+  import { unsaved } from '../lib/router.svelte';
 
   interface Notices {
     joined: boolean;
@@ -43,6 +44,9 @@
   const noEmail = $derived(!n ? '' : !n.managed ? 'Only with Overfin\'s own sign-in: with an identity provider, Overfin doesn\'t know people\'s addresses.'
     : !n.mail ? 'Email isn\'t set up yet (Server, Email).' : '');
   const values = () => ({ joined, expiring, expired, days: numberIn(days, 'Days before'), admins, webhook: webhook.trim(), person });
+  // Leaving with changes not saved asks first.
+  $effect(() => unsaved(() => !!n && (joined !== n.joined || expiring !== n.expiring || expired !== n.expired || String(days) !== String(n.days) ||
+    admins !== n.admins || person !== n.person || webhook.trim() !== n.webhook)));
   const failed = (err: Error) => (status = { text: err.message, kind: 'error' });
 
   async function save() {
@@ -58,10 +62,21 @@
   }
 
   async function newKey() {
-    if (n!.signed && !(await ask('Make a new key? The old one stops matching: whatever checks the signatures needs the new one.', { yes: 'Make a new key' }))) return;
+    const question = n!.signed
+      ? 'Make a new key? The old one stops matching: whatever checks the signatures needs the new one.'
+      : 'Sign the posts? Overfin makes a key, shown once: whatever receives the posts needs it to check them.';
+    if (!(await ask(question, { yes: n!.signed ? 'Make a new key' : 'Sign the posts' }))) return;
     const { secret } = await api<{ secret: string }>('POST', '/admin/api/notices/secret', {});
     n!.signed = true;
     key = secret;
+  }
+
+  async function stopSigning() {
+    if (!(await ask('Stop signing the posts? The key is removed: posts go without a signature, and whatever checks signatures refuses them.', { yes: 'Stop signing', danger: true }))) return;
+    await api('DELETE', '/admin/api/notices/secret');
+    n!.signed = false;
+    key = '';
+    toast('Posts aren\'t signed any more.');
   }
 
   load();
@@ -98,7 +113,10 @@
       <input type="url" bind:value={webhook} placeholder="https://…" autocomplete="off" spellcheck="false" />
     </Field>
     <Setting label="Signing" hint={n.signed ? 'Posts are signed.' : 'Posts aren\'t signed: make a key if what receives them checks signatures.'}>
-      {#snippet children()}<Busy action={newKey}>{n!.signed ? 'Make a new key' : 'Sign the posts'}</Busy>{/snippet}
+      {#snippet children()}
+        <Busy action={newKey}>{n!.signed ? 'Make a new key' : 'Sign the posts'}</Busy>
+        {#if n!.signed}<Busy kind="danger" action={stopSigning}>Stop signing</Busy>{/if}
+      {/snippet}
     </Setting>
     {#if key}
       <Secret value={key} after={'Each post carries X-Overfin-Signature: "sha256=" and the HMAC-SHA256 of its body with this key, in hex.'}>The webhook's key. Copy it now: it won't be shown again.</Secret>
