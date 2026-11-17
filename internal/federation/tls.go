@@ -203,6 +203,10 @@ func (s *Service) keepCertificates(ctx context.Context, p *store.Peer, named []s
 // known.
 const probeEvery = time.Minute
 
+// probeAgain is how soon a reading that failed is tried again, when none
+// ever worked.
+var probeAgain = 5 * time.Second
+
 // Certificates is what this server names of its own certificates in its
 // hellos.
 type Certificates struct {
@@ -218,7 +222,8 @@ type Certificates struct {
 // For gives the pins to name for address: the operator's, or else the
 // one of the certificate served there, as seen from here, looked at again
 // after a minute (a renewed certificate is named at once). A look that
-// fails keeps the last one seen.
+// fails keeps the last one seen; when there's none, the next look is
+// after probeAgain.
 func (c *Certificates) For(ctx context.Context, address string) ([]string, error) {
 	if c == nil {
 		return nil, nil
@@ -238,6 +243,12 @@ func (c *Certificates) For(ctx context.Context, address string) ([]string, error
 	c.at = time.Now()
 	pin, err := probe(ctx, u)
 	if err != nil {
+		if c.seen == nil {
+			// Never read yet (a reverse proxy starting after Overfin):
+			// tried again soon, rather than naming none for a minute,
+			// which has peers drop the pins they had.
+			c.at = c.at.Add(probeAgain - probeEvery)
+		}
 		return c.seen, err
 	}
 	c.seen = []string{pin}

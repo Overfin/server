@@ -9,7 +9,9 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"errors"
+	"io"
 	"math/big"
+	"net"
 	"net/url"
 	"slices"
 	"strings"
@@ -189,5 +191,55 @@ func TestCertificatesNamedInHello(t *testing.T) {
 	}
 	if got := onlyPeer(t, b); !slices.Equal(got.Certificates, []string{pin}) {
 		t.Fatalf("B's view after the renewal: %v", got.Certificates)
+	}
+}
+
+// A first reading that fails (a reverse proxy starting after Overfin) is
+// tried again soon, not a minute later: meanwhile, hellos name none, and
+// peers drop the pins they had.
+func TestOwnCertificatesFirstFailureRetriedSoon(t *testing.T) {
+	ctx := context.Background()
+	defer func(was time.Duration) { probeAgain = was }(probeAgain)
+	probeAgain = 50 * time.Millisecond
+	a := newServerOn(t, "A", true)
+	u, _ := url.Parse(a.url)
+	cert := tlsCertOf(t, u.Host)
+	// The address first refuses connections, then serves.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	c := &Certificates{}
+	if got, err := c.For(ctx, "https://"+addr); got != nil || err == nil {
+		t.Fatalf("nothing served yet: %v %v", got, err)
+	}
+	ln, err = net.Listen("tcp", addr)
+	if err != nil {
+		t.Skip("the port was taken meanwhile")
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			in, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer in.Close()
+				out, err := net.Dial("tcp", u.Host)
+				if err != nil {
+					return
+				}
+				defer out.Close()
+				go io.Copy(out, in)
+				io.Copy(in, out)
+			}()
+		}
+	}()
+	time.Sleep(100 * time.Millisecond)
+	if got, err := c.For(ctx, "https://"+addr); err != nil || !slices.Equal(got, []string{Pin(cert)}) {
+		t.Fatalf("served now: %v %v", got, err)
 	}
 }
