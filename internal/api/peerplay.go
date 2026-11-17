@@ -175,7 +175,9 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 	pb.Logger.Info("playback started for a paired server", "playback", s.ID, "peer", peer.Name, "method", o.dec.Method,
 		"reasons", o.dec.Reasons(), "maxKbps", kbps)
 	s.View = out
-	pb.Tickets.Describe(s, peer.Name)
+	// What plays, for the live view: the title (ours), the server playing
+	// it showing as the account (the control panel).
+	pb.Tickets.Describe(s, l.Provisioner.Store.ItemDescription(ctx, item))
 	if err := l.Jellyfin.ReportStart(ctx, s.Auth, pb.state(s, pb.Tickets.Snapshot(s))); err != nil {
 		pb.Logger.Warn("could not report a playback start", "playback", s.ID, "err", err)
 	}

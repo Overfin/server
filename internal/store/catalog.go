@@ -881,3 +881,29 @@ func (s *Store) SharedFiles(ctx context.Context, keys []string) (map[string]stri
 		JOIN catalog_items f ON f.id = r.range_of AND f.title_key IS NOT NULL`, jsonList(keys))
 	return out, err
 }
+
+// ItemDescription names a catalog item in words, for the control panel's
+// live view: "Name (year)" for a film, "Series · S1 E2 · Name" for an
+// episode; "" when it isn't in the catalog.
+func (s *Store) ItemDescription(ctx context.Context, id string) string {
+	var name, series sql.NullString
+	var year, season, episode sql.NullInt64
+	var kind string
+	err := s.read.QueryRowContext(ctx, `SELECT i.kind, i.name, i.year, i.season_number, i.episode_number, se.name
+		FROM catalog_items i LEFT JOIN catalog_items se ON se.id = i.series_id WHERE i.id = ?`, id).
+		Scan(&kind, &name, &year, &season, &episode, &series)
+	if err != nil {
+		return ""
+	}
+	if kind == "episode" && series.Valid {
+		num := ""
+		if season.Valid && episode.Valid {
+			num = fmt.Sprintf("S%d E%d · ", season.Int64, episode.Int64)
+		}
+		return series.String + " · " + num + name.String
+	}
+	if year.Valid && year.Int64 > 0 {
+		return fmt.Sprintf("%s (%d)", name.String, year.Int64)
+	}
+	return name.String
+}

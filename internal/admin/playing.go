@@ -3,6 +3,7 @@ package admin
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/overfin/server/internal/connector"
@@ -58,6 +59,15 @@ func (p *Panel) playing(w http.ResponseWriter, r *http.Request, _ *session) {
 	transcodes := 0
 	for _, l := range live {
 		s := l.Stream
+		if peerID, ok := strings.CutPrefix(s.AccountID, playback.PeerPrefix); ok {
+			// A paired server's viewer: that server, never a person here.
+			if _, ok := names[s.AccountID]; !ok {
+				names[s.AccountID] = "Paired server"
+				if peer, err := p.Store.PeerByID(ctx, peerID); err == nil {
+					names[s.AccountID] = peer.Name + " (paired server)"
+				}
+			}
+		}
 		if _, ok := names[s.AccountID]; !ok {
 			a, err := p.Store.AccountByID(ctx, s.AccountID)
 			if errors.Is(err, store.ErrNotFound) {

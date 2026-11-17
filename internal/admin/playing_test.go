@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -39,6 +40,10 @@ func TestNowPlaying(t *testing.T) {
 	ctx := context.Background()
 	p, b, db, _ := signedInPanel(t)
 	acct, owner, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", JellyfinUsername: "of-1", JellyfinToken: "t"})
+	peer, err := db.AddPeer(ctx, bytes.Repeat([]byte{7}, 32), "https://b.example.org", "Films de B")
+	if err != nil {
+		t.Fatal(err)
+	}
 	src := jellyfin.MediaSource{Bitrate: 8_000_000, RunTimeTicks: 60 * 60 * 10_000_000,
 		MediaStreams: []jellyfin.MediaStream{{Type: "Video", Height: 1080}}}
 	f := &fakePlaying{live: []playback.Live{
@@ -47,6 +52,9 @@ func TestNowPlaying(t *testing.T) {
 			Title: "Free Guy (2021)", Method: "transcode", Started: time.Now(), PositionMs: 61_000},
 		// An account deleted meanwhile still shows.
 		{Stream: &playback.Stream{ID: "play_two", AccountID: "acct_gone"}, Method: "direct", Started: time.Now()},
+		// A paired server's viewer: the server, not a deleted account.
+		{Stream: &playback.Stream{ID: "play_three", AccountID: playback.PeerPrefix + peer.ID, ProfileID: playback.PeerPrefix + peer.ID},
+			Title: "Heat (1995)", Method: "direct", Started: time.Now()},
 	}}
 	p.Playing = f
 	b.h = p.Handler()
@@ -55,7 +63,7 @@ func TestNowPlaying(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{`"name":"Main"`, `"profile":"Main"`, `"title":"Free Guy (2021)"`, `"method":"transcode"`,
 		`"height":1080`, `"bitrateKbps":8000`, `"positionMs":61000`, `"durationMs":3600000`, `"transcodes":1`,
-		`"maxTranscodes":2`, `"name":"Deleted account"`} {
+		`"maxTranscodes":2`, `"name":"Deleted account"`, `"name":"Films de B (paired server)"`, `"title":"Heat (1995)"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("lacks %s: %s", want, body)
 		}
