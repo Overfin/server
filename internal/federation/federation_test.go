@@ -183,11 +183,14 @@ func TestSignedRequestRefused(t *testing.T) {
 
 func TestNoncesForgotten(t *testing.T) {
 	var n Nonces
-	if !n.add("a", now, true) || n.add("a", now, true) {
+	if !n.add("k", "a", now, true) || n.add("k", "a", now, true) {
 		t.Fatal("a nonce must be accepted once")
 	}
-	n.add("b", now.Add(2*MaxSkew+2*time.Minute), true)
-	if _, kept := n.seen["a"]; kept {
+	if !n.add("other", "a", now, true) {
+		t.Fatal("another key's nonce refused")
+	}
+	n.add("k", "b", now.Add(2*MaxSkew+2*time.Minute), true)
+	if _, kept := n.seen["k"]["a"]; kept {
 		t.Fatal("an old nonce was kept")
 	}
 }
@@ -211,17 +214,22 @@ func TestStrangersFillNoMemory(t *testing.T) {
 		t.Fatalf("%d nonces remembered for strangers", len(v.Seen.seen))
 	}
 	req, _ := request(known, "POST", "/api/v1/federation/hello", nil, now)
-	if _, err := v.Check(req, nil, now); err != nil || len(v.Seen.seen) != 1 {
+	if _, err := v.Check(req, nil, now); err != nil || len(v.Seen.seen[string(known.Public())]) != 1 {
 		t.Fatalf("a known server refused: %v", err)
 	}
 	var n Nonces
-	for i := range maxNonces {
-		n.add(fmt.Sprint(i), now, true)
+	// One server asking far past its room (its refused requests count).
+	for i := range 120_000 {
+		n.add("k", fmt.Sprint(i), now, true)
 	}
-	if n.add("one more", now, true) {
+	if n.add("k", "one more", now, true) {
 		t.Fatal("past the cap, a nonce was remembered")
 	}
-	if !n.add("later", now.Add(2*MaxSkew+2*time.Minute), true) {
+	// Another paired server isn't crowded out by the first.
+	if !n.add("other", "one more", now, true) {
+		t.Fatal("one server's nonces filled another's room")
+	}
+	if !n.add("k", "later", now.Add(2*MaxSkew+2*time.Minute), true) {
 		t.Fatal("room didn't come back once the old ones went")
 	}
 }
@@ -288,15 +296,15 @@ func TestStrangersOwnMemory(t *testing.T) {
 	n := &Nonces{}
 	now := time.Now()
 	for i := range maxStrangerNonces {
-		n.add(fmt.Sprint("s", i), now, false)
+		n.add("k", fmt.Sprint("s", i), now, false)
 	}
-	if n.add("one more stranger", now, false) {
+	if n.add("k", "one more stranger", now, false) {
 		t.Error("strangers past their cap")
 	}
-	if !n.add("a paired server", now, true) {
+	if !n.add("p", "a paired server", now, true) {
 		t.Error("a paired server refused")
 	}
-	if n.add("a paired server", now, false) {
+	if n.add("p", "a paired server", now, false) {
 		t.Error("a nonce twice")
 	}
 }

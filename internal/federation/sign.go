@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"maps"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -226,7 +227,7 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 			if v.Seen == nil {
 				v.Seen = &Nonces{}
 			}
-			if !v.Seen.add(string(key)+nonce, now, false) {
+			if !v.Seen.add(string(key), nonce, now, false) {
 				return Verified{}, ErrSignature
 			}
 			return Verified{Key: ed25519.PublicKey(key), Nonce: nonce}, ErrForgotten
@@ -235,16 +236,22 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 	if v.Seen == nil {
 		v.Seen = &Nonces{}
 	}
-	if !v.Seen.add(string(key)+nonce, now, known) {
+	if !v.Seen.add(string(key), nonce, now, known) {
 		return Verified{}, ErrSignature
 	}
 	return Verified{Key: ed25519.PublicKey(key), Nonce: nonce, Known: known}, nil
 }
 
-// maxNonces caps the nonces remembered: past it (after clearing the old
-// ones), requests are refused until room comes back, rather than the
-// memory growing.
-const maxNonces = 100_000
+// maxNoncesPerKey caps the nonces remembered for one known server's key:
+// past it (after clearing the old ones), its requests are refused until
+// room comes back, rather than the memory growing. Each key has its own,
+// so one server, however fast it asks, never crowds out another (keys are
+// known only once an operator paired them, so they are few). Its limits
+// (limits.go) let a server through at most peerBurst + peerRate × 2 ×
+// MaxSkew requests in the time a nonce is kept: 12,200; requests its
+// limits refuse are remembered too, so a server asking much faster than
+// allowed is the one refused.
+const maxNoncesPerKey = 20_000
 
 // maxStrangerNonces caps those of strangers' requests (servers pairing).
 const maxStrangerNonces = 1_000
@@ -263,9 +270,9 @@ type Nonces struct {
 	Since time.Time
 
 	mu        sync.Mutex
-	seen      map[string]time.Time // known servers'
-	strangers map[string]time.Time // others', heard while a code is live
-	last      time.Time            // when the old ones were last cleared
+	seen      map[string]map[string]time.Time // known servers', by key, then nonce
+	strangers map[string]time.Time            // others' (key + nonce), heard while a code is live
+	last      time.Time                       // when the old ones were last cleared
 }
 
 // NewNonces is a memory of nonces that begins at now: give it the time
@@ -279,34 +286,60 @@ func (n *Nonces) before(when int64) bool {
 	return time.Unix(when, 0).Before(n.Since)
 }
 
-func (n *Nonces) add(nonce string, now time.Time, known bool) bool {
+// add remembers a request's nonce, signed by key: false when it was seen
+// already, or there's no room for it.
+func (n *Nonces) add(key, nonce string, now time.Time, known bool) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if n.seen == nil {
-		n.seen, n.strangers = map[string]time.Time{}, map[string]time.Time{}
+		n.seen, n.strangers = map[string]map[string]time.Time{}, map[string]time.Time{}
 	}
-	m, max := n.seen, maxNonces
-	if !known {
-		m, max = n.strangers, maxStrangerNonces
+	full := len(n.strangers) >= maxStrangerNonces
+	if known {
+		full = len(n.seen[key]) >= maxNoncesPerKey
 	}
-	if now.Sub(n.last) > time.Minute || len(m) >= max {
-		for _, each := range []map[string]time.Time{n.seen, n.strangers} {
-			for k, t := range each {
-				if now.Sub(t) > 2*MaxSkew {
-					delete(each, k)
-				}
-			}
-		}
-		n.last = now
+	// Full, the old ones are cleared once a second at most: a server
+	// asking past its room doesn't make each request go through them all.
+	if now.Sub(n.last) > time.Minute || full && now.Sub(n.last) >= time.Second {
+		n.forget(now)
 	}
 	// A nonce is refused if either memory has it.
-	_, dup := n.seen[nonce]
-	_, dupStranger := n.strangers[nonce]
-	if dup || dupStranger || len(m) >= max {
+	_, dup := n.seen[key][nonce]
+	_, dupStranger := n.strangers[key+nonce]
+	switch {
+	case dup || dupStranger:
+		return false
+	case !known:
+		if len(n.strangers) >= maxStrangerNonces {
+			return false
+		}
+		n.strangers[key+nonce] = now
+		return true
+	}
+	m := n.seen[key]
+	if m == nil {
+		m = map[string]time.Time{}
+		n.seen[key] = m
+	}
+	if len(m) >= maxNoncesPerKey {
 		return false
 	}
 	m[nonce] = now
 	return true
+}
+
+// forget clears the nonces old enough to be refused by their date; n.mu
+// is held.
+func (n *Nonces) forget(now time.Time) {
+	old := func(t time.Time) bool { return now.Sub(t) > 2*MaxSkew }
+	for key, m := range n.seen {
+		maps.DeleteFunc(m, func(_ string, t time.Time) bool { return old(t) })
+		if len(m) == 0 {
+			delete(n.seen, key)
+		}
+	}
+	maps.DeleteFunc(n.strangers, func(_ string, t time.Time) bool { return old(t) })
+	n.last = now
 }
 
 // PairingProof proves, without sending it, that the server redeeming a
