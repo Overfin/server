@@ -819,8 +819,8 @@ anyone. Paired servers are not trusted at all (rule 94).
      multicast addresses, IPv4's 0.0.0.0/8 or 240.0.0.0/4, or broadcast.
      An IPv4-mapped IPv6 address counts as its IPv4 one, and so does a
      NAT64 (64:ff9b::/96) or 6to4 (2002::/16) address for the IPv4 one
-     it reaches; local-use NAT64 (64:ff9b:1::/48) is refused. Private ranges are allowed: paired
-     servers may share a LAN. A name is looked up once per connection,
+     it reaches; local-use NAT64 (64:ff9b:1::/48) is refused. Private
+     ranges are allowed: paired servers may share a LAN. A name is looked up once per connection,
      every address it gives must pass, and the address dialed is the one
      checked, never looked up again. Redirects are never followed. One
      setting loosens this: `federation.allow_loopback`, for a peer on the
