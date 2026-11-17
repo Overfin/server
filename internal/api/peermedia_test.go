@@ -1,13 +1,18 @@
 package api_test
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -274,4 +279,171 @@ func TestRelayChecksWhatItRelays(t *testing.T) {
 		t.Errorf("a second fetch at once: %d", code)
 	}
 	held.Body.Close()
+}
+
+// What a paired server sends is never relayed unchecked, whatever its
+// name or encoding, and a viewer's HEAD reads nothing of it.
+func TestRelayHoles(t *testing.T) {
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	_, _ = zw.Write(bytes.Repeat([]byte{0}, 1<<20))
+	_ = zw.Close()
+	var sent atomic.Int64
+	var encodings sync.Map
+	x := pairForPlayWith(t, true, func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.HasPrefix(r.URL.Path, "/api/v1/stream/") {
+				h.ServeHTTP(w, r)
+				return
+			}
+			encodings.Store(r.Header.Get("Accept-Encoding"), true)
+			switch name := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]; name {
+			case "v0", "seg0.ts":
+				w.Header().Set("Content-Type", "video/mp2t")
+				_, _ = w.Write([]byte("#EXTM3U\n#EXTINF:6,\nhttps://elsewhere.example/s.ts\n"))
+			case "typed.ts":
+				w.Header().Set("Content-Type", "audio/x-mpegurl")
+				_, _ = w.Write([]byte{0x47, 0, 0, 0})
+			case "gz.ts":
+				w.Header().Set("Content-Encoding", "gzip")
+				w.Header().Set("Content-Length", strconv.Itoa(gz.Len()))
+				_, _ = w.Write(gz.Bytes())
+			case "whole.ts":
+				w.Header().Set("Content-Range", "bytes 5-9/10")
+				_, _ = w.Write([]byte("0123456789"))
+			case "big.ts":
+				w.Header().Set("Content-Length", strconv.Itoa(64<<20))
+				chunk := bytes.Repeat([]byte{1}, 1<<20)
+				for range 64 {
+					n, err := w.Write(chunk)
+					sent.Add(int64(n))
+					if err != nil {
+						return
+					}
+				}
+			default:
+				h.ServeHTTP(w, r)
+			}
+		})
+	})
+	status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{},"audioLanguage":"fr"}`)
+	var s peerSession
+	_ = json.Unmarshal([]byte(body), &s)
+	if status != 201 {
+		t.Fatalf("play on A: %d %s", status, body)
+	}
+	base := x.srvA.URL + strings.TrimSuffix(s.Stream.URL, "file")
+	get := func(method, name, rangeHeader string) (*http.Response, string) {
+		req, _ := http.NewRequest(method, base+name, nil)
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		req.Header.Set("Remote-User", subject)
+		if rangeHeader != "" {
+			req.Header.Set("Range", rangeHeader)
+		}
+		res, err := client(x.srvA, subject).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		return res, string(b)
+	}
+	for _, name := range []string{"v0", "seg0.ts", "gz.ts"} {
+		if res, got := get("GET", name, ""); res.StatusCode != http.StatusNotFound || strings.Contains(got, "elsewhere") {
+			t.Errorf("%s: %d %.80q", name, res.StatusCode, got)
+		}
+	}
+	if _, ok := encodings.Load("gzip"); ok {
+		t.Errorf("A asked B for gzip")
+	}
+	if res, _ := get("GET", "typed.ts", ""); res.Header.Get("Content-Type") != "application/octet-stream" {
+		t.Errorf("a playlist's type passed on: %q", res.Header.Get("Content-Type"))
+	}
+	if res, _ := get("GET", "whole.ts", "bytes=5-"); res.StatusCode != 200 || res.Header.Get("Content-Range") != "" {
+		t.Errorf("a 200 to a range: %d, Content-Range %q", res.StatusCode, res.Header.Get("Content-Range"))
+	}
+	if res, _ := get("HEAD", "big.ts", ""); res.StatusCode != 200 {
+		t.Errorf("HEAD: %d", res.StatusCode)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if n := sent.Load(); n > 16<<20 {
+		t.Errorf("a HEAD made B send %d bytes", n)
+	}
+	// Any query, even an empty one, is a 404.
+	for _, q := range []string{"?", "?&"} {
+		if res, _ := get("GET", "whole.ts"+q, ""); res.StatusCode != http.StatusNotFound {
+			t.Errorf("query %q: %d", q, res.StatusCode)
+		}
+	}
+}
+
+// A relayed subtitle part frees the server's slot for whole reads once
+// checked: viewers who read slowly don't hold every subtitle and
+// playlist of the server.
+func TestRelaySmallSlotFreedBeforeSending(t *testing.T) {
+	var vtt strings.Builder
+	vtt.WriteString("WEBVTT\n")
+	for i := range 6000 {
+		fmt.Fprintf(&vtt, "\n00:00:%02d.000 --> 00:00:%02d.500\n%s\n", i%60, i%60, strings.Repeat("&", 490))
+	}
+	x := pairForPlayWith(t, true, func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.Contains(r.URL.Path, "/subtitles/"):
+				_, _ = io.WriteString(w, vtt.String())
+			case strings.HasSuffix(r.URL.Path, "/small.m3u8"):
+				_, _ = io.WriteString(w, "#EXTM3U\n#EXTINF:6,\nseg0.ts\n")
+			default:
+				h.ServeHTTP(w, r)
+			}
+		})
+	})
+	status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{},"audioLanguage":"fr"}`)
+	var s peerSession
+	_ = json.Unmarshal([]byte(body), &s)
+	if status != 201 {
+		t.Fatalf("play on A: %d %s", status, body)
+	}
+	base := x.srvA.URL + strings.TrimSuffix(s.Stream.URL, "file")
+	// Viewers that read nothing: a tiny receive window each.
+	tr := x.srvA.Client().Transport.(*http.Transport).Clone()
+	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		c, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+		if err == nil {
+			_ = c.(*net.TCPConn).SetReadBuffer(4096)
+		}
+		return c, err
+	}
+	slow := &http.Client{Transport: tr, Jar: client(x.srvA, subject).Jar}
+	do := func(c *http.Client, name string) (*http.Response, error) {
+		req, _ := http.NewRequest("GET", base+name, nil)
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		req.Header.Set("Remote-User", subject)
+		return c.Do(req)
+	}
+	for range 4 {
+		res, err := do(slow, "subtitles/s0/0")
+		if err != nil || res.StatusCode != 200 {
+			t.Fatalf("subtitles: %v %v", res, err)
+		}
+		defer res.Body.Close() // never read
+	}
+	done := make(chan int, 1)
+	go func() {
+		res, err := do(client(x.srvA, subject), "small.m3u8")
+		if err != nil {
+			done <- 0
+			return
+		}
+		res.Body.Close()
+		done <- res.StatusCode
+	}()
+	select {
+	case code := <-done:
+		if code != 200 {
+			t.Errorf("a playlist while 4 viewers read slowly: %d", code)
+		}
+	case <-time.After(3 * time.Second):
+		t.Errorf("a playlist waited for slow viewers' subtitles")
+	}
 }

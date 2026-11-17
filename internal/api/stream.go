@@ -52,7 +52,7 @@ func (s Stream) Register(r *plugin.Registrar) error {
 // 10), checked as the stream is. A paired server's playback here has its
 // sheets at this server's playback route only.
 func (s Stream) trickplay(w http.ResponseWriter, r *http.Request) {
-	if len(r.URL.Query()) > 0 {
+	if hasQuery(r) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -186,7 +186,7 @@ func (s Stream) find(w http.ResponseWriter, r *http.Request) (*playback.Stream, 
 
 func (s Stream) serve(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if len(r.URL.Query()) > 0 || !fileName(name) {
+	if hasQuery(r) || !fileName(name) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -330,7 +330,10 @@ func (s Stream) proxy(w http.ResponseWriter, r *http.Request, st *playback.Strea
 // render (and nosniff is set on every response).
 func mediaType(ct string) string {
 	t, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(ct)), ";")
-	if (strings.HasPrefix(t, "video/") || strings.HasPrefix(t, "audio/")) && fileNameRe.MatchString(strings.ReplaceAll(t, "/", "-")) {
+	// Never a playlist's type (audio/mpegurl, audio/x-mpegurl): players
+	// would read it as one, unchecked.
+	if (strings.HasPrefix(t, "video/") || strings.HasPrefix(t, "audio/")) && !strings.Contains(t, "mpegurl") &&
+		fileNameRe.MatchString(strings.ReplaceAll(t, "/", "-")) {
 		return t
 	}
 	return "application/octet-stream"
@@ -400,7 +403,7 @@ func (s Stream) stretch(w http.ResponseWriter, r *http.Request, st *playback.Str
 // WebVTT.
 func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 	track := r.PathValue("track")
-	if len(r.URL.Query()) > 0 {
+	if hasQuery(r) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -452,7 +455,7 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 // browser would render.
 func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
 	track := r.PathValue("track")
-	if len(r.URL.Query()) > 0 {
+	if hasQuery(r) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -520,4 +523,11 @@ func validRange(h string) bool {
 func validPeerRange(h string) bool {
 	_, ok := parseRange(h)
 	return ok
+}
+
+// hasQuery says whether a request's URL has a query at all: "?", "?&"
+// and "?;" too, which parse to no values (MSFP media, section 2: any
+// query is a 404).
+func hasQuery(r *http.Request) bool {
+	return r.URL.RawQuery != "" || r.URL.ForceQuery
 }

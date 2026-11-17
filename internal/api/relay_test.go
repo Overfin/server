@@ -179,3 +179,29 @@ func TestRelayedPlaylistOfJellyfin(t *testing.T) {
 		}
 	}
 }
+
+// A character players read as a line's end, inside a line, would hide
+// an address from the check; a master playlist names playlists only.
+func TestRelayedPlaylistHiddenLines(t *testing.T) {
+	for _, tc := range []struct {
+		body   string
+		subset []string
+	}{
+		{"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\rhttps://elsewhere.example/v.m3u8\n", masterSubset},
+		{"#EXTM3U\n#EXTINF:6, https://elsewhere.example/s.ts\n", mediaSubset},
+		{"#EXTM3U\n#EXTINF:6,\rhttps://elsewhere.example/s.ts\n", mediaSubset},
+		{"#EXTM3U\n#EXTINF:6,\x0bs.ts\n", mediaSubset},
+		{"#EXTM3U\n#EXTINF:6,\u0085s.ts\n", nil},
+		{"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv0\n", masterSubset},
+		{"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv0.ts\n", masterSubset},
+	} {
+		if _, err := relayedPlaylist([]byte(tc.body), tc.subset); err == nil {
+			t.Errorf("%q passed", tc.body)
+		}
+	}
+	for _, ok := range []string{"#EXTM3U\r\n#EXT-X-STREAM-INF:BANDWIDTH=1,\tRESOLUTION=1x1\r\nv0.m3u8\r\n"} {
+		if _, err := relayedPlaylist([]byte(ok), masterSubset); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+}

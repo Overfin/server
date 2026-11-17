@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -39,6 +40,9 @@ var relayTransport = &http.Transport{
 	ResponseHeaderTimeout: 60 * time.Second,
 	MaxIdleConnsPerHost:   8,
 	IdleConnTimeout:       90 * time.Second,
+	// Never asked compressed: Go would decompress on the fly and drop
+	// Content-Length, the bound of what is read (MSFP media, section 2.4).
+	DisableCompression: true,
 }
 
 // relayClients are the clients for each paired server's streams, by its
@@ -136,12 +140,6 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 		rh = ""
 	}
 	if !media {
-		free, ok := subtitleSlot(r)
-		if !ok {
-			return
-		}
-		free = sync.OnceFunc(free)
-		defer free()
 		var stop context.CancelFunc
 		ctx, stop = context.WithTimeout(ctx, smallReadTime)
 		defer stop()
@@ -154,6 +152,18 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 		return
 	}
 	defer free()
+	// What is read whole takes one of the server's few slots for it
+	// (taken after this playback's, which may wait), freed once checked,
+	// before a slow viewer reads it.
+	freeSmall := func() {}
+	if !media {
+		f, ok := subtitleSlot(r)
+		if !ok {
+			return
+		}
+		freeSmall = sync.OnceFunc(f)
+		defer freeSmall()
+	}
 	res, prob, err := s.relayGet(ctx, st, what.path, rh)
 	if err != nil {
 		if prob == problem.ServerBusy && ctx.Err() == nil {
@@ -163,6 +173,12 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 		return
 	}
 	defer res.Body.Close()
+	if res.Header.Get("Content-Encoding") != "" {
+		// Asked for none: what is sent is the bytes themselves.
+		l.Logger.Warn("refused a paired server's stream: encoded", "playback", st.ID)
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
 	switch res.StatusCode {
 	case http.StatusOK, http.StatusPartialContent:
 	case http.StatusRequestedRangeNotSatisfiable:
@@ -232,19 +248,38 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 			}
 			contentType = "application/octet-stream"
 		}
+		freeSmall()
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-		_, _ = w.Write(body)
+		if r.Method != http.MethodHead {
+			_, _ = w.Write(body)
+		}
+		return
+	}
+	// A playlist under a media name (a master playlist may name its
+	// variants anything) is never relayed unchecked: players read a
+	// playlist by what it holds.
+	peek := bufio.NewReaderSize(res.Body, 512)
+	if start, _ := peek.Peek(len("#EXTM3U")); string(start) == "#EXTM3U" {
+		l.Logger.Warn("refused a paired server's stream: a playlist under a media name", "playback", st.ID)
+		problem.Send(w, problem.NotFound, "")
 		return
 	}
 	h := w.Header()
 	h.Set("Content-Type", mediaType(res.Header.Get("Content-Type")))
-	for _, k := range []string{"Content-Length", "Content-Range", "Accept-Ranges"} {
+	keep := []string{"Content-Length", "Accept-Ranges"}
+	if res.StatusCode == http.StatusPartialContent {
+		keep = append(keep, "Content-Range") // checked above; a 200 is the whole
+	}
+	for _, k := range keep {
 		if v := res.Header.Get(k); v != "" && len(v) < 200 {
 			h.Set(k, v)
 		}
 	}
 	w.WriteHeader(res.StatusCode)
+	if r.Method == http.MethodHead {
+		return // the headers only: nothing more read from the paired server
+	}
 	// Held open (a paused player reads nothing), the playback is in use.
 	go func() {
 		tick := time.NewTicker(30 * time.Second)
@@ -258,9 +293,9 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 			}
 		}
 	}()
-	body := io.Reader(res.Body)
+	body := io.Reader(peek)
 	if length >= 0 {
-		body = io.LimitReader(res.Body, length)
+		body = io.LimitReader(peek, length)
 	}
 	_, _ = io.Copy(w, body)
 }
@@ -496,12 +531,19 @@ func relayedPlaylist(body []byte, subset []string) ([]byte, error) {
 	lines := strings.Split(string(body), "\n")
 	for i, line := range lines {
 		lines[i] = strings.TrimSuffix(line, "\r")
+		// Players end lines at a carriage return, or at U+2028, too:
+		// such a character inside a line would hide what follows it
+		// from these checks, as another line players read.
+		if strings.ContainsFunc(lines[i], lineBreaking) {
+			return nil, errors.New("a control character inside a line")
+		}
 	}
 	if lines[0] != "#EXTM3U" {
 		return nil, errors.New("not a playlist")
 	}
 	var out strings.Builder
 	uris := 0
+	master := slices.Contains(subset, "#EXT-X-STREAM-INF")
 	for _, line := range lines {
 		switch {
 		case line == "":
@@ -522,6 +564,10 @@ func relayedPlaylist(body []byte, subset []string) ([]byte, error) {
 			}
 		case !fileName(line):
 			return nil, errors.New("an address that isn't the stream's")
+		case master && !strings.HasSuffix(line, ".m3u8"):
+			// What a master playlist names is fetched as a playlist, so
+			// it is checked as one here (relay goes by the name).
+			return nil, errors.New("a master playlist naming something else than playlists")
 		default:
 			uris++
 		}
@@ -532,6 +578,13 @@ func relayedPlaylist(body []byte, subset []string) ([]byte, error) {
 		out.WriteByte('\n')
 	}
 	return []byte(out.String()), nil
+}
+
+// lineBreaking says whether a character may end a line for some player,
+// or hide what follows it: control characters but tabs, and Unicode's
+// line breaks.
+func lineBreaking(r rune) bool {
+	return r < 0x20 && r != '\t' || r == 0x7f || r == 0x85 || r == 0x2028 || r == 0x2029
 }
 
 // quotedURIs counts a tag line's URI= values, false when one isn't a
