@@ -634,3 +634,73 @@ func TestSyncTitlesBounded(t *testing.T) {
 		t.Errorf("%d pages asked", n)
 	}
 }
+
+// A peer's odd title is skipped alone, and an odd language tag alone
+// (MSFP catalog, section 3.3): never the whole reading.
+func TestSyncTitlesSkipsOddOnesAlone(t *testing.T) {
+	ctx := context.Background()
+	a, b, _, aOnB := pairedPair(t)
+	lib := pub(t, a, "films")[0]
+	k := NewKey()
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := []byte(`{"libraries":[{"id":"` + lib + `","name":"Films","kind":"movies"}]}`)
+		if r.URL.Path != "/api/v1/federation/libraries" {
+			body = []byte(`{"titles":[
+				{"key":"movie/tmdb/1","kind":"movie","library":"` + lib + `","audio":["en",7,null,"fr"]},
+				{"key":"movie/tmdb/2","kind":"movie","library":"` + lib + `","audio":"en","subtitles":{"a":1}},
+				"movie/tmdb/3", 17, null, [],
+				{"key":4,"kind":"movie","library":"` + lib + `"},
+				{"key":"movie/tmdb/5","kind":"movie","library":"` + lib + `"}],"seq":7}`)
+		}
+		w.Header().Set(HeaderSignature, SignResponse(k, r.Header.Get(HeaderNonce), 200, body))
+		_, _ = w.Write(body)
+	}))
+	defer fake.Close()
+	peer := *aOnB
+	peer.Address, peer.PublicKey = fake.URL, k.Public()
+	if n, err := b.s.SyncTitles(ctx, &peer); err != nil || n != 3 {
+		t.Fatalf("read %d, %v; want the 3 titles", n, err)
+	}
+	got, _ := b.s.Store.TitlesOfPeer(ctx, peer.ID)
+	for _, title := range got {
+		if title.Key == "movie/tmdb/1" && strings.Join(title.Audio, ",") != "en,fr" {
+			t.Errorf("tags: %v", title.Audio)
+		}
+	}
+}
+
+// A peer's odd library is skipped alone: an ID outside MSFP's form, a
+// second one with the same ID; a name that isn't text is "?", and its
+// format characters go (MSFP section 9.3).
+func TestTheirLibrariesOddOnes(t *testing.T) {
+	ctx := context.Background()
+	_, b, _, aOnB := pairedPair(t)
+	k := NewKey()
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := []byte(`{"libraries":[
+			{"id":"lib_A","name":"Films","kind":"movies"},
+			{"id":"lib_A","name":"Duplicate","kind":"movies"},
+			{"id":"a b","name":"Spaced","kind":"movies"},
+			{"id":"","name":"Empty"},
+			"lib_C", 7,
+			{"id":"lib_B","name":"Mixed​\u0001 one","kind":"TVSHOWS"},
+			{"id":"lib_N","name":42,"kind":7}],
+			"limits":{"streams":"two"}}`)
+		w.Header().Set(HeaderSignature, SignResponse(k, r.Header.Get(HeaderNonce), 200, body))
+		_, _ = w.Write(body)
+	}))
+	defer fake.Close()
+	peer := *aOnB
+	peer.Address, peer.PublicKey = fake.URL, k.Public()
+	got, err := b.s.TheirLibraries(ctx, &peer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen []string
+	for _, l := range got {
+		seen = append(seen, l.ID+"="+l.Name+"/"+l.Kind)
+	}
+	if strings.Join(seen, " | ") != "lib_A=Films/movies | lib_B=Mixed one/ | lib_N=?/" {
+		t.Errorf("kept %q", seen)
+	}
+}

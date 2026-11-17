@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"runtime/debug"
 	"slices"
 	"strconv"
@@ -464,6 +465,9 @@ func viewOf(p *store.Peer) string {
 	return helloWaiting
 }
 
+// libraryIDRe is a library ID's form (MSFP section 9.3).
+var libraryIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
 // cleanName keeps a peer's name short and printable, or its host when
 // it gives none.
 // In MSFP core section 9.1's order: each run of white space one space,
@@ -878,7 +882,13 @@ func (s *Service) TheirLibraries(ctx context.Context, p *store.Peer) ([]store.Pe
 	if p.State != store.PeerPaired {
 		return nil, ErrNotPaired
 	}
-	var answer librariesAnswer
+	// Each library read on its own: one that isn't one is skipped alone
+	// (MSFP section 9.3).
+	var answer struct {
+		Name      string            `json:"name"`
+		Libraries []json.RawMessage `json:"libraries"`
+		Limits    json.RawMessage   `json:"limits"` // ignored when it isn't limits
+	}
 	r, err := s.call(ctx, p, "/api/v1/federation/libraries", struct{}{}, &answer)
 	switch {
 	case err != nil:
@@ -890,24 +900,36 @@ func (s *Service) TheirLibraries(ctx context.Context, p *store.Peer) ([]store.Pe
 		return nil, ErrUnreachable
 	}
 	s.Store.PeerSeen(ctx, p.ID)
-	if l := answer.Limits; l != nil && ValidLimits(*l) == nil {
+	var l *store.PeerLimits
+	if answer.Limits != nil && DecodeJSON(answer.Limits, &l) == nil && l != nil && ValidLimits(*l) == nil {
 		if err := s.Store.SetTheirLimits(ctx, p.ID, *l); err != nil {
 			return nil, err
 		}
 	}
 	out := []store.PeerLibrary{}
-	for _, l := range answer.Libraries {
+	for _, raw := range answer.Libraries {
 		if len(out) == maxLibraries {
 			break
 		}
-		if l.ID == "" || len(l.ID) > 64 {
+		var l struct {
+			ID   string          `json:"id"`
+			Name json.RawMessage `json:"name"`
+			Kind json.RawMessage `json:"kind"`
+		}
+		// Its ID in the form MSFP gives, each once (the first kept).
+		if DecodeJSON(raw, &l) != nil || !libraryIDRe.MatchString(l.ID) ||
+			slices.ContainsFunc(out, func(o store.PeerLibrary) bool { return o.ID == l.ID }) {
 			continue
 		}
-		name := textclean.Plain(l.Name, maxName)
+		var name, kind string
+		_ = json.Unmarshal(l.Name, &name) // not a string: none
+		_ = json.Unmarshal(l.Kind, &kind)
+		// Cleaned as a server's name is (section 9.1), then as text.
+		name = textclean.Plain(cleanName(name, ""), maxName)
 		if name == "" {
 			name = "?"
 		}
-		out = append(out, store.PeerLibrary{ID: l.ID, Name: name, Kind: cleanKind(l.Kind)})
+		out = append(out, store.PeerLibrary{ID: l.ID, Name: name, Kind: cleanKind(kind)})
 	}
 	// What it calls itself and its libraries now, for our site's menu.
 	if err := s.Store.RenamePeerWants(ctx, p.ID, cleanName(answer.Name, ""), out); err != nil {
@@ -1006,6 +1028,47 @@ type titlesRequest struct {
 	// (the seq a former answer gave); 0, or one we can't answer from,
 	// gets the whole list.
 	Since int64 `json:"since,omitempty"`
+}
+
+// titlesReading is a peer's titlesAnswer as read: each title, and each
+// key gone, on its own, so that one that isn't one is skipped alone.
+type titlesReading struct {
+	Titles  []json.RawMessage `json:"titles"`
+	Next    string            `json:"next"`
+	Changes bool              `json:"changes"`
+	Gone    []json.RawMessage `json:"gone"`
+	Seq     int64             `json:"seq"`
+}
+
+// readPeerTitle reads one of a peer's titles: false when it isn't an
+// object with a key, a kind and a library, all strings; a language tag
+// that isn't a string is skipped alone, as a list that isn't one is
+// (cleanTags checks the rest).
+func readPeerTitle(raw json.RawMessage) (store.PeerTitle, bool) {
+	var t struct {
+		Key       string          `json:"key"`
+		Kind      string          `json:"kind"`
+		Library   string          `json:"library"`
+		Audio     json.RawMessage `json:"audio"`
+		Subtitles json.RawMessage `json:"subtitles"`
+	}
+	if DecodeJSON(raw, &t) != nil {
+		return store.PeerTitle{}, false
+	}
+	tags := func(raw json.RawMessage) []string {
+		var list []any
+		if json.Unmarshal(raw, &list) != nil {
+			return nil
+		}
+		var out []string
+		for _, v := range list {
+			if s, ok := v.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return store.PeerTitle{Key: t.Key, Kind: t.Kind, Library: t.Library, Audio: tags(t.Audio), Subtitles: tags(t.Subtitles)}, true
 }
 
 type titlesAnswer struct {
@@ -1172,7 +1235,7 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 	changes, first := false, true
 	var seq int64
 	for len(libs) > 0 {
-		var answer titlesAnswer
+		var answer titlesReading
 		r, err := s.call(ctx, p, "/api/v1/federation/titles", titlesRequest{Libraries: libs, After: after, Since: since}, &answer)
 		// Asked to wait a moment: the same page again, once it's time
 		// (never sooner); asked longer, the next reading.
@@ -1201,7 +1264,11 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 			return 0, ErrUnreachable
 		}
 		page := make([]store.PeerTitle, 0, len(answer.Titles))
-		for _, t := range answer.Titles {
+		for _, raw := range answer.Titles {
+			t, ok := readPeerTitle(raw)
+			if !ok {
+				continue // not a title: skipped, not the whole page (MSFP catalog, section 3.3)
+			}
 			// Only what we asked for, and only keys we read the same way:
 			// TMDB's, as TMDB numbers them (a "movie/tmdb/0550" would be
 			// one more title here, a duplicate nobody can play, and one
@@ -1218,8 +1285,9 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 		}
 		if changes {
 			var gone []string
-			for _, k := range answer.Gone {
-				if len(k) <= 128 {
+			for _, raw := range answer.Gone {
+				var k string
+				if json.Unmarshal(raw, &k) == nil && len(k) <= 128 {
 					gone = append(gone, k)
 				}
 			}

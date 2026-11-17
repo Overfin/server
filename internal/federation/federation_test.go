@@ -122,7 +122,7 @@ func TestSignedRequest(t *testing.T) {
 	k := NewKey()
 	v := &Verifier{Host: "films.example.org"}
 	body := []byte(`{"a":1}`)
-	req, nonce := request(k, "POST", "/api/v1/federation/ping?x=1", body, now)
+	req, nonce := request(k, "POST", "/api/v1/federation/ping", body, now)
 	got, err := v.Check(req, body, now.Add(time.Second))
 	if err != nil || !SameKey(got.Key, k.Public()) || got.Nonce != nonce {
 		t.Fatalf("valid request refused: %v", err)

@@ -66,3 +66,20 @@ func TestTitlesWithoutLibraries(t *testing.T) {
 		t.Fatalf("an empty list: %+v %v", r, err)
 	}
 }
+
+// A call with a query is refused like a bad signature, even signed over
+// it (MSFP section 6.4, step 1).
+func TestCheckRefusesQueries(t *testing.T) {
+	k := NewKey()
+	v := &Verifier{Host: "films.example.org"}
+	for _, target := range []string{"/api/v1/federation/hello?x=1", "/api/v1/federation/hello?"} {
+		req, _ := request(k, "POST", target, []byte(`{}`), now)
+		if _, err := v.Check(req, []byte(`{}`), now); err == nil {
+			t.Errorf("%s accepted", target)
+		}
+	}
+	req, _ := request(k, "POST", "/api/v1/federation/hello", []byte(`{}`), now)
+	if _, err := v.Check(req, []byte(`{}`), now); err != nil {
+		t.Errorf("without a query: %v", err)
+	}
+}

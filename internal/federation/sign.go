@@ -178,6 +178,11 @@ type Verified struct {
 // request was signed by the key it names, for this server, recently, and
 // never seen before: who that key belongs to is the caller's question.
 func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified, error) {
+	// No query (MSFP section 6.4, step 1): a call with one is refused
+	// like a bad signature, even one signed over it.
+	if r.URL.RawQuery != "" || r.URL.ForceQuery {
+		return Verified{}, ErrSignature
+	}
 	// Each header once, each value in its one form (MSFP section 2.1).
 	keyText, ok1 := oneHeader(r.Header, HeaderKey)
 	date, ok2 := oneHeader(r.Header, HeaderDate)
