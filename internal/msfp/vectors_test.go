@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// MSFP's version 0 test vectors (https://github.com/C0PT3R/msfp-spec,
+// MSFP's version 0 test vectors (https://github.com/msfp-io/msfp-spec,
 // vectors/v0.json), copied in testdata/vectors.json: recomputed here with
 // the code, so the code keeps speaking the protocol they describe.
 

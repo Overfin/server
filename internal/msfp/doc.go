@@ -1,5 +1,5 @@
 // Package msfp implements MSFP, the Media Server Federation Protocol
-// (https://github.com/C0PT3R/msfp-spec), as servers speak it today
+// (https://github.com/msfp-io/msfp-spec), as servers speak it today
 // (version 0), with the media checks of version 1's media part: each
 // server's own key and its fingerprint, the one-time pairing code,
 // signed requests and answers and their nonces, MSFP's strict JSON,

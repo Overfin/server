@@ -49,7 +49,7 @@ func TestRelayErrorWithoutTicket(t *testing.T) {
 }
 
 // The WebVTT cases of MSFP's media test vectors (vectors/v1/media.json of
-// https://github.com/C0PT3R/msfp-spec, copied in the msfp package's
+// https://github.com/msfp-io/msfp-spec, copied in the msfp package's
 // testdata), through the code that rebuilds what a paired server sends.
 func TestWebVTTVectors(t *testing.T) {
 	b, err := os.ReadFile("../msfp/testdata/media-vectors.json")

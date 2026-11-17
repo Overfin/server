@@ -188,7 +188,7 @@ configuration avoids that.
 
 Building your own server that pairs with Overfin? Servers speak MSFP, the
 Media Server Federation Protocol: its specification and test vectors are
-at [github.com/C0PT3R/msfp-spec](https://github.com/C0PT3R/msfp-spec).
+at [github.com/msfp-io/msfp-spec](https://github.com/msfp-io/msfp-spec).
 
 ## Where it stands
 
