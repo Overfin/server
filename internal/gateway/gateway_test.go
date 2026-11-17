@@ -557,7 +557,12 @@ func TestQueriesPassWholeOrNot(t *testing.T) {
 	}
 	do(h, "GET", "/api/v1/stream/abcdefghijklmnop/file?a=1", "203.0.113.5:1234")
 	do(h, "GET", "/api/v1/stream/abcdefghijklmnop/file?", "203.0.113.5:1234")
-	if len(b.got) != 2 || b.got[0] != "/api/v1/stream/abcdefghijklmnop/file?a=1" || !strings.HasSuffix(b.got[1], "?") {
+	// A site page with a query that doesn't parse (pasted, a tracker's)
+	// still loads.
+	if rec := do(h, "GET", "/search?q=100%", "203.0.113.5:1234"); rec.Code != 200 {
+		t.Errorf("a site page with an odd query: %d", rec.Code)
+	}
+	if len(b.got) != 3 || b.got[0] != "/api/v1/stream/abcdefghijklmnop/file?a=1" || !strings.HasSuffix(b.got[1], "?") {
 		t.Errorf("the backend got %q", b.got)
 	}
 }

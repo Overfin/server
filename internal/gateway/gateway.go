@@ -110,7 +110,10 @@ func cleanQuery(raw string) bool {
 // read the same path; any other spelling gets a plain 404 here.
 func canonical(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !canonicalPath(r.URL.Path, r.URL.EscapedPath()) || !cleanQuery(r.URL.RawQuery) {
+		// The API's routes read their queries: one that doesn't parse is
+		// refused there; a site page's (a pasted "?q=100%") goes on, as
+		// the proxy drops what doesn't parse.
+		if !canonicalPath(r.URL.Path, r.URL.EscapedPath()) || strings.HasPrefix(r.URL.Path, "/api/") && !cleanQuery(r.URL.RawQuery) {
 			notFound(w)
 			return
 		}
