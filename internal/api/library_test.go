@@ -82,6 +82,9 @@ type fakeJellyfin struct {
 	// set, is its only set.
 	noTrickplay bool
 	trickplay   map[string]int
+	// onPlaybackInfo, when set, runs as PlaybackInfo is asked (something
+	// happening while a playback opens).
+	onPlaybackInfo func()
 }
 
 func (f *fakeJellyfin) setTrickplay(none bool, set map[string]int) {
@@ -268,6 +271,9 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			streamed = int(n)
 		}
 		f.lastAsked = asked
+		if f.onPlaybackInfo != nil {
+			f.onPlaybackInfo()
+		}
 		f.calls = append(f.calls, fmt.Sprintf("PlaybackInfo audio=%v subtitles=%v streamed=%d", asked["AudioStreamIndex"], asked["SubtitleStreamIndex"], streamed))
 		if f.notPlayable {
 			json.NewEncoder(w).Encode(map[string]any{"ErrorCode": "NoCompatibleStream"})

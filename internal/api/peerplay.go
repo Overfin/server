@@ -157,6 +157,14 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s, out := o.stream, o.out
+	// The pairing ended, or the library is no longer offered, while it
+	// opened: what ends its playbacks (PeerChanged) ran before this one
+	// was admitted, so it ends here.
+	if why := peerMayPlay(ctx, l.Provisioner.Store, peer.ID, s.ItemID); why != "" {
+		pb.end(s, why, "")
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
 	// Its seek-bar previews, a bonus, by the same ticket (MSFP section 10).
 	out.Trickplay = pb.previews(ctx, s, ja, uid, func(n int) string {
 		return fed.Address + "/api/v1/stream/" + s.Ticket + "/trickplay/" + strconv.Itoa(n)
@@ -853,6 +861,23 @@ func roundKbps(kbps int) int {
 	return kbps / 1000 * 1000
 }
 
+// peerMayPlay says why a paired server may no longer play an item here
+// ("pairing ended", "no longer shared"), "" when it may (or it couldn't be
+// told: each media request checks again).
+func peerMayPlay(ctx context.Context, st *store.Store, peerID, itemID string) string {
+	peer, err := st.PeerByID(ctx, peerID)
+	switch {
+	case errors.Is(err, store.ErrNotFound), err == nil && peer.State != store.PeerPaired:
+		return "pairing ended"
+	case err != nil:
+		return ""
+	}
+	if offered, err := st.ItemOfferedTo(ctx, peerID, itemID); err == nil && !offered {
+		return "no longer shared"
+	}
+	return ""
+}
+
 // PeerChanged ends at once what a paired server may no longer play here,
 // after its pairing ended or changed: all its playbacks when it is no
 // longer paired, those of a library no longer offered to it otherwise; and
@@ -870,12 +895,8 @@ func (pb Playback) PeerChanged(peerID string) {
 	}
 	paired := err == nil && peer.State == store.PeerPaired
 	for _, s := range pb.Tickets.Where(func(s *playback.Stream) bool { return s.ProfileID == playback.PeerPrefix+peerID }) {
-		if !paired {
-			pb.end(s, "pairing ended", "")
-			continue
-		}
-		if offered, err := st.ItemOfferedTo(ctx, peerID, s.ItemID); err == nil && !offered {
-			pb.end(s, "no longer shared", "")
+		if why := peerMayPlay(ctx, st, peerID, s.ItemID); why != "" {
+			pb.end(s, why, "")
 		}
 	}
 	if !paired {

@@ -56,3 +56,34 @@ func TestPeerPlaybacksEndAtOnce(t *testing.T) {
 		t.Fatal("the pairing ended: the ticket still works")
 	}
 }
+
+// The library un-offered while a paired server's playback opens (after
+// its request was let in, before it was admitted): it doesn't start.
+func TestPeerPlaybackUnofferedWhileOpening(t *testing.T) {
+	ctx := context.Background()
+	var st *store.Store
+	var b *federation.Service
+	var onB *playback.Tickets
+	srv, fake := newServerWith(t, options{store: &st, federation: &b, tickets: &onB})
+	fake.setDirect(true)
+	st.PutCatalog(ctx, []store.CatalogItem{
+		{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "949", LibraryID: "films"},
+	}, 1)
+	st.RefreshTitleKeys(ctx)
+	st.SetLibraries(ctx, []store.Library{{ID: "films", Item: []byte(`{"Name":"Films"}`)}})
+	a, bOnA, aOnB := viewer(t, b, srv.Client())
+	fake.mu.Lock()
+	fake.onPlaybackInfo = func() {
+		if err := b.SetOffers(ctx, aOnB, nil); err != nil {
+			t.Error(err)
+		}
+	}
+	fake.mu.Unlock()
+	var s peerSession
+	if status, _ := a.Call(ctx, bOnA, "/api/v1/federation/play", map[string]any{"title": "movie/tmdb/949", "capabilities": map[string]any{}}, &s); status == 200 {
+		t.Errorf("play answered 200")
+	}
+	if live := onB.Where(func(*playback.Stream) bool { return true }); len(live) != 0 {
+		t.Errorf("%d playbacks live", len(live))
+	}
+}
