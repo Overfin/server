@@ -889,8 +889,14 @@ func (s *Store) ItemDescription(ctx context.Context, id string) string {
 	var name, series sql.NullString
 	var year, season, episode sql.NullInt64
 	var kind string
-	err := s.read.QueryRowContext(ctx, `SELECT i.kind, i.name, i.year, i.season_number, i.episode_number, se.name
-		FROM catalog_items i LEFT JOIN catalog_items se ON se.id = i.series_id WHERE i.id = ?`, id).
+	// TMDB's names when known: Jellyfin's may be a folder's, with its tags.
+	err := s.read.QueryRowContext(ctx, `SELECT i.kind, coalesce(t.name, i.name), coalesce(t.year, i.year), i.season_number, i.episode_number,
+			coalesce(st.name, se.name)
+		FROM catalog_items i
+		LEFT JOIN catalog_titles t ON i.kind = 'movie' AND t.kind = 'movie' AND t.tmdb = i.tmdb
+		LEFT JOIN catalog_items se ON se.id = i.series_id
+		LEFT JOIN catalog_titles st ON st.kind = 'series' AND st.tmdb = se.tmdb
+		WHERE i.id = ?`, id).
 		Scan(&kind, &name, &year, &season, &episode, &series)
 	if err != nil {
 		return ""
