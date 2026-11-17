@@ -96,3 +96,26 @@ func TestLibraryIDsChanged(t *testing.T) {
 		t.Fatalf("wants again: %+v", w)
 	}
 }
+
+// Saving the same offers again (the panel saves them with each edit of a
+// pairing) changes nothing: the peer's next reading isn't a whole one.
+func TestSameOffersChangeNothing(t *testing.T) {
+	ctx := context.Background()
+	a, _, bOnA, _ := pairedPair(t)
+	before, err := a.s.Store.PeerOffersSeq(ctx, bOnA.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.s.SetOffers(ctx, bOnA, []string{"films", "films"}); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := a.s.Store.PeerOffersSeq(ctx, bOnA.ID); after != before {
+		t.Errorf("offers' number moved from %d to %d", before, after)
+	}
+	if err := a.s.SetOffers(ctx, bOnA, nil); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := a.s.Store.PeerOffersSeq(ctx, bOnA.ID); after == before {
+		t.Errorf("a real change didn't move it")
+	}
+}

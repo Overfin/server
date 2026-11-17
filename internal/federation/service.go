@@ -910,6 +910,20 @@ func (s *Service) SetOffers(ctx context.Context, p *store.Peer, ids []string) er
 			keep = append(keep, l.ID)
 		}
 	}
+	// Unchanged (the panel saves the offers with every edit of a
+	// pairing): nothing to do. A change has the peer read the whole list
+	// again, and a reading under way would fail.
+	had, err := s.Store.PeerOffers(ctx, p.ID)
+	if err != nil {
+		return err
+	}
+	same := slices.Clone(keep)
+	slices.Sort(same)
+	same = slices.Compact(same)
+	slices.Sort(had)
+	if slices.Equal(same, slices.Compact(had)) {
+		return nil
+	}
 	if err := s.Store.SetPeerOffers(ctx, p.ID, keep); err != nil {
 		return err
 	}
