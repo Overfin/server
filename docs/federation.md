@@ -84,7 +84,7 @@ offer its people what yours would refuse.
 
 Besides those, Overfin protects itself from a paired server that calls
 too much, by fault or on purpose, with fixed limits nobody needs to set:
-federation calls per address before any signature (50 a second, bursts
+federation calls per address (an IPv6 /64 counting as one) before any signature (50 a second, bursts
 of 400), per paired server (20 a second, bursts of 200), for all of them
 together (200 a second, bursts of 2,000), `play` per paired server (30 a
 minute, 20 at once), and requests at once (8 per paired server, 64 in

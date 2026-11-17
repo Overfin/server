@@ -375,8 +375,8 @@ and per-email limits don't depend on them (rule 126).
   two minutes after its last try), "Out of reach" otherwise; English or French by the visitor's first language; HTML with a
   20 s refresh and a strict CSP, or problem JSON under `/api/`. Neither page
   names what's behind the gateway.
-- **Rate limit:** 50 requests a second per address, bursts of 400, in
-  memory; 429 with `Retry-After: 5` past it.
+- **Rate limit:** 50 requests a second per address (an IPv6 /64 counting as one), bursts of 400, in
+  memory (100,000 addresses at most); 429 with `Retry-After: 5` past it.
 - **Servers:** 10 s to read request headers, 2 minutes idle; no limit on
   writing (films). HSTS for two years over HTTPS.
 - **The link:** 512-byte preamble line, 15 s handshake (egress included:

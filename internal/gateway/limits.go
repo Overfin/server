@@ -45,8 +45,21 @@ func (l *limiter) allow(a netip.Addr) bool {
 		}
 		l.swept = now
 	}
+	a = limitAddr(a)
 	b, ok := l.buckets[a]
 	if !ok {
+		if len(l.buckets) >= maxBuckets {
+			// Room: those full again, as a new one would be; when
+			// none are, all of them, rather than the memory growing.
+			for k, b := range l.buckets {
+				if now.Sub(b.last).Seconds() >= Burst/Rate {
+					delete(l.buckets, k)
+				}
+			}
+			if len(l.buckets) >= maxBuckets {
+				clear(l.buckets)
+			}
+		}
 		b = &bucket{tokens: Burst, last: now}
 		l.buckets[a] = b
 	}
@@ -57,6 +70,21 @@ func (l *limiter) allow(a netip.Addr) bool {
 	}
 	b.tokens--
 	return true
+}
+
+// maxBuckets caps the addresses whose limits are remembered at once.
+const maxBuckets = 100_000
+
+// limitAddr is the address limits count by: an IPv4 address, or an IPv6
+// address's /64, which one connection usually gets whole (a visitor
+// choosing a new address in it for each request is still one).
+func limitAddr(a netip.Addr) netip.Addr {
+	a = a.Unmap()
+	if a.Is6() {
+		p, _ := a.Prefix(64)
+		return p.Addr()
+	}
+	return a
 }
 
 // Limit refuses a visitor past the limit (after withClientAddr resolved

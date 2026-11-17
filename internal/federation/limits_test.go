@@ -242,3 +242,26 @@ func TestRetryAfterOf(t *testing.T) {
 		}
 	}
 }
+
+// Addresses of one IPv6 /64 share a limit, and the memory of addresses
+// has a cap.
+func TestAddressLimitIPv6AndMemory(t *testing.T) {
+	var l Limits
+	now := time.Unix(1_800_000_000, 0)
+	refused := 0
+	for i := range addrBurst + 50 {
+		a := netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 15: byte(i), 14: byte(i >> 8)})
+		if !l.fromAddr(a, now) {
+			refused++
+		}
+	}
+	if refused != 50 {
+		t.Errorf("one /64, new address each time: %d refused, want 50", refused)
+	}
+	for i := range 2 * maxAddrBuckets {
+		l.fromAddr(netip.AddrFrom4([4]byte{10, byte(i >> 16), byte(i >> 8), byte(i)}), now)
+	}
+	if n := len(l.addrs); n > maxAddrBuckets {
+		t.Errorf("%d addresses remembered", n)
+	}
+}

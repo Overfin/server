@@ -144,13 +144,46 @@ func (l *Limits) fromAddr(addr netip.Addr, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.sweep(now)
+	addr = limitAddr(addr)
 	b := l.addrs[addr]
 	if b == nil {
+		if len(l.addrs) >= maxAddrBuckets {
+			forgetFull(l.addrs, now, addrBurst/addrRate)
+		}
 		b = &bucket{tokens: addrBurst, last: now}
 		l.addrs[addr] = b
 	}
 	ok, _ := b.take(now, addrRate, addrBurst)
 	return ok
+}
+
+// maxAddrBuckets caps the addresses whose limits are remembered at once.
+const maxAddrBuckets = 100_000
+
+// forgetFull makes room among buckets: those full again (unused for
+// refill seconds), which a new bucket would be anyway; when none are,
+// all of them, rather than the memory growing.
+func forgetFull(m map[netip.Addr]*bucket, now time.Time, refill float64) {
+	for k, b := range m {
+		if now.Sub(b.last).Seconds() >= refill {
+			delete(m, k)
+		}
+	}
+	if len(m) >= maxAddrBuckets {
+		clear(m)
+	}
+}
+
+// limitAddr is the address limits count by: an IPv4 address, or an IPv6
+// address's /64, which one connection usually gets whole (a server
+// choosing a new address in it for each request is still one).
+func limitAddr(a netip.Addr) netip.Addr {
+	a = a.Unmap()
+	if a.Is6() {
+		p, _ := a.Prefix(64)
+		return p.Addr()
+	}
+	return a
 }
 
 // refusal is a limit reached: the problem to answer, and when to try
