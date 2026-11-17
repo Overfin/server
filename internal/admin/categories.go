@@ -59,6 +59,7 @@ func (p *Panel) categories(w http.ResponseWriter, r *http.Request, _ *session) {
 		p.fail(w, "listing genres", err)
 		return
 	}
+	genres = panelGenres(genres)
 	gs := []map[string]any{}
 	for _, g := range genres {
 		gs = append(gs, map[string]any{"id": g.ID, "name": g.Name})
