@@ -4,7 +4,9 @@
 
 Instead of Overfin's own sign-in, people can sign in through an OpenID
 Connect provider (`identity.mode = "oidc"`), such as Authentik or Pocket
-ID, or a reverse proxy's forward auth (`"forwardauth"`).
+ID, or a reverse proxy's forward auth (`"forwardauth"`). Forward auth is
+for a single Overfin behind your proxy only: a backend behind its gateway
+refuses it at start, since visitors' headers reach it through the gateway.
 
 By hand: make a confidential OpenID client at your provider with the
 redirect URL `https://media.example.org/api/v1/auth/callback`, allowed to

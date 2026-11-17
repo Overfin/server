@@ -224,6 +224,11 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	if backendMode {
+		if err := backendIdentity(cfg); err != nil {
+			return err
+		}
+	}
 	// Addresses paired servers give: this machine's own only when the
 	// operator allows it (SECURITY.md rule 136). On a gateway, its egress
 	// for the backend follows the same.
@@ -1203,4 +1208,16 @@ func setUpPocketID(ctx context.Context, cfg *config.Config, logger *slog.Logger)
 		case <-time.After(wait):
 		}
 	}
+}
+
+// backendIdentity refuses, on a backend, the sign-in a proxy in front of
+// Overfin vouches for (forwardauth): visitors reach the backend through
+// its gateway, which passes their headers on and tells the backend their
+// own address, so a proxy trusted by address would be any visitor from
+// it, naming whom they like in the user header.
+func backendIdentity(cfg *config.Config) error {
+	if cfg.Identity.Mode == "forwardauth" {
+		return errors.New(`identity.mode "forwardauth" isn't for a backend behind its gateway: visitors' headers come through the gateway; use "managed" (the default) or "oidc"`)
+	}
+	return nil
 }
