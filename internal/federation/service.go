@@ -249,8 +249,12 @@ type helloMessage struct {
 
 // ownCertificates is what this server names of its certificates in a
 // hello.
-func (s *Service) ownCertificates(ctx context.Context) []string {
-	pins, err := s.Certificates.For(ctx, s.Address)
+func (s *Service) ownCertificates(ctx context.Context, answering bool) []string {
+	look := s.Certificates.For
+	if answering {
+		look = s.Certificates.Fresh // a peer asking may have just been refused the old one
+	}
+	pins, err := look(ctx, s.Address)
 	if err != nil {
 		s.Logger.Info("federation: this server's certificate couldn't be read at its address", "address", s.Address, "error", err)
 	}
@@ -436,7 +440,7 @@ func (s *Service) hello(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	s.answer(w, v.Nonce, helloMessage{State: viewOf(p), Certificates: s.ownCertificates(ctx)})
+	s.answer(w, v.Nonce, helloMessage{State: viewOf(p), Certificates: s.ownCertificates(ctx, true)})
 }
 
 // theyPaired is a peer saying it has accepted: if we were waiting for it,
@@ -698,7 +702,7 @@ func (s *Service) End(ctx context.Context, id string) error {
 // error says so).
 func (s *Service) Check(ctx context.Context, p *store.Peer) (*store.Peer, error) {
 	var answer helloMessage
-	r, err := s.call(ctx, p, helloPath, helloMessage{State: viewOf(p), Certificates: s.ownCertificates(ctx)}, &answer)
+	r, err := s.call(ctx, p, helloPath, helloMessage{State: viewOf(p), Certificates: s.ownCertificates(ctx, false)}, &answer)
 	switch {
 	case err != nil:
 		return p, err

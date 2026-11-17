@@ -225,6 +225,21 @@ type Certificates struct {
 // fails keeps the last one seen; when there's none, the next look is
 // after probeAgain.
 func (c *Certificates) For(ctx context.Context, address string) ([]string, error) {
+	return c.within(ctx, address, probeEvery)
+}
+
+// Fresh is For, looked at again unless the last look is under
+// probeFresh old: what a hello answers, since a peer sends one when a
+// call of its was refused this server's certificate (a renewal), and
+// would otherwise get the old pin, and fail until its next try.
+func (c *Certificates) Fresh(ctx context.Context, address string) ([]string, error) {
+	return c.within(ctx, address, probeFresh)
+}
+
+// probeFresh is how recent a look a hello's answer takes as is.
+const probeFresh = 2 * time.Second
+
+func (c *Certificates) within(ctx context.Context, address string, maxAge time.Duration) ([]string, error) {
 	if c == nil {
 		return nil, nil
 	}
@@ -237,7 +252,7 @@ func (c *Certificates) For(ctx context.Context, address string) ([]string, error
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.at.IsZero() && time.Since(c.at) < probeEvery {
+	if !c.at.IsZero() && time.Since(c.at) < maxAge {
 		return c.seen, nil
 	}
 	c.at = time.Now()

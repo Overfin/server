@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -241,5 +242,59 @@ func TestOwnCertificatesFirstFailureRetriedSoon(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if got, err := c.For(ctx, "https://"+addr); err != nil || !slices.Equal(got, []string{Pin(cert)}) {
 		t.Fatalf("served now: %v %v", got, err)
+	}
+}
+
+// A hello's answer names the certificate served now, not one read up to a
+// minute ago: a peer sends a hello when it was refused this server's
+// certificate, after a renewal.
+func TestOwnCertificatesFreshForHellos(t *testing.T) {
+	ctx := context.Background()
+	one, two := newServerOn(t, "A", true), newServerOn(t, "B", true)
+	u1, _ := url.Parse(one.url)
+	u2, _ := url.Parse(two.url)
+	var mu sync.Mutex
+	target := u1.Host
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			in, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			to := target
+			mu.Unlock()
+			go func() {
+				defer in.Close()
+				out, err := net.Dial("tcp", to)
+				if err != nil {
+					return
+				}
+				defer out.Close()
+				go io.Copy(out, in)
+				io.Copy(in, out)
+			}()
+		}
+	}()
+	addr := "https://" + ln.Addr().String()
+	c := &Certificates{}
+	first, err := c.For(ctx, addr)
+	if err != nil || !slices.Equal(first, []string{Pin(tlsCertOf(t, u1.Host))}) {
+		t.Fatalf("first: %v %v", first, err)
+	}
+	mu.Lock()
+	target = u2.Host // renewed
+	mu.Unlock()
+	time.Sleep(probeFresh + 100*time.Millisecond)
+	if got, _ := c.For(ctx, addr); !slices.Equal(got, first) {
+		t.Fatalf("within the minute, For looked again: %v", got)
+	}
+	if got, err := c.Fresh(ctx, addr); err != nil || !slices.Equal(got, []string{Pin(tlsCertOf(t, u2.Host))}) {
+		t.Fatalf("a hello's answer names %v (%v), not the renewed one", got, err)
 	}
 }
