@@ -121,7 +121,8 @@
           <div class="name">{`${c.name}${c.year ? ` (${c.year})` : ''}`}</div>
           <div class="hint">{[c.originalName && c.originalName !== c.name ? c.originalName : '', c.language && languageName(c.language), `TMDB ${c.tmdb}`].filter(Boolean).join(' · ')}</div>
         </div>
-        {#if c.tmdb === t.tmdb}<Busy small action={() => act('PUT', { tmdb: c.tmdb }, 'Kept as it is.')}>It's right</Busy>{:else}<Busy small action={() => retitle(c.tmdb)}>Use this</Busy>{/if}
+        <!-- The current one: "It's right" is above already when there's a doubt. -->
+        {#if c.tmdb === t.tmdb && t.reasons.length}<Badge kind="plain">Current</Badge>{:else if c.tmdb === t.tmdb}<Busy small action={() => act('PUT', { tmdb: c.tmdb }, 'Kept as it is.')}>It's right</Busy>{:else}<Busy small action={() => retitle(c.tmdb)}>Use this</Busy>{/if}
       </li>
     {/each}
   </ul>
