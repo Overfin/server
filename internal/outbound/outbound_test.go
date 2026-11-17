@@ -54,7 +54,7 @@ func TestRefused(t *testing.T) {
 		// Clouds' metadata services outside link-local, and IPv4 ones
 		// reached through NAT64 or 6to4.
 		"100.100.100.200": true, "168.63.129.16": true, "fd00:ec2::254": true,
-		"64:ff9b::a9fe:a9fe": true, "64:ff9b:1::a9fe:a9fe": true, "2002:a9fe:a9fe::1": true,
+		"64:ff9b::a9fe:a9fe": true, "64:ff9b:1::a9fe:a9fe": true, "64:ff9b:1:c000:201::": true, "2002:a9fe:a9fe::1": true,
 		"64:ff9b::7f00:1": true, "2002:7f00:1::": true, "64:ff9b::6464:64c8": true,
 		"64:ff9b::c000:201": false, "2002:c000:201::1": false, "100.64.0.1": false,
 		"10.1.2.3": false, "192.168.1.5": false, "172.16.0.1": false, "fd00::1": false,

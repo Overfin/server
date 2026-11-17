@@ -80,7 +80,8 @@ var ErrRefused = errors.New("an address Overfin doesn't connect to for a paired 
 // multicast, and IPv4's "this network" (0.0.0.0/8), reserved block
 // (240.0.0.0/4) and broadcast in it. An IPv4-mapped IPv6 address is
 // judged as the IPv4 one, and so is the IPv4 address inside a NAT64
-// (64:ff9b::/96, 64:ff9b:1::/48) or 6to4 (2002::/16) one, which reaches it.
+// (64:ff9b::/96) or 6to4 (2002::/16) one, which reaches it; local-use
+// NAT64 (64:ff9b:1::/48) is refused whole.
 func Refused(ip netip.Addr) bool {
 	ip = ip.Unmap()
 	if v4, ok := embeddedV4(ip); ok && Refused(v4) {
@@ -91,7 +92,11 @@ func Refused(ip netip.Addr) bool {
 	}
 	return !ip.IsValid() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
 		ip.IsMulticast() || ip.IsInterfaceLocalMulticast() ||
-		thisNetwork.Contains(ip) || reservedV4.Contains(ip) || metadata[ip]
+		thisNetwork.Contains(ip) || reservedV4.Contains(ip) || metadata[ip] ||
+		// Local-use NAT64 (RFC 8215): a network's own translator, whose
+		// prefix (/48 to /96) places the IPv4 address it reaches anywhere;
+		// never a paired server's public address.
+		nat64Local.Contains(ip)
 }
 
 var (
@@ -111,15 +116,15 @@ var (
 )
 
 // embeddedV4 is the IPv4 address a NAT64 or 6to4 address reaches: the last
-// 32 bits of a NAT64 one (RFC 6052's /96, the one in use), bits 16 to 47 of
-// a 6to4 one.
+// 32 bits of a well-known NAT64 one (RFC 6052's /96), bits 16 to 47 of a
+// 6to4 one.
 func embeddedV4(ip netip.Addr) (netip.Addr, bool) {
 	if !ip.Is6() {
 		return netip.Addr{}, false
 	}
 	b := ip.As16()
 	switch {
-	case nat64.Contains(ip), nat64Local.Contains(ip):
+	case nat64.Contains(ip):
 		return netip.AddrFrom4([4]byte(b[12:16])), true
 	case sixToFour.Contains(ip):
 		return netip.AddrFrom4([4]byte(b[2:6])), true
