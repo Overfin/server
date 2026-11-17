@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/outbound"
 )
 
@@ -23,22 +24,8 @@ func TestSignRefusalsCrash(t *testing.T) {
 	}))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/v1/federation/hello", nil))
-	if !freed || rec.Code != 500 || rec.Header().Get(HeaderSignature) != "signed" {
-		t.Fatalf("freed %v, %d, signature %q", freed, rec.Code, rec.Header().Get(HeaderSignature))
-	}
-}
-
-// Every body is an object: "null", a list or a string isn't.
-func TestDecodeJSONObjectsOnly(t *testing.T) {
-	for _, body := range []string{`null`, `[]`, `"x"`, `1`, `true`} {
-		var v struct{}
-		if DecodeJSON([]byte(body), &v) == nil {
-			t.Errorf("%s accepted", body)
-		}
-	}
-	var v struct{}
-	if DecodeJSON([]byte(`{}`), &v) != nil {
-		t.Error("{} refused")
+	if !freed || rec.Code != 500 || rec.Header().Get(msfp.HeaderSignature) != "signed" {
+		t.Fatalf("freed %v, %d, signature %q", freed, rec.Code, rec.Header().Get(msfp.HeaderSignature))
 	}
 }
 
@@ -71,23 +58,6 @@ func TestTitlesWithoutLibraries(t *testing.T) {
 	}
 }
 
-// A call with a query is refused like a bad signature, even signed over
-// it (MSFP section 6.4, step 1).
-func TestCheckRefusesQueries(t *testing.T) {
-	k := NewKey()
-	v := &Verifier{Host: "films.example.org"}
-	for _, target := range []string{"/api/v1/federation/hello?x=1", "/api/v1/federation/hello?"} {
-		req, _ := request(k, "POST", target, []byte(`{}`), now)
-		if _, err := v.Check(req, []byte(`{}`), now); err == nil {
-			t.Errorf("%s accepted", target)
-		}
-	}
-	req, _ := request(k, "POST", "/api/v1/federation/hello", []byte(`{}`), now)
-	if _, err := v.Check(req, []byte(`{}`), now); err != nil {
-		t.Errorf("without a query: %v", err)
-	}
-}
-
 // The side that ends a pairing remembers the other's key; the side told
 // "ended" forgets the ender without remembering it (MSFP section 7.4,
 // step 3): its next hello is a stranger's, not "unknown", signed.
@@ -116,7 +86,7 @@ func TestNoContentCoding(t *testing.T) {
 		t.Error("the transport asks for gzip")
 	}
 	_, b, _, aOnB := pairedPair(t)
-	k := NewKey()
+	k := msfp.NewKey()
 	coding := ""
 	var asked []string
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -132,7 +102,7 @@ func TestNoContentCoding(t *testing.T) {
 		if coding != "" {
 			w.Header().Set("Content-Encoding", coding)
 		}
-		w.Header().Set(HeaderSignature, SignResponse(k, r.Header.Get(HeaderNonce), 200, body))
+		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()

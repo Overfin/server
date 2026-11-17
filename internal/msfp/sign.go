@@ -1,4 +1,4 @@
-package federation
+package msfp
 
 import (
 	"bytes"
@@ -31,7 +31,7 @@ import (
 // carries an Overfin-Signature too, from the server answering, over the
 // request's nonce, the status and the body: an answer can't be forged or
 // swapped for another request's, even by someone who can read and change
-// the traffic (a web certificate alone is never trusted, rule 94).
+// the traffic (a web certificate alone is never trusted).
 const (
 	HeaderKey       = "Overfin-Key"
 	HeaderDate      = "Overfin-Date"
@@ -58,10 +58,14 @@ var b64 = base64.RawURLEncoding
 // answers every one the same way.
 var ErrSignature = errors.New("federation: not a valid signature")
 
-// decode64 decodes base64url in MSFP's one form (section 2.1): no
+// Encode64 writes b as base64url in MSFP's one form (section 2.1): no
+// padding.
+func Encode64(b []byte) string { return b64.EncodeToString(b) }
+
+// Decode64 decodes base64url in MSFP's one form (section 2.1): no
 // padding, no white space, unused bits zero, n bytes (any, for n < 0);
 // re-encoding gives the same text.
-func decode64(s string, n int) ([]byte, bool) {
+func Decode64(s string, n int) ([]byte, bool) {
 	b, err := b64.DecodeString(s)
 	if err != nil || (n >= 0 && len(b) != n) || b64.EncodeToString(b) != s {
 		return nil, false
@@ -85,9 +89,9 @@ func parseDate(s string) (int64, bool) {
 	return n, err == nil && n <= maxInteger
 }
 
-// oneHeader is a signature header sent exactly once, its value without a
+// OneHeader is a signature header sent exactly once, its value without a
 // comma (section 2.1); false otherwise.
-func oneHeader(h http.Header, name string) (string, bool) {
+func OneHeader(h http.Header, name string) (string, bool) {
 	v := h.Values(name)
 	if len(v) != 1 || strings.Contains(v[0], ",") {
 		return "", false
@@ -130,7 +134,7 @@ func SignResponse(k Key, nonce string, status int, body []byte) string {
 // CheckResponse checks an answer's signature against the key the
 // requester knows the other server by.
 func CheckResponse(peer ed25519.PublicKey, nonce string, status int, body []byte, signature string) error {
-	sig, ok := decode64(signature, ed25519.SignatureSize)
+	sig, ok := Decode64(signature, ed25519.SignatureSize)
 	if !ok || !verify(peer, responseMessage(nonce, status, body), sig) {
 		return ErrSignature
 	}
@@ -184,16 +188,16 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 		return Verified{}, ErrSignature
 	}
 	// Each header once, each value in its one form (MSFP section 2.1).
-	keyText, ok1 := oneHeader(r.Header, HeaderKey)
-	date, ok2 := oneHeader(r.Header, HeaderDate)
-	nonce, ok3 := oneHeader(r.Header, HeaderNonce)
-	sigText, ok4 := oneHeader(r.Header, HeaderSignature)
+	keyText, ok1 := OneHeader(r.Header, HeaderKey)
+	date, ok2 := OneHeader(r.Header, HeaderDate)
+	nonce, ok3 := OneHeader(r.Header, HeaderNonce)
+	sigText, ok4 := OneHeader(r.Header, HeaderSignature)
 	if !ok1 || !ok2 || !ok3 || !ok4 {
 		return Verified{}, ErrSignature
 	}
 	// A key MSFP accepts (section 2.1), wherever it's learnt: here for
 	// pair, and checked again (from memory) on every other request.
-	key, ok := decode64(keyText, ed25519.PublicKeySize)
+	key, ok := Decode64(keyText, ed25519.PublicKeySize)
 	if !ok || !ValidKey(key) {
 		return Verified{}, ErrSignature
 	}
@@ -207,10 +211,10 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 	if v.Seen != nil && v.Seen.before(when) {
 		return Verified{}, ErrSignature
 	}
-	if _, ok := decode64(nonce, 16); !ok {
+	if _, ok := Decode64(nonce, 16); !ok {
 		return Verified{}, ErrSignature
 	}
-	sig, ok := decode64(sigText, ed25519.SignatureSize)
+	sig, ok := Decode64(sigText, ed25519.SignatureSize)
 	if !ok {
 		return Verified{}, ErrSignature
 	}
@@ -361,12 +365,19 @@ func PairingProof(secret []byte, redeemer ed25519.PublicKey, address string) str
 
 // CheckPairingProof checks a PairingProof in constant time.
 func CheckPairingProof(secret []byte, redeemer ed25519.PublicKey, address, proof string) bool {
-	got, ok := decode64(proof, sha256.Size)
+	got, ok := Decode64(proof, sha256.Size)
 	if !ok {
 		return false
 	}
 	want, _ := b64.DecodeString(PairingProof(secret, redeemer, address))
 	return hmac.Equal(got, want)
+}
+
+// SecretHash is a pairing code's secret as the redeeming server names it
+// (pair's secretHash, section 9.1): SHA-256 of the secret.
+func SecretHash(secret []byte) []byte {
+	sum := sha256.Sum256(secret)
+	return sum[:]
 }
 
 // SameKey reports whether two public keys are the same.

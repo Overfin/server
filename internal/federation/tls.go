@@ -2,11 +2,8 @@ package federation
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/outbound"
 	"github.com/overfin/server/internal/store"
 )
@@ -29,72 +27,6 @@ import (
 // accepted for pair and hello only: their answers are checked by key, and
 // carry nothing secret. Every other call, and the media, wants a trusted
 // or named one.
-
-// maxPins caps the certificates a server may name.
-const maxPins = 8
-
-// Pin is how a certificate is named between servers: base64url, without
-// padding, of the SHA-256 of its public key (its SubjectPublicKeyInfo).
-func Pin(c *x509.Certificate) string {
-	sum := sha256.Sum256(c.RawSubjectPublicKeyInfo)
-	return b64.EncodeToString(sum[:])
-}
-
-// ValidPin reports whether s is a pin as Pin writes it.
-func ValidPin(s string) bool {
-	b, err := b64.DecodeString(s)
-	return err == nil && len(b) == sha256.Size && b64.EncodeToString(b) == s
-}
-
-// cleanPins keeps the valid pins, each once, sorted, at most maxPins.
-func cleanPins(in []string) []string {
-	var out []string
-	for _, p := range in {
-		if ValidPin(p) && !slices.Contains(out, p) {
-			out = append(out, p)
-		}
-	}
-	slices.Sort(out)
-	if len(out) > maxPins {
-		out = out[:maxPins]
-	}
-	return out
-}
-
-// ErrUntrustedCertificate is returned for a connection to a peer whose
-// certificate is neither publicly trusted nor one the peer named.
-var ErrUntrustedCertificate = errors.New("federation: the other server's certificate is neither publicly trusted nor one it named")
-
-// verifyPeer checks a peer's certificate: trusted by roots (nil: the
-// system's) for host, or, its key, one of pins. With anyCert, any
-// certificate passes.
-func verifyPeer(roots *x509.CertPool, now func() time.Time, host string, pins []string, anyCert bool) func(tls.ConnectionState) error {
-	return func(cs tls.ConnectionState) error {
-		if len(cs.PeerCertificates) == 0 {
-			return ErrUntrustedCertificate
-		}
-		if anyCert {
-			return nil
-		}
-		// Only the first certificate's: the handshake proves the server
-		// holds its private key, not any other's in the chain.
-		leaf := cs.PeerCertificates[0]
-		if slices.Contains(pins, Pin(leaf)) {
-			return nil
-		}
-		opts := x509.VerifyOptions{Roots: roots, DNSName: host, Intermediates: x509.NewCertPool()}
-		if now != nil {
-			opts.CurrentTime = now()
-		}
-		for _, c := range cs.PeerCertificates[1:] {
-			opts.Intermediates.AddCert(c)
-		}
-		if _, err := leaf.Verify(opts); err != nil {
-			return fmt.Errorf("%w: %v", ErrUntrustedCertificate, err)
-		}
-		return nil
-	}
-}
 
 // peerConns are the TLS settings and client made for one peer, as it was.
 type peerConns struct {
@@ -147,7 +79,7 @@ func (s *Service) conns(p *store.Peer, anyCert bool) *peerConns {
 	}
 	// Checked by VerifyConnection instead, which Go runs either way.
 	cfg.InsecureSkipVerify = true
-	cfg.VerifyConnection = verifyPeer(cfg.RootCAs, cfg.Time, host, p.Certificates, anyCert)
+	cfg.VerifyConnection = msfp.VerifyPeer(cfg.RootCAs, cfg.Time, host, p.Certificates, anyCert)
 	tr := t.Clone()
 	tr.TLSClientConfig = cfg
 	c := &peerConns{sig: sig, tls: cfg,
@@ -175,7 +107,7 @@ func (s *Service) TLSConfig(p *store.Peer) *tls.Config {
 // trusted or named. It gives p as it is then, and whether its pins
 // changed, so that trying again may work.
 func (s *Service) Repin(ctx context.Context, p *store.Peer, err error) (*store.Peer, bool) {
-	if !errors.Is(err, ErrUntrustedCertificate) || p.ID == "" {
+	if !errors.Is(err, msfp.ErrUntrustedCertificate) || p.ID == "" {
 		return p, false
 	}
 	q, cerr := s.Check(ctx, p)
@@ -188,7 +120,7 @@ func (s *Service) Repin(ctx context.Context, p *store.Peer, err error) (*store.P
 // keepCertificates keeps the pins p named in a signed hello, replacing
 // those it named before: none, if it named none.
 func (s *Service) keepCertificates(ctx context.Context, p *store.Peer, named []string) error {
-	pins := cleanPins(named)
+	pins := msfp.CleanPins(named)
 	if slices.Equal(pins, p.Certificates) {
 		return nil
 	}
@@ -296,5 +228,5 @@ func probe(ctx context.Context, u *url.URL) (string, error) {
 	if len(certs) == 0 {
 		return "", errors.New("no certificate")
 	}
-	return Pin(certs[0]), nil
+	return msfp.Pin(certs[0]), nil
 }

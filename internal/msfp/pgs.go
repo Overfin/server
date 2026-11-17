@@ -1,23 +1,23 @@
-package playback
+package msfp
 
 import (
 	"encoding/binary"
 	"errors"
 )
 
-// Subtitles that are pictures (PGS, from Blu-rays): the track Jellyfin
-// extracts as it is, served only when every part of it is well-formed and
-// within its limits (SECURITY.md rule 17). The player decodes and draws
-// it; nothing in it is run, and a browser never renders it as a page.
+// Subtitles that are pictures (PGS, from Blu-rays; MSFP media, section
+// 3.3): a track served as it is, only when every part of it is
+// well-formed and within its limits. The player decodes and draws it;
+// nothing in it is run, and a browser never renders it as a page.
 
-// The limits of a PGS track Overfin serves.
+// The limits of a PGS track.
 const (
 	MaxPGS        = 64 << 20 // bytes, a whole track
-	maxPGSSide    = 4096     // a picture's or the screen's width or height, as rule 16
+	maxPGSSide    = 4096     // a picture's or the screen's width or height
 	maxPGSObjects = 20_000   // pictures in a track
 )
 
-// ErrPGS: a PGS track isn't one Overfin serves.
+// ErrPGS: a PGS track outside what MSFP allows.
 var ErrPGS = errors.New("playback: not a well-formed PGS track")
 
 // PGS segment types.

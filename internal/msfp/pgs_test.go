@@ -1,4 +1,4 @@
-package playback
+package msfp
 
 import (
 	"encoding/binary"

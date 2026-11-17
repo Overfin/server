@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/overfin/server/internal/jellyfin"
+	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/problem"
@@ -68,23 +69,12 @@ func (s Stream) trickplay(w http.ResponseWriter, r *http.Request) {
 	s.Playback.serveSheet(w, r, st, r.PathValue("sheet"))
 }
 
-const (
-	maxPlaylist  = 2 << 20
-	maxSubtitles = 5 << 20
-)
+const maxSubtitles = 5 << 20
 
 var (
-	ticketRe   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-	fileNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
-	rangeRe    = regexp.MustCompile(`^bytes=\d{0,15}-\d{0,15}$`)
+	ticketRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+	rangeRe  = regexp.MustCompile(`^bytes=\d{0,15}-\d{0,15}$`)
 )
-
-// fileName says whether s may name a file of a stream (MSFP media): the
-// characters of fileNameRe, never "." or "..", which a URL resolves as a
-// folder, not a file.
-func fileName(s string) bool {
-	return s != "." && s != ".." && fileNameRe.MatchString(s)
-}
 
 // Bounds of what a paired server fetches at once of its playbacks here
 // (MSFP media, section 2.4): per ticket and per paired server. Over them,
@@ -186,7 +176,7 @@ func (s Stream) find(w http.ResponseWriter, r *http.Request) (*playback.Stream, 
 
 func (s Stream) serve(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if hasQuery(r) || !fileName(name) {
+	if hasQuery(r) || !msfp.FileName(name) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -239,7 +229,7 @@ func (s Stream) playlist(w http.ResponseWriter, r *http.Request, st *playback.St
 	up playback.Upstream, rewrite func([]byte, playback.Upstream) (*playback.Rewritten, error)) {
 
 	l := s.Playback.Library
-	body, err := l.Jellyfin.ReadSmall(r.Context(), a, up.Path, up.Query, maxPlaylist)
+	body, err := l.Jellyfin.ReadSmall(r.Context(), a, up.Path, up.Query, msfp.MaxPlaylist)
 	if err != nil {
 		s.upstreamError(w, st, err)
 		return
@@ -355,7 +345,7 @@ func mediaType(ct string) string {
 	// Never a playlist's type (audio/mpegurl, audio/x-mpegurl): players
 	// would read it as one, unchecked.
 	if (strings.HasPrefix(t, "video/") || strings.HasPrefix(t, "audio/")) && !strings.Contains(t, "mpegurl") &&
-		fileNameRe.MatchString(strings.ReplaceAll(t, "/", "-")) {
+		msfp.FileName(strings.ReplaceAll(t, "/", "-")) {
 		return t
 	}
 	return "application/octet-stream"
@@ -363,7 +353,7 @@ func mediaType(ct string) string {
 
 // subtitleReads bounds how many subtitle tracks are held in memory at
 // once: each is read whole before it is checked (a PGS track may be up to
-// playback.MaxPGS), so many asked together could otherwise take hundreds
+// msfp.MaxPGS), so many asked together could otherwise take hundreds
 // of megabytes. A read waits for a slot as long as its request lasts; the
 // slot is freed once the track is checked, before it's sent.
 var subtitleReads = make(chan struct{}, 4)
@@ -509,11 +499,11 @@ func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
 	}
 	free = sync.OnceFunc(free)
 	defer free()
-	body := s.stretch(w, r, st, index, part, playback.MaxPGS)
+	body := s.stretch(w, r, st, index, part, msfp.MaxPGS)
 	if body == nil {
 		return
 	}
-	if err := playback.CheckPGS(body); err != nil {
+	if err := msfp.CheckPGS(body); err != nil {
 		s.Playback.Library.Logger.Warn("refused upstream picture subtitles", "playback", st.ID)
 		problem.Send(w, problem.NotFound, "")
 		return

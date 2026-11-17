@@ -1,12 +1,4 @@
-// Package federation holds what servers need to trust each other (ROADMAP.md
-// milestone 6, SECURITY.md rule 94): each server's own key and its
-// fingerprint, the one-time pairing code, and signed requests and answers.
-//
-// A server proves who it is with its key only, never with a web
-// certificate, a name or an address. Two servers learn each other's keys
-// when their operators pair them, and from then on every request between
-// them is signed by the sender, and every answer by the server answering.
-package federation
+package msfp
 
 import (
 	"crypto/ed25519"

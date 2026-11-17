@@ -18,6 +18,7 @@ import (
 	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/lang"
+	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/store"
@@ -69,7 +70,7 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req peerPlayRequest
-	if federation.DecodeJSON(body, &req) != nil {
+	if msfp.DecodeJSON(body, &req) != nil {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
@@ -220,7 +221,7 @@ func (pb Playback) peerStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req peerStopRequest
-	if federation.DecodeJSON(body, &req) != nil || !playIDRe.MatchString(req.ID) || req.PositionMs < 0 || req.PositionMs > maxPositionMs {
+	if msfp.DecodeJSON(body, &req) != nil || !playIDRe.MatchString(req.ID) || req.PositionMs < 0 || req.PositionMs > maxPositionMs {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
@@ -254,7 +255,7 @@ func (pb Playback) peerProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req peerProgressRequest
-	if federation.DecodeJSON(body, &req) != nil || !playIDRe.MatchString(req.ID) || req.PositionMs < 0 || req.PositionMs > maxPositionMs {
+	if msfp.DecodeJSON(body, &req) != nil || !playIDRe.MatchString(req.ID) || req.PositionMs < 0 || req.PositionMs > maxPositionMs {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
@@ -305,7 +306,7 @@ func origin(address string) string {
 	if err != nil {
 		return ""
 	}
-	return federation.Origin(u.Scheme + "://" + u.Host) // as browsers write it
+	return msfp.Origin(u.Scheme + "://" + u.Host) // as browsers write it
 }
 
 // A title this server's people play from a paired server: no copy here
@@ -580,9 +581,9 @@ func keepPeerURLs(out *sessionJSON, address string) (string, bool) {
 		rest, in := strings.CutPrefix(u, base)
 		name, track, sub := strings.Cut(rest, "/")
 		if sub {
-			return in && (name == "subtitles" || name == "pictures") && fileName(track)
+			return in && (name == "subtitles" || name == "pictures") && msfp.FileName(track)
 		}
-		return in && fileName(rest)
+		return in && msfp.FileName(rest)
 	}
 	if !ok(out.Stream.URL) || (out.Stream.Protocol != "hls" && out.Stream.Protocol != "file") || !playIDRe.MatchString(out.ID) {
 		return "", false

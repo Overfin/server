@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/overfin/server/internal/ids"
+	"github.com/overfin/server/internal/msfp"
 )
 
 const federationKeyContext = "federation key"
@@ -59,10 +60,7 @@ type PairingCode struct {
 	Expires time.Time `json:"expires"`
 }
 
-func pairingSecretHash(secret []byte) []byte {
-	sum := sha256.Sum256(secret)
-	return sum[:]
-}
+func pairingSecretHash(secret []byte) []byte { return msfp.SecretHash(secret) }
 
 // CreatePairingCode keeps a new pairing code's secret, sealed, until
 // expires.
@@ -124,7 +122,7 @@ type Peer struct {
 	Limits PeerLimits  `json:"limits"`
 	Theirs *PeerLimits `json:"theirs,omitempty"`
 	// Certificates are the pins of the TLS certificates it said, signed,
-	// its address serves (federation.Pin): its own, not publicly trusted
+	// its address serves (msfp.Pin): its own, not publicly trusted
 	// perhaps. Never sent to the panel.
 	Certificates []string `json:"-"`
 }

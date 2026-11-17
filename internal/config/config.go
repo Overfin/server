@@ -27,6 +27,8 @@ import (
 	"unicode"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/overfin/server/internal/msfp"
 )
 
 // Config is the whole configuration. Field tags give the TOML key names.
@@ -411,13 +413,6 @@ type Site struct {
 	Certificates []string `toml:"certificates"`
 }
 
-// validPin reports whether s is a certificate pin: base64url, without
-// padding, of 32 bytes.
-func validPin(s string) bool {
-	b, err := base64.RawURLEncoding.DecodeString(s)
-	return err == nil && len(b) == 32 && base64.RawURLEncoding.EncodeToString(b) == s
-}
-
 // DefaultCSP is the site's Content-Security-Policy unless the operator sets
 // one: everything from the site itself, nothing embedded elsewhere.
 const DefaultCSP = "default-src 'self'; img-src 'self' data:; media-src 'self' blob:; worker-src 'self' blob:; " +
@@ -711,7 +706,7 @@ func (c *Config) validate() error {
 	}
 
 	for _, pin := range c.Site.Certificates {
-		if !validPin(pin) {
+		if !msfp.ValidPin(pin) {
 			add("site.certificates: %q isn't a certificate's pin (base64url of the SHA-256 of its public key, 43 characters)", pin)
 		}
 	}

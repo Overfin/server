@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/overfin/server/internal/federation"
+	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/store"
 )
@@ -205,7 +206,7 @@ func TestFederationPanelUnusableKey(t *testing.T) {
 	if _, err := s.Store.AddPeer(ctx, identity, "https://b.example.org", "B"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Store.AddPeer(ctx, federation.NewKey().Public(), "https://c.example.org", "C"); err != nil {
+	if _, err := s.Store.AddPeer(ctx, msfp.NewKey().Public(), "https://c.example.org", "C"); err != nil {
 		t.Fatal(err)
 	}
 	var st struct {
@@ -230,7 +231,7 @@ func TestFederationPanelUnusableKey(t *testing.T) {
 func TestFederationPanelWantsGone(t *testing.T) {
 	a, s := fedPanel(t, "A")
 	ctx := context.Background()
-	p, err := s.Store.AddPeer(ctx, federation.NewKey().Public(), "https://b.example.org", "B")
+	p, err := s.Store.AddPeer(ctx, msfp.NewKey().Public(), "https://b.example.org", "B")
 	if err != nil {
 		t.Fatal(err)
 	}

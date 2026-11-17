@@ -40,6 +40,7 @@ import (
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/keys"
 	"github.com/overfin/server/internal/link"
+	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/notices"
 	"github.com/overfin/server/internal/oidc"
 	"github.com/overfin/server/internal/outbound"
@@ -953,7 +954,7 @@ func newShared(cfg *config.Config, db *store.Store, moduleDBs map[string]*sql.DB
 	}
 	// The nonces' memory begins now: a request signed before this start
 	// is refused, its nonce perhaps seen by the last one.
-	sh.fed = fedShared{key: fedKey, seen: federation.NewNonces(time.Now()), http: federation.NewHTTPClient(),
+	sh.fed = fedShared{key: fedKey, seen: msfp.NewNonces(time.Now()), http: federation.NewHTTPClient(),
 		certs: &federation.Certificates{Pins: cfg.Site.Certificates}, limits: &federation.Limits{}}
 	// Notices: account events, by email and webhook, as the panel sets.
 	sh.notices = &notices.Notifier{Store: db, Emails: sh.emails, Managed: cfg.Identity.Mode == "managed",

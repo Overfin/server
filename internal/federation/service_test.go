@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/outbound"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/seal"
@@ -95,7 +96,7 @@ func TestPairing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.s.UseCode(ctx, "garbage"); !errors.Is(err, ErrCode) {
+	if _, err := b.s.UseCode(ctx, "garbage"); !errors.Is(err, msfp.ErrCode) {
 		t.Fatalf("garbage code: %v", err)
 	}
 	if _, err := a.s.UseCode(ctx, code); !errors.Is(err, ErrOwnCode) {
@@ -109,7 +110,7 @@ func TestPairing(t *testing.T) {
 		t.Fatalf("B's view of A: %+v", pa)
 	}
 	pb := onlyPeer(t, a)
-	if pb.State != store.PeerOurs || pb.Name != "B" || !SameKey(pb.PublicKey, b.s.Key.Public()) {
+	if pb.State != store.PeerOurs || pb.Name != "B" || !msfp.SameKey(pb.PublicKey, b.s.Key.Public()) {
 		t.Fatalf("A's view of B: %+v", pb)
 	}
 	// The code is used up: a third server can't use it.
@@ -163,19 +164,19 @@ func TestRefused(t *testing.T) {
 // Every route answers the same plain 404 to anyone without a pairing.
 func TestStrangers(t *testing.T) {
 	a := newServer(t, "A")
-	stranger := NewKey()
+	stranger := msfp.NewKey()
 	for _, path := range []string{"/api/v1/federation/hello", "/api/v1/federation/pair"} {
 		body := []byte(`{"state":"paired"}`)
 		req, _ := http.NewRequest("POST", a.url+path, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		SignRequest(req, body, stranger, a.s.now())
+		msfp.SignRequest(req, body, stranger, a.s.now())
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
 		res.Body.Close()
-		if res.StatusCode != http.StatusNotFound || res.Header.Get(HeaderSignature) != "" {
-			t.Errorf("%s: %d, signed %q", path, res.StatusCode, res.Header.Get(HeaderSignature))
+		if res.StatusCode != http.StatusNotFound || res.Header.Get(msfp.HeaderSignature) != "" {
+			t.Errorf("%s: %d, signed %q", path, res.StatusCode, res.Header.Get(msfp.HeaderSignature))
 		}
 		// Unsigned.
 		res, err = http.Post(a.url+path, "application/json", strings.NewReader(`{}`))
@@ -195,7 +196,7 @@ func TestImpostor(t *testing.T) {
 	ctx := context.Background()
 	a, b, mallory := newServer(t, "A"), newServer(t, "B"), newServer(t, "Mallory")
 	code, _, _ := a.s.NewCode(ctx, "")
-	c, _ := ParseCode(code)
+	c, _ := msfp.ParseCode(code)
 	// The code, its address changed to Mallory's, who also made a code of
 	// her own with the same secret to answer it.
 	c.Address = mallory.url
@@ -565,7 +566,7 @@ func TestSyncTitlesPageTooLarge(t *testing.T) {
 	ctx := context.Background()
 	a, b, _, aOnB := pairedPair(t)
 	lib := pub(t, a, "films")[0]
-	k := NewKey()
+	k := msfp.NewKey()
 	var n atomic.Int64
 	n.Store(titlesPage + 1)
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -581,7 +582,7 @@ func TestSyncTitlesPageTooLarge(t *testing.T) {
 			}
 			body, _ = json.Marshal(map[string]any{"titles": titles})
 		}
-		w.Header().Set(HeaderSignature, SignResponse(k, r.Header.Get(HeaderNonce), 200, body))
+		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()
@@ -607,7 +608,7 @@ func TestSyncTitlesBounded(t *testing.T) {
 	maxPeerTitles = 12_000
 	a, b, _, aOnB := pairedPair(t)
 	lib := pub(t, a, "films")[0]
-	k := NewKey()
+	k := msfp.NewKey()
 	var pages atomic.Int64
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body []byte
@@ -621,7 +622,7 @@ func TestSyncTitlesBounded(t *testing.T) {
 			}
 			body, _ = json.Marshal(map[string]any{"titles": titles, "next": fmt.Sprintf("movie/tmdb/%d", p*10_000+titlesPage)})
 		}
-		w.Header().Set(HeaderSignature, SignResponse(k, r.Header.Get(HeaderNonce), 200, body))
+		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()
@@ -641,7 +642,7 @@ func TestSyncTitlesSkipsOddOnesAlone(t *testing.T) {
 	ctx := context.Background()
 	a, b, _, aOnB := pairedPair(t)
 	lib := pub(t, a, "films")[0]
-	k := NewKey()
+	k := msfp.NewKey()
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := []byte(`{"libraries":[{"id":"` + lib + `","name":"Films","kind":"movies"}]}`)
 		if r.URL.Path != "/api/v1/federation/libraries" {
@@ -652,7 +653,7 @@ func TestSyncTitlesSkipsOddOnesAlone(t *testing.T) {
 				{"key":4,"kind":"movie","library":"` + lib + `"},
 				{"key":"movie/tmdb/5","kind":"movie","library":"` + lib + `"}],"seq":7}`)
 		}
-		w.Header().Set(HeaderSignature, SignResponse(k, r.Header.Get(HeaderNonce), 200, body))
+		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()
@@ -675,7 +676,7 @@ func TestSyncTitlesSkipsOddOnesAlone(t *testing.T) {
 func TestTheirLibrariesOddOnes(t *testing.T) {
 	ctx := context.Background()
 	_, b, _, aOnB := pairedPair(t)
-	k := NewKey()
+	k := msfp.NewKey()
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := []byte(`{"libraries":[
 			{"id":"lib_A","name":"Films","kind":"movies"},
@@ -686,7 +687,7 @@ func TestTheirLibrariesOddOnes(t *testing.T) {
 			{"id":"lib_B","name":"Mixed\u200b\u0001 one","kind":"TVSHOWS"},
 			{"id":"lib_N","name":42,"kind":7}],
 			"limits":{"streams":"two"}}`)
-		w.Header().Set(HeaderSignature, SignResponse(k, r.Header.Get(HeaderNonce), 200, body))
+		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()
@@ -702,5 +703,15 @@ func TestTheirLibrariesOddOnes(t *testing.T) {
 	}
 	if strings.Join(seen, " | ") != "lib_A=Films/movies | lib_B=Mixed one/ | lib_N=?/" {
 		t.Errorf("kept %q", seen)
+	}
+}
+
+// Only TMDB's own way of writing an ID is kept from a peer's index: no
+// duplicates made of leading zeros, nothing that isn't a number.
+func TestCanonicalTMDB(t *testing.T) {
+	for id, want := range map[string]bool{"550": true, "0550": false, "00550": false, "abc": false, "0": false, "": false, "99999999999": false} {
+		if canonicalTMDB(id) != want {
+			t.Errorf("%q: %v", id, !want)
+		}
 	}
 }

@@ -1,4 +1,4 @@
-package federation
+package msfp
 
 import (
 	"bytes"
@@ -93,28 +93,18 @@ func request(k Key, method, target string, body []byte, at time.Time) (*http.Req
 // port; anything a CSP or CORS header could be broken by is refused.
 func TestAddresses(t *testing.T) {
 	for _, ok := range []string{"https://films.example.org", "http://192.0.2.10:8096", "https://[2001:db8::1]:8443"} {
-		if checkAddress(ok) != nil {
+		if CheckAddress(ok) != nil {
 			t.Errorf("%s refused", ok)
 		}
 	}
 	for _, bad := range []string{"https://evil;script-src", "https://a,b", "https://ex.com'", "https://Films.example.org",
 		"https://films.example.org:443", "http://films.example.org:80", "https://films.example.org/path", "ftp://films.example.org"} {
-		if checkAddress(bad) == nil {
+		if CheckAddress(bad) == nil {
 			t.Errorf("%s accepted", bad)
 		}
 	}
 	if got := Origin("HTTPS://Films.Example.org:443/"); got != "https://films.example.org" {
 		t.Errorf("origin: %q", got)
-	}
-}
-
-// Only TMDB's own way of writing an ID is kept from a peer's index: no
-// duplicates made of leading zeros, nothing that isn't a number.
-func TestCanonicalTMDB(t *testing.T) {
-	for id, want := range map[string]bool{"550": true, "0550": false, "00550": false, "abc": false, "0": false, "": false, "99999999999": false} {
-		if canonicalTMDB(id) != want {
-			t.Errorf("%q: %v", id, !want)
-		}
 	}
 }
 
@@ -284,7 +274,7 @@ func FuzzParseCode(f *testing.F) {
 		if err != nil {
 			return
 		}
-		if checkAddress(c.Address) != nil || len(c.Key) != 32 || len(c.Secret) != SecretSize {
+		if CheckAddress(c.Address) != nil || len(c.Key) != 32 || len(c.Secret) != SecretSize {
 			t.Fatalf("accepted a bad code: %+v", c)
 		}
 	})
@@ -415,5 +405,36 @@ func TestReplayAfterRestart(t *testing.T) {
 	onTime, _ := request(k, "POST", "/api/v1/federation/play", body, now)
 	if _, err := exact.Check(onTime, body, now); err != nil {
 		t.Errorf("signed the second the memory began, on it: %v", err)
+	}
+}
+
+// Every body is an object: "null", a list or a string isn't.
+func TestDecodeJSONObjectsOnly(t *testing.T) {
+	for _, body := range []string{`null`, `[]`, `"x"`, `1`, `true`} {
+		var v struct{}
+		if DecodeJSON([]byte(body), &v) == nil {
+			t.Errorf("%s accepted", body)
+		}
+	}
+	var v struct{}
+	if DecodeJSON([]byte(`{}`), &v) != nil {
+		t.Error("{} refused")
+	}
+}
+
+// A call with a query is refused like a bad signature, even signed over
+// it (MSFP section 6.4, step 1).
+func TestCheckRefusesQueries(t *testing.T) {
+	k := NewKey()
+	v := &Verifier{Host: "films.example.org"}
+	for _, target := range []string{"/api/v1/federation/hello?x=1", "/api/v1/federation/hello?"} {
+		req, _ := request(k, "POST", target, []byte(`{}`), now)
+		if _, err := v.Check(req, []byte(`{}`), now); err == nil {
+			t.Errorf("%s accepted", target)
+		}
+	}
+	req, _ := request(k, "POST", "/api/v1/federation/hello", []byte(`{}`), now)
+	if _, err := v.Check(req, []byte(`{}`), now); err != nil {
+		t.Errorf("without a query: %v", err)
 	}
 }

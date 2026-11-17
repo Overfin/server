@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/overfin/server/internal/federation"
+	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/textclean"
 )
@@ -45,8 +46,8 @@ type peerJSON struct {
 
 func peerOf(p *store.Peer) peerJSON {
 	j := peerJSON{ID: p.ID, Name: p.Name, Address: p.Address, State: p.State,
-		Fingerprint: federation.Fingerprint(p.PublicKey), CreatedAt: p.Created.Format(time.RFC3339),
-		Unusable: !federation.ValidKey(p.PublicKey)}
+		Fingerprint: msfp.Fingerprint(p.PublicKey), CreatedAt: p.Created.Format(time.RFC3339),
+		Unusable: !msfp.ValidKey(p.PublicKey)}
 	if p.Paired != nil {
 		j.PairedAt = p.Paired.Format(time.RFC3339)
 	}
@@ -144,7 +145,7 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 		outPeers = append(outPeers, j)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"available": true, "address": s.Address,
-		"fingerprint": federation.Fingerprint(s.Key.Public()), "codes": outCodes, "peers": outPeers})
+		"fingerprint": msfp.Fingerprint(s.Key.Public()), "codes": outCodes, "peers": outPeers})
 }
 
 func (p *Panel) createPairingCode(w http.ResponseWriter, r *http.Request, s *session) {
@@ -197,16 +198,16 @@ func (p *Panel) previewPairingCode(w http.ResponseWriter, r *http.Request, _ *se
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request"})
 		return
 	}
-	c, err := federation.ParseCode(req.Code)
+	c, err := msfp.ParseCode(req.Code)
 	if err != nil {
 		p.pairingProblem(w, err)
 		return
 	}
-	if federation.SameKey(c.Key, fed.Key.Public()) {
+	if msfp.SameKey(c.Key, fed.Key.Public()) {
 		p.pairingProblem(w, federation.ErrOwnCode)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"address": c.Address, "fingerprint": federation.Fingerprint(c.Key),
+	writeJSON(w, http.StatusOK, map[string]any{"address": c.Address, "fingerprint": msfp.Fingerprint(c.Key),
 		"expiresAt": c.Expires.UTC().Format(time.RFC3339), "expired": !c.Expires.After(time.Now())})
 }
 
@@ -309,7 +310,7 @@ func (p *Panel) endPeer(w http.ResponseWriter, r *http.Request, s *session) {
 func (p *Panel) pairingProblem(w http.ResponseWriter, err error) {
 	detail := ""
 	switch {
-	case errors.Is(err, federation.ErrCode):
+	case errors.Is(err, msfp.ErrCode):
 		detail = "That isn't a pairing code. Paste the whole code, starting with overfin-pair-1."
 	case errors.Is(err, federation.ErrOwnCode):
 		detail = "That's this server's own code: send it to the other server's operator instead."

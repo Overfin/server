@@ -1,4 +1,4 @@
-package federation
+package msfp
 
 import (
 	"bytes"
@@ -12,13 +12,11 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/overfin/server/internal/store"
 )
 
 // MSFP's version 0 test vectors (https://github.com/C0PT3R/msfp-spec,
 // vectors/v0.json), copied in testdata/vectors.json: recomputed here with
-// the code, so Overfin keeps speaking the protocol they describe.
+// the code, so the code keeps speaking the protocol they describe.
 
 type vectorKey struct {
 	Seed        string `json:"seed"` // hex
@@ -109,7 +107,7 @@ func TestVectors(t *testing.T) {
 		!bytes.Equal(c.Secret, secret) || !c.Expires.Equal(code.Expires) {
 		t.Errorf("the pairing code reads back as %+v, %v", c, err)
 	}
-	same("secret hash", b64.EncodeToString(store.PairingSecretHash(secret)), v.Code.SecretHash)
+	same("secret hash", b64.EncodeToString(SecretHash(secret)), v.Code.SecretHash)
 	same("pairing proof", PairingProof(secret, keys[v.Proof.Redeemer].Public(), v.Proof.Address), v.Proof.Value)
 
 	for _, x := range v.Exchanges {
@@ -169,7 +167,7 @@ func TestStrictVectors(t *testing.T) {
 		t.Fatal("no cases")
 	}
 	for _, c := range v.Keys {
-		key, _ := decode64(c.Text, 32)
+		key, _ := Decode64(c.Text, 32)
 		if ValidKey(key) != c.Valid {
 			t.Errorf("key %s: valid %v", c.Name, !c.Valid)
 		}
@@ -186,11 +184,11 @@ func TestStrictVectors(t *testing.T) {
 		}
 	}
 	for _, c := range v.Signatures {
-		public, _ := decode64(c.Public, 32)
+		public, _ := Decode64(c.Public, 32)
 		if got := CheckResponse(public, "", 0, nil, c.Signature) == nil; got {
 			t.Errorf("signature %s: an answer's check passes a request's message", c.Name)
 		}
-		sig, _ := decode64(c.Signature, 64)
+		sig, _ := Decode64(c.Signature, 64)
 		if verify(public, []byte(c.Message), sig) != c.Valid {
 			t.Errorf("signature %s: valid %v", c.Name, !c.Valid)
 		}
@@ -214,7 +212,7 @@ func TestStrictVectors(t *testing.T) {
 		}
 	}
 	for _, c := range v.Addresses {
-		if err := checkAddress(c.Text); (err == nil) != c.Valid {
+		if err := CheckAddress(c.Text); (err == nil) != c.Valid {
 			t.Errorf("address %q: %v", c.Text, err)
 		}
 	}
@@ -229,7 +227,7 @@ func TestStrictVectors(t *testing.T) {
 		}
 	}
 	for _, c := range v.Base64url {
-		b, ok := decode64(c.Text, -1)
+		b, ok := Decode64(c.Text, -1)
 		if ok = ok && (len(b) == 32 || len(b) == 16); ok != c.Valid {
 			t.Errorf("base64url %s: %v", c.Name, ok)
 		}

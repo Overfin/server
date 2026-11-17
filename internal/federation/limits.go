@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/overfin/server/internal/identity"
+	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/slots"
 )
@@ -44,10 +45,9 @@ const (
 	forgetBucket = 10 * time.Minute
 
 	// What this server's own calls do after no answer: wait from
-	// backoffFirst, doubling each time, up to maxRetryAfter (MSFP's "an
+	// backoffFirst, doubling each time, up to msfp.MaxRetryAfter (MSFP's "an
 	// hour at most"), give or take a quarter.
-	backoffFirst  = 2 * time.Second
-	maxRetryAfter = 3600
+	backoffFirst = 2 * time.Second
 )
 
 // ErrBackingOff is a call not sent: the peer asked to wait (a signed
@@ -87,7 +87,7 @@ func (b *bucket) take(now time.Time, rate, burst float64) (ok bool, retryAfter i
 		b.tokens--
 		return true, 0
 	}
-	return false, max(1, min(maxRetryAfter, int(math.Ceil((1-b.tokens)/rate))))
+	return false, max(1, min(msfp.MaxRetryAfter, int(math.Ceil((1-b.tokens)/rate))))
 }
 
 func (l *Limits) now() time.Time {
@@ -327,24 +327,12 @@ func (l *Limits) heard(key string, answered bool, status, retryAfter int, now ti
 }
 
 // backoff is how long background calls hold off after n calls in a row
-// went unanswered: backoffFirst, doubling, at most maxRetryAfter seconds,
+// went unanswered: backoffFirst, doubling, at most msfp.MaxRetryAfter seconds,
 // give or take a quarter so that servers don't all try again together.
 func backoff(n int) time.Duration {
 	d := backoffFirst << min(n-1, 20)
-	d = min(d, maxRetryAfter*time.Second)
-	return min(time.Duration(float64(d)*(0.75+rand.Float64()/2)), maxRetryAfter*time.Second)
-}
-
-// retryAfterOf is a signed refusal's retryAfter, 0 when it has none in
-// range (1 to 3,600 seconds).
-func retryAfterOf(body []byte) int {
-	var p struct {
-		RetryAfter int `json:"retryAfter"` // a fraction or a string: not one
-	}
-	if DecodeJSON(body, &p) != nil || p.RetryAfter < 1 || p.RetryAfter > maxRetryAfter {
-		return 0
-	}
-	return p.RetryAfter
+	d = min(d, msfp.MaxRetryAfter*time.Second)
+	return min(time.Duration(float64(d)*(0.75+rand.Float64()/2)), msfp.MaxRetryAfter*time.Second)
 }
 
 // waitTurn waits until a call to p may go again, when the peer asked for

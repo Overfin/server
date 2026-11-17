@@ -32,6 +32,7 @@ import (
 	"github.com/overfin/server/internal/keys"
 	"github.com/overfin/server/internal/library"
 	"github.com/overfin/server/internal/mail"
+	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/notices"
 	"github.com/overfin/server/internal/oidc"
 	"github.com/overfin/server/internal/pin"
@@ -347,8 +348,8 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 
 // fedShared is what federation keeps across rebuilds.
 type fedShared struct {
-	key   federation.Key
-	seen  *federation.Nonces
+	key   msfp.Key
+	seen  *msfp.Nonces
 	http  *http.Client
 	certs *federation.Certificates
 	// limits are the limits on federation calls, and the memory of peers
@@ -361,11 +362,11 @@ type fedShared struct {
 // return address), or one with a path: peers reach a server at its site's
 // root.
 func federationService(cfg *config.Config, sh *shared) *federation.Service {
-	address := federation.Origin(siteURL(cfg))
+	address := msfp.Origin(siteURL(cfg))
 	if address == "" || sh.fed.http == nil {
 		return nil
 	}
-	if _, err := federation.NewCode(address, sh.fed.key.Public(), time.Now()); err != nil {
+	if _, err := msfp.NewCode(address, sh.fed.key.Public(), time.Now()); err != nil {
 		sh.logger.Info("federation: off, the site's address isn't http(s)://host alone", "address", address)
 		return nil
 	}

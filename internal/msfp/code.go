@@ -1,4 +1,4 @@
-package federation
+package msfp
 
 import (
 	"crypto/ed25519"
@@ -54,7 +54,7 @@ var ErrCode = errors.New("federation: not a valid pairing code")
 // NewCode makes a pairing code for this server at address, with a new
 // secret, valid from now for CodeLifetime.
 func NewCode(address string, public ed25519.PublicKey, now time.Time) (Code, error) {
-	if err := checkAddress(address); err != nil {
+	if err := CheckAddress(address); err != nil {
 		return Code{}, err
 	}
 	secret := make([]byte, SecretSize)
@@ -85,7 +85,7 @@ func ParseCode(text string) (Code, error) {
 	if !ok || len(rest) > 2*(maxAddress+ed25519.PublicKeySize+SecretSize+8) {
 		return Code{}, ErrCode
 	}
-	b, ok := decode64(rest, -1)
+	b, ok := Decode64(rest, -1)
 	fixed := ed25519.PublicKeySize + SecretSize + 8
 	if !ok || len(b) <= fixed || binary.BigEndian.Uint64(b[fixed-8:fixed]) > maxInteger {
 		return Code{}, ErrCode
@@ -97,13 +97,13 @@ func ParseCode(text string) (Code, error) {
 		Address: string(b[fixed:]),
 	}
 	// A key MSFP accepts (section 2.1): never one of small order.
-	if checkAddress(c.Address) != nil || !ValidKey(c.Key) {
+	if CheckAddress(c.Address) != nil || !ValidKey(c.Key) {
 		return Code{}, ErrCode
 	}
 	return c, nil
 }
 
-// checkAddress accepts a site's address in MSFP's one form (section 5.2):
+// CheckAddress accepts a site's address in MSFP's one form (section 5.2):
 // "http" or "https" in lower case, "://", a host, an optional port, and
 // nothing after (no path, not even "/", no "?", "#" or "@"); at most
 // maxAddress bytes. The host is a name (labels of a-z 0-9 -, 1 to 63
@@ -115,7 +115,7 @@ func ParseCode(text string) (Code, error) {
 // answer is signed either way, so a server can't be impersonated over it;
 // the panel says what it exposes. One server, one way of writing its
 // address.
-func checkAddress(address string) error {
+func CheckAddress(address string) error {
 	bad := errors.New("federation: an address is http(s)://host[:port], with nothing after it")
 	scheme, rest, ok := strings.Cut(address, "://")
 	if len(address) > maxAddress || !ok || (scheme != "https" && scheme != "http") || rest == "" ||

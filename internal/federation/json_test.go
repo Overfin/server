@@ -2,70 +2,24 @@ package federation
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 
+	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/store"
 )
-
-// The json and integers cases of MSFP's strict vectors
-// (testdata/v0-strict.json), through DecodeJSON: valid ones decode,
-// invalid ones are refused.
-func TestStrictJSONVectors(t *testing.T) {
-	b, err := os.ReadFile("testdata/v0-strict.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var v struct {
-		JSON []struct {
-			Name, Text, Hex string
-			Valid           bool
-		}
-		Integers []struct {
-			Text  string
-			Valid bool
-		}
-	}
-	if err := json.Unmarshal(b, &v); err != nil || len(v.JSON) == 0 || len(v.Integers) == 0 {
-		t.Fatal("no cases", err)
-	}
-	for _, c := range v.JSON {
-		body := []byte(c.Text)
-		if c.Hex != "" {
-			body, _ = hex.DecodeString(c.Hex)
-		}
-		var msg helloMessage
-		if err := DecodeJSON(body, &msg); (err == nil) != c.Valid {
-			t.Errorf("json %s: %v", c.Name, err)
-		}
-		var any map[string]any
-		if err := DecodeJSON(body, &any); (err == nil) != c.Valid {
-			t.Errorf("json %s, into a map: %v", c.Name, err)
-		}
-	}
-	for _, c := range v.Integers {
-		var n struct {
-			N int64 `json:"n"`
-		}
-		if err := DecodeJSON([]byte(`{"n":`+c.Text+`}`), &n); (err == nil) != c.Valid {
-			t.Errorf("integer %s: %v", c.Text, err)
-		}
-	}
-}
 
 // Names match exactly: "State" is an unknown member, ignored; null is a
 // member left out; each check reaches into lists and nested objects.
 func TestDecodeJSONExact(t *testing.T) {
 	var msg helloMessage
-	if err := DecodeJSON([]byte(`{"State":"ended","certificates":null}`), &msg); err != nil || msg.State != "" || msg.Certificates != nil {
+	if err := msfp.DecodeJSON([]byte(`{"State":"ended","certificates":null}`), &msg); err != nil || msg.State != "" || msg.Certificates != nil {
 		t.Errorf("another case: %+v %v", msg, err)
 	}
 	var a titlesAnswer
-	err := DecodeJSON([]byte(`{"titles":[{"key":"movie/tmdb/1","KIND":"movie","kind":"movie","Library":"x","library":"l"}],"next":null,"Seq":3}`), &a)
+	err := msfp.DecodeJSON([]byte(`{"titles":[{"key":"movie/tmdb/1","KIND":"movie","kind":"movie","Library":"x","library":"l"}],"next":null,"Seq":3}`), &a)
 	if err != nil || len(a.Titles) != 1 || a.Titles[0].Kind != "movie" || a.Titles[0].Library != "l" || a.Seq != 0 {
 		t.Errorf("nested: %+v %v", a, err)
 	}
@@ -77,13 +31,13 @@ func TestDecodeJSONExact(t *testing.T) {
 		``, `[`, `{"a":` + strings.Repeat("[", 100) + strings.Repeat("]", 100) + `}`,
 	} {
 		var x titlesAnswer
-		if err := DecodeJSON([]byte(bad), &x); err == nil {
+		if err := msfp.DecodeJSON([]byte(bad), &x); err == nil {
 			t.Errorf("accepted: %s", bad)
 		}
 	}
 	// Escapes that are fine: a pair, a backslash before a u.
 	var m map[string]string
-	if err := DecodeJSON([]byte(`{"a":"🎬","b":"\\ud800"}`), &m); err != nil || m["a"] != "🎬" || m["b"] != `\ud800` {
+	if err := msfp.DecodeJSON([]byte(`{"a":"🎬","b":"\\ud800"}`), &m); err != nil || m["a"] != "🎬" || m["b"] != `\ud800` {
 		t.Errorf("good escapes: %v %v", m, err)
 	}
 }

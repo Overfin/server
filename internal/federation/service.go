@@ -1,3 +1,8 @@
+// Package federation is the server side of federation between servers
+// (ROADMAP.md milestone 6, SECURITY.md rule 94): pairing and its states,
+// the calls and their handlers, limits, and connections to paired
+// servers. The protocol itself (keys, pairing codes, signatures, strict
+// JSON, pins) is package msfp.
 package federation
 
 import (
@@ -7,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/outbound"
 	"io"
 	"log/slog"
@@ -51,7 +57,7 @@ import (
 // Service is federation on this server.
 type Service struct {
 	Store *store.Store
-	Key   Key
+	Key   msfp.Key
 	// Address is this server's site address, as its codes give it:
 	// http(s)://host, without a path.
 	Address string
@@ -63,7 +69,7 @@ type Service struct {
 	Now func() time.Time
 	// Seen is the server's memory of nonces already accepted, shared
 	// across rebuilds (Verifier.Seen).
-	Seen *Nonces
+	Seen *msfp.Nonces
 
 	// Certificates is what this server names of its own certificates to
 	// its peers (nil: none).
@@ -78,7 +84,7 @@ type Service struct {
 	// here end at once (MSFP playback, section 6.3).
 	PeerChanged func(peerID string)
 
-	verifier *Verifier
+	verifier *msfp.Verifier
 	mu       sync.Mutex
 	asked    map[string]time.Time // CheckSoon's, by peer ID
 	// peerConns are the TLS settings and clients for each peer (conns).
@@ -127,7 +133,7 @@ func (p Plugin) Name() string { return "federation" }
 // Register declares the routes other servers call. They're public: the
 // caller is a server, proven by its signature, never a person.
 func (p Plugin) Register(r *plugin.Registrar) error {
-	p.S.verifier = &Verifier{Host: p.S.host(), Seen: p.S.Seen, Admit: p.S.admit, Forgotten: p.S.forgotten}
+	p.S.verifier = &msfp.Verifier{Host: p.S.host(), Seen: p.S.Seen, Admit: p.S.admit, Forgotten: p.S.forgotten}
 	if err := r.HandlePublic("POST /api/v1/federation/pair", SignRefusals(http.HandlerFunc(p.S.pair))); err != nil {
 		return err
 	}
@@ -211,8 +217,8 @@ func SignRefusals(h http.Handler) http.Handler {
 			w.Header()[k] = v
 		}
 		body := res.Body.Bytes()
-		if res.Code != http.StatusOK && rw.sign != nil && w.Header().Get(HeaderSignature) == "" {
-			w.Header().Set(HeaderSignature, rw.sign(res.Code, body))
+		if res.Code != http.StatusOK && rw.sign != nil && w.Header().Get(msfp.HeaderSignature) == "" {
+			w.Header().Set(msfp.HeaderSignature, rw.sign(res.Code, body))
 		}
 		w.WriteHeader(res.Code)
 		w.Write(body)
@@ -223,7 +229,7 @@ func SignRefusals(h http.Handler) http.Handler {
 // was, when w is a route's (SignRefusals).
 func (s *Service) signsFor(w http.ResponseWriter, nonce string) {
 	if rw, ok := w.(*refusalWriter); ok {
-		rw.sign = func(status int, body []byte) string { return SignResponse(s.Key, nonce, status, body) }
+		rw.sign = func(status int, body []byte) string { return msfp.SignResponse(s.Key, nonce, status, body) }
 	}
 }
 
@@ -292,35 +298,35 @@ const playPath = "/api/v1/federation/play"
 // of a failed check; then, for a known peer, its own limits (429
 // rate-limited) and all peers' (503 server-busy), signed, with
 // retryAfter.
-func (s *Service) verified(w http.ResponseWriter, r *http.Request) (Verified, []byte, bool) {
+func (s *Service) verified(w http.ResponseWriter, r *http.Request) (msfp.Verified, []byte, bool) {
 	lim := s.lim()
 	if !lim.fromAddr(clientAddr(r), lim.now()) {
 		problem.Send(w, problem.NotFound, "")
-		return Verified{}, nil, false
+		return msfp.Verified{}, nil, false
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		problem.Send(w, problem.NotFound, "")
-		return Verified{}, nil, false
+		return msfp.Verified{}, nil, false
 	}
 	v, err := s.verifier.Check(r, body, s.now())
-	if errors.Is(err, ErrForgotten) {
+	if errors.Is(err, msfp.ErrForgotten) {
 		// A server whose pairing ended: "unknown", signed.
 		s.signsFor(w, v.Nonce)
 		problem.Send(w, problem.NotFound, "")
-		return Verified{}, nil, false
+		return msfp.Verified{}, nil, false
 	}
 	if err != nil {
 		problem.Send(w, problem.NotFound, "")
-		return Verified{}, nil, false
+		return msfp.Verified{}, nil, false
 	}
 	key := ""
 	if v.Known {
 		s.signsFor(w, v.Nonce)
-		key = b64.EncodeToString(v.Key)
+		key = msfp.Encode64(v.Key)
 		if no := lim.call(key, r.URL.Path == playPath, lim.now()); no != nil {
 			sendRefusal(w, no)
-			return Verified{}, nil, false
+			return msfp.Verified{}, nil, false
 		}
 	}
 	free, no := lim.slots(r.Context(), key, v.Known)
@@ -330,7 +336,7 @@ func (s *Service) verified(w http.ResponseWriter, r *http.Request) (Verified, []
 		} else {
 			problem.Send(w, problem.NotFound, "")
 		}
-		return Verified{}, nil, false
+		return msfp.Verified{}, nil, false
 	}
 	if rw, ok := w.(*refusalWriter); ok {
 		rw.free = free
@@ -348,7 +354,7 @@ func (s *Service) answer(w http.ResponseWriter, nonce string, v any) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set(HeaderSignature, SignResponse(s.Key, nonce, http.StatusOK, body))
+	w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(s.Key, nonce, http.StatusOK, body))
 	w.WriteHeader(http.StatusOK)
 	w.Write(body)
 }
@@ -359,18 +365,18 @@ func (s *Service) pair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req pairRequest
-	if DecodeJSON(body, &req) != nil || checkAddress(req.Address) != nil {
+	if msfp.DecodeJSON(body, &req) != nil || msfp.CheckAddress(req.Address) != nil {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	hash, ok := decode64(req.SecretHash, 32)
+	hash, ok := msfp.Decode64(req.SecretHash, 32)
 	if !ok {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
 	name := cleanName(req.Name, req.Address)
 	_, err := s.Store.RedeemPairingCode(r.Context(), hash, v.Key, req.Address, name, func(secret []byte) bool {
-		return CheckPairingProof(secret, v.Key, req.Address, req.Proof)
+		return msfp.CheckPairingProof(secret, v.Key, req.Address, req.Proof)
 	})
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -407,7 +413,7 @@ func (s *Service) hello(w http.ResponseWriter, r *http.Request) {
 	var state struct {
 		State *string `json:"state"`
 	}
-	if DecodeJSON(body, &msg) != nil || DecodeJSON(body, &state) != nil || state.State == nil {
+	if msfp.DecodeJSON(body, &msg) != nil || msfp.DecodeJSON(body, &state) != nil || state.State == nil {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -532,7 +538,7 @@ const (
 // core section 8.3): ErrBackingOff. A code's server isn't known yet:
 // pair always goes.
 func (s *Service) call(ctx context.Context, p *store.Peer, path string, in, out any) (Reply, error) {
-	key := b64.EncodeToString(p.PublicKey)
+	key := msfp.Encode64(p.PublicKey)
 	lim := s.lim()
 	if path != pairPath && !lim.mayCall(key, background(ctx), lim.now()) {
 		return Reply{}, ErrBackingOff
@@ -576,7 +582,7 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 		return Reply{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	nonce := SignRequest(req, body, s.Key, s.now())
+	nonce := msfp.SignRequest(req, body, s.Key, s.now())
 	res, err := client.Do(req)
 	if err != nil {
 		return Reply{}, fmt.Errorf("%w: %w", ErrUnreachable, err)
@@ -597,8 +603,8 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 		// with, or were, signs its own; anything else may come from
 		// someone between the two. A code's server doesn't know us yet:
 		// its refusal is a stranger's, plain, and costs only that pairing.
-		sigText, _ := oneHeader(res.Header, HeaderSignature)
-		signed := CheckResponse(p.PublicKey, nonce, res.StatusCode, answer, sigText) == nil
+		sigText, _ := msfp.OneHeader(res.Header, msfp.HeaderSignature)
+		signed := msfp.CheckResponse(p.PublicKey, nonce, res.StatusCode, answer, sigText) == nil
 		if !signed && path != pairPath {
 			return Reply{}, fmt.Errorf("%w: a refusal not signed by its key (%d)", ErrUnreachable, res.StatusCode)
 		}
@@ -609,19 +615,19 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 			var pd struct {
 				Type string `json:"type"`
 			}
-			if DecodeJSON(answer, &pd) == nil && len(pd.Type) <= 64 {
+			if msfp.DecodeJSON(answer, &pd) == nil && len(pd.Type) <= 64 {
 				r.Problem = pd.Type
 			}
 			if r.Status == http.StatusTooManyRequests || r.Status == http.StatusServiceUnavailable {
-				r.RetryAfter = retryAfterOf(answer)
+				r.RetryAfter = msfp.RetryAfter(answer)
 			}
 		}
 		return r, nil
 	}
-	if sigText, _ := oneHeader(res.Header, HeaderSignature); CheckResponse(p.PublicKey, nonce, res.StatusCode, answer, sigText) != nil {
+	if sigText, _ := msfp.OneHeader(res.Header, msfp.HeaderSignature); msfp.CheckResponse(p.PublicKey, nonce, res.StatusCode, answer, sigText) != nil {
 		return Reply{}, fmt.Errorf("%w: its answer isn't signed by its key", ErrUnreachable)
 	}
-	if err := DecodeJSON(answer, out); err != nil {
+	if err := msfp.DecodeJSON(answer, out); err != nil {
 		return Reply{}, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
 	return Reply{Status: http.StatusOK}, nil
@@ -639,19 +645,19 @@ var (
 // UseCode is our operator pasting another server's pairing code: we
 // introduce ourselves, and add it as waiting for its operator.
 func (s *Service) UseCode(ctx context.Context, text string) (*store.Peer, error) {
-	c, err := ParseCode(text)
+	c, err := msfp.ParseCode(text)
 	if err != nil {
 		return nil, err
 	}
-	if SameKey(c.Key, s.Key.Public()) {
+	if msfp.SameKey(c.Key, s.Key.Public()) {
 		return nil, ErrOwnCode
 	}
 	if _, err := s.Store.PeerByKey(ctx, c.Key); err == nil {
 		return nil, store.ErrPeerExists
 	}
 	req := pairRequest{Address: s.Address, Name: s.Name(ctx),
-		SecretHash: b64.EncodeToString(store.PairingSecretHash(c.Secret)),
-		Proof:      PairingProof(c.Secret, s.Key.Public(), s.Address)}
+		SecretHash: msfp.Encode64(store.PairingSecretHash(c.Secret)),
+		Proof:      msfp.PairingProof(c.Secret, s.Key.Public(), s.Address)}
 	var answer pairAnswer
 	r, err := s.call(ctx, &store.Peer{Address: c.Address, PublicKey: c.Key}, pairPath, req, &answer)
 	switch {
@@ -742,7 +748,7 @@ func (s *Service) Check(ctx context.Context, p *store.Peer) (*store.Peer, error)
 
 // NewCode makes a pairing code for our operator to send, noted as note.
 func (s *Service) NewCode(ctx context.Context, note string) (string, *store.PairingCode, error) {
-	c, err := NewCode(s.Address, s.Key.Public(), s.now())
+	c, err := msfp.NewCode(s.Address, s.Key.Public(), s.now())
 	if err != nil {
 		return "", nil, err
 	}
@@ -758,17 +764,17 @@ func cleanNote(note string) string {
 }
 
 // LoadKey reads this server's federation key, making it the first time.
-func LoadKey(ctx context.Context, st *store.Store) (Key, error) {
+func LoadKey(ctx context.Context, st *store.Store) (msfp.Key, error) {
 	seed, ok, err := st.FederationSeed(ctx)
 	if err != nil {
-		return Key{}, err
+		return msfp.Key{}, err
 	}
 	if !ok {
-		if seed, err = st.KeepFederationSeed(ctx, NewKey().Seed()); err != nil {
-			return Key{}, err
+		if seed, err = st.KeepFederationSeed(ctx, msfp.NewKey().Seed()); err != nil {
+			return msfp.Key{}, err
 		}
 	}
-	return KeyFromSeed(seed)
+	return msfp.KeyFromSeed(seed)
 }
 
 // checkEvery is how often, at most, a peer is asked where things stand
@@ -860,7 +866,7 @@ func (s *Service) libraries(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	p, err := s.Store.PeerByKey(ctx, v.Key)
-	if err != nil || p.State != store.PeerPaired || DecodeJSON(body, &struct{}{}) != nil {
+	if err != nil || p.State != store.PeerPaired || msfp.DecodeJSON(body, &struct{}{}) != nil {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -913,7 +919,7 @@ func (s *Service) TheirLibraries(ctx context.Context, p *store.Peer) ([]store.Pe
 	}
 	s.Store.PeerSeen(ctx, p.ID)
 	var l *store.PeerLimits
-	if answer.Limits != nil && DecodeJSON(answer.Limits, &l) == nil && l != nil && ValidLimits(*l) == nil {
+	if answer.Limits != nil && msfp.DecodeJSON(answer.Limits, &l) == nil && l != nil && ValidLimits(*l) == nil {
 		if err := s.Store.SetTheirLimits(ctx, p.ID, *l); err != nil {
 			return nil, err
 		}
@@ -929,7 +935,7 @@ func (s *Service) TheirLibraries(ctx context.Context, p *store.Peer) ([]store.Pe
 			Kind json.RawMessage `json:"kind"`
 		}
 		// Its ID in the form MSFP gives, each once (the first kept).
-		if DecodeJSON(raw, &l) != nil || !libraryIDRe.MatchString(l.ID) ||
+		if msfp.DecodeJSON(raw, &l) != nil || !libraryIDRe.MatchString(l.ID) ||
 			slices.ContainsFunc(out, func(o store.PeerLibrary) bool { return o.ID == l.ID }) {
 			continue
 		}
@@ -1064,7 +1070,7 @@ func readPeerTitle(raw json.RawMessage) (store.PeerTitle, bool) {
 		Audio     json.RawMessage `json:"audio"`
 		Subtitles json.RawMessage `json:"subtitles"`
 	}
-	if DecodeJSON(raw, &t) != nil {
+	if msfp.DecodeJSON(raw, &t) != nil {
 		return store.PeerTitle{}, false
 	}
 	tags := func(raw json.RawMessage) []string {
@@ -1113,7 +1119,7 @@ func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
 	var required struct {
 		Libraries *[]string `json:"libraries"` // required (MSFP catalog, section 3)
 	}
-	if DecodeJSON(body, &req) != nil || DecodeJSON(body, &required) != nil || required.Libraries == nil || len(req.After) > 512 {
+	if msfp.DecodeJSON(body, &req) != nil || msfp.DecodeJSON(body, &required) != nil || required.Libraries == nil || len(req.After) > 512 {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}

@@ -2,106 +2,19 @@ package federation
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"errors"
 	"io"
-	"math/big"
 	"net"
 	"net/url"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/overfin/server/internal/msfp"
 )
-
-// testCert makes a certificate for host, signed by parent's key (itself
-// when parent is nil), and its key.
-func testCert(t *testing.T, host string, ca bool, parent *x509.Certificate, parentKey *ecdsa.PrivateKey) (*x509.Certificate, *ecdsa.PrivateKey) {
-	t.Helper()
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	tmpl := &x509.Certificate{SerialNumber: big.NewInt(time.Now().UnixNano()), Subject: pkix.Name{CommonName: host},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), BasicConstraintsValid: true, IsCA: ca}
-	if ca {
-		tmpl.KeyUsage = x509.KeyUsageCertSign
-	} else {
-		tmpl.DNSNames = []string{host}
-		tmpl.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
-	}
-	if parent == nil {
-		parent, parentKey = tmpl, key
-	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, parent, &key.PublicKey, parentKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, _ := x509.ParseCertificate(der)
-	return c, key
-}
-
-// A peer's certificate passes when trusted for its host, or when its own
-// key is one the peer named; a name of another certificate in the chain
-// (a private authority's) counts for nothing, since the handshake proves
-// only the first one's key.
-func TestVerifyPeer(t *testing.T) {
-	ca, caKey := testCert(t, "Private CA", true, nil, nil)
-	leaf, _ := testCert(t, "a.example.org", false, ca, caKey)
-	own, _ := testCert(t, "a.example.org", false, nil, nil)
-	trusted := x509.NewCertPool()
-	trusted.AddCert(ca)
-	none := x509.NewCertPool()
-	chain := []*x509.Certificate{leaf, ca}
-	cases := []struct {
-		name    string
-		roots   *x509.CertPool
-		host    string
-		pins    []string
-		anyCert bool
-		certs   []*x509.Certificate
-		ok      bool
-	}{
-		{"trusted", trusted, "a.example.org", nil, false, chain, true},
-		{"trusted, another host", trusted, "b.example.org", nil, false, chain, false},
-		{"not trusted", none, "a.example.org", nil, false, chain, false},
-		{"named", none, "a.example.org", []string{Pin(own)}, false, []*x509.Certificate{own}, true},
-		{"named, whatever its names", none, "192.0.2.10", []string{Pin(own)}, false, []*x509.Certificate{own}, true},
-		{"another named", none, "a.example.org", []string{Pin(leaf)}, false, []*x509.Certificate{own}, false},
-		{"its authority named", none, "a.example.org", []string{Pin(ca)}, false, chain, false},
-		{"any certificate", none, "a.example.org", nil, true, []*x509.Certificate{own}, true},
-		{"none at all", none, "a.example.org", nil, true, nil, false},
-	}
-	for _, c := range cases {
-		err := verifyPeer(c.roots, nil, c.host, c.pins, c.anyCert)(tls.ConnectionState{PeerCertificates: c.certs})
-		if (err == nil) != c.ok || (err != nil && !errors.Is(err, ErrUntrustedCertificate)) {
-			t.Errorf("%s: %v", c.name, err)
-		}
-	}
-}
-
-func TestCleanPins(t *testing.T) {
-	own, _ := testCert(t, "a.example.org", false, nil, nil)
-	pin := Pin(own)
-	if len(pin) != 43 || !ValidPin(pin) || ValidPin(pin+"=") || ValidPin(pin[:42]) || ValidPin(strings.ToUpper(pin)+"x") {
-		t.Fatalf("pin %q", pin)
-	}
-	var many []string
-	for i := range 10 {
-		c, _ := testCert(t, "a.example.org", false, nil, nil)
-		many = append(many, Pin(c))
-		if i == 0 {
-			many = append(many, Pin(c), "not a pin")
-		}
-	}
-	got := cleanPins(many)
-	if len(got) != maxPins || !slices.IsSorted(got) || slices.Contains(got, "not a pin") {
-		t.Fatalf("cleaned: %v", got)
-	}
-}
 
 // What a server names of its own: the operator's pins, or the one its
 // https address serves, nothing for http, and nothing when its address
@@ -126,7 +39,7 @@ func TestOwnCertificates(t *testing.T) {
 	a := newServerOn(t, "A", true)
 	u, _ := url.Parse(a.url)
 	cert := tlsCertOf(t, u.Host)
-	if got, err := (&Certificates{}).For(ctx, a.url); err != nil || !slices.Equal(got, []string{Pin(cert)}) {
+	if got, err := (&Certificates{}).For(ctx, a.url); err != nil || !slices.Equal(got, []string{msfp.Pin(cert)}) {
 		t.Fatalf("served: %v %v", got, err)
 	}
 }
@@ -151,7 +64,7 @@ func TestCertificatesNamedInHello(t *testing.T) {
 	ctx := context.Background()
 	a, b := newServerOn(t, "A", true), newServerOn(t, "B", true)
 	u, _ := url.Parse(a.url)
-	pin := Pin(tlsCertOf(t, u.Host))
+	pin := msfp.Pin(tlsCertOf(t, u.Host))
 	code, _, _ := a.s.NewCode(ctx, "")
 	aOnB, err := b.s.UseCode(ctx, code)
 	if err != nil {
@@ -182,7 +95,7 @@ func TestCertificatesNamedInHello(t *testing.T) {
 	if aOnB, err = b.s.Check(ctx, aOnB); err != nil || len(aOnB.Certificates) != 0 {
 		t.Fatalf("after A named none: %+v %v", aOnB, err)
 	}
-	if _, err := b.s.TheirLibraries(ctx, aOnB); !errors.Is(err, ErrUntrustedCertificate) {
+	if _, err := b.s.TheirLibraries(ctx, aOnB); !errors.Is(err, msfp.ErrUntrustedCertificate) {
 		t.Fatalf("libraries with nothing named: %v", err)
 	}
 	// A names it again: B's next call asks A's hello, and goes through.
@@ -240,7 +153,7 @@ func TestOwnCertificatesFirstFailureRetriedSoon(t *testing.T) {
 		}
 	}()
 	time.Sleep(100 * time.Millisecond)
-	if got, err := c.For(ctx, "https://"+addr); err != nil || !slices.Equal(got, []string{Pin(cert)}) {
+	if got, err := c.For(ctx, "https://"+addr); err != nil || !slices.Equal(got, []string{msfp.Pin(cert)}) {
 		t.Fatalf("served now: %v %v", got, err)
 	}
 }
@@ -284,7 +197,7 @@ func TestOwnCertificatesFreshForHellos(t *testing.T) {
 	addr := "https://" + ln.Addr().String()
 	c := &Certificates{}
 	first, err := c.For(ctx, addr)
-	if err != nil || !slices.Equal(first, []string{Pin(tlsCertOf(t, u1.Host))}) {
+	if err != nil || !slices.Equal(first, []string{msfp.Pin(tlsCertOf(t, u1.Host))}) {
 		t.Fatalf("first: %v %v", first, err)
 	}
 	mu.Lock()
@@ -294,7 +207,7 @@ func TestOwnCertificatesFreshForHellos(t *testing.T) {
 	if got, _ := c.For(ctx, addr); !slices.Equal(got, first) {
 		t.Fatalf("within the minute, For looked again: %v", got)
 	}
-	if got, err := c.Fresh(ctx, addr); err != nil || !slices.Equal(got, []string{Pin(tlsCertOf(t, u2.Host))}) {
+	if got, err := c.Fresh(ctx, addr); err != nil || !slices.Equal(got, []string{msfp.Pin(tlsCertOf(t, u2.Host))}) {
 		t.Fatalf("a hello's answer names %v (%v), not the renewed one", got, err)
 	}
 }

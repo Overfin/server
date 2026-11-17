@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/slots"
 	"github.com/overfin/server/internal/store"
 )
@@ -81,8 +82,8 @@ func drain(l *Limits, pick func(*Limits) *bucket) {
 func TestCallsOverTheLimits(t *testing.T) {
 	ctx := context.Background()
 	a, b, _, aOnB := pairedPair(t)
-	keyB := b64.EncodeToString(b.s.Key.Public())
-	keyA := b64.EncodeToString(a.s.Key.Public())
+	keyB := msfp.Encode64(b.s.Key.Public())
+	keyA := msfp.Encode64(a.s.Key.Public())
 	onA := stillClock(a)
 
 	drain(a.s.lim(), func(l *Limits) *bucket { return l.peers[keyB] })
@@ -117,7 +118,7 @@ func TestCallsOverTheLimits(t *testing.T) {
 func TestSyncTitlesWaitsItsTurn(t *testing.T) {
 	ctx := context.Background()
 	a, b, _, aOnB := pairedPair(t)
-	keyB := b64.EncodeToString(b.s.Key.Public())
+	keyB := msfp.Encode64(b.s.Key.Public())
 	// One call left: libraries goes, titles waits about a second (A's
 	// clock moves on once B is waiting).
 	onA := stillClock(a)
@@ -174,7 +175,7 @@ func TestCallsAtOnce(t *testing.T) {
 	if n := l.allSlots.InUse(""); n != 0 {
 		t.Fatalf("slots still held: %d", n)
 	}
-	keyB := b64.EncodeToString(b.s.Key.Public())
+	keyB := msfp.Encode64(b.s.Key.Public())
 	free, _ := l.peerSlots.Take(ctx, keyB)
 	if r, err := b.s.call(ctx, aOnB, "/api/v1/federation/libraries", struct{}{}, &answer); err != nil || r.Status != http.StatusTooManyRequests || r.RetryAfter < 1 {
 		t.Fatalf("its own at once: %+v %v", r, err)
@@ -234,16 +235,6 @@ func TestBackoffWhenNoAnswer(t *testing.T) {
 	}
 }
 
-// retryAfter counts only from 1 to 3,600, as an integer.
-func TestRetryAfterOf(t *testing.T) {
-	for body, want := range map[string]int{`{"retryAfter":5}`: 5, `{"retryAfter":3600}`: 3600, `{"retryAfter":0}`: 0,
-		`{"retryAfter":3601}`: 0, `{"retryAfter":1.5}`: 0, `{"retryAfter":"5"}`: 0, `{}`: 0, `x`: 0} {
-		if got := retryAfterOf([]byte(body)); got != want {
-			t.Errorf("%s: %d", body, got)
-		}
-	}
-}
-
 // Addresses of one IPv6 /64 share a limit, and the memory of addresses
 // has a cap.
 func TestAddressLimitIPv6AndMemory(t *testing.T) {
@@ -273,10 +264,10 @@ func TestAddressLimitIPv6AndMemory(t *testing.T) {
 func TestPlayBusyIsAnAnswer(t *testing.T) {
 	ctx := context.Background()
 	_, b, _, aOnB := pairedPair(t)
-	k := NewKey()
+	k := msfp.NewKey()
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := []byte(`{"type":"server-busy","title":"busy","status":503}`)
-		w.Header().Set(HeaderSignature, SignResponse(k, r.Header.Get(HeaderNonce), 503, body))
+		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 503, body))
 		w.WriteHeader(503)
 		_, _ = w.Write(body)
 	}))
