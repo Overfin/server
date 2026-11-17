@@ -1,7 +1,8 @@
 <!-- Intro Skipper on Overfin's Jellyfin, installed from here; an install
      shows how it goes. -->
 <script lang="ts">
-  import { Card, Badge, Status, ask, toast } from '@overfin/ui';
+  import { onDestroy } from 'svelte';
+  import { Card, Badge, Status, Busy, ask, toast } from '@overfin/ui';
   import { api } from '../../lib/api';
   import { message } from '../../lib/format';
   import type { IntroSkipper, Line } from '../../lib/types-server';
@@ -13,9 +14,12 @@
   // svelte-ignore state_referenced_locally
   let st = $state<Line>({ text: describe(sk.status), kind: sk.status.installed && sk.status.state !== 'Active' ? 'error' : '' });
   let running = $state(false);
+  // Leaving the page stops the following: no more asking every 2 s.
+  let gone = false;
+  onDestroy(() => (gone = true));
 
   async function watch() {
-    for (;;) {
+    while (!gone) {
       const now = await api<IntroSkipper>('GET', '/admin/api/intro-skipper');
       if (!now.progress.running) {
         if (now.progress.error) throw new Error(now.progress.error);
@@ -28,12 +32,16 @@
     }
   }
 
-  async function run(action: () => Promise<void>) {
+  const fail = (err: Error) => (st = { text: message(err), kind: 'error' });
+
+  // An install or removal under way when the page opened: followed, the
+  // buttons off meanwhile.
+  async function follow() {
     running = true;
     try {
-      await action();
+      await watch();
     } catch (err) {
-      st = { text: message(err), kind: 'error' };
+      fail(err instanceof Error ? err : new Error(String(err)));
     } finally {
       running = false;
     }
@@ -51,9 +59,8 @@
     await watch();
   }
 
-  // An install or removal under way when the page opened: followed.
   // svelte-ignore state_referenced_locally
-  if (sk.progress.running) run(watch);
+  if (sk.progress.running) follow();
 </script>
 
 <Card title="Intro Skipper" description="A Jellyfin plugin, by the Intro Skipper project, that finds intros and credits: the player then offers to skip them.">
@@ -67,7 +74,8 @@
   <span hidden></span>
   {#snippet foot()}
     <Status text={st.text} kind={st.kind} />
-    {#if !installed}<button type="button" class="primary" disabled={running} onclick={() => run(install)}>Install</button>{/if}
-    {#if installed}<button type="button" class="danger" disabled={running} onclick={() => run(remove)}>Remove</button>{/if}
+    <!-- Busy: the focus comes back to the button after the question. -->
+    {#if !installed}<Busy kind="primary" disabled={running} action={install} {fail}>Install</Busy>{/if}
+    {#if installed}<Busy kind="danger" disabled={running} action={remove} {fail}>Remove</Busy>{/if}
   {/snippet}
 </Card>
