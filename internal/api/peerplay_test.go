@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/overfin/server/internal/api"
 	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/seal"
@@ -152,6 +153,7 @@ type twoServers struct {
 	a, b       *federation.Service
 	onB        *playback.Tickets
 	aOnB, bOnA *store.Peer
+	pbA        api.Playback
 }
 
 // pairForPlay makes twoServers. With trustB, A trusts B's test
@@ -173,7 +175,7 @@ func pairForPlayWith(t *testing.T, trustB bool, wrapB func(http.Handler) http.Ha
 		TMDB: "949", LibraryID: "films", AudioTags: []string{"fr"}}}, 1)
 	x.stB.RefreshTitleKeys(ctx)
 	x.stB.SetLibraries(ctx, []store.Library{{ID: "films", Item: []byte(`{"Name":"Films"}`)}})
-	x.srvA, _ = newServerWith(t, options{store: &x.stA, federation: &x.a})
+	x.srvA, _ = newServerWith(t, options{store: &x.stA, federation: &x.a, playback: &x.pbA})
 	if trustB {
 		x.a.HTTP = x.srvB.Client()
 	} else {
@@ -494,5 +496,46 @@ func TestPeerPlayUnansweredIsBusy(t *testing.T) {
 	_ = json.Unmarshal([]byte(body), &p)
 	if status != http.StatusServiceUnavailable || p.Type != "server-busy" {
 		t.Fatalf("an unsigned 429 from B's host: %d %s", status, p.Type)
+	}
+}
+
+// A's playbacks on B are remembered until they end: a restart of A tells
+// B they're over (StopLeftovers), rather than B holding them, counted
+// against the pairing's streams, until its idle timeout.
+func TestRemotePlaybacksStoppedAfterARestart(t *testing.T) {
+	ctx := context.Background()
+	x := pairForPlay(t, true)
+	status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
+	if status != 201 {
+		t.Fatalf("play: %d %s", status, body)
+	}
+	live := x.onB.Where(func(*playback.Stream) bool { return true })
+	if len(live) != 1 {
+		t.Fatalf("on B: %d", len(live))
+	}
+	// A restarts: its playbacks in memory are gone, the one on B isn't.
+	left, err := x.stA.TakeRemotePlaybacks(ctx)
+	if err != nil || len(left) != 1 || left[0].RemoteID != live[0].ID {
+		t.Fatalf("remembered: %+v %v", left, err)
+	}
+	for _, rp := range left {
+		x.stA.AddRemotePlayback(ctx, rp.PeerID, rp.RemoteID)
+	}
+	x.pbA.StopLeftovers(ctx)
+	deadline := time.Now().Add(5 * time.Second)
+	for len(x.onB.Where(func(*playback.Stream) bool { return true })) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("B still holds A's playback")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	for {
+		if left, _ := x.stA.TakeRemotePlaybacks(ctx); len(left) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("still remembered")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

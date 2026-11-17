@@ -200,8 +200,10 @@ func pickCopy(copies []store.PeerCopy, language string) string {
 }
 
 type peerStopRequest struct {
-	ID         string `json:"id"`
-	PositionMs int64  `json:"positionMs"`
+	ID string `json:"id"`
+	// PositionMs, optional: left out when not known (a playback stopped
+	// after a restart here).
+	PositionMs int64 `json:"positionMs,omitempty"`
 }
 
 // peerStop ends a paired server's viewer's playback: theirs only.
@@ -221,7 +223,10 @@ func (pb Playback) peerStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s, ended, ok := pb.Tickets.ByID(req.ID, playback.PeerPrefix+peer.ID, time.Now()); ok && ended == nil {
-		pb.Tickets.Progress(s, req.PositionMs*10_000, false, time.Now())
+		// Without a position, where it last was stays.
+		if req.PositionMs > 0 {
+			pb.Tickets.Progress(s, req.PositionMs*10_000, false, time.Now())
+		}
 		pb.end(s, "stopped", "")
 	}
 	fed.Answer(w, nonce, struct{}{})
@@ -511,6 +516,11 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	for _, old := range replaced {
 		pb.stopped(old)
 	}
+	// Remembered until it ends, so that a restart here tells the paired
+	// server it's over (StopLeftovers).
+	if err := l.Provisioner.Store.AddRemotePlayback(ctx, peer.ID, s.Remote.ID); err != nil {
+		pb.Logger.Warn("a playback on a paired server couldn't be remembered", "err", err)
+	}
 	// The browser asks this server only (rule 97).
 	relayURLs(&out, base, s.Ticket)
 	out.ID, out.Title, out.Next = s.ID, nil, nil
@@ -756,7 +766,30 @@ func (pb Playback) stopRemote(peer *store.Peer, id string, positionMs int64) {
 		if _, err := fed.Call(ctx, peer, "/api/v1/federation/stop", peerStopRequest{ID: id, PositionMs: positionMs}, &struct{}{}); err != nil {
 			pb.Logger.Info("a paired server couldn't be told a playback stopped", "peer", peer.Name, "err", err)
 		}
+		if err := pb.Library.Provisioner.Store.ForgetRemotePlayback(ctx, peer.ID, id); err != nil {
+			pb.Logger.Warn("a playback on a paired server couldn't be forgotten", "err", err)
+		}
 	}()
+}
+
+// StopLeftovers tells paired servers the playbacks this server had there
+// before it started are over: playbacks live in memory, and a paired
+// server would otherwise hold them, counted against the pairing's
+// streams, until its idle timeout. Run once at start, before anyone plays.
+func (pb Playback) StopLeftovers(ctx context.Context) {
+	st := pb.Library.Provisioner.Store
+	left, err := st.TakeRemotePlaybacks(ctx)
+	if err != nil {
+		pb.Logger.Warn("playbacks on paired servers couldn't be read", "err", err)
+		return
+	}
+	for _, rp := range left {
+		peer, err := st.PeerByID(ctx, rp.PeerID)
+		if err != nil || peer.State != store.PeerPaired {
+			continue
+		}
+		pb.stopRemote(peer, rp.RemoteID, 0)
+	}
 }
 
 // remoteStops are the stops on their way to each paired server. A new

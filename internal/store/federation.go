@@ -1134,3 +1134,40 @@ func randomPublicID() string {
 	rand.Read(b) // crypto/rand.Read never fails on supported systems
 	return "lib_" + base64.RawURLEncoding.EncodeToString(b)
 }
+
+// RemotePlayback is one of this server's playbacks on a paired server:
+// that server's ID for it.
+type RemotePlayback struct {
+	PeerID, RemoteID string
+}
+
+// AddRemotePlayback remembers a playback started on a paired server.
+func (s *Store) AddRemotePlayback(ctx context.Context, peerID, remoteID string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO remote_playbacks (peer_id, remote_id) VALUES (?, ?)`, peerID, remoteID)
+	return err
+}
+
+// ForgetRemotePlayback forgets a playback on a paired server, over.
+func (s *Store) ForgetRemotePlayback(ctx context.Context, peerID, remoteID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM remote_playbacks WHERE peer_id = ? AND remote_id = ?`, peerID, remoteID)
+	return err
+}
+
+// TakeRemotePlaybacks lists the playbacks on paired servers remembered,
+// and forgets them all.
+func (s *Store) TakeRemotePlaybacks(ctx context.Context) ([]RemotePlayback, error) {
+	rows, err := s.db.QueryContext(ctx, `DELETE FROM remote_playbacks RETURNING peer_id, remote_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RemotePlayback
+	for rows.Next() {
+		var p RemotePlayback
+		if err := rows.Scan(&p.PeerID, &p.RemoteID); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}

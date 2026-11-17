@@ -295,6 +295,8 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 		b.fed, fedNow = fed, fed
 		fed.PeerChanged = pb.PeerChanged
 		plugins = append(plugins, federation.Plugin{S: fed})
+		// What this server played on paired servers before it started.
+		go pb.StopLeftovers(context.Background())
 	}
 	if cfg.Plugins.Enabled("library") {
 		plugins = append(plugins, lib)
