@@ -16,8 +16,8 @@ Overfin must be easy to run, for anyone from a first-time operator to a
 network security expert. So the rules come in two kinds:
 
 - **Hard rules** hold on every server, whatever its settings. No setting
-  loosens them. Above all, between servers (rules 94 to 100): one badly
-  run server must never be a way into another.
+  loosens them. Above all, between servers (rules 94 to 100, 136 to
+  138): one badly run server must never be a way into another.
 - **Settings** are where the operator's setup decides. Each is listed here
   with what it can be set to. Its default is the safest choice that works
   without extra setup, and changing it only ever affects that operator's
@@ -567,7 +567,8 @@ anyone. Paired servers are not trusted at all (rule 94).
     so a request signed before the server started is refused, with no
     allowance for the other's clock. Refusals to servers known
     now or before are signed too, and unsigned ones count as no answer. A
-    stranger gets a plain 404.
+    stranger gets a plain 404. A server's key changes only as rules 137
+    and 138 say.
 96. Each side shares only libraries it offers and the other wants: titles
     by key, with their languages, never files, paths or people. Playing
     stays within the pairing's limits (2 streams and 1 transcode at first,
@@ -827,6 +828,37 @@ anyone. Paired servers are not trusted at all (rule 94).
      checked, never looked up again. Redirects are never followed. One
      setting loosens this: `federation.allow_loopback`, for a peer on the
      same machine; nothing else refused is ever allowed.
+
+### Keys between servers
+
+137. A server's federation key changes only by its operator's action,
+     to the next key it made in advance and committed to: only the
+     commitment (the next key's SHA-256) travels, in pair, in a change of
+     key, or, for a pairing that has none, in its first hello (trust on
+     first use, which the panel says). A hello never replaces a
+     commitment. The next key's seed is sealed with the secret key like
+     the current one, under a context of its own; it leaves the server
+     only when the operator exports it from the control panel, and can
+     then be deleted from it. Seeds, current, next or old, are never
+     logged, nor shown in the panel but on that export. A paired server
+     moves to a new key at once only when it matches the commitment it
+     holds; without a commitment, only once its operator confirmed the
+     new key's fingerprint; any other new key, another server's, or a
+     forgotten one, is refused, and its operator warned. Both keys sign
+     the change. The key moved from is still heard 10 minutes. The
+     server that changed keeps its old key for peers that haven't moved,
+     30 days at most, then deletes it: a peer still on it must pair
+     again. The IDs peers know a server's things by stay through a
+     change of key.
+138. A key its server says was stolen (revoked) suspends the peer at
+     once: its key is answered nothing but a change of key or another
+     revocation, no call is made to it, and its titles are shown to
+     nobody. Only a change to the key it had committed to lifts the
+     suspension; after 30 days without one, the peer is gone, and stays
+     suspended. An operator whose key was stolen revokes it at every
+     paired server, then moves to the next key in the same action when
+     it is safe; otherwise the server gets a new key and every pairing
+     ends, to be made again with new codes.
 
 ## Deployment
 

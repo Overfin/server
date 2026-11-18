@@ -38,6 +38,7 @@ holds the data and the secrets, and checks everything itself [119, 123, 127].
 | Script injected into the website (XSS) | Act as the user, take over the account, send users to a phishing page | No tokens in reach [9, 26], step-up for lasting damage [31], checked return addresses [29] |
 | A compromised sibling subdomain | Make requests in the user's name | Same-origin requests only [27], `__Host-` cookies over HTTPS [26] |
 | Another server, weak or compromised | Reach into servers that share with it | Peers untrusted, authenticated, limited to what was shared [94–100] |
+| Thief of a server's federation key | Act as that server toward its peers, move them to a key of the thief's | Revocation suspends the key at every peer; peers follow only the key committed in advance, whose seed can be kept offline [137, 138] |
 | Attacker-controlled media or metadata | Run code in the browser, reach the internal network, exhaust memory | Untrusted-data rules [10–18] |
 | Network observer | See who watches what, catch passwords or links | TLS (a secure default: without HTTPS, everything travels in clear), nothing personal in URLs [71] |
 | An app the operator gave a key | Per-person activity | Totals only, for the scopes an admin ticked; keys kept as hashes, revocable [61, 85] |
