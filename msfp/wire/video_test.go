@@ -2,6 +2,7 @@ package wire
 
 import (
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -133,6 +134,61 @@ func TestOtherID(t *testing.T) {
 	} {
 		if OtherID(c.scheme, c.value) != c.ok {
 			t.Errorf("%s %s: %v", c.scheme, c.value, !c.ok)
+		}
+	}
+}
+
+// The cases of vectors/v1/video.json: what a caller keeps of each title,
+// its picture included.
+func TestVideoVectors(t *testing.T) {
+	var v struct {
+		Libraries []string
+		Titles    []struct {
+			Name, Text, Output string
+			Valid              bool
+		}
+	}
+	readVectors(t, "video.json", &v)
+	if len(v.Titles) == 0 {
+		t.Fatal("no video cases")
+	}
+	for _, c := range v.Titles {
+		got, ok := ReadVideoTitle(json.RawMessage(c.Text))
+		if ok && !slices.Contains(v.Libraries, got.Library) {
+			ok = false // the caller's check: a library it asked for
+		}
+		if ok != c.Valid {
+			t.Errorf("title %s: kept %v, want %v", c.Name, ok, c.Valid)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		var want, have map[string]any
+		if err := json.Unmarshal([]byte(c.Output), &want); err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(struct {
+			Key       string            `json:"key"`
+			Kind      string            `json:"kind"`
+			Library   string            `json:"library"`
+			Audio     []string          `json:"audio,omitempty"`
+			Subtitles []string          `json:"subtitles,omitempty"`
+			Video     *Picture          `json:"video,omitempty"`
+			With      []string          `json:"with,omitempty"`
+			IDs       map[string]string `json:"ids,omitempty"`
+		}{got.Key, got.Kind, got.Library, got.Audio, got.Subtitles, got.Video, got.With, got.IDs})
+		json.Unmarshal(b, &have)
+		if !reflect.DeepEqual(have, want) {
+			t.Errorf("title %s:\n got %s\nwant %s", c.Name, b, c.Output)
+		}
+	}
+}
+
+func TestStepHeight(t *testing.T) {
+	for in, want := range map[int]int{0: 0, -5: 0, 1: 480, 479: 480, 480: 480, 719: 480, 720: 720, 1600: 1440, 2160: 2160, 3000: 2160, 4320: 4320, 9000: 4320} {
+		if got := StepHeight(in); got != want {
+			t.Errorf("StepHeight(%d) = %d, want %d", in, got, want)
 		}
 	}
 }

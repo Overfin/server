@@ -701,6 +701,7 @@ type videoTitleWire struct {
 	Library   string            `json:"library"`
 	Audio     []string          `json:"audio,omitempty"`
 	Subtitles []string          `json:"subtitles,omitempty"`
+	Video     *wire.Picture     `json:"video,omitempty"`
 	With      []string          `json:"with,omitempty"`
 	IDs       map[string]string `json:"ids,omitempty"`
 }
@@ -711,6 +712,9 @@ func videoOut(k wire.TitleKey, t *VideoTitle, library string) videoTitleWire {
 	w := videoTitleWire{Key: t.Key, Kind: t.Kind, Library: library}
 	if k.Playable {
 		w.Audio, w.Subtitles = wire.CleanTags(t.Audio), wire.CleanTags(t.Subtitles)
+		if p, ok := BestPicture(t.Pictures); ok {
+			w.Video = &wire.Picture{Height: p.Height, HDR: p.HDR}
+		}
 	}
 	if k.Kind == "episode" {
 		vk, _ := wire.ParseVideoKey(t.Key)

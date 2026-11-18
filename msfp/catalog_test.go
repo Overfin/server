@@ -378,3 +378,71 @@ func TestMusicTitles(t *testing.T) {
 		t.Errorf("B without music keeps %v", keysOf(got))
 	}
 }
+
+// A film's picture (MSFP video section 3.2): the host gives each copy's,
+// the best goes, stepped; a reader keeps it with the title, and another
+// picture is a change of the title.
+func TestTitlePictures(t *testing.T) {
+	ctx := context.Background()
+	h := newFakeHost()
+	h.film("films", "movie/tmdb/1", "en")
+	h.film("films", "movie/tmdb/2", "en")
+	h.film("films", "movie/tmdb/3", "en")
+	h.mu.Lock()
+	h.titles["movie/tmdb/1"].(*msfp.VideoTitle).Pictures = []msfp.Picture{{Height: 1080}, {Height: 2200, HDR: []string{"dv", "HDR10", "hdr10"}}, {Height: 2160}}
+	h.titles["movie/tmdb/2"].(*msfp.VideoTitle).Pictures = []msfp.Picture{{Height: 360}, {Height: 0, HDR: []string{"hdr10"}}}
+	h.mu.Unlock()
+	s := newSharing(t, h, msfp.Config{}, msfp.Config{})
+	got := s.peerTitles(t)
+	if v := got["movie/tmdb/1"].(*msfp.VideoTitle).Video; v == nil || v.Height != 2160 || !slices.Equal(v.HDR, []string{"hdr10", "dv"}) {
+		t.Errorf("the best copy's picture: %+v", v)
+	}
+	if v := got["movie/tmdb/2"].(*msfp.VideoTitle).Video; v == nil || v.Height != 480 || v.HDR != nil {
+		t.Errorf("below 480, and a copy of no known size: %+v", v)
+	}
+	if v := got["movie/tmdb/3"].(*msfp.VideoTitle).Video; v != nil {
+		t.Errorf("no copy of known size: %+v", v)
+	}
+	last := s.a.exchanges("titles")
+	if body := last[len(last)-1].resBody; !strings.Contains(body, `"video":{"height":2160,"hdr":["hdr10","dv"]}`) || strings.Contains(body, "pictures") {
+		t.Errorf("as sent: %s", body)
+	}
+	// Another picture: the title is sent again in a changes reading.
+	h.mu.Lock()
+	h.titles["movie/tmdb/3"].(*msfp.VideoTitle).Pictures = []msfp.Picture{{Height: 720}}
+	h.mu.Unlock()
+	s.a.eng.CatalogChanged()
+	if _, err := s.b.eng.ReadNow(ctx, s.onB.ID); err != nil {
+		t.Fatal(err)
+	}
+	last = s.a.exchanges("titles")
+	if x := last[len(last)-1]; !strings.Contains(x.resBody, `"changes":true`) || !strings.Contains(x.resBody, `"key":"movie/tmdb/3"`) ||
+		strings.Contains(x.resBody, `"key":"movie/tmdb/1"`) {
+		t.Errorf("a changes reading: %s", x.resBody)
+	}
+	if v := s.peerTitles(t)["movie/tmdb/3"].(*msfp.VideoTitle).Video; v == nil || v.Height != 720 {
+		t.Errorf("the new picture kept: %+v", v)
+	}
+}
+
+func TestBestPicture(t *testing.T) {
+	for _, c := range []struct {
+		in   []msfp.Picture
+		want msfp.Picture
+		ok   bool
+	}{
+		{nil, msfp.Picture{}, false},
+		{[]msfp.Picture{{Height: 0}}, msfp.Picture{}, false},
+		{[]msfp.Picture{{Height: 1600}}, msfp.Picture{Height: 1440}, true},
+		{[]msfp.Picture{{Height: 9000}}, msfp.Picture{Height: 4320}, true},
+		{[]msfp.Picture{{Height: 2160}, {Height: 2160, HDR: []string{"hlg"}}}, msfp.Picture{Height: 2160, HDR: []string{"hlg"}}, true},
+		{[]msfp.Picture{{Height: 2160, HDR: []string{"hlg"}}, {Height: 2160, HDR: []string{"dv", "hdr10"}}}, msfp.Picture{Height: 2160, HDR: []string{"hdr10", "dv"}}, true},
+		{[]msfp.Picture{{Height: 1080, HDR: []string{"hdr10"}}, {Height: 2160}}, msfp.Picture{Height: 2160}, true},
+		{[]msfp.Picture{{Height: 1080, HDR: []string{"hdr10+", "sdr"}}}, msfp.Picture{Height: 1080}, true},
+	} {
+		got, ok := msfp.BestPicture(c.in)
+		if ok != c.ok || got.Height != c.want.Height || !slices.Equal(got.HDR, c.want.HDR) {
+			t.Errorf("%+v: %+v %v, want %+v %v", c.in, got, ok, c.want, c.ok)
+		}
+	}
+}

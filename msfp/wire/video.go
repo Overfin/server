@@ -3,6 +3,7 @@ package wire
 import (
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -177,6 +178,83 @@ func OtherID(scheme, value string) bool {
 	return known && re.MatchString(value)
 }
 
+// Picture is what a film's or an episode's copy offers for playing
+// (video section 3.2): its stepped height, and its HDR formats (none for
+// standard range).
+type Picture struct {
+	Height int      `json:"height"`
+	HDR    []string `json:"hdr,omitempty"`
+}
+
+// The heights a picture is stepped to (video sections 3.2 and 5.1), and
+// the HDR formats it may list, in their order.
+var (
+	Heights    = []int{480, 720, 1080, 1440, 2160, 4320}
+	HDRFormats = []string{"hdr10", "hlg", "dv"}
+)
+
+// StepHeight steps a height down to the greatest of Heights not above
+// it, 480 below 480 (video section 5.1's coarsening); 0 stays 0, unknown.
+func StepHeight(h int) int {
+	if h <= 0 {
+		return 0
+	}
+	out := Heights[0]
+	for _, s := range Heights {
+		if s <= h {
+			out = s
+		}
+	}
+	return out
+}
+
+// CleanHDR keeps of formats those HDRFormats lists, each once, in its
+// order; none for standard range.
+func CleanHDR(formats []string) []string {
+	var out []string
+	for _, f := range HDRFormats {
+		if slices.Contains(formats, f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// Better says whether a is a better copy than b (video section 3.2): of
+// a greater height, then with HDR when b has none, then with more
+// formats.
+func (a Picture) Better(b Picture) bool {
+	if a.Height != b.Height {
+		return a.Height > b.Height
+	}
+	return len(a.HDR) > len(b.HDR)
+}
+
+// readPicture reads video as a receiver keeps it (video section 3.1):
+// nil, absent, unless it is an object whose height is one of Heights as
+// an MSFP integer, and whose hdr, when present, is an array (null is of
+// the wrong type, core section 2.3); in hdr, an entry that isn't a
+// string or a format of HDRFormats is skipped alone.
+func readPicture(raw json.RawMessage) *Picture {
+	var o map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &o) != nil || o == nil {
+		return nil
+	}
+	h := integerIn(o["height"], 1, 4320)
+	if !slices.Contains(Heights, int(h)) {
+		return nil
+	}
+	p := &Picture{Height: int(h)}
+	if hdr, present := o["hdr"]; present {
+		var list []any
+		if string(hdr) == "null" || json.Unmarshal(hdr, &list) != nil {
+			return nil
+		}
+		p.HDR = CleanHDR(stringsOf(hdr))
+	}
+	return p
+}
+
 // VideoTitle is a peer's video title, as kept: its key, its kind, the
 // library it gives, and the members video adds, cleaned.
 type VideoTitle struct {
@@ -185,6 +263,7 @@ type VideoTitle struct {
 	Library   string
 	Audio     []string
 	Subtitles []string
+	Video     *Picture
 	With      []string
 	IDs       map[string]string
 }
@@ -205,6 +284,7 @@ func ReadVideoTitle(raw json.RawMessage) (VideoTitle, bool) {
 		Subtitles json.RawMessage `json:"subtitles"`
 		With      json.RawMessage `json:"with"`
 		IDs       json.RawMessage `json:"ids"`
+		Video     json.RawMessage `json:"video"`
 	}
 	if DecodeEntry(raw, &t) != nil {
 		return VideoTitle{}, false
@@ -217,6 +297,7 @@ func ReadVideoTitle(raw json.RawMessage) (VideoTitle, bool) {
 	// Languages for films and episodes only, with for episodes only.
 	if k.Playable() {
 		out.Audio, out.Subtitles = CleanTags(stringsOf(t.Audio)), CleanTags(stringsOf(t.Subtitles))
+		out.Video = readPicture(t.Video)
 	}
 	if k.Kind == "episode" {
 		out.With = CleanWith(k, stringsOf(t.With))

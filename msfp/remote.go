@@ -166,7 +166,7 @@ func coarsen(c Capabilities, video bool) *capsWire {
 	}
 	if video {
 		w.VideoCodecs, w.HDR = list("videoCodecs", c.VideoCodecs), list("hdr", c.HDR)
-		w.MaxHeight = step(c.MaxHeight, []int{480, 720, 1080, 1440, 2160, 4320})
+		w.MaxHeight = wire.StepHeight(c.MaxHeight)
 	}
 	if w.Containers == nil && w.AudioCodecs == nil && w.VideoCodecs == nil && w.HDR == nil &&
 		w.MaxAudioChannels == 0 && w.MaxBitrateKbps == 0 && w.MaxHeight == 0 {

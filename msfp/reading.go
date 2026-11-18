@@ -523,8 +523,12 @@ func (e *Engine) readTitle(p *PeerRecord, raw json.RawMessage, libs []string) (T
 		if !ok || !slices.Contains(libs, v.Library) {
 			return nil, false
 		}
-		return &VideoTitle{TitleCommon: TitleCommon{Key: v.Key, Kind: v.Kind, Libraries: []string{v.Library}},
-			Audio: v.Audio, Subtitles: v.Subtitles, With: v.With, IDs: v.IDs}, true
+		t := &VideoTitle{TitleCommon: TitleCommon{Key: v.Key, Kind: v.Kind, Libraries: []string{v.Library}},
+			Audio: v.Audio, Subtitles: v.Subtitles, With: v.With, IDs: v.IDs}
+		if v.Video != nil {
+			t.Video = &Picture{Height: v.Video.Height, HDR: v.Video.HDR}
+		}
+		return t, true
 	case wire.PartMusic:
 		m, ok := wire.ReadMusicTitle(raw)
 		if !ok || !slices.Contains(libs, m.Library) {

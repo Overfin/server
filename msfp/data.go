@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/overfin/server/msfp/wire"
 )
 
 // The data objects of the host interfaces (engine.md section 7).
@@ -48,10 +50,50 @@ type TitleCommon struct {
 // section 3).
 type VideoTitle struct {
 	TitleCommon
-	Audio     []string          `json:"audio,omitempty"`
-	Subtitles []string          `json:"subtitles,omitempty"`
-	With      []string          `json:"with,omitempty"`
-	IDs       map[string]string `json:"ids,omitempty"`
+	Audio     []string `json:"audio,omitempty"`
+	Subtitles []string `json:"subtitles,omitempty"`
+	// Pictures is the host's, for its own films and episodes: each copy's
+	// picture, as its files say (any height, HDR formats among
+	// "hdr10", "hlg" and "dv"); a copy whose size isn't known is left
+	// out. The engine sends the best, stepped (MSFP video section 3.2).
+	Pictures []Picture `json:"pictures,omitempty"`
+	// Video is a peer's: the picture it sent of its best copy, cleaned
+	// (MSFP video section 3.1); nil when it sent none.
+	Video *Picture          `json:"video,omitempty"`
+	With  []string          `json:"with,omitempty"`
+	IDs   map[string]string `json:"ids,omitempty"`
+}
+
+// Picture is what a copy of a film or an episode offers for playing
+// (MSFP video section 3.2): its height in pixels (for a picture wider
+// than 16:9, a 16:9 picture's as wide: 2160 for 3840 × 1600), and its
+// high dynamic range formats, "hdr10", "hlg" or "dv" (none: standard
+// range).
+type Picture struct {
+	Height int      `json:"height"`
+	HDR    []string `json:"hdr,omitempty"`
+}
+
+// Better says whether a copy of picture p is better than one of q, as
+// BestPicture ranks them (both stepped).
+func (p Picture) Better(q Picture) bool {
+	return wire.Picture{Height: p.Height, HDR: p.HDR}.Better(wire.Picture{Height: q.Height, HDR: q.HDR})
+}
+
+// BestPicture is the picture of the best of a title's copies, as MSFP
+// video section 3.2 says, stepped: the greatest height, then HDR before
+// none, then more formats; false when no copy's size is known. A host
+// lists its copies to Copies in that order, best first, so that play
+// without a version plays it.
+func BestPicture(pictures []Picture) (Picture, bool) {
+	var best wire.Picture
+	for _, p := range pictures {
+		w := wire.Picture{Height: wire.StepHeight(p.Height), HDR: wire.CleanHDR(p.HDR)}
+		if w.Height > 0 && (best.Height == 0 || w.Better(best)) {
+			best = w
+		}
+	}
+	return Picture{Height: best.Height, HDR: best.HDR}, best.Height > 0
 }
 
 // MusicTitle is an artist, an album or a track, with its description
