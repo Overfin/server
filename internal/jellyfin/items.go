@@ -60,6 +60,9 @@ type RawItem struct {
 	AlbumCount        *int
 	Width             *int
 	Height            *int
+	// PartCount is a video's files when it is several played one after
+	// the other (stacked files: "cd1", "cd2"); absent for one.
+	PartCount *int
 	// MediaStreams are a file's streams; only the catalog asks for them,
 	// for its audio's languages.
 	MediaStreams []MediaStream

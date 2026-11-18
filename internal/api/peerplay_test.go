@@ -416,6 +416,31 @@ func TestPeerRefusalsToldApart(t *testing.T) {
 	}
 }
 
+// A copy of several files (Jellyfin's stacked parts) is one copy in MSFP,
+// to be served whole as HLS; B can't serve it as one, so it isn't
+// playable (MSFP playback section 1, media section 1).
+func TestPeerCopyOfSeveralParts(t *testing.T) {
+	x := pairForPlay(t)
+	x.fakeB.mu.Lock()
+	x.fakeB.parts = 2
+	x.fakeB.mu.Unlock()
+	status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
+	var p struct{ Type string }
+	json.Unmarshal([]byte(body), &p)
+	if status != http.StatusConflict || p.Type != "not-playable" {
+		t.Fatalf("a copy of two parts: %d %s", status, body)
+	}
+	if n := len(livePlaybacks(x.onB)); n != 0 {
+		t.Errorf("playbacks on B: %d", n)
+	}
+	x.fakeB.mu.Lock()
+	x.fakeB.parts = 0
+	x.fakeB.mu.Unlock()
+	if status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`); status != 201 {
+		t.Fatalf("a copy of one file: %d %s", status, body)
+	}
+}
+
 // B's host refusing A's play unsigned (a gateway's plain 429) is busy
 // for now to A's viewer, not "can't be played".
 func TestPeerPlayUnansweredIsBusy(t *testing.T) {

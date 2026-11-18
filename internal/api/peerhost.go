@@ -81,6 +81,17 @@ func (h PeerHost) Describe(ctx context.Context, copy string) (msfp.CopyInfo, err
 	src := info.MediaSources[0]
 	audio, subtitles, forced := tracks.Read(src.MediaStreams)
 	out := msfp.CopyInfo{DurationMs: src.RunTimeTicks / 10_000}
+	// A copy of several files (Jellyfin's stacked parts) is one copy in
+	// MSFP (playback section 1); Start refuses it (below).
+	item, err := l.Jellyfin.Item(ctx, ja, uid, copy)
+	switch {
+	case jellyfin.IsStatus(err, http.StatusNotFound):
+		return msfp.CopyInfo{}, msfp.ErrNotFound
+	case err != nil:
+		return msfp.CopyInfo{}, msfp.ErrServerBusy
+	case item.PartCount != nil:
+		out.Parts = *item.PartCount
+	}
 	for _, a := range audio {
 		out.AudioTracks = append(out.AudioTracks, msfp.Track{ID: "a" + strconv.Itoa(a.Index), Label: a.Name,
 			Language: a.Language, Channels: a.Channels, Role: roleJSON(a.Role), Default: a.Default})
@@ -117,6 +128,12 @@ func (h PeerHost) Start(ctx context.Context, req msfp.StartRequest) (msfp.Starte
 	}
 	if req.AudioOnly {
 		// Overfin shares no music.
+		return msfp.Started{}, msfp.ErrNotPlayable
+	}
+	if req.Parts > 1 {
+		// A copy of several files must come whole, as HLS (MSFP media
+		// section 1); Jellyfin plays its parts one by one, as separate
+		// streams, so this server can't serve it as one yet.
 		return msfp.Started{}, msfp.ErrNotPlayable
 	}
 	l := pb.Library

@@ -95,6 +95,8 @@ type fakeJellyfin struct {
 	// reasons; reencodes then has its session say the video is
 	// re-encoded after all.
 	remux, reencodes bool
+	// parts makes the movie a stacked one, of that many files.
+	parts int
 }
 
 func (f *fakeJellyfin) setRemux(remux, reencodes bool) {
@@ -291,7 +293,11 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"EndDate": "1852-11-27T00:00:00.0000000Z", "ProviderIds": map[string]string{"Imdb": "nm0000001", "Evil": "x"},
 			"ImageTags": map[string]string{"Primary": fmt.Sprintf("%032x", 7)}})
 	case r.URL.Path == "/Items/"+fmt.Sprintf("%032x", 1):
-		json.NewEncoder(w).Encode(movie(0))
+		m := movie(0)
+		if f.parts > 1 {
+			m["PartCount"] = f.parts
+		}
+		json.NewEncoder(w).Encode(m)
 	case r.Method == "POST" && r.URL.Path == "/Items/"+fmt.Sprintf("%032x", 1)+"/PlaybackInfo":
 		var asked map[string]any
 		json.NewDecoder(r.Body).Decode(&asked)
