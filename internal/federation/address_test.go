@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/store"
 )
@@ -190,5 +191,40 @@ func TestAddressChangeNotConfirmed(t *testing.T) {
 	}
 	if p := peerOn(t, a, bOnA.ID); p.Address != b.url || p.Move != nil {
 		t.Fatalf("A's view of B after: %q, move %+v", p.Address, p.Move)
+	}
+}
+
+// A peer whose key was revoked hears nothing from that key but a rotation
+// (MSFP core section 12.6), and no call goes to it: an address it named
+// before it was suspended isn't confirmed by a hello there, which it
+// would answer under the revoked key.
+func TestSuspendedPeerMoveNotConfirmed(t *testing.T) {
+	ctx := context.Background()
+	a, b, bOnA, aOnB := pairedPair(t)
+	for _, s := range []*server{a, b} {
+		if err := s.s.NoteAddress(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key := b.s.Keys.Current()
+	rev := msfp.SignRevocation(key, b.s.now())
+	if status, _ := signedCall(t, b, peer(t, b, aOnB.ID), revokePath, marshal(t, rev.Body()), key); status != 200 {
+		t.Fatalf("revoke: %d", status)
+	}
+	// B, still holding the revoked key, answers at another address.
+	before := b.url
+	b2 := moveTo(t, b, "", true)
+	exec(t, a, `UPDATE peers SET new_address = ? WHERE id = ?`, b2.url, bOnA.ID)
+	got := peer(t, a, bOnA.ID)
+	if got.Suspended == nil || got.Move == nil {
+		t.Fatalf("A's view of B: suspended %v, move %+v", got.Suspended, got.Move)
+	}
+	peers, err := a.s.Store.Peers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.s.maintainAddresses(ctx, peers)
+	if p := peer(t, a, bOnA.ID); p.Address != before {
+		t.Fatalf("a suspended peer's address moved, under its revoked key, to %q", p.Address)
 	}
 }

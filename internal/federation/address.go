@@ -329,6 +329,11 @@ var ErrMoveFailed = fmt.Errorf("%w at its new address", ErrUnreachable)
 // those of the old address dropped; otherwise the old one stays, and the
 // failure is noted for the next try, an hour later at least.
 func (s *Service) confirmMove(ctx context.Context, p *store.Peer, m msfp.Move) error {
+	// A revoked key: no call at all, nor an answer under it taken (MSFP
+	// core section 12.6). The move waits for its rotation.
+	if p.Suspended != nil {
+		return ErrSuspended
+	}
 	now := s.now()
 	m.Tried = now
 	there := *p
