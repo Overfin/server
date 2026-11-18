@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/admin"
 	"github.com/overfin/server/internal/api"
 	"github.com/overfin/server/internal/backend"
@@ -53,7 +54,6 @@ import (
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/tmdb"
 	"github.com/overfin/server/internal/watchlist"
-	"github.com/overfin/server/msfp/wire"
 	"golang.org/x/crypto/acme/autocert"
 )
 

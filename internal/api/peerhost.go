@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/msfp-io/msfp-go"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/tracks"
-	"github.com/overfin/server/msfp"
 )
 
 // A paired server's viewer plays one of our titles (ROADMAP.md milestone

@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 
-	"github.com/overfin/server/msfp"
+	"github.com/msfp-io/msfp-go"
 )
 
 // Copy is what a title's page says of one of its copies: its picture's

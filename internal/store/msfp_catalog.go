@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/textclean"
-	"github.com/overfin/server/msfp"
-	"github.com/overfin/server/msfp/wire"
 )
 
 // This server's own catalog, as the MSFP engine reads it to answer paired

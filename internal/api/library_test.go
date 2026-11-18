@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/api"
 	"github.com/overfin/server/internal/catalog"
 	"github.com/overfin/server/internal/config"
@@ -47,8 +49,6 @@ import (
 	"github.com/overfin/server/internal/site"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/watchlist"
-	"github.com/overfin/server/msfp"
-	"github.com/overfin/server/msfp/wire"
 	web "github.com/overfin/web"
 )
 

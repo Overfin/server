@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/textclean"
-	"github.com/overfin/server/msfp"
-	"github.com/overfin/server/msfp/wire"
 )
 
 // maxLabel is how long our name for a taken library's entry may be.

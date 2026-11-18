@@ -11,7 +11,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/overfin/server/msfp"
+	"github.com/msfp-io/msfp-go"
 )
 
 // Federation's records, as the MSFP engine keeps them (msfp.Store): in

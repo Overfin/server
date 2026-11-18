@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/msfp-io/msfp-go"
 	"github.com/overfin/server/internal/api"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/store"
-	"github.com/overfin/server/msfp"
 )
 
 // Overfin as the host of the MSFP engine (package msfp, whose own tests

@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/msfp-io/msfp-go"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/store"
-	"github.com/overfin/server/msfp"
 )
 
 type fakePlaying struct {

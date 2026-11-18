@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/msfp-io/msfp-go"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/store"
-	"github.com/overfin/server/msfp"
 )
 
 // engine is federation now, the MSFP engine: nil without it.

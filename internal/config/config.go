@@ -28,7 +28,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/overfin/server/msfp/wire"
+	"github.com/msfp-io/msfp-go/wire"
 )
 
 // Config is the whole configuration. Field tags give the TOML key names.

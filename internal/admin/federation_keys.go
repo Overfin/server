@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/overfin/server/msfp"
+	"github.com/msfp-io/msfp-go"
 )
 
 // Federation keys (MSFP core section 12, SECURITY.md rules 137 and 138):

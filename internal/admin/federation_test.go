@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/store"
-	"github.com/overfin/server/msfp"
-	"github.com/overfin/server/msfp/wire"
 )
 
 // fedPanel is a signed-in panel whose server has federation, the MSFP

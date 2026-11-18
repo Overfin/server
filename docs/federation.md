@@ -394,8 +394,9 @@ a server that serves it tells anyone it federates):
 discovery = true
 ```
 
-Overfin's federation is the MSFP engine for Go, package `msfp` of
-Overfin's repository (with `msfp/wire`, the protocol's toolkit): Overfin
+Overfin's federation is the MSFP engine for Go,
+[msfp-io/msfp-go](https://github.com/msfp-io/msfp-go) (package `msfp`,
+with `wire`, the protocol's toolkit): Overfin
 hosts it, with its records in Overfin's database, its own libraries and
 titles, its playback and media, and its connections to other servers
 (through the gateway when it runs split). Each copy of a title is one of

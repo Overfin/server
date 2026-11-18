@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/overfin/server/msfp"
+	"github.com/msfp-io/msfp-go"
 )
 
 // What we offer and want is per peer, replaced whole, and goes with it.

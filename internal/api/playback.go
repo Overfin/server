@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/msfp-io/msfp-go"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/library"
@@ -20,7 +21,6 @@ import (
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/textclean"
 	"github.com/overfin/server/internal/tracks"
-	"github.com/overfin/server/msfp"
 )
 
 // Playback starts, follows, ends and restores playbacks.

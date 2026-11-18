@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/overfin/server/msfp"
+	"github.com/msfp-io/msfp-go"
 )
 
 // Peers as the engine writes them (store/msfp.go), for the tests of what

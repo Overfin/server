@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/problem"
-	"github.com/overfin/server/msfp"
-	"github.com/overfin/server/msfp/wire"
 )
 
 // Stream serves what a playback session plays: the media file, rewritten

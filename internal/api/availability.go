@@ -4,10 +4,10 @@ import (
 	"context"
 	"slices"
 
+	"github.com/msfp-io/msfp-go"
 	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/textclean"
-	"github.com/overfin/server/msfp"
 )
 
 // Where a film or an episode is available, for its page: this server

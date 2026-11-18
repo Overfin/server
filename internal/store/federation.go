@@ -8,7 +8,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/overfin/server/msfp"
+	"github.com/msfp-io/msfp-go"
 )
 
 // Paired servers' titles, as this server's pages read them beside its

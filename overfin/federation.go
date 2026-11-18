@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/api"
 	"github.com/overfin/server/internal/config"
 	"github.com/overfin/server/internal/identity"
@@ -19,8 +21,6 @@ import (
 	"github.com/overfin/server/internal/plugin"
 	apiproblem "github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/store"
-	"github.com/overfin/server/msfp"
-	"github.com/overfin/server/msfp/wire"
 )
 
 // Federation (ROADMAP.md milestone 6) is the MSFP engine (package msfp):

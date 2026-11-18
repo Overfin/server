@@ -30,6 +30,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/msfp-io/msfp-go"
 	"github.com/overfin/server/internal/catalog"
 	"github.com/overfin/server/internal/config"
 	"github.com/overfin/server/internal/connector"
@@ -44,7 +45,6 @@ import (
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/theme"
 	"github.com/overfin/server/internal/tmdb"
-	"github.com/overfin/server/msfp"
 )
 
 // uiFiles are the control panel and the setup page, built from frontend/

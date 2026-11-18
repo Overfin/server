@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/msfp-io/msfp-go"
 	"github.com/overfin/server/internal/store"
-	"github.com/overfin/server/msfp"
 )
 
 // A film's page says where it's available, in the order playing picks

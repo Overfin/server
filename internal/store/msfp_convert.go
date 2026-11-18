@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/seal"
-	"github.com/overfin/server/msfp"
-	"github.com/overfin/server/msfp/wire"
 )
 
 // The engine's seals are this server's box, under the engine's contexts

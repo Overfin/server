@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/overfin/server/msfp"
+	"github.com/msfp-io/msfp-go"
 )
 
 // ---- Jellyfin service account ---------------------------------------------------
