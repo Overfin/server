@@ -64,7 +64,9 @@ type schedule struct {
 // sent a hello at once, then on the schedule of MSFP core section 7.5 (Run).
 // Off: this server moves back to its address (Config.Address, or the last
 // SetAddress): announced as an address change once it reaches itself
-// there, until then it still says it can't be called.
+// there, until then it still says it can't be called. Error, off:
+// ErrInvalidAddress for a server opened without an address (SetAddress
+// first).
 func (e *Engine) SetUncallable(ctx context.Context, on bool) error {
 	made := ""
 	if on {
@@ -77,6 +79,9 @@ func (e *Engine) SetUncallable(ctx context.Context, on bool) error {
 	e.keysMu.RLock()
 	configured := e.configured
 	e.keysMu.RUnlock()
+	if !on && configured == "" {
+		return ErrInvalidAddress.with(errors.New("this server has no address to be called at: SetAddress first"))
+	}
 	err := e.moveTo(ctx, func(r *ServerRecord) string {
 		if r.Uncallable == on {
 			return r.Address

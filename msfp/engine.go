@@ -124,6 +124,9 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 		cfg.Logger.Warn("msfp: plain http pairings are on: for tests only, never for a server in use")
 	}
 	switch err := wire.CheckAddress(cfg.Address); {
+	case cfg.Address == "":
+		// Only for a server whose record says it can't be called
+		// (loadKeys).
 	case errors.Is(err, wire.ErrPlainHTTP):
 		return nil, ErrPlainHTTP
 	case err != nil:
@@ -197,6 +200,9 @@ func (e *Engine) newID(prefix string) (string, error) {
 func (e *Engine) loadKeys(ctx context.Context) error {
 	moved := false
 	err := e.changeServer(ctx, func(tx Tx, r *ServerRecord) error {
+		if e.cfg.Address == "" && !r.Uncallable {
+			return ErrInvalidAddress.with(errors.New("no address, and this server's record doesn't say it can't be called"))
+		}
 		if r.Current == nil {
 			made, err := e.newServer()
 			if err != nil {

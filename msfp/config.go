@@ -9,14 +9,18 @@ import (
 	"time"
 )
 
-// Config is what the host gives Open. Only Address and Store are
-// required; every other field has a safe default.
+// Config is what the host gives Open. Only Address (but for a server
+// that can't be called) and Store are required; every other field has a
+// safe default.
 type Config struct {
 	// Address is this server's address, https://host[:port], without a
 	// path (MSFP core section 5.2). Another than at the last start is a
 	// move (SetAddress). While this server can't be called
 	// (SetUncallable), it is kept for when it can again: its address is
-	// then the one of the .invalid form the engine made.
+	// then the one of the .invalid form the engine made. It may be empty
+	// for a server whose stored record says it can't be called: it needs
+	// no address of its own then, until it can be called again
+	// (SetAddress first).
 	Address string
 	// Store keeps the engine's records: msfp/store/jsonfile for a small
 	// host, msfp/store/memory for tests, or the host's own database.
