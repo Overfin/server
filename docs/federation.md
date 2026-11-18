@@ -73,6 +73,57 @@ and the IDs other servers know them by, stay.
 
 Ending a pairing (**End**) is one click, and it ends on both servers at once.
 
+## Your server's key
+
+Each server is known to the others by its key, a pair of numbers made on
+its first start: the fingerprint you compared when pairing is the key's.
+Overfin also makes, in advance, the key it will move to next, and tells
+paired servers which one it is (only a fingerprint of it travels, never
+the key). Under **Federation**, **This server** shows that next key's
+fingerprint.
+
+**Keep the next key offline.** **Export the next key** shows it once, as
+text starting with `overfin-next-key-1.`, with its fingerprint. Keep it
+somewhere safe away from the server (a password manager, or on paper),
+then **Delete it from this server**. Someone who copies your server's
+storage then gets its key, but can't move your paired servers to a key of
+theirs. Changing the key later asks for the copy you kept.
+
+**Changing the key.** **Change this server's key** moves your server to
+its next key, and makes a new next key. Paired servers are told at once,
+and move by themselves: they know it as the next one. Servers paired
+before this existed learn the next key in the first exchange after the
+update, so they move by themselves too; the panel notes that they learnt
+it then rather than when pairing. A server that knows no next key of
+yours asks its operator to confirm the new fingerprint with you first.
+Until a server moved, yours keeps the old key for it, and tells it again
+at each contact and at least daily; after 30 days the old key is deleted,
+and a server still on it shows **Pair again**: remove it and pair again.
+
+**If your server's key is stolen** (the server or a backup copied, say),
+use **This server's key was stolen**. Every paired server is told at once
+that the key is revoked, and stops hearing it. With the next key (on the
+server, or pasted from the copy you kept), your server then moves to it,
+and the paired servers follow by themselves: the thief can't do the same,
+not holding the next key. Without it (or if you tick **Don't move to the
+next key**, because the thief may hold it too), your server gets a new
+key, and every pairing ends: pair again with each server, with new codes
+and comparing fingerprints.
+
+**When a paired server changes its key**, the list shows it:
+
+- **Current**: nothing to do. Its next key is known (from pairing, its
+  last change, or its first exchange after the update).
+- **To confirm**: it moved to a key it hadn't announced. Call its operator
+  and compare the new fingerprint, then **Confirm key**; if they differ,
+  end the pairing.
+- A warning says when someone tried to move it to another key than the
+  one it announced: refused, and its own operator should hear of it.
+- **Suspended**: it said its key was stolen. Nothing is shared with it
+  until it moves to the key it announced; after 30 days without that, it
+  is gone, and you remove it.
+- **Changing**: it hasn't moved to your server's new key yet.
+
 ## Limits
 
 Each pairing has its own limits, set by the server that shares:
@@ -111,7 +162,8 @@ paired gets a plain 404. Nonces are kept in memory, so a request signed
 before a server started is refused: a paired server whose clock runs
 behind is refused for that long after each start (keep both clocks set by
 the network). A compromised paired server can't reach your data or your
-people. The full rules are SECURITY.md's 94 to 100, and 136.
+people. The full rules are SECURITY.md's 94 to 100, 136, and, for
+keys, 137 and 138.
 
 Paired servers say, each time they check on each other, which versions of
 the protocol and of its parts (catalog, playback, media, video) they
@@ -212,9 +264,10 @@ Media Server Federation Protocol, version 1 (its core, and the parts
 catalog, playback, media and video; Overfin has no music): its
 specification and test vectors are at
 [github.com/msfp-io/msfp-spec](https://github.com/msfp-io/msfp-spec).
-Overfin doesn't yet do key rotation and revocation, address changes,
-the discovery document, or servers that can't be called: it doesn't
-serve `rotate` and `revoke` (a path that doesn't exist, the plain 404).
+Overfin does key rotation and revocation (`rotate`, `revoke`, the next key
+commitment in `pair` and `hello`), but not yet address changes, the
+discovery document, or servers that can't be called (`inbound`, and the
+rotations and revocations they pull in `hello` answers).
 
 ## Where it stands
 

@@ -4006,7 +4006,7 @@ paths:
                 name: {type: string, description: What the caller calls itself}
                 secretHash: {type: string, description: URL-safe base64, no padding}
                 proof: {type: string, description: URL-safe base64, no padding}
-                nextCommitment: {type: string, description: "Read for its form only: this server doesn't rotate keys yet"}
+                nextCommitment: {type: string, description: "The caller's next key commitment, SHA-256 of its next key, URL-safe base64, no padding: a later change of the caller's key to that key is followed at once"}
                 inbound: {type: boolean, description: "Read for its form only"}
       responses:
         "200":
@@ -4018,6 +4018,7 @@ paths:
                 required: [name]
                 properties:
                   name: {type: string, description: What this server calls itself}
+                  nextCommitment: {type: string, description: "This server's next key commitment"}
         "404": {description: "Not signed, no such live code, or a wrong proof."}
         "409": {description: "The caller's key is known here already."}
 
@@ -4047,6 +4048,96 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/FederationState"}
+        "404": {description: "Not signed, or not a peer of this server."}
+
+  /federation/rotate:
+    post:
+      operationId: federationRotate
+      summary: A paired server changed its key
+      description: |
+        Server to server, signed both ways as for pair, with the caller's
+        old key, by any peer in any state (MSFP core sections 9.3 and 12).
+        The rotation statement, `msfp-key-rotation-1`, the old key, the new
+        key, the commitment to the key after it (or `-`) and the date, one
+        per line, is signed by both keys. When the new key matches the
+        commitment this server holds for the caller, it becomes the
+        caller's key at once; without a commitment, it waits for this
+        server's operator to confirm its fingerprint; otherwise it is
+        refused, and the operator is warned. The old key is still heard for
+        10 minutes after. A peer whose key was revoked is answered only
+        here and on revoke, and only a rotation to the committed key lifts
+        its suspension.
+      tags: [federation]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newKey, date, oldSignature, newSignature]
+              properties:
+                newKey: {type: string, description: "The new key, URL-safe base64, no padding"}
+                nextCommitment: {type: string, description: "The commitment to the key after it"}
+                date: {type: integer, description: "Unix seconds, within 5 minutes of this server's clock"}
+                oldSignature: {type: string, description: "The old key's signature of the statement"}
+                newSignature: {type: string, description: "The new key's signature of the statement"}
+      responses:
+        "200":
+          description: "The new key is the caller's key here (also for a repeat within the 10 minutes). Signed."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state: {type: string, enum: [rotated]}
+        "202":
+          description: "Waiting for this server's operator to confirm the new key. Signed."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state: {type: string, enum: [pending]}
+        "400": {description: "invalid-request, signed: a bad body, a signature that doesn't verify, or a date more than 5 minutes off."}
+        "404": {description: "Not signed, or not a peer of this server."}
+        "409": {description: "rotation-refused, signed: the new key isn't the committed one, is another server's or a forgotten one's, or the caller's key is revoked and the new key isn't the committed one."}
+
+  /federation/revoke:
+    post:
+      operationId: federationRevoke
+      summary: A paired server says its key was stolen
+      description: |
+        Server to server, signed both ways as for pair, with the key
+        revoked (MSFP core sections 9.4 and 12.6). The revocation
+        statement, `msfp-key-revocation-1`, the key and the date, one per
+        line, is signed by that key. This server then suspends the caller:
+        it answers that key nothing but rotate and revoke, makes no call
+        to it, shows its people nothing of it, and warns its operator.
+        After 30 days without a rotation to the committed key, the peer is
+        gone.
+      tags: [federation]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date, signature]
+              properties:
+                date: {type: integer, description: "Unix seconds, within 5 minutes of this server's clock"}
+                signature: {type: string, description: "The key's signature of the statement"}
+      responses:
+        "200":
+          description: "Suspended (also when it already was). Signed."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state: {type: string, enum: [suspended]}
+        "400": {description: "invalid-request, signed: a bad body, a signature that doesn't verify, or a date more than 5 minutes off."}
         "404": {description: "Not signed, or not a peer of this server."}
 
   /federation/libraries:
@@ -4326,6 +4417,9 @@ components:
           items: {type: string}
           description: "Pins of the certificates the sender's address serves"
         address: {type: string, description: "The sender's address, https://host"}
+        nextCommitment:
+          type: string
+          description: "The sender's next key commitment (SHA-256 of its next key, URL-safe base64, no padding), sent while the pairing has none from pair or a rotation. Kept only by a peer that never had one (trust on first use); ignored otherwise."
     Signin:
       description: What a step of the sign-in pages sends; each uses its own
         fields.
