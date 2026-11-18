@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strings"
 
-
 	"github.com/overfin/server/internal/store"
 )
 
