@@ -32,9 +32,10 @@ const (
 // CheckPGS reads a PGS track whole: every segment's header and length,
 // the presentations', windows' and palettes' sizes, and every picture's
 // run-length data decoded (counted, not drawn) within the size it says it
-// has. Anything else is ErrPGS.
+// has. Anything else is ErrPGS. An empty part, of no segments, is valid:
+// it is the answer for a stretch with no subtitles (video section 6.4).
 func CheckPGS(raw []byte) error {
-	if len(raw) == 0 || len(raw) > MaxPGS {
+	if len(raw) > MaxPGS {
 		return ErrPGS
 	}
 	type object struct {

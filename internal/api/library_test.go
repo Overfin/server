@@ -1016,6 +1016,14 @@ func TestStreamingThroughRewrittenPlaylists(t *testing.T) {
 	if code, body := getAs(t, srv, subject, base+"pictures/s4/3"); code != 200 || body != string(fake.pgs) {
 		t.Errorf("picture subtitles: %d, %d bytes", code, len(body))
 	}
+	// A stretch with no pictures: a 200 with an empty body (MSFP video
+	// section 6.4), not a refusal.
+	fake.mu.Lock()
+	fake.pgs = []byte{}
+	fake.mu.Unlock()
+	if code, body := getAs(t, srv, subject, base+"pictures/s4/3"); code != 200 || body != "" {
+		t.Errorf("picture subtitles, a stretch without any: %d, %d bytes", code, len(body))
+	}
 	fake.mu.Lock()
 	fake.pgs = append(pgsTrack(), "PX"...)
 	fake.mu.Unlock()

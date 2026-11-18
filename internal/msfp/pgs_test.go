@@ -52,8 +52,11 @@ func TestCheckPGS(t *testing.T) {
 	if err := CheckPGS(track(append(first, rest...))); err != nil {
 		t.Errorf("in fragments: %v", err)
 	}
+	// Empty: a stretch with no subtitles (MSFP video section 6.4).
+	if err := CheckPGS(nil); err != nil {
+		t.Errorf("empty: %v", err)
+	}
 	for name, bad := range map[string][]byte{
-		"empty":            nil,
 		"cut short":        ok[:len(ok)-3],
 		"not PGS":          append([]byte("PX"), ok[2:]...),
 		"unknown segment":  append(ok, segment(0x42, nil)...),
