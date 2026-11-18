@@ -1,14 +1,20 @@
 // Command share-folder is a small MSFP host: one server, its records in
-// JSON files, paired by hand with another. It will share a folder's
-// films once the engine has its catalog; for now it pairs.
+// JSON files, sharing a folder of films (folder.go) with the servers it
+// pairs with by hand, and playing theirs.
 //
 // Two of them on one machine:
 //
-//	go run . -address https://127.0.0.1:8441 -listen :8441 -data a -loopback
+//	go run . -address https://127.0.0.1:8441 -listen :8441 -data a -films ~/films -loopback
 //	go run . -address https://127.0.0.1:8442 -listen :8442 -data b -loopback
 //
 // Then type "code" in the first, "redeem <code>" in the second, and
 // "accept <id>" in the first. "peers" lists them, "end <id>" ends one.
+// "offer <id>" shares the films with a peer; on the other side, "want
+// <id>" reads them, "titles <id>" lists them, "play <id> <key>" prints a
+// URL that curl -k or ffplay -tls_verify 0 plays through this server
+// (anyone who has it may, for as long as the playback lasts: an example,
+// not a viewer's page), "stop <playback>" ends it. "rescan" tells the
+// engine the folder changed.
 // "rotate" moves this server to its next key; "stolen" revokes its key
 // and rotates ("stolen none": without the next key, every pairing ends);
 // "confirm <id>" accepts a peer's new key after comparing fingerprints.
@@ -23,6 +29,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -44,6 +51,7 @@ func main() {
 	listen := flag.String("listen", ":8443", "where to listen")
 	data := flag.String("data", "msfp-data", "the directory of its records")
 	loopback := flag.Bool("loopback", false, "allow peers on this machine")
+	films := flag.String("films", "", "the folder of films to share")
 	flag.Parse()
 	ctx := context.Background()
 
@@ -52,13 +60,35 @@ func main() {
 		log.Fatal(err)
 	}
 	cert := selfSigned(*address)
-	eng, err := msfp.Open(ctx, msfp.Config{Address: *address, Store: store, AllowLoopback: *loopback,
-		Pins: []string{wire.Pin(cert.Leaf)}, Notifier: printer{}})
+	cfg := msfp.Config{Address: *address, Store: store, AllowLoopback: *loopback,
+		Pins: []string{wire.Pin(cert.Leaf)}, Notifier: printer{}, Parts: []string{"catalog", "playback", "media", "video"}}
+	if *films != "" {
+		f := folder{*films}
+		cfg.Catalog, cfg.Playback, cfg.Media = f, f, f
+	}
+	eng, err := msfp.Open(ctx, cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/federation/", eng.FederationHandler())
+	mux.Handle("/api/v1/stream/", eng.StreamHandler(nil))
+	mux.HandleFunc("/watch/{id}/{rest...}", func(w http.ResponseWriter, r *http.Request) {
+		p, ok := msfp.ParseMediaPath(r.PathValue("rest"))
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		err := eng.Fetch(r.Context(), r.PathValue("id"), p, r.Header.Get("Range"), msfp.NewHTTPSink(r.Context(), w))
+		switch {
+		case errors.Is(err, msfp.ErrRangeNotSatisfiable):
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+		case errors.Is(err, msfp.ErrServerBusy):
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case err != nil:
+			http.NotFound(w, r)
+		}
+	})
 	srv := &http.Server{Addr: *listen, Handler: mux, TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}}
 	go func() { log.Fatal(srv.ListenAndServeTLS("", "")) }()
 	go eng.Run(ctx)
@@ -92,6 +122,39 @@ func main() {
 			show("moving; peers are told once this server answers there", eng.SetAddress(ctx, arg))
 		case "uncallable":
 			show("can't be called: "+arg, eng.SetUncallable(ctx, arg == "on"))
+		case "offer":
+			show("offered", eng.SetOffers(ctx, arg, []string{"films"}))
+		case "want":
+			libs, err := eng.TheirLibraries(ctx, arg)
+			var ids []string
+			for _, l := range libs {
+				ids = append(ids, l.ID)
+			}
+			if err == nil {
+				err = eng.SetWants(ctx, arg, ids)
+			}
+			n, err := readNow(ctx, eng, arg, err)
+			show(fmt.Sprintf("%d titles", n), err)
+		case "titles":
+			err := store.Read(ctx, func(tx msfp.Tx) error {
+				titles, err := tx.PeerTitles(arg, "", 1000)
+				for _, t := range titles {
+					fmt.Println(t.Common().Key)
+				}
+				return err
+			})
+			show("", err)
+		case "play":
+			peer, key, _ := strings.Cut(arg, " ")
+			pb, err := eng.Play(ctx, peer, msfp.PlayRequest{Title: key, Capabilities: msfp.Capabilities{
+				Containers: []string{"mp4", "mkv", "webm", "ts"}, VideoCodecs: []string{"h264", "hevc", "vp9", "av1"},
+				AudioCodecs: []string{"aac", "mp3", "opus", "ac3"}}})
+			name := map[string]string{"hls": "master.m3u8", "file": "file"}[pb.Protocol]
+			show(fmt.Sprintf("%s/watch/%s/%s  (%s, %s; stop %s)", *address, pb.ID, name, pb.Method, pb.Protocol, pb.ID), err)
+		case "stop":
+			show("stopped", eng.Stop(ctx, arg, -1))
+		case "rescan":
+			eng.CatalogChanged()
 		case "peers":
 			eng.PanelOpen()
 			peers, err := eng.Peers(ctx)
@@ -104,9 +167,18 @@ func main() {
 			}
 			show("", err)
 		default:
-			fmt.Println("code [note] | redeem <code> | accept <id> | end <id> | peers | rotate [key] | stolen [key|none] | confirm <id> | address <url> | uncallable on|off")
+			fmt.Println("code [note] | redeem <code> | accept <id> | end <id> | peers | rotate [key] | stolen [key|none] | " +
+				"confirm <id> | address <url> | uncallable on|off | offer <id> | want <id> | titles <id> | play <id> <key> | stop <playback> | rescan")
 		}
 	}
+}
+
+// readNow reads a peer's titles, unless err.
+func readNow(ctx context.Context, eng *msfp.Engine, peer string, err error) (int, error) {
+	if err != nil {
+		return 0, err
+	}
+	return eng.ReadNow(ctx, peer)
 }
 
 func show(ok string, err error) {

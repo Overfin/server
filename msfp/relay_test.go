@@ -230,7 +230,7 @@ func TestHostilePlayAnswers(t *testing.T) {
 		s.a.eng.StopPlayback(v.ID)
 	}
 	edit(func(m map[string]any) {
-		m["audioTracks"] = []any{map[string]any{"id": "a0", "label": "Eng‮lish\u0007"}, map[string]any{"id": "a01", "label": "x"},
+		m["audioTracks"] = []any{map[string]any{"id": "a0", "label": "Eng\u202elish\u0007"}, map[string]any{"id": "a01", "label": "x"},
 			map[string]any{"id": "a2", "label": ""}, map[string]any{"id": "a3", "label": "y", "role": "evil"}}
 		m["versions"] = []any{map[string]any{"id": "../x", "name": "x"}, map[string]any{"id": "v1", "name": "<b>HD</b>"}}
 		m["segments"] = []any{map[string]any{"kind": "intro", "startMs": 0, "endMs": 1000}, map[string]any{"kind": "ad", "startMs": 0, "endMs": 1}}

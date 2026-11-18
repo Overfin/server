@@ -49,48 +49,70 @@ func (e *Engine) StreamHandler(fallback http.Handler) http.Handler {
 	})
 }
 
-// mediaName is a file name of a stream (MSFP media section 1); partRe a
-// subtitle part's or a sheet's number, without leading zeros.
+// partRe is a subtitle part's or a sheet's number, without leading
+// zeros.
 var partRe = regexp.MustCompile(`^(0|[1-9][0-9]{0,3})$`)
 
-// mediaPath reads what a request asks of a playback, after its ticket:
-// false for anything MSFP doesn't serve.
-func mediaPath(rest string, pb *playback) (MediaPath, bool) {
+// ParseMediaPath reads what a URL asks of a playback, after its ticket
+// (or, at the host's own viewer route, after its own ID for the
+// playback): "master.m3u8", "file", "subtitles/<track>/<part>",
+// "pictures/<track>/<part>", "trickplay/<n>", or a bare name, a playlist
+// when it ends in .m3u8 and a segment otherwise. Each part is checked as
+// MSFP media section 1 says, compared as sent: nothing decoded; false
+// for anything else. A host's viewer route serves playlists unchanged
+// this way: their bare names resolve under it.
+func ParseMediaPath(rest string) (MediaPath, bool) {
 	parts := strings.Split(rest, "/")
 	for _, s := range parts {
 		if !wire.FileName(s) {
 			return MediaPath{}, false
 		}
 	}
-	number := func(s string, below int) (int, bool) {
-		if !partRe.MatchString(s) {
-			return 0, false
-		}
-		n, _ := strconv.Atoi(s)
-		return n, n < below
+	number := func(s string) (int, bool) {
+		n, err := strconv.Atoi(s)
+		return n, err == nil && partRe.MatchString(s)
 	}
 	switch {
-	case len(parts) == 1 && pb.protocol == "file":
-		return MediaPath{Kind: MediaFile}, parts[0] == "file"
 	case len(parts) == 1 && parts[0] == "master.m3u8":
 		return MediaPath{Kind: MediaMaster}, true
+	case len(parts) == 1 && parts[0] == "file":
+		return MediaPath{Kind: MediaFile}, true
 	case len(parts) == 1 && strings.HasSuffix(parts[0], ".m3u8"):
 		return MediaPath{Kind: MediaPlaylist, Name: parts[0]}, true
 	case len(parts) == 1:
-		return MediaPath{Kind: MediaSegment, Name: parts[0]}, parts[0] != "file"
+		return MediaPath{Kind: MediaSegment, Name: parts[0]}, true
 	case len(parts) == 2 && parts[0] == "trickplay":
-		n, ok := number(parts[1], pb.sheets)
+		n, ok := number(parts[1])
 		return MediaPath{Kind: MediaSheet, Sheet: n}, ok
 	case len(parts) == 3 && (parts[0] == "subtitles" || parts[0] == "pictures"):
-		pictures, ok := pb.subtitles[parts[1]]
-		n, numberOK := number(parts[2], 10_000)
+		n, ok := number(parts[2])
 		kind := MediaSubtitles
-		if pictures {
+		if parts[0] == "pictures" {
 			kind = MediaPictures
 		}
-		return MediaPath{Kind: kind, Track: parts[1], Part: n}, ok && numberOK && pictures == (parts[0] == "pictures")
+		return MediaPath{Kind: kind, Track: parts[1], Part: n}, ok
 	}
 	return MediaPath{}, false
+}
+
+// mediaPath reads what a request asks of a peer's playback here: false
+// for anything the playback doesn't serve (another protocol's names, a
+// track it hasn't, a sheet past the count).
+func mediaPath(rest string, pb *playback) (MediaPath, bool) {
+	p, ok := ParseMediaPath(rest)
+	if !ok {
+		return MediaPath{}, false
+	}
+	switch p.Kind {
+	case MediaFile:
+		return p, pb.protocol == "file"
+	case MediaMaster, MediaPlaylist, MediaSegment:
+		return p, pb.protocol == "hls"
+	case MediaSheet:
+		return p, p.Sheet < pb.sheets
+	}
+	pictures, has := pb.subtitles[p.Track]
+	return p, has && pictures == (p.Kind == MediaPictures)
 }
 
 // ParseRange reads a Range header of MSFP media section 2.1: one range of
@@ -266,6 +288,14 @@ func normalLines(b []byte) []byte {
 		}
 	}
 	return out.Bytes()
+}
+
+// NewHTTPSink is a ResponseSink on an http.ResponseWriter, for a host's
+// viewer route around Fetch: the status and only the headers MSFP needs
+// (Content-Type, Content-Length, Content-Range, Accept-Ranges), no
+// content coding. Writes fail once ctx is done.
+func NewHTTPSink(ctx context.Context, w http.ResponseWriter) ResponseSink {
+	return &httpSink{w: w, ctx: ctx}
 }
 
 // httpSink is a ResponseSink on an http.ResponseWriter: the status and

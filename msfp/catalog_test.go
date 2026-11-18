@@ -19,7 +19,7 @@ import (
 func TestLibrariesAndPaging(t *testing.T) {
 	ctx := context.Background()
 	h := newFakeHost()
-	h.libs = []msfp.Library{{ID: "films", Name: " Films​ ", Kind: "movies"}, {ID: "other", Name: "Other", Kind: "weird"}}
+	h.libs = []msfp.Library{{ID: "films", Name: " Films\u200b ", Kind: "movies"}, {ID: "other", Name: "Other", Kind: "weird"}}
 	for i := 1; i <= 12_001; i++ {
 		h.film("films", fmt.Sprintf("movie/tmdb/%d", i), "en")
 	}

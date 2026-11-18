@@ -605,7 +605,7 @@ func (e *Engine) play(req *request) response {
 			return e.hostRefusal(err, "admit")
 		}
 	}
-	pb, res := e.register(req, p, *in.Title, chosen, info, started, slot, audioOnly)
+	pb, res := e.register(p, *in.Title, chosen, info, started, slot, audioOnly)
 	if pb == nil {
 		return res.response
 	}
@@ -669,7 +669,7 @@ type registered struct {
 // register makes a started playback live: its ID and its ticket, 128
 // bits and 256 bits of randomness, the ticket kept by its hash only
 // (MSFP media section 1).
-func (e *Engine) register(req *request, p *PeerRecord, title string, c Copy, info CopyInfo, s Started, slot *countSlot, audioOnly bool) (*playback, registered) {
+func (e *Engine) register(p *PeerRecord, title string, c Copy, info CopyInfo, s Started, slot *countSlot, audioOnly bool) (*playback, registered) {
 	fail := func() (*playback, registered) {
 		slot.Release()
 		e.hostStop(s.Handle, EndStopped)
