@@ -3,6 +3,7 @@ package wire
 import (
 	"html"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -133,4 +134,48 @@ func dropInvisible(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// StretchSeconds is how long a part of subtitles covers (video section
+// 6.2): part n covers n × 120 to (n + 1) × 120 seconds.
+const StretchSeconds = 120
+
+// WebVTTPart is part n of a whole WebVTT track, for an owning server
+// that holds its subtitles as one file: the track rebuilt as
+// RebuildWebVTT does, keeping the cues that show during the part's
+// stretch, from 10 seconds before it (video section 6.2). A part with no
+// cue is "WEBVTT" and a line feed. False when the track isn't WebVTT.
+func WebVTTPart(track []byte, n int) ([]byte, bool) {
+	all, ok := RebuildWebVTT(track)
+	if !ok {
+		return nil, false
+	}
+	from := int64(n*StretchSeconds-10) * 1000
+	to := int64(n+1) * StretchSeconds * 1000
+	var out strings.Builder
+	out.WriteString("WEBVTT\n")
+	for _, cue := range strings.Split(string(all), "\n\n")[1:] {
+		timing, _, _ := strings.Cut(cue, "\n")
+		m := cueTiming.FindStringSubmatch(timing)
+		if m != nil && cueMs(m[2]) > from && cueMs(m[1]) < to {
+			out.WriteString("\n" + cue)
+			if !strings.HasSuffix(cue, "\n") {
+				out.WriteString("\n")
+			}
+		}
+	}
+	return []byte(out.String()), true
+}
+
+// cueMs is a cue timestamp, [hours:]minutes:seconds.milliseconds, in
+// milliseconds.
+func cueMs(ts string) int64 {
+	var ms int64
+	clock, frac, _ := strings.Cut(ts, ".")
+	for _, part := range strings.Split(clock, ":") {
+		n, _ := strconv.ParseInt(part, 10, 64)
+		ms = ms*60 + n
+	}
+	f, _ := strconv.ParseInt(frac, 10, 64)
+	return ms*1000 + f
 }
