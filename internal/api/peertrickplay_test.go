@@ -2,12 +2,10 @@ package api_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"image"
 	"image/jpeg"
 	"image/png"
-	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -68,57 +66,12 @@ func startOnA(t *testing.T, x *twoServers) (previewSession, string) {
 }
 
 // A paired server's previews are part of its playback: B offers them with
-// the playback's ticket, to that ticket only and never to a browser; A
+// the playback's ticket (the engine's rules for it are msfp's tests); A
 // offers them at its own playback's route, each sheet fetched from B and
 // re-encoded, and refuses sheets that aren't what B announced.
 func TestPeerPlaybackPreviews(t *testing.T) {
-	ctx := context.Background()
 	var standIn sheetStandIn
-	x := pairForPlayWith(t, true, standIn.wrap)
-
-	// B, asked by A: the previews' sheets under the playback's ticket.
-	var onB previewSession
-	if status, err := x.a.Call(ctx, x.bOnA, "/api/v1/federation/play", map[string]any{"title": "movie/tmdb/949", "capabilities": map[string]any{}}, &onB); err != nil || status != 200 {
-		t.Fatalf("play on B: %d %v", status, err)
-	}
-	base := strings.TrimSuffix(onB.Stream.URL, "file")
-	if tp := onB.Trickplay; tp == nil || tp.TileWidth != 320 || tp.Columns != 10 || tp.TileCount != 645 || len(tp.Sheets) != 7 ||
-		tp.Sheets[6] != base+"trickplay/6" || !strings.HasPrefix(base, x.srvB.URL+"/api/v1/stream/") {
-		t.Fatalf("B's previews: %+v (stream %s)", tp, onB.Stream.URL)
-	}
-	fromB := func(url string, header map[string]string) (int, string) {
-		req, _ := http.NewRequest("GET", url, nil)
-		for k, v := range header {
-			req.Header.Set(k, v)
-		}
-		res, err := x.srvB.Client().Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer res.Body.Close()
-		b, _ := io.ReadAll(res.Body)
-		return res.StatusCode, string(b)
-	}
-	if code, body := fromB(base+"trickplay/6", nil); code != 200 || !strings.HasPrefix(body, "\xff\xd8") {
-		t.Fatalf("B's sheet by its ticket: %d", code)
-	}
-	// The ticket is required, a browser never gets it, and only the sheets
-	// there are.
-	for _, bad := range []string{
-		x.srvB.URL + "/api/v1/stream/" + strings.Repeat("x", 32) + "/trickplay/6",
-		x.srvB.URL + "/api/v1/stream//trickplay/6",
-		base + "trickplay/7", base + "trickplay/06", base + "trickplay/-1", base + "trickplay/6?width=1",
-	} {
-		if code, _ := fromB(bad, nil); code != http.StatusNotFound {
-			t.Errorf("%s: %d", bad, code)
-		}
-	}
-	for _, h := range []map[string]string{{"Origin": x.srvA.URL}, {"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Mode": "no-cors"}} {
-		if code, _ := fromB(base+"trickplay/6", h); code != http.StatusNotFound {
-			t.Errorf("a browser (%v): %d", h, code)
-		}
-	}
-	x.a.Call(ctx, x.bOnA, "/api/v1/federation/stop", map[string]any{"id": onB.ID}, &struct{}{})
+	x := pairForPlayWith(t, standIn.wrap)
 
 	// A's viewer: the same previews, at A's own addresses.
 	s, body := startOnA(t, x)
@@ -173,7 +126,7 @@ func TestPeerPlaybackPreviews(t *testing.T) {
 // A paired server without previews for a copy, or with previews outside
 // what MSFP allows, plays without them, as an older Overfin's do.
 func TestPeerPlaybackWithoutPreviews(t *testing.T) {
-	x := pairForPlay(t, true)
+	x := pairForPlay(t)
 	x.fakeB.setTrickplay(true, nil)
 	s, body := startOnA(t, x)
 	if s.Trickplay != nil || strings.Contains(body, "trickplay") {

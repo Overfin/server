@@ -2,7 +2,6 @@ package overfin
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -24,7 +23,6 @@ import (
 	"github.com/overfin/server/internal/connector"
 	"github.com/overfin/server/internal/emails"
 	"github.com/overfin/server/internal/feature"
-	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/gpu"
 	"github.com/overfin/server/internal/identity"
 	"github.com/overfin/server/internal/images"
@@ -48,7 +46,6 @@ import (
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/takeover"
 	"github.com/overfin/server/internal/tmdb"
-	"github.com/overfin/server/msfp/wire"
 )
 
 // shared is what lives for the whole run, across configuration reloads: the
@@ -84,9 +81,8 @@ type shared struct {
 	// proof checks the sign-in pages' forms against scripts; one for the
 	// whole run, so a check is used once whatever reloads.
 	proof *proof.Checker
-	// fed is what federation keeps across rebuilds: this server's key,
-	// the nonces already accepted, and the client for peers.
-	fed fedShared
+	// fed is federation, the MSFP engine, for the whole run.
+	fed fedHost
 	// tmdb is TMDB itself, with the operator's token: TMDB's data comes
 	// from it first, from Seerr otherwise.
 	tmdb *tmdb.Client
@@ -160,13 +156,7 @@ type built struct {
 	managed *api.Managed
 	// playback serves playbacks; its janitor ends the idle ones.
 	playback api.Playback
-	// fed is federation, nil when the site has no address for it.
-	fed *federation.Service
 }
-
-// leftovers stops, once per process, the playbacks on paired servers a
-// former run of it left (Playback.StopLeftovers).
-var leftovers sync.Once
 
 func build(cfg *config.Config, sh *shared) (*built, error) {
 	// Checked at every build, a reload's too, not only at start.
@@ -255,9 +245,8 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 		MaxBitrateKbps:  cfg.Limits.MaxBitrateKbps,
 		MaxTranscodes:   cfg.Limits.MaxTranscodesTotal,
 		RefuseOverLimit: cfg.Limits.OnLimit == "refuse", PeerTranscodeReserve: cfg.Limits.PeerTranscodeReserve, Logger: logger}
-	// Federation, made further down: paired servers' viewers play too.
-	var fedNow *federation.Service
-	pb.Federation = func() *federation.Service { return fedNow }
+	// Federation: paired servers' viewers play too.
+	pb.Engine = sh.fed.current
 	// The modules the operator switched on, with their control panel routes
 	// and tabs.
 	b := &built{admin: http.NewServeMux(), playback: pb, on: on}
@@ -303,14 +292,8 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	plugins = append(plugins, signIn...)
 	// Federation: its routes answer paired servers only, and a server using
 	// a live code; with neither, everything is a plain 404.
-	if fed := federationService(cfg, sh); fed != nil {
-		b.fed, fedNow = fed, fed
-		fed.PeerChanged = pb.PeerChanged
-		plugins = append(plugins, federation.Plugin{S: fed})
-		// What this server played on paired servers before it started:
-		// once, at the first build with federation, before anyone plays
-		// (later builds, a reload or a panel save, have live playbacks).
-		leftovers.Do(func() { pb.StopLeftovers(context.Background()) })
+	if eng := sh.federation(cfg); eng != nil {
+		plugins = append(plugins, fedRoutes{engine: eng})
 	}
 	if cfg.Plugins.Enabled("library") {
 		plugins = append(plugins, lib)
@@ -343,70 +326,8 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	if err != nil {
 		return nil, err
 	}
-	b.handler = h
+	b.handler = discoveryFirst(&sh.fed, cfg.Federation.Discovery, h)
 	return b, nil
-}
-
-// fedShared is what federation keeps across rebuilds.
-type fedShared struct {
-	keys  *federation.Keys
-	seen  *wire.Nonces
-	http  *http.Client
-	certs *federation.Certificates
-	// limits are the limits on federation calls, and the memory of peers
-	// that asked to wait.
-	limits *federation.Limits
-}
-
-// federationService is federation on this server, its address noted
-// (NoteAddress), or nil when the site has
-// no address a code could give (no site.url, HTTPS domain or sign-in
-// return address), one with a path (peers reach a server at its site's
-// root), or one that is plain http: MSFP is HTTPS only, but for the test
-// setting federation.test_plain_http.
-//
-// When the operator says this server can't be called (MSFP core section
-// 7.5), it federates under its address of the form
-// https://msfp-<26 characters>.invalid instead, made once and kept, and
-// needs no site address.
-func federationService(cfg *config.Config, sh *shared) *federation.Service {
-	if sh.fed.http == nil {
-		return nil
-	}
-	db := sh.db
-	uncallable, address, err := db.FederationUncallable(context.Background(), wire.NewUncallableAddress)
-	if err != nil {
-		sh.logger.Error("federation: off, whether this server can be called couldn't be read", "error", err)
-		return nil
-	}
-	if !uncallable {
-		address = wire.Origin(siteURL(cfg))
-		if address == "" {
-			return nil
-		}
-		if _, err := wire.NewCode(address, sh.fed.keys.Current().Public(), time.Now()); err != nil {
-			sh.logger.Info("federation: off, the site's address isn't https://host alone", "address", address, "error", err)
-			return nil
-		}
-	}
-	// Its name, without branding: its site's host, even when it can't be
-	// called and federates under another.
-	named := cmp.Or(wire.Origin(siteURL(cfg)), address)
-	fed := &federation.Service{Store: db, Keys: sh.fed.keys, Address: address, Uncallable: uncallable, HTTP: sh.fed.http, Seen: sh.fed.seen,
-		Certificates: sh.fed.certs, Limits: sh.fed.limits, Logger: sh.logger, Name: func(ctx context.Context) string {
-			if b, err := db.Branding(ctx); err == nil && b.On && b.Name != "" {
-				return b.Name
-			}
-			u, _ := url.Parse(named)
-			return u.Host
-		}}
-	// A site address other than the last one federated under is a move
-	// (MSFP core section 13): paired servers are told, and the former
-	// address still accepted for a while.
-	if err := fed.NoteAddress(context.Background()); err != nil {
-		sh.logger.Error("federation: this server's address couldn't be noted", "error", err)
-	}
-	return fed
 }
 
 // newSite is the website Overfin serves beside the API: the one this build
@@ -869,26 +790,23 @@ func (g *gateway) SetPreviews(ctx context.Context, on bool) error {
 // FederationUncallable says whether this server's operator said it can't
 // be called (MSFP core section 7.5).
 func (g *gateway) FederationUncallable(ctx context.Context) (bool, error) {
-	on, _, err := g.sh.db.FederationUncallable(ctx, wire.NewUncallableAddress)
-	return on, err
+	if eng := g.sh.fed.current(); eng != nil {
+		sv, err := eng.Server(ctx)
+		return sv.Uncallable, err
+	}
+	return uncallableRecord(ctx, g.sh.db)
 }
 
-// SetFederationUncallable saves whether this server can't be called, and
-// builds federation anew with it: under its address of the form
-// https://msfp-<26 characters>.invalid, or its site's again. Paired
-// servers are told by the move of address (NoteAddress).
+// SetFederationUncallable says whether this server can't be called: it
+// federates under its address of the form https://msfp-<26
+// characters>.invalid, or its site's again (the engine's SetUncallable).
+// Paired servers are told by the move of address.
 func (g *gateway) SetFederationUncallable(ctx context.Context, on bool) error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if err := g.sh.db.SetFederationUncallable(ctx, on); err != nil {
-		return err
+	eng := g.sh.fed.current()
+	if eng == nil {
+		return errors.New("federation needs the site's https address first")
 	}
-	b, err := build(g.cfg, g.sh)
-	if err != nil {
-		return err
-	}
-	g.current.Store(b)
-	return nil
+	return eng.SetUncallable(ctx, on)
 }
 
 // choices are the operator's, among the Jellyfin settings Overfin owns.

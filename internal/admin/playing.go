@@ -63,8 +63,8 @@ func (p *Panel) playing(w http.ResponseWriter, r *http.Request, _ *session) {
 			// A paired server's viewer: that server, never a person here.
 			if _, ok := names[s.AccountID]; !ok {
 				names[s.AccountID] = "Paired server"
-				if peer, err := p.Store.PeerByID(ctx, peerID); err == nil {
-					names[s.AccountID] = peer.Name + " (paired server)"
+				if name, err := p.Store.PeerName(ctx, peerID); err == nil {
+					names[s.AccountID] = name + " (paired server)"
 				}
 			}
 		}

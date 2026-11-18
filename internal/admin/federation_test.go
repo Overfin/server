@@ -9,35 +9,53 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/overfin/server/internal/federation"
-	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp"
 	"github.com/overfin/server/msfp/wire"
 )
 
-// fedPanel is a signed-in panel whose server has federation, on a test
-// server of its own.
-func fedPanel(t *testing.T, name string) (*browser, *federation.Service) {
+// fedPanel is a signed-in panel whose server has federation, the MSFP
+// engine, on a test server of its own: over HTTPS, as MSFP is, with the
+// test server's certificate, which the server names to its peers.
+func fedPanel(t *testing.T, name string) (*browser, *msfp.Engine, *store.Store) {
 	t.Helper()
 	p, b, db, _ := signedInPanel(t)
-	keys, err := federation.LoadKeys(context.Background(), db)
+	mux := http.NewServeMux()
+	ts := httptest.NewTLSServer(mux)
+	t.Cleanup(ts.Close)
+	e, err := msfp.Open(context.Background(), msfp.Config{Address: ts.URL, Store: db.MSFP(), Name: func() string { return name },
+		Pins: []string{wire.Pin(ts.Certificate())}, AllowLoopback: true, Clock: secondsClock{},
+		Parts: []string{"catalog", "playback", "media", "video"}, Catalog: store.MSFPCatalog{S: db},
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err != nil {
 		t.Fatal(err)
 	}
-	mux := http.NewServeMux()
-	// Over HTTPS, as MSFP is, with the test server's certificate, which
-	// the server names to its peers.
-	ts := httptest.NewTLSServer(mux)
-	t.Cleanup(ts.Close)
-	s := &federation.Service{Store: db, Keys: keys, Address: ts.URL, HTTP: federation.NewHTTPClient(),
-		Certificates: &federation.Certificates{},
-		Name:         func(context.Context) string { return name }, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	if err := plugin.NewRegistrar(mux, func(h http.Handler) http.Handler { return h }).Load(federation.Plugin{S: s}); err != nil {
+	mux.Handle("/api/v1/federation/", e.FederationHandler())
+	p.Engine = func() *msfp.Engine { return e }
+	return b, e, db
+}
+
+// secondsClock is the system's time cut to the second: an engine started
+// at it hears requests dated the second it started, which tests make at
+// once.
+type secondsClock struct{}
+
+func (secondsClock) Now() time.Time { return time.Now().Truncate(time.Second) }
+
+// putPeer writes a peer as the engine would have.
+func putPeer(t *testing.T, db *store.Store, p msfp.PeerRecord) {
+	t.Helper()
+	if p.Key == nil {
+		p.Key = wire.NewKey().Public()
+	}
+	if p.Inbound == "" {
+		p.Inbound = msfp.InboundYes
+	}
+	if err := db.MSFP().Update(context.Background(), func(tx msfp.Tx) error { return tx.PutPeer(p) }); err != nil {
 		t.Fatal(err)
 	}
-	p.Federation = func() *federation.Service { return s }
-	return b, s
 }
 
 type fedState struct {
@@ -64,8 +82,8 @@ func readState(t *testing.T, b *browser) fedState {
 // the other reads it (the fingerprint matches the first server's), uses
 // it, and the first accepts; then one ends it.
 func TestFederationPanel(t *testing.T) {
-	a, _ := fedPanel(t, "A")
-	b, _ := fedPanel(t, "B")
+	a, _, _ := fedPanel(t, "A")
+	b, _, _ := fedPanel(t, "B")
 	rec := a.do("POST", "/admin/api/federation/codes", `{"note":"  for   B "}`, nil)
 	var made struct{ ID, Note, Code string }
 	json.Unmarshal(rec.Body.Bytes(), &made)
@@ -144,12 +162,12 @@ func TestFederationUnavailable(t *testing.T) {
 // each list counts it; a server not paired yet has no sharing.
 func TestSharingPanel(t *testing.T) {
 	ctx := context.Background()
-	a, fa := fedPanel(t, "A")
-	b, fb := fedPanel(t, "B")
-	fa.Store.SetLibraries(ctx, []store.Library{{ID: "films", Item: json.RawMessage(`{"Name":"Films","CollectionType":"movies"}`)},
+	a, fa, dbA := fedPanel(t, "A")
+	b, fb, _ := fedPanel(t, "B")
+	dbA.SetLibraries(ctx, []store.Library{{ID: "films", Item: json.RawMessage(`{"Name":"Films","CollectionType":"movies"}`)},
 		{ID: "series", Item: json.RawMessage(`{"Name":"Séries","CollectionType":"tvshows"}`)}})
-	code, _, _ := fa.NewCode(ctx, "")
-	aOnB, err := fb.UseCode(ctx, code)
+	code, _, _ := fa.MakeCode(ctx, "")
+	aOnB, err := fb.RedeemCode(ctx, code)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,47 +217,13 @@ func TestSharingPanel(t *testing.T) {
 	}
 }
 
-// A stored peer whose key MSFP refuses (one of small order: never an
-// honest server's) is shown unusable in the panel; an honest one isn't.
-func TestFederationPanelUnusableKey(t *testing.T) {
-	a, s := fedPanel(t, "A")
-	ctx := context.Background()
-	identity := make([]byte, 32)
-	identity[0] = 1
-	if _, err := s.Store.AddPeer(ctx, identity, "https://b.example.org", "B", nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Store.AddPeer(ctx, wire.NewKey().Public(), "https://c.example.org", "C", nil); err != nil {
-		t.Fatal(err)
-	}
-	var st struct {
-		Peers []struct {
-			Name     string
-			Unusable bool
-		}
-	}
-	rec := a.do("GET", "/admin/api/federation", "", nil)
-	if json.Unmarshal(rec.Body.Bytes(), &st) != nil || len(st.Peers) != 2 {
-		t.Fatalf("state: %d %s", rec.Code, rec.Body)
-	}
-	for _, p := range st.Peers {
-		if p.Unusable != (p.Name == "B") {
-			t.Errorf("%s: unusable %v", p.Name, p.Unusable)
-		}
-	}
-}
-
 // A library we want that the peer no longer offers (it changed its
 // library IDs, say) is counted on the peer's row, to choose again.
 func TestFederationPanelWantsGone(t *testing.T) {
-	a, s := fedPanel(t, "A")
-	ctx := context.Background()
-	p, err := s.Store.AddPeer(ctx, wire.NewKey().Public(), "https://b.example.org", "B", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.Store.SetPeerWants(ctx, p.ID, []store.PeerLibrary{{ID: "old", Name: "Films", Kind: "movies"}})
-	s.Store.RenamePeerWants(ctx, p.ID, "", []store.PeerLibrary{{ID: "lib_new", Name: "Films", Kind: "movies"}})
+	a, _, db := fedPanel(t, "A")
+	putPeer(t, db, msfp.PeerRecord{ID: "pb", Name: "B", Address: "https://b.example.org", State: msfp.Paired,
+		Wants: []msfp.WantedLibrary{{ID: "old", Name: "Films", Kind: "movies", Wanted: true, Gone: true},
+			{ID: "lib_new", Name: "Films", Kind: "movies"}}})
 	var st struct {
 		Peers []struct{ WantsGone int }
 	}
@@ -249,17 +233,15 @@ func TestFederationPanelWantsGone(t *testing.T) {
 	}
 }
 
-// fakeUncallable is the gateway's setting, kept in the store as it does,
-// without building federation anew.
-type fakeUncallable struct{ db *store.Store }
+// fakeUncallable is the gateway's setting without an engine: kept until
+// it opens one.
+type fakeUncallable struct{ on *bool }
 
-func (f fakeUncallable) FederationUncallable(ctx context.Context) (bool, error) {
-	on, _, err := f.db.FederationUncallable(ctx, wire.NewUncallableAddress)
-	return on, err
-}
+func (f fakeUncallable) FederationUncallable(context.Context) (bool, error) { return *f.on, nil }
 
-func (f fakeUncallable) SetFederationUncallable(ctx context.Context, on bool) error {
-	return f.db.SetFederationUncallable(ctx, on)
+func (f fakeUncallable) SetFederationUncallable(_ context.Context, on bool) error {
+	*f.on = on
+	return nil
 }
 
 // "This server can't be called" (MSFP core section 7.5): shown, and set,
@@ -267,8 +249,8 @@ func (f fakeUncallable) SetFederationUncallable(ctx context.Context, on bool) er
 // can't be called makes no code, and a peer that can't be called is
 // listed as such, with callsFailed.
 func TestFederationPanelUncallable(t *testing.T) {
-	p, b, db, _ := signedInPanel(t)
-	p.Uncallable = fakeUncallable{db}
+	p, b, _, _ := signedInPanel(t)
+	p.Uncallable = fakeUncallable{new(bool)}
 	read := func() map[string]any {
 		t.Helper()
 		rec := b.do("GET", "/admin/api/federation", "", nil)
@@ -288,17 +270,15 @@ func TestFederationPanelUncallable(t *testing.T) {
 		t.Fatalf("on: %v", s)
 	}
 
-	a, s := fedPanel(t, "A")
-	s.Uncallable = true
+	a, e, db := fedPanel(t, "A")
+	if err := e.SetUncallable(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
 	if rec := a.do("POST", "/admin/api/federation/codes", `{"note":""}`, nil); rec.Code != 409 || !strings.Contains(rec.Body.String(), "no-codes") {
 		t.Fatalf("a code from a server that can't be called: %d %s", rec.Code, rec.Body)
 	}
-	pe, err := s.Store.AddPeer(context.Background(), wire.NewKey().Public(), wire.NewUncallableAddress(), "P", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.Store.SetPeerInbound(context.Background(), pe.ID, store.InboundNo)
-	s.Store.SetPeerCallsFailed(context.Background(), pe.ID, true)
+	putPeer(t, db, msfp.PeerRecord{ID: "pp", Name: "P", Address: wire.NewUncallableAddress(), State: msfp.Paired,
+		Inbound: msfp.InboundNo, CallsFailed: true})
 	rec := a.do("GET", "/admin/api/federation", "", nil)
 	var st struct {
 		Uncallable bool

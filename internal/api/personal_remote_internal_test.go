@@ -13,6 +13,7 @@ import (
 	"github.com/overfin/server/internal/provision"
 	"github.com/overfin/server/internal/seal"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp"
 )
 
 // A paired server's copy holding two episodes, watched to its end, marks
@@ -36,12 +37,16 @@ func TestRemoteCopyWithMarksBoth(t *testing.T) {
 		t.Fatal(err)
 	}
 	key, _ := hex.DecodeString(strings.Repeat("ab", 32))
-	peer, err := st.AddPeer(ctx, key, "https://b.example.org", "B", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	peer := msfp.PeerRecord{ID: "pb", Key: key, Name: "B", Address: "https://b.example.org", State: msfp.Paired,
+		Inbound: msfp.InboundYes, Wants: []msfp.WantedLibrary{{ID: "L", Name: "Series", Kind: "tvshows", Wanted: true}}}
 	first, second := "series/tmdb/1399/e63056", "series/tmdb/1399/e63057"
-	if err := st.SetPeerTitles(ctx, peer.ID, []store.PeerTitle{{Key: first, Kind: "episode", Library: "L", With: []string{second}}}); err != nil {
+	if err := st.MSFP().Update(ctx, func(tx msfp.Tx) error {
+		if err := tx.PutPeer(peer); err != nil {
+			return err
+		}
+		return tx.PutPeerTitles(peer.ID, 1, []msfp.Title{&msfp.VideoTitle{TitleCommon: msfp.TitleCommon{Key: first, Kind: "episode",
+			Libraries: []string{"L"}}, With: []string{second}}})
+	}); err != nil {
 		t.Fatal(err)
 	}
 	pb := Playback{Library: Library{Provisioner: &provision.Provisioner{Store: st}}, Tickets: playback.NewTickets(time.Hour)}

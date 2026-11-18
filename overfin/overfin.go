@@ -32,7 +32,6 @@ import (
 	"github.com/overfin/server/internal/connector"
 	"github.com/overfin/server/internal/cookie"
 	"github.com/overfin/server/internal/emails"
-	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/gpu"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/imdb"
@@ -741,6 +740,21 @@ func run(logger *slog.Logger) error {
 		100*time.Millisecond, 3*time.Second)
 	sh.titles = catalog.NewTitles(func() catalog.TitleSource { return gw.titleSource() }, db, logger,
 		10*time.Minute, 100*time.Millisecond)
+	// Federation's engine runs for the whole run; its host plays with the
+	// playbacks' handler in use (gw, once built) and wakes TMDB's
+	// fetching when a paired server's titles were read.
+	sh.fed.ctx = ctx
+	sh.fed.playback = func() (api.Playback, bool) {
+		if gw == nil {
+			return api.Playback{}, false
+		}
+		b := gw.current.Load()
+		if b == nil {
+			return api.Playback{}, false
+		}
+		return b.playback, true
+	}
+	sh.fed.titles = func() { sh.titles.Wake(); sh.ratings.Wake() }
 	gw, err = newGateway(*configPath, cfg, sh)
 	if err != nil {
 		return err
@@ -758,10 +772,6 @@ func run(logger *slog.Logger) error {
 	// Overfin, keeping where an abandoned playback stopped).
 	go api.RunJanitor(ctx, func() api.Playback { return gw.current.Load().playback })
 	go purgeExpired(ctx, db, logger)
-	// Federation: each paired server's titles, read again regularly.
-	go syncPeers(ctx, func() *federation.Service { return gw.current.Load().fed })
-	go maintainKeys(ctx, func() *federation.Service { return gw.current.Load().fed })
-	go helloSchedule(ctx, func() *federation.Service { return gw.current.Load().fed })
 	// The catalog's index, read through Overfin's Jellyfin service account,
 	// as Jellyfin's socket says the library changed (polling only while
 	// it's out of reach), and whole once a day.
@@ -839,7 +849,7 @@ func run(logger *slog.Logger) error {
 		o := cfg.OIDC
 		p := &admin.Panel{Version: Version, Features: gw, Modules: gw, Jellyfin: gw, Libraries: newLibraries(gw), Transcoding: gw, Seerr: gw, Catalog: cat, Group: a.Group, Logger: logger,
 			TMDB: func() bool { return gw.tmdbSource() != nil }, TMDBTokens: gw, IntroSkipper: skipper,
-			Federation: func() *federation.Service { return gw.current.Load().fed },
+			Engine:     sh.fed.current,
 			Uncallable: gw,
 			// A new language: artwork and discovery's lists, read again now.
 			OnLanguage: func() { sh.titles.Wake(); sh.lists.Wake() },
@@ -956,16 +966,6 @@ func newShared(cfg *config.Config, db *store.Store, moduleDBs map[string]*sql.DB
 		// Emails, with the operator's own templates next to the database.
 		emails: &emails.Writer{Dir: filepath.Join(filepath.Dir(cfg.Storage.Path), "mail-templates"), Store: db, Logger: logger},
 		proof:  &proof.Checker{Key: k.Proof}}
-	// This server's federation keys: its key, made on the first start,
-	// and the next one, made in advance.
-	fedKeys, err := federation.LoadKeys(context.Background(), db)
-	if err != nil {
-		return nil, err
-	}
-	// The nonces' memory begins now: a request signed before this start
-	// is refused, its nonce perhaps seen by the last one.
-	sh.fed = fedShared{keys: fedKeys, seen: wire.NewNonces(time.Now()), http: federation.NewHTTPClient(),
-		certs: &federation.Certificates{Pins: cfg.Site.Certificates}, limits: &federation.Limits{}}
 	// Notices: account events, by email and webhook, as the panel sets.
 	sh.notices = &notices.Notifier{Store: db, Emails: sh.emails, Managed: cfg.Identity.Mode == "managed",
 		Site: siteURL(cfg), Logger: logger, Mail: func() notices.Sender {
@@ -1043,57 +1043,6 @@ func (s *swap) set(h http.Handler) { s.h.Store(&h) }
 
 func (s *swap) ServeHTTP(w http.ResponseWriter, r *http.Request) { (*s.h.Load()).ServeHTTP(w, r) }
 
-// syncPeers reads every paired server's titles a minute after starting,
-// then every federation.SyncEvery, with the federation in effect then.
-func syncPeers(ctx context.Context, fed func() *federation.Service) {
-	wait := time.Minute
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(wait):
-		}
-		wait = federation.SyncEvery()
-		if s := fed(); s != nil {
-			s.SyncAll(ctx)
-		}
-	}
-}
-
-// maintainKeys does what time brings to federation keys (a change of key
-// ending after 30 days, peers told of it again daily, a revoked peer gone
-// after 30 days), a minute after starting, then every hour.
-func maintainKeys(ctx context.Context, fed func() *federation.Service) {
-	wait := time.Minute
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(wait):
-		}
-		wait = time.Hour
-		if s := fed(); s != nil {
-			s.Maintain(ctx)
-		}
-	}
-}
-
-// helloSchedule sends, every second, the scheduled hellos of a server
-// that can't be called, with the federation in effect then (nothing for
-// one that can be called).
-func helloSchedule(ctx context.Context, fed func() *federation.Service) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(time.Second):
-		}
-		if s := fed(); s != nil {
-			s.Hellos(ctx)
-		}
-	}
-}
-
 // purgeExpired deletes expired sessions and logins every hour. They are
 // already refused when expired; this only keeps the database small.
 func purgeExpired(ctx context.Context, db *store.Store, logger *slog.Logger) {
@@ -1115,8 +1064,11 @@ func purgeExpired(ctx context.Context, db *store.Store, logger *slog.Logger) {
 		if err := db.DeleteExpiredDeviceCodes(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("purging expired device codes failed", "err", err)
 		}
-		if err := db.DeleteExpiredPairingCodes(ctx); err != nil && ctx.Err() == nil {
-			logger.Error("purging expired pairing codes failed", "err", err)
+		// The catalog's change log, for paired servers' readings of what
+		// changed: 30 days (MSFP catalog section 3.2); one that last read
+		// before gets the whole list.
+		if err := db.TrimTitleChanges(ctx, time.Now().Add(-30*24*time.Hour)); err != nil && ctx.Err() == nil {
+			logger.Error("trimming the catalog's changes failed", "err", err)
 		}
 		// Arrived wishes past a year weigh nothing; frames of episodes gone
 		// from the libraries serve nothing.

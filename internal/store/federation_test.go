@@ -3,127 +3,16 @@ package store
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/overfin/server/msfp"
 )
-
-// The key is made once: a second start racing the first keeps the first.
-func TestFederationSeed(t *testing.T) {
-	s, ctx := openTest(t), context.Background()
-	if _, ok, err := s.FederationSeed(ctx); ok || err != nil {
-		t.Fatalf("a key before any was made: %v %v", ok, err)
-	}
-	first := bytes.Repeat([]byte{1}, 32)
-	if kept, err := s.KeepFederationSeed(ctx, first); err != nil || !bytes.Equal(kept, first) {
-		t.Fatalf("kept %x, %v", kept, err)
-	}
-	if kept, err := s.KeepFederationSeed(ctx, bytes.Repeat([]byte{2}, 32)); err != nil || !bytes.Equal(kept, first) {
-		t.Fatalf("a second key replaced the first: %x, %v", kept, err)
-	}
-}
-
-// A code is redeemed once, by its secret, only if the check passes and
-// before it expires; the server that used it waits for our operator.
-func TestRedeemPairingCode(t *testing.T) {
-	s, ctx := openTest(t), context.Background()
-	clock := time.Unix(1_800_000_000, 0)
-	s.now = func() time.Time { return clock }
-	secret := bytes.Repeat([]byte{7}, 32)
-	_, err := s.CreatePairingCode(ctx, secret, "for Marc", clock.Add(24*time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if list, _ := s.PairingCodes(ctx); len(list) != 1 || list[0].Note != "for Marc" {
-		t.Fatalf("codes: %+v", list)
-	}
-	key := bytes.Repeat([]byte{3}, 32)
-	hash := PairingSecretHash(secret)
-	refuse := func([]byte) bool { return false }
-	if _, err := s.RedeemPairingCode(ctx, hash, key, "https://b.example.org", "B", nil, false, refuse); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("a refused proof: %v", err)
-	}
-	if _, err := s.RedeemPairingCode(ctx, PairingSecretHash([]byte("other")), key, "https://b.example.org", "B", nil, false,
-		func([]byte) bool { return true }); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("another secret: %v", err)
-	}
-	var seen []byte
-	p, err := s.RedeemPairingCode(ctx, hash, key, "https://b.example.org", "B", nil, false, func(got []byte) bool { seen = got; return true })
-	if err != nil || p.State != PeerOurs || !bytes.Equal(seen, secret) {
-		t.Fatalf("redeemed: %+v, %v (secret %x)", p, err, seen)
-	}
-	if _, err := s.RedeemPairingCode(ctx, hash, bytes.Repeat([]byte{4}, 32), "https://c.example.org", "C", nil, false,
-		func([]byte) bool { return true }); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("a code used twice: %v", err)
-	}
-	if list, _ := s.PairingCodes(ctx); len(list) != 0 {
-		t.Fatalf("a used code is still listed: %+v", list)
-	}
-
-	// An expired code.
-	secret2 := bytes.Repeat([]byte{8}, 32)
-	if _, err := s.CreatePairingCode(ctx, secret2, "", clock.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	clock = clock.Add(2 * time.Hour)
-	if _, err := s.RedeemPairingCode(ctx, PairingSecretHash(secret2), bytes.Repeat([]byte{5}, 32), "https://d.example.org", "D", nil, false,
-		func([]byte) bool { return true }); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("an expired code: %v", err)
-	}
-
-	// A key already known keeps the code.
-	secret3 := bytes.Repeat([]byte{6}, 32)
-	if _, err := s.CreatePairingCode(ctx, secret3, "", clock.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.RedeemPairingCode(ctx, PairingSecretHash(secret3), key, "https://b.example.org", "B", nil, false,
-		func([]byte) bool { return true }); !errors.Is(err, ErrPeerExists) {
-		t.Fatalf("a known key: %v", err)
-	}
-	if list, _ := s.PairingCodes(ctx); len(list) != 1 {
-		t.Fatalf("the code was used up by a known key: %+v", list)
-	}
-}
-
-func TestPeers(t *testing.T) {
-	s, ctx := openTest(t), context.Background()
-	key := bytes.Repeat([]byte{3}, 32)
-	p, err := s.AddPeer(ctx, key, "https://a.example.org", "A", nil)
-	if err != nil || p.State != PeerTheirs {
-		t.Fatalf("added: %+v, %v", p, err)
-	}
-	if _, err := s.AddPeer(ctx, key, "https://a.example.org", "A", nil); !errors.Is(err, ErrPeerExists) {
-		t.Fatalf("added twice: %v", err)
-	}
-	if ok, _ := s.SetPeerState(ctx, p.ID, PeerOurs, PeerPaired); ok {
-		t.Fatal("moved from a state it wasn't in")
-	}
-	if ok, err := s.SetPeerState(ctx, p.ID, PeerTheirs, PeerPaired); !ok || err != nil {
-		t.Fatalf("pairing: %v %v", ok, err)
-	}
-	got, err := s.PeerByKey(ctx, key)
-	if err != nil || got.State != PeerPaired || got.Paired == nil {
-		t.Fatalf("by key: %+v, %v", got, err)
-	}
-	if list, _ := s.Peers(ctx); len(list) != 1 {
-		t.Fatalf("peers: %+v", list)
-	}
-	if err := s.DeletePeer(ctx, p.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.PeerByID(ctx, p.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("still there: %v", err)
-	}
-	if err := s.DeletePeer(ctx, p.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("deleted twice: %v", err)
-	}
-}
 
 // What we offer and want is per peer, replaced whole, and goes with it.
 func TestPeerSharing(t *testing.T) {
@@ -142,7 +31,18 @@ func TestPeerSharing(t *testing.T) {
 	if err := s.SetPeerWants(ctx, p.ID, []PeerLibrary{{ID: "x", Name: "Films", Kind: "movies"}}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.PeerWants(ctx, p.ID); len(got) != 1 || got[0].Name != "Films" {
+	wanted := func() []string {
+		var out []string
+		rows, _ := s.read.QueryContext(ctx, `SELECT name FROM peer_wants WHERE peer_id = ?`, p.ID)
+		for rows.Next() {
+			var n string
+			rows.Scan(&n)
+			out = append(out, n)
+		}
+		rows.Close()
+		return out
+	}
+	if got := wanted(); len(got) != 1 || got[0] != "Films" {
 		t.Fatalf("wants: %v", got)
 	}
 	// Unticked, then ticked again: its menu entry has the same ID (the
@@ -162,7 +62,7 @@ func TestPeerSharing(t *testing.T) {
 	if got, _ := s.PeerOffers(ctx, p.ID); len(got) != 0 {
 		t.Fatalf("offers outlived the peer: %v", got)
 	}
-	if got, _ := s.PeerWants(ctx, p.ID); len(got) != 0 {
+	if got := wanted(); len(got) != 0 {
 		t.Fatalf("wants outlived the peer: %v", got)
 	}
 }
@@ -183,27 +83,27 @@ func TestPeerTitles(t *testing.T) {
 	if err := s.RefreshTitleKeys(ctx); err != nil {
 		t.Fatal(err)
 	}
-	public, err := s.PublicLibraryIDs(ctx, []string{"films", "films4k"})
-	if err != nil {
-		t.Fatal(err)
+	cat := MSFPCatalog{S: s}
+	page, err := cat.Titles(ctx, []string{"films", "films4k"}, "", 1)
+	if err != nil || len(page.Titles) != 1 || page.Titles[0].Common().Key != "movie/tmdb/14160" || !page.More ||
+		!slices.Equal(page.Titles[0].Common().Libraries, []string{"films"}) {
+		t.Fatalf("first page: %+v, %v", page, err)
 	}
-	got, _, err := s.TitlesInLibraries(ctx, []string{"films", "films4k"}, "", 1)
-	if err != nil || len(got) != 1 || got[0].Key != "movie/tmdb/14160" || got[0].Library != public["films"] {
-		t.Fatalf("first page: %+v, %v", got, err)
-	}
-	got, _, _ = s.TitlesInLibraries(ctx, []string{"films", "films4k"}, got[0].Key, 10)
-	// Heat is in both: the library given is the first of their public IDs.
-	if len(got) != 1 || got[0].Key != "movie/tmdb/949" || got[0].Library != min(public["films"], public["films4k"]) {
-		t.Fatalf("second page (Heat once, the unidentified file and the other library left out): %+v", got)
+	page, _ = cat.Titles(ctx, []string{"films", "films4k"}, "movie/tmdb/14160", 10)
+	// Heat is in both: both libraries given, the engine picks.
+	if len(page.Titles) != 1 || page.Titles[0].Common().Key != "movie/tmdb/949" ||
+		!slices.Equal(page.Titles[0].Common().Libraries, []string{"films", "films4k"}) || page.More {
+		t.Fatalf("second page (Heat once, the unidentified file and the other library left out): %+v", page)
 	}
 	// Its languages: both copies'.
-	if a, s := got[0].Audio, got[0].Subtitles; len(a) != 2 || a[0] != "en" || a[1] != "fr-CA" || len(s) != 1 || s[0] != "fr" {
+	heat := page.Titles[0].(*msfp.VideoTitle)
+	if a, s := heat.Audio, heat.Subtitles; len(a) != 2 || a[0] != "en" || a[1] != "fr-CA" || len(s) != 1 || s[0] != "fr" {
 		t.Fatalf("languages: %v %v", a, s)
 	}
-	if only, _, _ := s.TitlesInLibraries(ctx, []string{"films"}, "movie/tmdb/14160", 10); len(only[0].Audio) != 1 {
+	if only, _ := cat.Titles(ctx, []string{"films"}, "movie/tmdb/14160", 10); len(only.Titles[0].(*msfp.VideoTitle).Audio) != 1 {
 		t.Fatalf("languages from a library not asked for: %+v", only)
 	}
-	if got, _, _ := s.TitlesInLibraries(ctx, nil, "", 10); len(got) != 0 {
+	if got, _ := cat.Titles(ctx, nil, "", 10); len(got.Titles) != 0 {
 		t.Fatalf("no library: %+v", got)
 	}
 	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A", nil)
@@ -432,131 +332,6 @@ func TestPeerListing(t *testing.T) {
 	}
 }
 
-// Addresses kept before they were normalized are, as the other side and
-// browsers now write them.
-func TestPeerAddressesNormalized(t *testing.T) {
-	s := openTest(t)
-	ctx := context.Background()
-	key := make([]byte, 32)
-	key[0] = 9
-	p, err := s.AddPeer(ctx, key, "https://Films.Example.org:443", "B", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sqlText, err := migrations.ReadFile("migrations/100_peer_addresses.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.db.ExecContext(ctx, string(sqlText)); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := s.PeerByID(ctx, p.ID); got.Address != "https://films.example.org" {
-		t.Errorf("address: %q", got.Address)
-	}
-}
-
-// Our libraries' public IDs: random, 128 bits in base64url, each made once
-// and kept, never Jellyfin's; a library renamed (another Jellyfin ID) keeps
-// its own.
-func TestPublicLibraryIDs(t *testing.T) {
-	s, ctx := openTest(t), context.Background()
-	first, err := s.PublicLibraryIDs(ctx, []string{"f137a2cd", "e5e5e5e5"})
-	if err != nil || len(first) != 2 || first["f137a2cd"] == first["e5e5e5e5"] {
-		t.Fatalf("made: %v, %v", first, err)
-	}
-	for id, pub := range first {
-		raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(pub, "lib_"))
-		if err != nil || len(raw) != 16 || !strings.HasPrefix(pub, "lib_") || strings.Contains(pub, id) {
-			t.Fatalf("%s: %q", id, pub)
-		}
-	}
-	again, _ := s.PublicLibraryIDs(ctx, []string{"e5e5e5e5", "f137a2cd"})
-	if !maps.Equal(first, again) {
-		t.Fatalf("not kept: %v, then %v", first, again)
-	}
-	if err := s.ReplaceLibraryID(ctx, "f137a2cd", "0d0d0d0d"); err != nil {
-		t.Fatal(err)
-	}
-	if renamed, _ := s.PublicLibraryIDs(ctx, []string{"0d0d0d0d"}); renamed["0d0d0d0d"] != first["f137a2cd"] {
-		t.Fatalf("renamed: %v, was %v", renamed, first)
-	}
-}
-
-// A library we want that a peer no longer offers is marked so at our
-// next reading of its libraries, and back once it offers it again.
-func TestPeerWantsGone(t *testing.T) {
-	s, ctx := openTest(t), context.Background()
-	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A", nil)
-	s.SetPeerWants(ctx, p.ID, []PeerLibrary{{ID: "x", Name: "Films", Kind: "movies"}, {ID: "y", Name: "Series", Kind: "tvshows"}})
-	gone := func() []string {
-		w, _ := s.PeerWants(ctx, p.ID)
-		var out []string
-		for _, l := range w {
-			if l.Gone {
-				out = append(out, l.ID)
-			}
-		}
-		return out
-	}
-	if g := gone(); len(g) != 0 {
-		t.Fatalf("at first: %v", g)
-	}
-	s.RenamePeerWants(ctx, p.ID, "", []PeerLibrary{{ID: "y", Name: "Séries", Kind: "tvshows"}, {ID: "z", Name: "New"}})
-	if g := gone(); len(g) != 1 || g[0] != "x" {
-		t.Fatalf("after x left the offer: %v", g)
-	}
-	s.SetPeerWants(ctx, p.ID, []PeerLibrary{{ID: "x", Name: "Films", Kind: "movies"}, {ID: "z", Name: "New"}})
-	if g := gone(); len(g) != 0 {
-		t.Fatalf("chosen again: %v", g)
-	}
-}
-
-// This server's address (MSFP core section 13.1): kept the first time; a
-// change is a move from the one kept, which peers not seen since are
-// taken as calling; a move back makes the address left the former.
-func TestFederationAddress(t *testing.T) {
-	ctx := context.Background()
-	s := openTest(t)
-	at := time.Unix(1_800_000_000, 0)
-	if moved, err := s.NoteFederationAddress(ctx, "https://a.example.org", at); err != nil || moved {
-		t.Fatalf("first: %v, %v", moved, err)
-	}
-	if moved, _ := s.NoteFederationAddress(ctx, "https://a.example.org", at); moved {
-		t.Fatal("the same address is a move")
-	}
-	p, err := s.AddPeer(ctx, bytes.Repeat([]byte{1}, 32), "https://p.example.org", "P", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if moved, err := s.NoteFederationAddress(ctx, "https://b.example.org", at); err != nil || !moved {
-		t.Fatalf("a move: %v, %v", moved, err)
-	}
-	a, err := s.FederationAddress(ctx)
-	if err != nil || a.Current != "https://b.example.org" || a.Former != "https://a.example.org" || !a.MovedAt.Equal(at) {
-		t.Fatalf("after the move: %+v, %v", a, err)
-	}
-	// P wasn't heard since: taken as calling the former address.
-	if n, _ := s.PeersOnAddress(ctx, "https://a.example.org"); n != 1 {
-		t.Fatalf("peers on the former address: %d", n)
-	}
-	s.SetPeerOurAddress(ctx, p.ID, "https://b.example.org")
-	if n, _ := s.PeersOnAddress(ctx, "https://a.example.org"); n != 0 {
-		t.Fatalf("peers on the former address, P moved: %d", n)
-	}
-	if moved, _ := s.NoteFederationAddress(ctx, "https://a.example.org", at.Add(time.Hour)); !moved {
-		t.Fatal("moving back isn't a move")
-	}
-	if a, _ := s.FederationAddress(ctx); a.Current != "https://a.example.org" || a.Former != "https://b.example.org" {
-		t.Fatalf("after moving back: %+v", a)
-	}
-	if err := s.EndFederationMove(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if a, _ := s.FederationAddress(ctx); a.Former != "" || !a.MovedAt.IsZero() || a.Current != "https://a.example.org" {
-		t.Fatalf("after the move ended: %+v", a)
-	}
-}
-
 // What a paired server is told of each title (MSFP video, sections 3 and
 // 4): TMDB's keys only, never a title known by IMDb's or TheTVDB's ID; an
 // episode of a file holding several, the others it holds (with); films,
@@ -585,18 +360,17 @@ func TestPeerTitlesVideoMembers(t *testing.T) {
 	if err := s.RefreshTitleKeys(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.PublicLibraryIDs(ctx, []string{"lib"}); err != nil {
-		t.Fatal(err)
+	cat := MSFPCatalog{S: s}
+	page, err := cat.Titles(ctx, []string{"lib"}, "", 100)
+	if err != nil || page.More {
+		t.Fatal(err, page.More)
 	}
-	got, full, err := s.TitlesInLibraries(ctx, []string{"lib"}, "", 100)
-	if err != nil || full {
-		t.Fatal(err, full)
-	}
-	byKey := map[string]PeerTitle{}
+	byKey := map[string]*msfp.VideoTitle{}
 	var keys []string
-	for _, pt := range got {
-		byKey[pt.Key] = pt
-		keys = append(keys, pt.Key)
+	for _, pt := range page.Titles {
+		v := pt.(*msfp.VideoTitle)
+		byKey[v.Key] = v
+		keys = append(keys, v.Key)
 	}
 	want := []string{"movie/tmdb/603", "series/tmdb/1399", "series/tmdb/1399/e63056", "series/tmdb/1399/e63057",
 		"series/tmdb/1399/s1", "series/tmdb/1399/s1/e3"}
@@ -624,21 +398,17 @@ func TestPeerTitlesVideoMembers(t *testing.T) {
 	if ids := byKey["series/tmdb/1399/e63057"].IDs; ids != nil {
 		t.Errorf("an IMDb ID not in its form sent: %v", ids)
 	}
-	// The second episode plays the file.
-	key, _ := hex.DecodeString(strings.Repeat("ab", 32))
-	p, err := s.AddPeer(ctx, key, "https://b.example.org", "B", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SetPeerOffers(ctx, p.ID, []string{"lib"}); err != nil {
-		t.Fatal(err)
-	}
-	copies, err := s.PeerCopies(ctx, p.ID, "series/tmdb/1399/e63057")
-	if err != nil || len(copies) != 1 || copies[0].Item != id(12) || !slices.Equal(copies[0].Audio, []string{"en"}) {
+	// The second episode plays the file: its copy, of the library holding
+	// it, named by its video.
+	copies, err := cat.Copies(ctx, "series/tmdb/1399/e63057", []string{"lib"})
+	if err != nil || len(copies) != 1 || copies[0].Handle != id(12) || !slices.Equal(copies[0].Audio, []string{"en"}) || copies[0].Library != "lib" {
 		t.Errorf("copies %+v %v", copies, err)
 	}
+	if copies, _ := cat.Copies(ctx, "series/tmdb/1399/e63057", []string{"other"}); len(copies) != 0 {
+		t.Errorf("copies in a library not asked for: %+v", copies)
+	}
 	// A page looked at whole is full, whatever was left out of it.
-	if _, full, _ := s.TitlesInLibraries(ctx, []string{"lib"}, "", len(want)); !full {
+	if page, _ := cat.Titles(ctx, []string{"lib"}, "", len(want)); !page.More {
 		t.Error("a full page not said so")
 	}
 }
@@ -663,7 +433,13 @@ func TestPeerWith(t *testing.T) {
 			t.Errorf("%s: %v %v", k, w, err)
 		}
 	}
-	if got, _ := s.TitlesOfPeer(ctx, p.ID); len(got) != 2 || !slices.Equal(got[0].With, []string{"series/tmdb/1/e2"}) {
+	var got []msfp.Title
+	s.MSFP().Read(ctx, func(tx msfp.Tx) error {
+		var err error
+		got, err = tx.PeerTitles(p.ID, "", 10)
+		return err
+	})
+	if len(got) != 2 || !slices.Equal(got[0].(*msfp.VideoTitle).With, []string{"series/tmdb/1/e2"}) {
 		t.Errorf("%+v", got)
 	}
 }

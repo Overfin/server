@@ -165,6 +165,11 @@ func (s *Store) apply(ctx context.Context, name, body string, version int) (err 
 	if _, err := tx.ExecContext(ctx, body); err != nil {
 		return fmt.Errorf("store: applying %s: %w", name, err)
 	}
+	if fn := goMigrations[version]; fn != nil {
+		if err := fn(ctx, tx, s); err != nil {
+			return fmt.Errorf("store: applying %s: %w", name, err)
+		}
+	}
 	if strings.HasPrefix(body, foreignKeysOff) {
 		rows, err := tx.QueryContext(ctx, "PRAGMA foreign_key_check")
 		if err != nil {

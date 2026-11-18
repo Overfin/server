@@ -301,23 +301,6 @@ func TestDescribe(t *testing.T) {
 	}
 }
 
-// What a paired server is told of a viewer's device: known values in one
-// order, numbers in common steps, nothing made up.
-func TestCapabilitiesForPeer(t *testing.T) {
-	c := Capabilities{Containers: []string{"WEBM", "mp4", "my-install-1234"}, VideoCodecs: []string{"vp9", "h264", "h264"},
-		AudioCodecs: []string{"opus", "aac"}, HDR: []string{"x-unique"}, Subtitles: []string{"vtt", "someone"},
-		MaxHeight: 1350, MaxAudioChannels: 1, MaxBitrateKbps: 23456}
-	got := c.ForPeer()
-	if strings.Join(got.Containers, ",") != "mp4,webm" || strings.Join(got.VideoCodecs, ",") != "h264,vp9" ||
-		strings.Join(got.AudioCodecs, ",") != "aac,opus" || len(got.HDR) != 0 || len(got.Subtitles) != 0 ||
-		got.MaxHeight != 1080 || got.MaxAudioChannels != 2 || got.MaxBitrateKbps != 23000 {
-		t.Errorf("for a peer: %+v", got)
-	}
-	if z := (Capabilities{MaxHeight: 300}).ForPeer(); z.MaxHeight != 480 {
-		t.Errorf("a small screen: %d", z.MaxHeight)
-	}
-}
-
 // A paired server's capabilities count only as MSFP writes them: exact
 // case, known values, each once.
 func TestCapabilitiesExact(t *testing.T) {

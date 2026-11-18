@@ -13,13 +13,13 @@ import (
 // key gone and none given ends every pairing.
 func TestFederationKeysPanel(t *testing.T) {
 	ctx := context.Background()
-	a, fa := fedPanel(t, "A")
-	b, fb := fedPanel(t, "B")
-	code, _, _ := fa.NewCode(ctx, "")
-	if _, err := fb.UseCode(ctx, code); err != nil {
+	a, fa, _ := fedPanel(t, "A")
+	b, fb, _ := fedPanel(t, "B")
+	code, _, _ := fa.MakeCode(ctx, "")
+	if _, err := fb.RedeemCode(ctx, code); err != nil {
 		t.Fatal(err)
 	}
-	peers, _ := fa.Store.Peers(ctx)
+	peers, _ := fa.Peers(ctx)
 	if _, err := fa.Accept(ctx, peers[0].ID); err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestFederationKeysPanel(t *testing.T) {
 	rec := a.do("POST", "/admin/api/federation/next-key/export", "{}", nil)
 	var exported struct{ Text, Fingerprint string }
 	json.Unmarshal(rec.Body.Bytes(), &exported)
-	if rec.Code != 200 || !strings.HasPrefix(exported.Text, "overfin-next-key-1.") || exported.Fingerprint != sa.NextKey.Fingerprint {
+	if rec.Code != 200 || !strings.HasPrefix(exported.Text, "msfp-next-key-1.") || exported.Fingerprint != sa.NextKey.Fingerprint {
 		t.Fatalf("export: %d %s", rec.Code, rec.Body)
 	}
 	if strings.Contains(a.do("GET", "/admin/api/federation", "", nil).Body.String(), exported.Text) {
@@ -66,7 +66,7 @@ func TestFederationKeysPanel(t *testing.T) {
 	if rec := a.do("POST", "/admin/api/federation/key/rotate", `{}`, nil); rec.Code != 400 || !strings.Contains(rec.Body.String(), "paste the copy") {
 		t.Fatalf("rotate without the key: %d %s", rec.Code, rec.Body)
 	}
-	if rec := a.do("POST", "/admin/api/federation/key/rotate", `{"nextKey":"overfin-next-key-1.nope"}`, nil); rec.Code != 400 || !strings.Contains(rec.Body.String(), "isn't this server's next key") {
+	if rec := a.do("POST", "/admin/api/federation/key/rotate", `{"nextKey":"msfp-next-key-1.nope"}`, nil); rec.Code != 400 || !strings.Contains(rec.Body.String(), "isn't this server's next key") {
 		t.Fatalf("rotate with another: %d %s", rec.Code, rec.Body)
 	}
 	body, _ := json.Marshal(map[string]string{"nextKey": exported.Text})

@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"github.com/overfin/server/internal/store"
 	"io"
 	"net/http"
 	"regexp"
@@ -16,7 +15,7 @@ import (
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/problem"
-	"github.com/overfin/server/internal/slots"
+	"github.com/overfin/server/msfp"
 	"github.com/overfin/server/msfp/wire"
 )
 
@@ -36,16 +35,31 @@ func (Stream) Name() string { return "stream" }
 // site); one a paired server's viewer plays, for that server only, never
 // for a browser (rule 46).
 func (s Stream) Register(r *plugin.Registrar) error {
-	if err := r.HandleMedia("GET /api/v1/stream/{ticket}/{name}", http.HandlerFunc(s.serve)); err != nil {
-		return err
+	for pattern, h := range map[string]http.HandlerFunc{
+		"GET /api/v1/stream/{ticket}/{name}":                   s.serve,
+		"GET /api/v1/stream/{ticket}/subtitles/{track}/{part}": s.subtitles,
+		"GET /api/v1/stream/{ticket}/trickplay/{sheet}":        s.trickplay,
+		"GET /api/v1/stream/{ticket}/pictures/{track}/{part}":  s.pictures,
+	} {
+		if err := r.HandleMedia(pattern, s.peersFirst(h)); err != nil {
+			return err
+		}
 	}
-	if err := r.HandleMedia("GET /api/v1/stream/{ticket}/subtitles/{track}/{part}", http.HandlerFunc(s.subtitles)); err != nil {
-		return err
-	}
-	if err := r.HandleMedia("GET /api/v1/stream/{ticket}/trickplay/{sheet}", http.HandlerFunc(s.trickplay)); err != nil {
-		return err
-	}
-	return r.HandleMedia("GET /api/v1/stream/{ticket}/pictures/{track}/{part}", http.HandlerFunc(s.pictures))
+	return nil
+}
+
+// peersFirst serves a paired server's ticket through the MSFP engine
+// (msfp.Engine.StreamHandler), which checks it and the request before
+// PeerHost.Serve serves a byte; any other ticket, this server's own
+// people's, goes to h.
+func (s Stream) peersFirst(h http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if eng := s.Playback.engine(); eng != nil {
+			eng.StreamHandler(h).ServeHTTP(w, r)
+			return
+		}
+		h(w, r)
+	})
 }
 
 // trickplay serves a sheet of a playback's seek-bar previews by its
@@ -74,14 +88,6 @@ var (
 	rangeRe  = regexp.MustCompile(`^bytes=\d{0,15}-\d{0,15}$`)
 )
 
-// Bounds of what a paired server fetches at once of its playbacks here
-// (MSFP media, section 2.4): per ticket and per paired server. Over them,
-// a fetch waits a moment in a short queue, or is refused with 503.
-var (
-	servedPerTicket = &slots.Slots{Size: 8, Queue: 8, Wait: 10 * time.Second}
-	servedPerPeer   = &slots.Slots{Size: 64, Queue: 64, Wait: 10 * time.Second}
-)
-
 // peerTicket says whether a playback here is a paired server's viewer's.
 func peerTicket(st *playback.Stream) bool {
 	return strings.HasPrefix(st.SessionID, playback.PeerPrefix)
@@ -101,49 +107,17 @@ func (s Stream) stream(w http.ResponseWriter, r *http.Request) (*playback.Stream
 }
 
 func (s Stream) find(w http.ResponseWriter, r *http.Request) (*playback.Stream, *jellyfin.Auth, func()) {
+	// A paired server's viewer, through that server, as the MSFP engine
+	// found it by its ticket and checked the request (PeerHost.Serve):
+	// no session here.
+	if st, ok := r.Context().Value(peerStreamKey{}).(*playback.Stream); ok {
+		a := st.Auth
+		return st, &a, nil
+	}
 	ticket := r.PathValue("ticket")
 	if !ticketRe.MatchString(ticket) {
 		problem.Send(w, problem.NotFound, "")
 		return nil, nil, nil
-	}
-	// A paired server's viewer, through that server: no session here.
-	if st, ok := s.Playback.Tickets.ByPeerTicket(ticket, time.Now()); ok {
-		// Asked by that server, never by a browser (rule 46): a browser
-		// says where a request comes from. And only while the pairing
-		// lasts: an ended one ends its playbacks. GET only (MSFP media,
-		// section 2.2): a paired server never sends HEAD.
-		if r.Method != http.MethodGet || r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" || r.Header.Get("Sec-Fetch-Mode") != "" {
-			problem.Send(w, problem.NotFound, "")
-			return nil, nil, nil
-		}
-		st2 := s.Playback.Library.Provisioner.Store
-		peer, err := st2.PeerByID(r.Context(), strings.TrimPrefix(st.ProfileID, playback.PeerPrefix))
-		if err != nil || !peer.Usable() {
-			if errors.Is(err, store.ErrNotFound) || err == nil {
-				s.Playback.end(st, "pairing ended", "")
-			}
-			problem.Send(w, problem.NotFound, "")
-			return nil, nil, nil
-		}
-		// Nor once its library is no longer offered to that server.
-		if offered, err := st2.ItemOfferedTo(r.Context(), peer.ID, st.ItemID); err == nil && !offered {
-			s.Playback.end(st, "no longer shared", "")
-			problem.Send(w, problem.NotFound, "")
-			return nil, nil, nil
-		}
-		one, ok := servedPerTicket.Take(r.Context(), st.ID)
-		if !ok {
-			problem.Send(w, problem.ServerBusy, "")
-			return nil, nil, nil
-		}
-		all, ok := servedPerPeer.Take(r.Context(), peer.ID)
-		if !ok {
-			one()
-			problem.Send(w, problem.ServerBusy, "")
-			return nil, nil, nil
-		}
-		a := st.Auth
-		return st, &a, func() { all(); one() }
 	}
 	// This server's own viewers ask from its own site: a request another
 	// site starts (a link, an embedded video) goes no further, so it never
@@ -184,7 +158,12 @@ func (s Stream) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st.Remote != nil {
-		s.relay(w, r, st, relayed{path: name, playlist: strings.HasSuffix(name, ".m3u8") || st.Remote.Playlist(name)})
+		path, ok := msfp.ParseMediaPath(name)
+		if !ok {
+			problem.Send(w, problem.NotFound, "")
+			return
+		}
+		s.fetchRemote(w, r, st, path)
 		return
 	}
 	dec := st.Decision
@@ -425,7 +404,7 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st.Remote != nil {
-		s.relay(w, r, st, relayed{path: "subtitles/" + track + "/" + strconv.Itoa(part), vtt: true})
+		s.fetchRemote(w, r, st, msfp.MediaPath{Kind: msfp.MediaSubtitles, Track: track, Part: part})
 		return
 	}
 	if !st.TextSubtitle(index) {
@@ -477,7 +456,7 @@ func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st.Remote != nil {
-		s.relay(w, r, st, relayed{path: "pictures/" + track + "/" + strconv.Itoa(part), pgs: true})
+		s.fetchRemote(w, r, st, msfp.MediaPath{Kind: msfp.MediaPictures, Track: track, Part: part})
 		return
 	}
 	if !st.PictureSubtitle(index) {
@@ -527,7 +506,7 @@ func validRange(h string) bool {
 // validPeerRange says whether a Range header is one of MSFP's three forms
 // (media section 2.1): never several ranges, "bytes=-" or "bytes=-0".
 func validPeerRange(h string) bool {
-	_, ok := parseRange(h)
+	_, ok := msfp.ParseRange(h)
 	return ok
 }
 
@@ -564,5 +543,57 @@ func (s Stream) upstreamError(w http.ResponseWriter, st *playback.Stream, err er
 	default:
 		l.Logger.Warn("a paired server's stream: Jellyfin failed", "playback", st.ID, "err", err)
 		problem.Send(w, problem.ServerBusy, "")
+	}
+}
+
+// A paired server's title plays through this server (rule 97): the
+// viewer's browser asks this server only, with this server's ticket, and
+// the MSFP engine asks the paired one with the ticket it gave, which
+// never leaves the engine. The paired server sees this server, never the
+// viewer.
+
+// fetchRemote answers a browser's request for a paired server's playback
+// with what the engine fetches of it (msfp.Engine.Fetch), checked as
+// anything from Jellyfin is: playlists within MSFP's subset, subtitles
+// sanitized, sheets re-encoded, media passed on with the headers
+// streaming needs, a 206 only for the range asked (MSFP media, section
+// 2). A failed fetch is a 404 to the browser, never the paired server's
+// body; its 416 and 503 are passed on as such. HEAD fetches nothing.
+func (s Stream) fetchRemote(w http.ResponseWriter, r *http.Request, st *playback.Stream, path msfp.MediaPath) {
+	eng := s.Playback.engine()
+	if eng == nil || r.Method != http.MethodGet {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	// A playback that ends takes its response along (rules 45 and 49).
+	// While a response is open, the playback is in use: a film played
+	// straight is often one long download, with no progress between.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	go func() {
+		tick := time.NewTicker(30 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-st.Over():
+				cancel()
+				return
+			case now := <-tick.C:
+				s.Playback.Tickets.Touch(st, now)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	s.Playback.Tickets.Touch(st, time.Now())
+	err := eng.Fetch(ctx, st.Remote.ID, path, r.Header.Get("Range"), msfp.NewHTTPSink(ctx, w))
+	switch {
+	case err == nil, ctx.Err() != nil:
+	case errors.Is(err, msfp.ErrRangeNotSatisfiable):
+		w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+	case errors.Is(err, msfp.ErrServerBusy):
+		problem.Send(w, problem.ServerBusy, "")
+	default:
+		problem.Send(w, problem.NotFound, "")
 	}
 }

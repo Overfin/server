@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,17 +8,25 @@ import (
 	"strings"
 	"time"
 
-	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/textclean"
+	"github.com/overfin/server/msfp"
 	"github.com/overfin/server/msfp/wire"
 )
 
 // maxLabel is how long our name for a taken library's entry may be.
 const maxLabel = 64
 
+// keyOverlap is how long a change of this server's key lasts at most:
+// the old key is kept that long for peers that haven't moved (MSFP core
+// section 12.4).
+const keyOverlap = 30 * 24 * time.Hour
+
 // Federation: pairing this server with others (ROADMAP.md milestone 6,
 // SECURITY.md rules 94 and 96): pairing, then sharing library by library.
+// The MSFP engine (msfp) does it all; the panel calls its actions and
+// shows its views, and reads Overfin's own store only for what is
+// Overfin's (the menu labels of the libraries taken, the titles counted).
 
 type peerJSON struct {
 	ID          string `json:"id"`
@@ -39,10 +46,6 @@ type peerJSON struct {
 	// offered at our last reading (it stopped, or changed its IDs): to
 	// choose again.
 	WantsGone int `json:"wantsGone,omitempty"`
-	// Unusable: its key, as stored, isn't one MSFP accepts (of small
-	// order, say): no request from it, nor answer, is accepted. An honest
-	// server's key never is.
-	Unusable bool `json:"unusable,omitempty"`
 	// OtherVersion: its latest hello lists no version of MSFP's core this
 	// server speaks: the two can't talk (MSFP core section 10.3).
 	OtherVersion bool `json:"otherVersion,omitempty"`
@@ -99,55 +102,53 @@ type refusedJSON struct {
 	At          string `json:"at"`
 }
 
-func peerOf(p *store.Peer) peerJSON {
-	j := peerJSON{ID: p.ID, Name: p.Name, Address: p.Address, State: p.State,
-		Fingerprint: wire.Fingerprint(p.PublicKey), CreatedAt: p.Created.Format(time.RFC3339),
-		Unusable: !wire.ValidKey(p.PublicKey), OtherVersion: !federation.SpeaksCore(p)}
-	if p.Paired != nil {
-		j.PairedAt = p.Paired.Format(time.RFC3339)
+// limitsJSON is what a pairing may use (MSFP playback section 5), as the
+// panel shows and sets it: always these three numbers.
+type limitsJSON struct {
+	Streams     int `json:"streams"`
+	Transcodes  int `json:"transcodes"`
+	BitrateKbps int `json:"bitrateKbps"`
+}
+
+func limitsOf(l msfp.Limits) limitsJSON {
+	return limitsJSON{Streams: l.Streams, Transcodes: l.Transcodes, BitrateKbps: l.BitrateKbps}
+}
+
+// stamp is t for the panel, "" for the zero time (never).
+func stamp(t time.Time) string {
+	if t.IsZero() {
+		return ""
 	}
-	if p.Seen != nil {
-		j.SeenAt = p.Seen.Format(time.RFC3339)
+	return t.UTC().Format(time.RFC3339)
+}
+
+func peerOf(v msfp.PeerView) peerJSON {
+	j := peerJSON{ID: v.ID, Name: v.Name, Address: v.Address, State: string(v.State),
+		Fingerprint: v.Fingerprint, CreatedAt: stamp(v.Created), PairedAt: stamp(v.Paired), SeenAt: stamp(v.Seen),
+		Offers: v.Offers, Wants: v.Wants, WantsGone: v.WantsGone, OtherVersion: v.Core == 0,
+		Commitment: v.CommitmentFrom, SuspendedAt: stamp(v.Suspended), OurKey: v.OurKey, RotationAnswer: v.RotationAnswer,
+		NotMoved: v.NotMoved, MoveLate: v.MoveLate, CallsFailed: v.CallsFailed}
+	if v.Pending != nil {
+		j.Pending = &pendingJSON{Fingerprint: v.Pending.Fingerprint, Date: stamp(v.Pending.At)}
 	}
-	j.Commitment, j.OurKey, j.RotationAnswer = p.CommitmentFrom, p.OurKey, p.RotationAnswer
-	if p.NextCommitment == nil {
-		j.Commitment = ""
+	if v.Refused != nil {
+		j.Refused = &refusedJSON{Fingerprint: v.Refused.Fingerprint, At: stamp(v.Refused.At)}
 	}
-	if p.Pending != nil {
-		j.Pending = &pendingJSON{Fingerprint: wire.Fingerprint(p.Pending.New), Date: time.Unix(p.Pending.Date, 0).UTC().Format(time.RFC3339)}
+	if m := v.Moving; m != nil {
+		j.Moving = &movingJSON{Address: m.Address, Failing: stamp(m.FailingSince), Warn: m.Warn}
 	}
-	if p.Suspended != nil {
-		j.SuspendedAt = p.Suspended.Format(time.RFC3339)
+	if v.Inbound != msfp.InboundYes && v.Inbound != "" {
+		j.Inbound = string(v.Inbound)
 	}
-	if p.RefusedKey != nil && p.RefusedAt != nil {
-		j.Refused = &refusedJSON{Fingerprint: wire.Fingerprint(p.RefusedKey), At: p.RefusedAt.Format(time.RFC3339)}
-	}
-	if !p.Callable() {
-		j.Inbound = p.Inbound
-	}
-	j.CallsFailed = p.CallsFailed
 	return j
 }
 
-// peerCounted is peerOf with what's offered and wanted, and its titles
-// (counts, PeerTitleCounts), as the list shows them.
-func (p *Panel) peerCounted(ctx context.Context, pe *store.Peer, counts map[string]int) (peerJSON, error) {
-	j := peerOf(pe)
-	offers, err := p.Store.PeerOffers(ctx, pe.ID)
-	if err != nil {
-		return j, err
-	}
-	wants, err := p.Store.PeerWants(ctx, pe.ID)
-	if err != nil {
-		return j, err
-	}
-	j.Offers, j.Wants, j.Titles = len(offers), len(wants), counts[pe.ID]
-	for _, w := range wants {
-		if w.Gone {
-			j.WantsGone++
-		}
-	}
-	return j, nil
+// peerCounted is peerOf with the titles it holds in what we want of it
+// (counts, PeerTitleCounts), as the list shows it.
+func peerCounted(v msfp.PeerView, counts map[string]int) peerJSON {
+	j := peerOf(v)
+	j.Titles = counts[v.ID]
+	return j
 }
 
 type codeJSON struct {
@@ -159,119 +160,100 @@ type codeJSON struct {
 	Code string `json:"code,omitempty"`
 }
 
-func codeOf(c store.PairingCode) codeJSON {
-	return codeJSON{ID: c.ID, Note: c.Note, CreatedAt: c.Created.Format(time.RFC3339), ExpiresAt: c.Expires.Format(time.RFC3339)}
+func codeOf(c msfp.CodeView) codeJSON {
+	return codeJSON{ID: c.ID, Note: c.Note, CreatedAt: stamp(c.Created), ExpiresAt: stamp(c.Expires)}
+}
+
+// engine is federation now, nil without it.
+func (p *Panel) engine() *msfp.Engine {
+	if p.Engine == nil {
+		return nil
+	}
+	return p.Engine()
 }
 
 // fed is federation now, or nil after answering that it's unavailable.
-func (p *Panel) fed(w http.ResponseWriter) *federation.Service {
-	var s *federation.Service
-	if p.Federation != nil {
-		s = p.Federation()
-	}
-	if s == nil {
+func (p *Panel) fed(w http.ResponseWriter) *msfp.Engine {
+	e := p.engine()
+	if e == nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"type": "unavailable",
 			"detail": "Federation needs the site's https address: set site.url (or an HTTPS domain) in the configuration."})
 	}
-	return s
+	return e
 }
 
 func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
-	var s *federation.Service
-	if p.Federation != nil {
-		s = p.Federation()
-	}
+	eng := p.engine()
 	ctx := r.Context()
-	uncallable := false
-	if p.Uncallable != nil {
-		on, err := p.Uncallable.FederationUncallable(ctx)
-		if err != nil {
-			p.fail(w, "reading whether this server can be called", err)
-			return
-		}
-		uncallable = on
-	}
-	if s == nil {
+	if eng == nil {
 		// The setting shows anyway: a server that can't be called needs
 		// no site address.
+		uncallable := false
+		if p.Uncallable != nil {
+			on, err := p.Uncallable.FederationUncallable(ctx)
+			if err != nil {
+				p.fail(w, "reading whether this server can be called", err)
+				return
+			}
+			uncallable = on
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"available": false, "uncallable": uncallable, "canSet": p.Uncallable != nil})
 		return
 	}
-	codes, err := p.Store.PairingCodes(ctx)
+	sv, err := eng.Server(ctx)
+	if err != nil {
+		p.fail(w, "reading this server's federation", err)
+		return
+	}
+	codes, err := eng.Codes(ctx)
 	if err != nil {
 		p.fail(w, "listing pairing codes", err)
 		return
 	}
-	peers, err := p.Store.Peers(ctx)
+	peers, err := eng.Peers(ctx)
 	if err != nil {
 		p.fail(w, "listing peers", err)
 		return
 	}
 	// Those whose operator we're waiting for: asked, in the background.
-	s.CheckSoon(peers)
-	outCodes := []codeJSON{}
-	for _, c := range codes {
-		outCodes = append(outCodes, codeOf(c))
-	}
+	eng.PanelOpen()
 	counts, err := p.Store.PeerTitleCounts(ctx)
 	if err != nil {
 		p.fail(w, "counting peers' titles", err)
 		return
 	}
+	outCodes := []codeJSON{}
+	for _, c := range codes {
+		outCodes = append(outCodes, codeOf(c))
+	}
 	outPeers := []peerJSON{}
-	now := time.Now()
-	notMoved, others := 0, 0
-	for _, pe := range peers {
-		j, err := p.peerCounted(ctx, pe, counts)
-		if err != nil {
-			p.fail(w, "reading offers and wants", err)
-			return
-		}
-		j.NotMoved, j.MoveLate = s.NotMoved(pe)
-		if j.NotMoved {
-			notMoved++
-		}
-		if pe.State != store.PeerGone {
-			others++
-		}
-		if m := pe.Move; m != nil {
-			j.Moving = &movingJSON{Address: m.Address, Warn: m.Warn(now)}
-			if !m.Failing.IsZero() {
-				j.Moving.Failing = m.Failing.Format(time.RFC3339)
-			}
-		}
-		outPeers = append(outPeers, j)
+	for _, v := range peers {
+		outPeers = append(outPeers, peerCounted(v, counts))
 	}
-	nextFingerprint, nextOnServer, err := s.NextKey(ctx)
-	if err != nil {
-		p.fail(w, "reading the next key", err)
-		return
-	}
-	out := map[string]any{"available": true, "address": s.Address, "uncallable": s.Uncallable, "canSet": p.Uncallable != nil,
+	out := map[string]any{"available": true, "address": sv.Address, "uncallable": sv.Uncallable, "canSet": p.Uncallable != nil,
 		// The test setting federation.test_plain_http, on: said so.
-		"testPlainHTTP": strings.HasPrefix(s.Address, "http://"),
-		"fingerprint":   wire.Fingerprint(s.Keys.Current().Public()), "codes": outCodes, "peers": outPeers,
-		"nextKey": map[string]any{"fingerprint": nextFingerprint, "onServer": nextOnServer}}
+		"testPlainHTTP": strings.HasPrefix(sv.Address, "http://"),
+		"fingerprint":   sv.Fingerprint, "codes": outCodes, "peers": outPeers,
+		"nextKey": map[string]any{"fingerprint": sv.NextKey, "onServer": sv.NextOnServer}}
 	// A change of this server's key under way: since when, until when the
 	// old key is kept.
-	if _, since, ok := s.Keys.Old(); ok {
-		out["rotation"] = map[string]string{"since": since.Format(time.RFC3339),
-			"until": since.Add(federation.KeyOverlap).Format(time.RFC3339)}
+	if !sv.RotationSince.IsZero() {
+		out["rotation"] = map[string]string{"since": stamp(sv.RotationSince), "until": stamp(sv.RotationSince.Add(keyOverlap))}
 	}
 	// A change of this server's address under way: from which, since
 	// when, until when the former is accepted, how many peers moved, and
 	// whether the new address is still waited for, not announced yet.
-	if former, since, ok := s.Moving(); ok {
-		out["move"] = map[string]any{"former": former, "since": since.Format(time.RFC3339),
-			"until": since.Add(wire.AddressOverlap).Format(time.RFC3339), "moved": others - notMoved, "of": others,
-			"waiting": s.Waiting()}
+	if sv.Former != "" {
+		out["move"] = map[string]any{"former": sv.Former, "since": stamp(sv.MovedAt),
+			"until": stamp(sv.MovedAt.Add(wire.AddressOverlap)), "moved": sv.PeersMoved, "of": sv.PeersToMove,
+			"waiting": sv.Waiting}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (p *Panel) createPairingCode(w http.ResponseWriter, r *http.Request, s *session) {
-	fed := p.fed(w)
-	if fed == nil {
+	eng := p.fed(w)
+	if eng == nil {
 		return
 	}
 	var req struct {
@@ -281,8 +263,8 @@ func (p *Panel) createPairingCode(w http.ResponseWriter, r *http.Request, s *ses
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request"})
 		return
 	}
-	text, c, err := fed.NewCode(r.Context(), req.Note)
-	if errors.Is(err, federation.ErrNoCodes) {
+	text, c, err := eng.MakeCode(r.Context(), req.Note)
+	if errors.Is(err, msfp.ErrNoCodes) {
 		writeJSON(w, http.StatusConflict, map[string]string{"type": "no-codes",
 			"detail": "This server can't be called: it makes no codes. Ask the other server's operator for one, and use it here."})
 		return
@@ -292,14 +274,18 @@ func (p *Panel) createPairingCode(w http.ResponseWriter, r *http.Request, s *ses
 		return
 	}
 	p.Logger.Info("a pairing code was made in the control panel", "code", c.ID, "by", s.logID)
-	j := codeOf(*c)
+	j := codeOf(c)
 	j.Code = text
 	writeJSON(w, http.StatusCreated, j)
 }
 
 func (p *Panel) deletePairingCode(w http.ResponseWriter, r *http.Request, s *session) {
-	switch err := p.Store.DeletePairingCode(r.Context(), r.PathValue("id")); {
-	case errors.Is(err, store.ErrNotFound):
+	eng := p.fed(w)
+	if eng == nil {
+		return
+	}
+	switch err := eng.DeleteCode(r.Context(), r.PathValue("id")); {
+	case errors.Is(err, msfp.ErrNotFound):
 		notFound(w, "No such pairing code")
 		return
 	case err != nil:
@@ -338,8 +324,8 @@ func (p *Panel) setUncallable(w http.ResponseWriter, r *http.Request, s *session
 // previewPairingCode reads a pasted code, before it's used: which server
 // it's for, and its fingerprint, to compare with that server's operator.
 func (p *Panel) previewPairingCode(w http.ResponseWriter, r *http.Request, _ *session) {
-	fed := p.fed(w)
-	if fed == nil {
+	eng := p.fed(w)
+	if eng == nil {
 		return
 	}
 	var req struct {
@@ -349,22 +335,26 @@ func (p *Panel) previewPairingCode(w http.ResponseWriter, r *http.Request, _ *se
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request"})
 		return
 	}
-	c, err := wire.ParseCode(req.Code)
+	c, err := eng.ReadCode(r.Context(), req.Code)
+	expired := false
+	if errors.Is(err, msfp.ErrCodeExpired) {
+		// Shown anyway, said to be over: which server it was for still
+		// helps its operator, who is asked for a new one.
+		if old, perr := wire.ParseCode(req.Code); perr == nil {
+			c, err, expired = msfp.CodePreview{Address: old.Address, Fingerprint: wire.Fingerprint(old.Key), Expires: old.Expires}, nil, true
+		}
+	}
 	if err != nil {
 		p.pairingProblem(w, err)
 		return
 	}
-	if wire.SameKey(c.Key, fed.Keys.Current().Public()) {
-		p.pairingProblem(w, federation.ErrOwnCode)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"address": c.Address, "fingerprint": wire.Fingerprint(c.Key),
-		"expiresAt": c.Expires.UTC().Format(time.RFC3339), "expired": !c.Expires.After(time.Now())})
+	writeJSON(w, http.StatusOK, map[string]any{"address": c.Address, "fingerprint": c.Fingerprint,
+		"expiresAt": stamp(c.Expires), "expired": expired})
 }
 
 func (p *Panel) usePairingCode(w http.ResponseWriter, r *http.Request, s *session) {
-	fed := p.fed(w)
-	if fed == nil {
+	eng := p.fed(w)
+	if eng == nil {
 		return
 	}
 	var req struct {
@@ -374,7 +364,7 @@ func (p *Panel) usePairingCode(w http.ResponseWriter, r *http.Request, s *sessio
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request"})
 		return
 	}
-	peer, err := fed.UseCode(r.Context(), req.Code)
+	peer, err := eng.RedeemCode(r.Context(), req.Code)
 	if err != nil {
 		p.pairingProblem(w, err)
 		return
@@ -384,69 +374,81 @@ func (p *Panel) usePairingCode(w http.ResponseWriter, r *http.Request, s *sessio
 }
 
 func (p *Panel) acceptPeer(w http.ResponseWriter, r *http.Request, s *session) {
-	fed := p.fed(w)
-	if fed == nil {
-		return
-	}
-	peer, err := fed.Accept(r.Context(), r.PathValue("id"))
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		notFound(w, "No server waiting for you with that ID")
-		return
-	case peer == nil:
-		p.fail(w, "accepting a peer", err)
+	eng := p.fed(w)
+	if eng == nil {
 		return
 	}
 	// The other server may be unreachable for now: it's paired anyway,
 	// and learns it when it next asks.
+	peer, err := eng.Accept(r.Context(), r.PathValue("id"))
+	switch {
+	case errors.Is(err, msfp.ErrNotFound), errors.Is(err, msfp.ErrNotWaiting):
+		notFound(w, "No server waiting for you with that ID")
+		return
+	case err != nil:
+		p.fail(w, "accepting a peer", err)
+		return
+	}
 	p.Logger.Info("a peer was accepted in the control panel", "peer", peer.ID, "by", s.logID)
 	writeJSON(w, http.StatusOK, peerOf(peer))
 }
 
+// unreachable says whether err is a peer that couldn't be reached now,
+// or wouldn't answer: no answer, a bad one, or asked to wait.
+func unreachable(err error) bool {
+	for _, e := range []error{msfp.ErrUnreachable, msfp.ErrBackingOff, msfp.ErrServerBusy, msfp.ErrRateLimited,
+		msfp.ErrPeerFailed, msfp.ErrCertificateRefused, msfp.ErrRefusedDestination} {
+		if errors.Is(err, e) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Panel) checkPeer(w http.ResponseWriter, r *http.Request, _ *session) {
-	fed := p.fed(w)
-	if fed == nil {
+	eng := p.fed(w)
+	if eng == nil {
 		return
 	}
-	peer, err := p.Store.PeerByID(r.Context(), r.PathValue("id"))
-	if errors.Is(err, store.ErrNotFound) {
+	ctx, id := r.Context(), r.PathValue("id")
+	peer, err := eng.Check(ctx, id)
+	failed := unreachable(err)
+	switch {
+	case errors.Is(err, msfp.ErrNotFound):
 		notFound(w, "No such server")
 		return
-	}
-	if err != nil {
-		p.fail(w, "reading a peer", err)
-		return
-	}
-	peer, err = fed.Check(r.Context(), peer)
-	if peer == nil {
+	case err == nil:
+	case unreachable(err), errors.Is(err, msfp.ErrUnknown), errors.Is(err, msfp.ErrUncallable),
+		errors.Is(err, msfp.ErrSuspended), errors.Is(err, msfp.ErrKeyLost):
+		// It's shown as it stands now: gone (it doesn't know us), or
+		// whatever made it not asked.
+		if peer, err = eng.Peer(ctx, id); err != nil {
+			p.fail(w, "reading a peer", err)
+			return
+		}
+	default:
 		p.fail(w, "checking a peer", err)
 		return
 	}
-	unreachable := err != nil
-	counts, err := p.Store.PeerTitleCounts(r.Context())
+	counts, err := p.Store.PeerTitleCounts(ctx)
 	if err != nil {
 		p.fail(w, "counting peers' titles", err)
 		return
 	}
-	pj, err := p.peerCounted(r.Context(), peer, counts)
-	if err != nil {
-		p.fail(w, "reading offers and wants", err)
-		return
-	}
-	j := map[string]any{"peer": pj}
-	if unreachable {
+	j := map[string]any{"peer": peerCounted(peer, counts)}
+	if failed {
 		j["unreachable"] = true
 	}
 	writeJSON(w, http.StatusOK, j)
 }
 
 func (p *Panel) endPeer(w http.ResponseWriter, r *http.Request, s *session) {
-	fed := p.fed(w)
-	if fed == nil {
+	eng := p.fed(w)
+	if eng == nil {
 		return
 	}
-	switch err := fed.End(r.Context(), r.PathValue("id")); {
-	case errors.Is(err, store.ErrNotFound):
+	switch err := eng.End(r.Context(), r.PathValue("id")); {
+	case errors.Is(err, msfp.ErrNotFound):
 		notFound(w, "No such server")
 		return
 	case err != nil:
@@ -461,17 +463,23 @@ func (p *Panel) endPeer(w http.ResponseWriter, r *http.Request, s *session) {
 func (p *Panel) pairingProblem(w http.ResponseWriter, err error) {
 	detail := ""
 	switch {
-	case errors.Is(err, wire.ErrCode):
+	case errors.Is(err, msfp.ErrCodeInvalid):
 		detail = "That isn't a pairing code. Paste the whole code, starting with msfp-pair-1."
-	case errors.Is(err, wire.ErrPlainHTTP):
+	case errors.Is(err, msfp.ErrPlainHTTP):
 		detail = "That code is for a server at a plain http:// address. Servers pair over HTTPS only: ask its operator to give it an https address, then a new code."
-	case errors.Is(err, federation.ErrOwnCode):
+	case errors.Is(err, msfp.ErrOwnCode):
 		detail = "That's this server's own code: send it to the other server's operator instead."
-	case errors.Is(err, store.ErrPeerExists):
+	case errors.Is(err, msfp.ErrAlreadyPeer):
 		detail = "That server is already in the list."
-	case errors.Is(err, federation.ErrCodeRefused):
+	case errors.Is(err, msfp.ErrCodeExpired):
+		detail = "That code stopped working: it's more than a day old. Ask for a new one."
+	case errors.Is(err, msfp.ErrCodeRefused):
 		detail = "The other server refused the code: it was used, withdrawn, or is more than a day old. Ask for a new one."
-	case errors.Is(err, federation.ErrUnreachable):
+	case errors.Is(err, msfp.ErrRefusedDestination):
+		detail = "That code is for an address this server never connects to (a local or private one). Ask its operator for a code with its public address."
+	case errors.Is(err, msfp.ErrCertificateRefused):
+		detail = "The other server's HTTPS certificate wasn't accepted: it must be valid for its address. Ask its operator to check it."
+	case unreachable(err):
 		detail = "The other server couldn't be reached, or didn't answer as the server the code is from. Check that it's running and reachable."
 	default:
 		p.fail(w, "using a pairing code", err)
@@ -484,26 +492,22 @@ func (p *Panel) pairingProblem(w http.ResponseWriter, err error) {
 // libraries: ours, each offered or not; theirs as it offers them now (or,
 // when it can't be reached, only those we want, as we last saw them).
 func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
-	fed := p.fed(w)
-	if fed == nil {
+	eng := p.fed(w)
+	if eng == nil {
 		return
 	}
 	ctx := r.Context()
-	peer := p.pairedPeer(w, r)
-	if peer == nil {
+	peer, ok := p.pairedPeer(w, r, eng)
+	if !ok {
 		return
 	}
-	ours, err := fed.OurLibraries(ctx)
+	ours, err := eng.Offers(ctx, peer.ID)
 	if err != nil {
 		p.fail(w, "listing libraries", err)
 		return
 	}
-	offered, err := p.Store.PeerOffers(ctx, peer.ID)
-	if err != nil {
-		p.fail(w, "reading offers", err)
-		return
-	}
-	wants, err := p.Store.PeerWants(ctx, peer.ID)
+	// Our names for the libraries we want, kept by Overfin.
+	labels, err := p.Store.PeerWantLabels(ctx, peer.ID)
 	if err != nil {
 		p.fail(w, "reading wants", err)
 		return
@@ -522,56 +526,48 @@ func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
 	}
 	outOurs := []lib{}
 	for _, l := range ours {
-		outOurs = append(outOurs, lib{ID: l.ID, Name: l.Name, Kind: l.Kind, Picked: slices.Contains(offered, l.ID)})
+		outOurs = append(outOurs, lib{ID: l.ID, Name: l.Name, Kind: l.Kind, Picked: l.Offered})
 	}
-	wanted := func(id string) bool {
-		return slices.ContainsFunc(wants, func(w store.PeerLibrary) bool { return w.ID == id })
-	}
-	outTheirs := []lib{}
-	theirs, err := fed.TheirLibraries(ctx, peer)
+	theirs, err := eng.TheirLibraries(ctx, peer.ID)
 	reachable := err == nil
-	uncallable := errors.Is(err, federation.ErrUncallable)
 	if reachable {
 		// What it says we may use of it and what it calls itself, read
 		// again with its libraries.
-		if again, err := p.Store.PeerByID(ctx, peer.ID); err == nil {
+		if again, err := eng.Peer(ctx, peer.ID); err == nil {
 			peer = again
 		}
-	}
-	label := func(id string) string {
-		for _, w := range wants {
-			if w.ID == id {
-				return w.Label
-			}
+	} else {
+		// Those we want only, as last read.
+		wants, err := eng.Wants(ctx, peer.ID)
+		if err != nil {
+			p.fail(w, "reading wants", err)
+			return
 		}
-		return ""
+		theirs = slices.DeleteFunc(wants, func(l msfp.WantedLibrary) bool { return !l.Wanted })
 	}
-	if reachable {
-		for _, l := range theirs {
-			outTheirs = append(outTheirs, lib{ID: l.ID, Name: l.Name, Kind: l.Kind, Picked: wanted(l.ID),
-				Label: label(l.ID), Shown: l.Name + " (" + peer.Name + ")"})
-		}
+	outTheirs := []lib{}
+	for _, l := range theirs {
+		outTheirs = append(outTheirs, lib{ID: l.ID, Name: l.Name, Kind: l.Kind, Picked: l.Wanted, Gone: l.Gone,
+			Label: labels[l.ID], Shown: l.Name + " (" + peer.Name + ")"})
 	}
-	for _, w := range wants {
-		if !slices.ContainsFunc(theirs, func(l store.PeerLibrary) bool { return l.ID == w.ID }) {
-			outTheirs = append(outTheirs, lib{ID: w.ID, Name: w.Name, Kind: w.Kind, Picked: true, Gone: reachable || w.Gone,
-				Label: w.Label, Shown: w.Name + " (" + peer.Name + ")"})
-		}
+	out := map[string]any{"ours": outOurs, "theirs": outTheirs, "reachable": reachable,
+		"notSupported": errors.Is(err, msfp.ErrNotSupported), "uncallable": errors.Is(err, msfp.ErrUncallable),
+		"limits": limitsOf(peer.Limits)}
+	if peer.TheirLimits != nil {
+		out["theirLimits"] = limitsOf(*peer.TheirLimits)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ours": outOurs, "theirs": outTheirs, "reachable": reachable,
-		"notSupported": errors.Is(err, federation.ErrNotSupported), "uncallable": uncallable,
-		"limits": peer.Limits, "theirLimits": peer.Theirs})
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (p *Panel) setSharing(w http.ResponseWriter, r *http.Request, s *session) {
-	fed := p.fed(w)
-	if fed == nil {
+	eng := p.fed(w)
+	if eng == nil {
 		return
 	}
 	var req struct {
-		Offer  []string          `json:"offer"`
-		Want   []string          `json:"want"`
-		Limits *store.PeerLimits `json:"limits"`
+		Offer  []string    `json:"offer"`
+		Want   []string    `json:"want"`
+		Limits *limitsJSON `json:"limits"`
 		// Labels are our names for wanted libraries' entries in the site's
 		// menu, by the other server's library ID ("" for its own names).
 		Labels map[string]string `json:"labels"`
@@ -581,63 +577,48 @@ func (p *Panel) setSharing(w http.ResponseWriter, r *http.Request, s *session) {
 		return
 	}
 	ctx := r.Context()
-	peer := p.pairedPeer(w, r)
-	if peer == nil {
+	peer, ok := p.pairedPeer(w, r, eng)
+	if !ok {
 		return
 	}
 	if req.Limits != nil {
-		if err := federation.ValidLimits(*req.Limits); err != nil {
+		l := msfp.Limits{Streams: req.Limits.Streams, Transcodes: req.Limits.Transcodes, BitrateKbps: req.Limits.BitrateKbps}
+		err := eng.SetLimits(ctx, peer.ID, l)
+		if errors.Is(err, msfp.ErrInvalidLimits) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
 				"detail": "Streams and transcodes go from 0 to 50, with no more transcodes than streams; the bitrate cap from 0 (none) to 1,000,000 kbps."})
 			return
 		}
-		if err := p.Store.SetPeerLimits(ctx, peer.ID, *req.Limits); err != nil {
+		if err != nil {
 			p.fail(w, "setting a peer's limits", err)
 			return
 		}
 	}
-	if err := fed.SetOffers(ctx, peer, req.Offer); err != nil {
+	if err := eng.SetOffers(ctx, peer.ID, req.Offer); err != nil {
 		p.fail(w, "setting offers", err)
 		return
 	}
 	// What we want changes only when it did: picking needs the other
 	// server's list, so it must be reachable then.
-	wants, err := p.Store.PeerWants(ctx, peer.ID)
+	wants, err := eng.Wants(ctx, peer.ID)
 	if err != nil {
 		p.fail(w, "reading wants", err)
 		return
 	}
 	now := []string{}
 	for _, w := range wants {
-		now = append(now, w.ID)
+		if w.Wanted {
+			now = append(now, w.ID)
+		}
 	}
 	slices.Sort(now)
 	asked := slices.Clone(req.Want)
 	slices.Sort(asked)
 	asked = slices.Compact(asked)
 	if !slices.Equal(now, asked) {
-		err := fed.SetWants(ctx, peer, req.Want)
-		if err == nil {
-			// Its titles, for what we want now.
-			fed.SyncSoon(peer)
-		}
-		if err != nil {
-			if errors.Is(err, federation.ErrUnreachable) || errors.Is(err, federation.ErrUnknown) {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
-					"detail": "What you offer is saved, but what you want couldn't be: the other server can't be reached now. Try again later."})
-				return
-			}
-			if errors.Is(err, federation.ErrUncallable) {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
-					"detail": "What you offer is saved, but what you want couldn't be: the other server can't be called, so it shares nothing with this one."})
-				return
-			}
-			if errors.Is(err, federation.ErrNotSupported) {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
-					"detail": "What you offer is saved, but what you want couldn't be: the other server doesn't share libraries with this one (it speaks another version of the protocol, or hasn't said which yet). Try Check, then again."})
-				return
-			}
-			p.fail(w, "setting wants", err)
+		// Its titles are read at once, for what we want now.
+		if err := eng.SetWants(ctx, peer.ID, req.Want); err != nil {
+			p.wantsProblem(w, err)
 			return
 		}
 	}
@@ -652,20 +633,39 @@ func (p *Panel) setSharing(w http.ResponseWriter, r *http.Request, s *session) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// pairedPeer is the paired server the request names, or nil after
-// answering.
-func (p *Panel) pairedPeer(w http.ResponseWriter, r *http.Request) *store.Peer {
-	peer, err := p.Store.PeerByID(r.Context(), r.PathValue("id"))
+// wantsProblem explains why what we want of a peer couldn't be saved.
+func (p *Panel) wantsProblem(w http.ResponseWriter, err error) {
+	detail := ""
 	switch {
-	case errors.Is(err, store.ErrNotFound):
+	case unreachable(err), errors.Is(err, msfp.ErrUnknown):
+		detail = "What you offer is saved, but what you want couldn't be: the other server can't be reached now. Try again later."
+	case errors.Is(err, msfp.ErrUncallable):
+		detail = "What you offer is saved, but what you want couldn't be: the other server can't be called, so it shares nothing with this one."
+	case errors.Is(err, msfp.ErrSuspended):
+		detail = "What you offer is saved, but what you want couldn't be: the other server revoked its key."
+	case errors.Is(err, msfp.ErrNotSupported):
+		detail = "What you offer is saved, but what you want couldn't be: the other server doesn't share libraries with this one (it speaks another version of the protocol, or hasn't said which yet). Try Check, then again."
+	default:
+		p.fail(w, "setting wants", err)
+		return
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": detail})
+}
+
+// pairedPeer is the paired server the request names; ok is false after
+// answering.
+func (p *Panel) pairedPeer(w http.ResponseWriter, r *http.Request, eng *msfp.Engine) (msfp.PeerView, bool) {
+	peer, err := eng.Peer(r.Context(), r.PathValue("id"))
+	switch {
+	case errors.Is(err, msfp.ErrNotFound):
 		notFound(w, "No such server")
-		return nil
+		return peer, false
 	case err != nil:
 		p.fail(w, "reading a peer", err)
-		return nil
-	case peer.State != store.PeerPaired:
+		return peer, false
+	case peer.State != msfp.Paired:
 		writeJSON(w, http.StatusConflict, map[string]string{"type": "not-paired", "detail": "Sharing starts once both operators have accepted."})
-		return nil
+		return peer, false
 	}
-	return peer
+	return peer, true
 }

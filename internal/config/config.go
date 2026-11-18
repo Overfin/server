@@ -433,6 +433,12 @@ type Federation struct {
 	// only (its core, section 3.1, leaves this to an implementation's
 	// tests), so a server in use keeps it off, the default.
 	TestPlainHTTP bool `toml:"test_plain_http"`
+	// Discovery serves MSFP's discovery document at /.well-known/msfp
+	// (MSFP core section 11): where this server's federation calls are,
+	// for servers that look. Off, the default: a server that serves it
+	// tells anyone it federates; Overfin's calls are where every peer
+	// looks first anyway.
+	Discovery bool `toml:"discovery"`
 }
 
 type Storage struct {

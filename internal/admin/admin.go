@@ -34,7 +34,6 @@ import (
 	"github.com/overfin/server/internal/config"
 	"github.com/overfin/server/internal/connector"
 	"github.com/overfin/server/internal/cookie"
-	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/imdb"
 	"github.com/overfin/server/internal/introskipper"
@@ -45,6 +44,7 @@ import (
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/theme"
 	"github.com/overfin/server/internal/tmdb"
+	"github.com/overfin/server/msfp"
 )
 
 // uiFiles are the control panel and the setup page, built from frontend/
@@ -144,8 +144,9 @@ type Panel struct {
 	// TMDB, when set, says whether Overfin has a source for TMDB's data
 	// (TMDB itself, or Seerr).
 	TMDB func() bool
-	// Federation is federation now: nil without the site's address.
-	Federation func() *federation.Service
+	// Engine is federation now, the MSFP engine: nil (or a nil func)
+	// without the site's address.
+	Engine func() *msfp.Engine
 	// Uncallable, when set, reads and changes whether this server can't
 	// be called (MSFP core section 7.5): its operator's setting, which
 	// needs no site address.

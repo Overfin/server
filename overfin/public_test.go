@@ -29,6 +29,8 @@ var publicRoutes = map[string]string{
 	"GET /api/v1/stream/{ticket}/trickplay/{sheet}":        "the stream's seek-bar previews",
 	"POST /api/v1/federation/pair":                         "federation: using a pairing code",
 	"POST /api/v1/federation/hello":                        "federation: where a pairing stands",
+	"POST /api/v1/federation/rotate":                       "federation: a paired server's new key",
+	"POST /api/v1/federation/revoke":                       "federation: a paired server's key revoked",
 	"POST /api/v1/federation/libraries":                    "federation: the libraries offered",
 	"POST /api/v1/federation/titles":                       "federation: the titles offered",
 	"POST /api/v1/federation/play":                         "federation: a paired server's viewer plays",

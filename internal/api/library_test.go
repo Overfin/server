@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/x509"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -28,7 +30,6 @@ import (
 	"github.com/overfin/server/internal/config"
 	"github.com/overfin/server/internal/emails"
 	"github.com/overfin/server/internal/feature"
-	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/identity"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/jellyfin"
@@ -37,6 +38,7 @@ import (
 	"github.com/overfin/server/internal/pin"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/plugin"
+	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/proof"
 	"github.com/overfin/server/internal/provision"
 	"github.com/overfin/server/internal/seal"
@@ -45,6 +47,8 @@ import (
 	"github.com/overfin/server/internal/site"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/watchlist"
+	"github.com/overfin/server/msfp"
+	"github.com/overfin/server/msfp/wire"
 	web "github.com/overfin/web"
 )
 
@@ -404,9 +408,10 @@ type options struct {
 	panel func(*http.Request) string
 	// log, when set, receives the server's log.
 	log io.Writer
-	// federation, when set, receives the server's federation (its address
-	// the test server's).
-	federation **federation.Service
+	// federation, when set, receives the server's federation, the MSFP
+	// engine (its address the test server's, its name fedName or "B").
+	federation **msfp.Engine
+	fedName    string
 	// tickets, when set, receives the server's playbacks.
 	tickets **playback.Tickets
 	// wrap, when set, wraps the server's handler (to stand in for a
@@ -468,7 +473,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		t.Fatal(err)
 	}
 
-	logger := slog.New(slog.NewTextHandler(cmp.Or[io.Writer](o.log, io.Discard), nil))
+	logger := slog.New(slog.NewTextHandler(cmp.Or[io.Writer](o.log, debugLog()), nil))
 	prov := &provision.Provisioner{Store: st, Jellyfin: jf, AdminKey: "admin", LogKey: []byte("k"), Logger: logger,
 		AdminGroup: o.adminGroup}
 	// Overfin's one Jellyfin account, which serves everyone: the fake's
@@ -533,17 +538,30 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 	}
 	// The server listens first: federation needs its address.
 	srv := httptest.NewUnstartedServer(nil)
-	var fed *federation.Service
+	var fed *msfp.Engine
 	if o.federation != nil {
-		keys, err := federation.LoadKeys(context.Background(), st)
+		var cur api.Playback
+		host := api.PeerHost{Current: func() (api.Playback, bool) { return cur, true }}
+		var err error
+		fed, err = msfp.Open(context.Background(), msfp.Config{Address: "https://" + srv.Listener.Addr().String(),
+			Store: st.MSFP(), Name: func() string { return cmp.Or(o.fedName, "B") }, Pins: []string{wire.Pin(testCertificate(t))},
+			Parts: []string{"catalog", "playback", "media", "video"}, Catalog: store.MSFPCatalog{S: st},
+			Playback: host, Media: host, AllowLoopback: true, Logger: logger, Clock: secondsClock{},
+			Notifier: notifier(func(ev msfp.Event) {
+				if e, ok := ev.(msfp.RemotePlaybackEnded); ok {
+					cur.RemoteEnded(e.Playback)
+				}
+			}),
+			NotFound: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { problem.Send(w, problem.NotFound, "") })})
 		if err != nil {
 			t.Fatal(err)
 		}
-		fed = &federation.Service{Store: st, Keys: keys, Address: "https://" + srv.Listener.Addr().String(),
-			HTTP: federation.NewHTTPClient(), Name: func(context.Context) string { return "B" }, Logger: logger}
+		runCtx, stop := context.WithCancel(context.Background())
+		t.Cleanup(stop)
+		go fed.Run(runCtx)
 		*o.federation = fed
-		pb.Federation = func() *federation.Service { return fed }
-		fed.PeerChanged = pb.PeerChanged
+		pb.Engine = func() *msfp.Engine { return fed }
+		cur = pb
 	}
 	if o.playback != nil {
 		*o.playback = pb
@@ -604,7 +622,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		}
 	}
 	if fed != nil {
-		plugins = append(plugins, federation.Plugin{S: fed})
+		plugins = append(plugins, fedCalls{fed})
 	}
 	h, err := server.New(logger, identify, siteHandler, plugins...)
 	if err != nil {
@@ -1507,3 +1525,44 @@ func pgsTrack() []byte {
 	t = append(t, seg(0x80)...)
 	return append(t, seg(0x16, 7, 128, 4, 56, 16, 0, 1, 0, 0, 0, 0)...)
 }
+
+// testCertificate is the certificate every httptest TLS server serves.
+func testCertificate(t *testing.T) *x509.Certificate {
+	t.Helper()
+	srv := httptest.NewTLSServer(http.NotFoundHandler())
+	defer srv.Close()
+	return srv.Certificate()
+}
+
+// notifier is a func as an msfp.Notifier.
+type notifier func(msfp.Event)
+
+func (n notifier) Notify(ev msfp.Event) { n(ev) }
+
+// fedCalls mounts the engine's federation calls, as Overfin does.
+type fedCalls struct{ engine *msfp.Engine }
+
+func (fedCalls) Name() string { return "federation" }
+
+func (f fedCalls) Register(r *plugin.Registrar) error {
+	for _, call := range []string{"pair", "hello", "rotate", "revoke", "libraries", "titles", "play", "progress", "stop"} {
+		if err := r.HandlePublic("POST /api/v1/federation/"+call, f.engine.FederationHandler()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func debugLog() io.Writer {
+	if os.Getenv("OVERFIN_TEST_LOG") != "" {
+		return os.Stderr
+	}
+	return io.Discard
+}
+
+// secondsClock is the system's time cut to the second: an engine started
+// at it hears requests dated the second it started (MSFP core section
+// 6.4, step 4), which tests make at once.
+type secondsClock struct{}
+
+func (secondsClock) Now() time.Time { return time.Now().Truncate(time.Second) }

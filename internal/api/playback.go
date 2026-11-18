@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/library"
@@ -21,6 +20,7 @@ import (
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/textclean"
 	"github.com/overfin/server/internal/tracks"
+	"github.com/overfin/server/msfp"
 )
 
 // Playback starts, follows, ends and restores playbacks.
@@ -35,9 +35,9 @@ type Playback struct {
 	// replacing its oldest.
 	RefuseOverLimit bool
 	// PeerTranscodeReserve is how many transcodes paired servers can never
-	// take; Federation, federation now (nil without it).
+	// take; Engine, federation now, the MSFP engine (nil without it).
 	PeerTranscodeReserve int
-	Federation           func() *federation.Service
+	Engine               func() *msfp.Engine
 	Logger               *slog.Logger
 }
 
@@ -58,15 +58,7 @@ func (pb Playback) Register(r *plugin.Registrar) error {
 			return err
 		}
 	}
-	// A paired server's viewers: the caller is a server, proven by its
-	// signature (federation), never a person.
-	if err := r.HandlePublic("POST /api/v1/federation/play", federation.SignRefusals(http.HandlerFunc(pb.peerPlay))); err != nil {
-		return err
-	}
-	if err := r.HandlePublic("POST /api/v1/federation/progress", federation.SignRefusals(http.HandlerFunc(pb.peerProgress))); err != nil {
-		return err
-	}
-	return r.HandlePublic("POST /api/v1/federation/stop", federation.SignRefusals(http.HandlerFunc(pb.peerStop)))
+	return nil
 }
 
 // IdleTimeout ends a playback with neither progress reports nor stream
@@ -112,20 +104,32 @@ func (pb Playback) end(s *playback.Stream, reason, by string) {
 func (pb Playback) stopped(s *playback.Stream) {
 	snap := pb.Tickets.Snapshot(s)
 	if rm := s.Remote; rm != nil {
-		// Where the profile is, kept here; the playback ends there. Counted
-		// as on its way at once: a playback started right after (another
-		// audio track) waits for it (remoteStops).
-		done := remoteStops.begin(rm.PeerID)
+		// Where the profile is, kept here; the playback ends there (the
+		// engine sends stop, again when it doesn't answer), unless it is
+		// over there already, or the engine stops it itself before the
+		// playback replacing it (Replaced).
+		eng := pb.engine()
 		go func() {
-			defer done()
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			pb.record(ctx, s, snap.PositionTicks/10_000, true)
-			if peer, err := pb.Library.Provisioner.Store.PeerByID(ctx, rm.PeerID); err == nil {
-				pb.stopRemote(peer, rm.ID, snap.PositionTicks/10_000)
+			if eng != nil && !rm.Replaced.Load() {
+				eng.Stop(ctx, rm.ID, snap.PositionTicks/10_000)
 			}
 		}()
 		return
+	}
+	if peerTicket(s) {
+		// A paired server's playback here, ended on this side (idle, the
+		// operator, a playback taking its place): the engine ends its
+		// side, its ticket refused from then on.
+		if eng := pb.engine(); eng != nil {
+			for _, v := range eng.Playbacks() {
+				if v.Handle == s.ID {
+					eng.StopPlayback(v.ID)
+				}
+			}
+		}
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -264,8 +268,11 @@ func (pb Playback) progress(w http.ResponseWriter, r *http.Request) {
 	pb.record(r.Context(), s, req.PositionMs, false)
 	if rm := s.Remote; rm != nil {
 		// Played on a paired server: its stream's use keeps it alive
-		// there; this tells it where the viewer is, and pauses at once.
-		pb.tellRemote(rm, req.PositionMs, req.Paused)
+		// there; the engine tells it where the viewer is, now and then,
+		// and pauses at once.
+		if eng := pb.engine(); eng != nil {
+			eng.Progress(rm.ID, req.PositionMs, req.Paused)
+		}
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -563,7 +570,7 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 			l.storeError(w, err)
 			return
 		}
-		if src.peer != nil {
+		if src.peer != "" {
 			pb.startRemote(w, r, caller, req, kbps, src.peer, ref.Key())
 			return
 		}
@@ -749,7 +756,12 @@ func (pb Playback) trickplaySheet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Remote != nil {
-		Stream{Playback: pb}.relaySheet(w, r, s, r.PathValue("sheet"))
+		n, ok := sheetNumber(s.Trickplay, r.PathValue("sheet"))
+		if !ok {
+			problem.Send(w, problem.NotFound, "")
+			return
+		}
+		Stream{Playback: pb}.fetchRemote(w, r, s, msfp.MediaPath{Kind: msfp.MediaSheet, Sheet: n})
 		return
 	}
 	pb.serveSheet(w, r, s, r.PathValue("sheet"))
@@ -1035,6 +1047,10 @@ type openArgs struct {
 	// have counts as none asked for (MSFP playback, section 2.6). This
 	// server's own site sets pr.AudioStreamIndex itself.
 	peerTracks bool
+	// admit, for a paired server's playback, counts it by the pairing's
+	// limits once the method is known, before this server's own count
+	// (msfp.StartRequest.Admit); it gives what frees that count.
+	admit func(method string) (release func(), err error)
 }
 
 // opened is a copy opened: its playback registered, and the session's
@@ -1200,13 +1216,30 @@ func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*op
 		ItemID: jfItem, SourceID: sourceID, PlaySessionID: info.PlaySessionId, Decision: *dec,
 		Auth: play, AudioIndex: pr.AudioStreamIndex, SubtitleIndex: pr.SubtitleStreamIndex, Origin: o.origin,
 	}
+	// A paired server's: counted by its pairing's limits first (the
+	// engine's), then by this server's (Tickets.Admit), released when the
+	// second refuses.
+	release := func() {}
+	if o.admit != nil {
+		free, err := o.admit(dec.Method)
+		if err != nil {
+			if rec, ok := w.(*recorder); ok {
+				rec.err = err
+			}
+			problem.Send(w, problem.StreamLimitReached, "")
+			return nil, false
+		}
+		release = free
+	}
 	// Checked and registered at once, so two starts can't both pass.
 	replaced, err := pb.Tickets.Admit(s, pr.StartTimeTicks, time.Now(), o.lim, o.device)
 	switch {
 	case errors.Is(err, playback.ErrStreamLimit):
+		release()
 		problem.Send(w, problem.StreamLimitReached, "")
 		return nil, false
 	case errors.Is(err, playback.ErrServerBusy):
+		release()
 		problem.Send(w, problem.ServerBusy, "")
 		return nil, false
 	}

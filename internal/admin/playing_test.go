@@ -10,6 +10,7 @@ import (
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp"
 )
 
 type fakePlaying struct {
@@ -40,10 +41,8 @@ func TestNowPlaying(t *testing.T) {
 	ctx := context.Background()
 	p, b, db, _ := signedInPanel(t)
 	acct, owner, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", JellyfinUsername: "of-1", JellyfinToken: "t"})
-	peer, err := db.AddPeer(ctx, bytes.Repeat([]byte{7}, 32), "https://b.example.org", "Films de B", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	peer := msfp.PeerRecord{ID: "pb", Key: bytes.Repeat([]byte{7}, 32), Address: "https://b.example.org", Name: "Films de B", State: msfp.Paired}
+	putPeer(t, db, peer)
 	src := jellyfin.MediaSource{Bitrate: 8_000_000, RunTimeTicks: 60 * 60 * 10_000_000,
 		MediaStreams: []jellyfin.MediaStream{{Type: "Video", Height: 1080}}}
 	f := &fakePlaying{live: []playback.Live{
