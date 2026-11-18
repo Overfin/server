@@ -227,7 +227,7 @@ func TestHostilePlayAnswers(t *testing.T) {
 	}
 	// Cleaned, not refused.
 	for _, v := range s.a.eng.Playbacks() {
-		s.a.eng.StopPlayback(v.ID)
+		s.a.eng.StopPlayback(v.ID, msfp.EndOperator)
 	}
 	edit(func(m map[string]any) {
 		m["audioTracks"] = []any{map[string]any{"id": "a0", "label": "Eng\u202elish\u0007"}, map[string]any{"id": "a01", "label": "x"},

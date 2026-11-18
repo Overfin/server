@@ -104,6 +104,7 @@ var (
 	ErrMoveFailed         = &Error{Code: "MoveFailed"}         // a new address doesn't answer
 
 	ErrInvalidLimits       = &Error{Code: "InvalidLimits"}       // limits out of range
+	ErrInvalidReason       = &Error{Code: "InvalidReason"}       // not an ending a host may give (StopPlayback)
 	ErrRangeNotSatisfiable = &Error{Code: "RangeNotSatisfiable"} // a malformed Range, or out of the file
 	ErrSealed              = &Error{Code: "Sealed"}              // a sealed value didn't open
 	ErrInternal            = &Error{Code: "Internal"}            // anything else; logged, never shown to a peer

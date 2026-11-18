@@ -232,7 +232,7 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 		return
 	}
 	for _, old := range replaced {
-		pb.stopped(old)
+		pb.stopped(old, "taken-over")
 	}
 	// The browser asks this server only (rule 97).
 	out := remoteView(rp, s)

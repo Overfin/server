@@ -950,9 +950,20 @@ func (e *Engine) stop(req *request) response {
 	return answer(struct{}{})
 }
 
-// StopPlayback is the operator stopping a peer's playback here. Error:
-// ErrNotFound.
-func (e *Engine) StopPlayback(id string) error {
+// StopPlayback ends a peer's playback here from the host's side, for
+// why (MSFP playback section 6.3): EndOperator when the operator stops
+// it, EndExpired or EndTooLong when the host's own idle or time rules
+// end it, EndNotOffered when its copy is no longer shared; "" is
+// EndOperator. Errors: ErrNotFound, ErrInvalidReason for another reason (the
+// viewer's stop, the pairing's end are the engine's own).
+func (e *Engine) StopPlayback(id string, why EndReason) error {
+	switch why {
+	case "":
+		why = EndOperator
+	case EndOperator, EndExpired, EndTooLong, EndNotOffered:
+	default:
+		return ErrInvalidReason
+	}
 	ps := &e.plays
 	ps.mu.Lock()
 	pb := ps.byID[id]
@@ -960,7 +971,7 @@ func (e *Engine) StopPlayback(id string) error {
 	if pb == nil {
 		return ErrNotFound
 	}
-	e.endPlayback(pb, EndOperator)
+	e.endPlayback(pb, why)
 	return nil
 }
 
@@ -968,7 +979,7 @@ func (e *Engine) StopPlayback(id string) error {
 // peer (never a person), the title played, how, since when, and whether
 // it was used since it started ("started" or "active"). Handle is the
 // host's own (Started.Handle), for a host that ends a playback from its
-// side (StopPlayback with ID).
+// side (StopPlayback with ID and its reason).
 type PlaybackView struct {
 	ID, Peer, PeerName, Title, Method, Handle string
 	Since                                     time.Time

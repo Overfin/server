@@ -95,13 +95,14 @@ func (pb Playback) EndIdle(now time.Time) {
 // in the background, its transcode included.
 func (pb Playback) end(s *playback.Stream, reason, by string) {
 	if pb.Tickets.Remove(s, reason, by, time.Now()) {
-		pb.stopped(s)
+		pb.stopped(s, reason)
 	}
 }
 
-// stopped tells Jellyfin a playback, just removed, has ended: where the
-// profile stopped, and its transcode stopped.
-func (pb Playback) stopped(s *playback.Stream) {
+// stopped tells Jellyfin a playback, just removed for reason (as
+// Tickets.Remove has it), has ended: where the profile stopped, and its
+// transcode stopped.
+func (pb Playback) stopped(s *playback.Stream, reason string) {
 	snap := pb.Tickets.Snapshot(s)
 	if rm := s.Remote; rm != nil {
 		// Where the profile is, kept here; the playback ends there (the
@@ -122,11 +123,11 @@ func (pb Playback) stopped(s *playback.Stream) {
 	if peerTicket(s) {
 		// A paired server's playback here, ended on this side (idle, the
 		// operator, a playback taking its place): the engine ends its
-		// side, its ticket refused from then on.
+		// side, its ticket refused from then on, and tells why.
 		if eng := pb.engine(); eng != nil {
 			for _, v := range eng.Playbacks() {
 				if v.Handle == s.ID {
-					eng.StopPlayback(v.ID)
+					eng.StopPlayback(v.ID, hostEnding(reason))
 				}
 			}
 		}
@@ -146,6 +147,16 @@ func (pb Playback) stopped(s *playback.Stream) {
 			}
 		}
 	}()
+}
+
+// hostEnding is how a paired server's playback ended here, by this
+// server's rules, in MSFP's words (playback section 6.3): idle is
+// expiry; anything else, the operator's doing.
+func hostEnding(reason string) msfp.EndReason {
+	if reason == "expired" {
+		return msfp.EndExpired
+	}
+	return msfp.EndOperator
 }
 
 func (pb Playback) state(s *playback.Stream, snap playback.Snapshot) jellyfin.PlayState {
@@ -181,7 +192,7 @@ func (pb Playback) EndByAdmin(id string) bool {
 	if !ok || !pb.Tickets.Remove(s, "ended-by-admin", "", time.Now()) {
 		return false
 	}
-	pb.stopped(s)
+	pb.stopped(s, "ended-by-admin")
 	return true
 }
 
@@ -1244,7 +1255,7 @@ func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*op
 		return nil, false
 	}
 	for _, old := range replaced {
-		pb.stopped(old)
+		pb.stopped(old, "taken-over")
 	}
 	started = true // the device is the playback's now, freed when it ends
 

@@ -223,7 +223,7 @@ func TestLimitsAtOnce(t *testing.T) {
 		t.Errorf("%d played, %d refused", ok.Load(), limited.Load())
 	}
 	for _, v := range s.a.eng.Playbacks() {
-		s.a.eng.StopPlayback(v.ID)
+		s.a.eng.StopPlayback(v.ID, msfp.EndOperator)
 	}
 	h.mu.Lock()
 	h.hold, h.method = nil, "transcode"
@@ -314,7 +314,7 @@ func TestPlaybackEndings(t *testing.T) {
 	// The operator.
 	s.a.eng.SetOffers(ctx, s.onA.ID, []string{"films"})
 	play()
-	s.a.eng.StopPlayback(s.a.eng.Playbacks()[0].ID)
+	s.a.eng.StopPlayback(s.a.eng.Playbacks()[0].ID, msfp.EndOperator)
 	if r := reason(); r != msfp.EndOperator {
 		t.Errorf("the operator: %v", r)
 	}
@@ -534,7 +534,7 @@ func TestStatesAndCuts(t *testing.T) {
 	go func() { done <- s.b.eng.Fetch(ctx, pb.ID, msfp.MediaPath{Kind: msfp.MediaFile}, "", &sink{}) }()
 	time.Sleep(100 * time.Millisecond)
 	if v := s.a.eng.Playbacks(); len(v) == 1 {
-		s.a.eng.StopPlayback(v[0].ID)
+		s.a.eng.StopPlayback(v[0].ID, msfp.EndOperator)
 	}
 	select {
 	case <-cut:
@@ -603,5 +603,33 @@ func TestProgressPace(t *testing.T) {
 	s.b.eng.RunOnce(ctx)
 	if got := sent(); len(got) != 4 {
 		t.Fatalf("without reports: %v", got)
+	}
+}
+
+// A host ending a peer's playback by its own rules says why: the peer's
+// ending is that one; a reason that isn't the host's is refused.
+func TestStopPlaybackReason(t *testing.T) {
+	ctx := context.Background()
+	h := filmHost()
+	s := newSharing(t, h, msfp.Config{}, msfp.Config{})
+	if _, err := s.b.eng.Play(ctx, s.onB.ID, msfp.PlayRequest{Title: "movie/tmdb/949"}); err != nil {
+		t.Fatal(err)
+	}
+	id := s.a.eng.Playbacks()[0].ID
+	if err := s.a.eng.StopPlayback(id, msfp.EndStopped); !errors.Is(err, msfp.ErrInvalidReason) {
+		t.Errorf("the viewer's ending, from the host: %v", err)
+	}
+	if err := s.a.eng.StopPlayback(id, msfp.EndExpired); err != nil {
+		t.Fatal(err)
+	}
+	waitAll(s.a)
+	if ev, ok := has[msfp.PlaybackEnded](s.a.events); !ok || ev.Reason != msfp.EndExpired {
+		t.Errorf("the ending: %+v", ev)
+	}
+	if st := h.stops(); st["h1"] != msfp.EndExpired {
+		t.Errorf("the host was told %v", st)
+	}
+	if err := s.a.eng.StopPlayback(id, msfp.EndExpired); !errors.Is(err, msfp.ErrNotFound) {
+		t.Errorf("again: %v", err)
 	}
 }
