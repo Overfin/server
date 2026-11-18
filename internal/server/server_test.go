@@ -236,6 +236,25 @@ func TestFederationRefusalsAre404(t *testing.T) {
 	}
 }
 
+// A stream's path, fetched by paired servers too, refuses POST and PUT
+// with a 404, never the 415 of a request that isn't JSON (MSFP media
+// section 2.2: 404 or 405).
+func TestStreamMethodsAre404(t *testing.T) {
+	srv := newTestServer(t)
+	for _, method := range []string{"POST", "PUT", "PATCH"} {
+		req, _ := http.NewRequest(method, srv.URL+"/api/v1/stream/t_abc/master.m3u8", strings.NewReader("x"))
+		req.Header.Set("Content-Type", "text/plain")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound && res.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("%s: %d, want 404 or 405", method, res.StatusCode)
+		}
+	}
+}
+
 // The control panel's and the apps' paths reaching the site (the panel on
 // a listener of its own) are a plain 404, never the site's page.
 func TestPanelPathsNotTheSite(t *testing.T) {

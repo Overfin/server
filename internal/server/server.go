@@ -159,9 +159,12 @@ func sameOrigin(reg *plugin.Registrar, next http.Handler) http.Handler {
 
 // refuse answers a request sameOrigin refuses: with t, or, for a
 // federation call, the same plain 404 as a path that doesn't exist (MSFP
-// core section 3), so that nobody learns federation is on.
+// core section 3), so that nobody learns federation is on. A stream's
+// path, where a paired server fetches media too, refuses another method
+// than GET or HEAD with a 404 (MSFP media section 2.2: 404 or 405), never
+// a 415, whatever the request's Content-Type.
 func refuse(w http.ResponseWriter, r *http.Request, t problem.Type) {
-	if strings.HasPrefix(r.URL.Path, "/api/v1/federation/") {
+	if strings.HasPrefix(r.URL.Path, "/api/v1/federation/") || strings.HasPrefix(r.URL.Path, "/api/v1/stream/") {
 		t = problem.NotFound
 	}
 	problem.Send(w, t, "")
