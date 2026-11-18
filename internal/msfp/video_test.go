@@ -114,6 +114,13 @@ func TestReadVideoTitle(t *testing.T) {
 	}
 }
 
+func TestCleanTags(t *testing.T) {
+	got := CleanTags([]string{"fr-CA", "fr-ca", "", "x", "<script>", "es-419", "toolongtagvalue"})
+	if !slices.Equal(got, []string{"fr-CA", "es-419"}) {
+		t.Fatalf("%v", got)
+	}
+}
+
 func TestOtherID(t *testing.T) {
 	for _, c := range []struct {
 		scheme, value string

@@ -23,16 +23,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"regexp"
 	"runtime/debug"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
-
-	"github.com/overfin/server/internal/tmdb"
 
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/problem"
@@ -783,9 +779,6 @@ func viewOf(p *store.Peer) string {
 	return helloWaiting
 }
 
-// libraryIDRe is a library ID's form (MSFP catalog, section 2).
-var libraryIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-
 // cleanName keeps a peer's name short and printable, or its host when
 // it gives none.
 // In MSFP core section 9.1's order: each run of white space one space,
@@ -1368,7 +1361,7 @@ func (s *Service) TheirLibraries(ctx context.Context, p *store.Peer) ([]store.Pe
 			Kind json.RawMessage `json:"kind"`
 		}
 		// Its ID in the form MSFP gives, each once (the first kept).
-		if msfp.DecodeEntry(raw, &l) != nil || !libraryIDRe.MatchString(l.ID) ||
+		if msfp.DecodeEntry(raw, &l) != nil || !msfp.ID(l.ID) ||
 			slices.ContainsFunc(out, func(o store.PeerLibrary) bool { return o.ID == l.ID }) {
 			continue
 		}
@@ -1491,37 +1484,6 @@ type titlesReading struct {
 	Seq     int64             `json:"seq"`
 }
 
-// readPeerTitle reads one of a peer's titles: false when it isn't an
-// object with a key, a kind and a library, all strings; a language tag
-// that isn't a string is skipped alone, as a list that isn't one is
-// (cleanTags checks the rest).
-func readPeerTitle(raw json.RawMessage) (store.PeerTitle, bool) {
-	var t struct {
-		Key       string          `json:"key"`
-		Kind      string          `json:"kind"`
-		Library   string          `json:"library"`
-		Audio     json.RawMessage `json:"audio"`
-		Subtitles json.RawMessage `json:"subtitles"`
-	}
-	if msfp.DecodeEntry(raw, &t) != nil {
-		return store.PeerTitle{}, false
-	}
-	tags := func(raw json.RawMessage) []string {
-		var list []any
-		if json.Unmarshal(raw, &list) != nil {
-			return nil
-		}
-		var out []string
-		for _, v := range list {
-			if s, ok := v.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	}
-	return store.PeerTitle{Key: t.Key, Kind: t.Kind, Library: t.Library, Audio: tags(t.Audio), Subtitles: tags(t.Subtitles)}, true
-}
-
 type titlesAnswer struct {
 	Titles []store.PeerTitle `json:"titles"`
 	// Next is where the next page starts; empty after the last.
@@ -1624,7 +1586,7 @@ func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
 			answer.Next = last
 		}
 	} else {
-		page, err := s.Store.TitlesInLibraries(ctx, libs, req.After, titlesPage)
+		page, full, err := s.Store.TitlesInLibraries(ctx, libs, req.After, titlesPage)
 		if err != nil {
 			problem.Send(w, problem.Internal, "")
 			return
@@ -1636,7 +1598,8 @@ func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
 			problem.Send(w, problem.Internal, "")
 			return
 		}
-		if len(page) == titlesPage {
+		// A full page has a next (MSFP catalog, section 3.1): its last key.
+		if full && len(page) > 0 {
 			answer.Next = page[len(page)-1].Key
 		}
 	}
@@ -1732,20 +1695,18 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 		}
 		page := make([]store.PeerTitle, 0, len(answer.Titles))
 		for _, raw := range answer.Titles {
-			t, ok := readPeerTitle(raw)
-			if !ok {
-				continue // not a title: skipped, not the whole page (MSFP catalog, section 3.3)
-			}
-			// Only what we asked for, and only keys we read the same way:
-			// TMDB's, as TMDB numbers them (a "movie/tmdb/0550" would be
-			// one more title here, a duplicate nobody can play, and one
-			// more page asked of TMDB).
-			ref, ok := store.ParseTitleKey(t.Key)
-			if !ok || ref.Kind != t.Kind || ref.Key() != t.Key || !slices.Contains(libs, t.Library) || !canonicalTMDB(ref.TMDB()) {
+			// Skipped alone, not the whole page (MSFP catalog, section
+			// 3.3): what isn't a title, a key not in MSFP's one form (a
+			// "movie/tmdb/0550" would be one more title here, a duplicate
+			// nobody can play, and one more page asked of TMDB), or a
+			// library we didn't ask for. Its other IDs aren't kept: titles
+			// are known here by TMDB's.
+			t, ok := msfp.ReadVideoTitle(raw)
+			if !ok || !slices.Contains(libs, t.Library) {
 				continue
 			}
-			t.Audio, t.Subtitles = cleanTags(t.Audio), cleanTags(t.Subtitles)
-			page = append(page, t)
+			page = append(page, store.PeerTitle{Key: t.Key, Kind: t.Kind, Library: t.Library,
+				Audio: t.Audio, Subtitles: t.Subtitles, With: t.With})
 		}
 		if err := s.Store.PutPeerTitles(ctx, p.ID, reading, page); err != nil {
 			return 0, err
@@ -1841,24 +1802,6 @@ func (s *Service) SyncSoon(p *store.Peer) {
 // SyncEvery is how often the gateway should call SyncAll.
 func SyncEvery() time.Duration { return syncEvery }
 
-// cleanTags keeps a peer's language tags that look like tags ("fr",
-// "fr-CA", "es-419"), at most 12, each once.
-func cleanTags(tags []string) []string {
-	var out []string
-	for _, t := range tags {
-		if len(out) == 12 {
-			break
-		}
-		if len(t) < 2 || len(t) > 12 || slices.ContainsFunc(out, func(o string) bool { return strings.EqualFold(o, t) }) || strings.IndexFunc(t, func(r rune) bool {
-			return !(r == '-' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9')
-		}) >= 0 {
-			continue
-		}
-		out = append(out, t)
-	}
-	return out
-}
-
 // ErrLimits is returned for limits out of range.
 var ErrLimits = errors.New("federation: streams and transcodes go from 0 to 50, transcodes no more than streams, and the bitrate cap from 0 to 1,000,000 kbps")
 
@@ -1904,12 +1847,6 @@ func (s *Service) Call(ctx context.Context, p *store.Peer, path string, in, out 
 // CallReply is Call, giving a refusal's problem type too.
 func (s *Service) CallReply(ctx context.Context, p *store.Peer, path string, in, out any) (Reply, error) {
 	return s.call(ctx, p, path, in, out)
-}
-
-// canonicalTMDB reports whether id is a TMDB ID as TMDB writes it.
-func canonicalTMDB(id string) bool {
-	n, err := strconv.Atoi(id)
-	return err == nil && strconv.Itoa(n) == id && tmdb.ValidID(n)
 }
 
 // forgotUs is a peer refusing us, signed, where a pairing should answer:

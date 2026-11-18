@@ -418,13 +418,6 @@ func TestSyncTitlesChanges(t *testing.T) {
 	}
 }
 
-func TestCleanTags(t *testing.T) {
-	got := cleanTags([]string{"fr-CA", "fr-CA", "", "x", "<script>", "es-419", "toolongtagvalue"})
-	if len(got) != 2 || got[0] != "fr-CA" || got[1] != "es-419" {
-		t.Fatalf("%v", got)
-	}
-}
-
 // Someone between two paired servers answering "unknown" for one of them
 // can't end the pairing: a refusal counts only signed by its key. The
 // real one, after the pairing ended there, is signed, and does.
@@ -740,12 +733,49 @@ func TestTheirLibrariesOddOnes(t *testing.T) {
 	}
 }
 
-// Only TMDB's own way of writing an ID is kept from a peer's index: no
-// duplicates made of leading zeros, nothing that isn't a number.
-func TestCanonicalTMDB(t *testing.T) {
-	for id, want := range map[string]bool{"550": true, "0550": false, "00550": false, "abc": false, "0": false, "": false, "99999999999": false} {
-		if canonicalTMDB(id) != want {
-			t.Errorf("%q: %v", id, !want)
+// Of a peer's episodes, the others its copy holds are kept (MSFP video,
+// section 4.2), those of another series or not episodes skipped alone; a
+// member at the answer's top of the wrong type fails the whole reading,
+// and what was kept stays (catalog section 3.3).
+func TestSyncTitlesWithAndWrongTypes(t *testing.T) {
+	ctx := context.Background()
+	a, b, _, aOnB := pairedPair(t)
+	lib := pub(t, a, "films")[0]
+	k := msfp.NewKey()
+	var tail atomic.Value
+	tail.Store(`,"seq":7`)
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := []byte(`{"libraries":[{"id":"` + lib + `","name":"Series","kind":"tvshows"}]}`)
+		if r.URL.Path != "/api/v1/federation/libraries" {
+			body = []byte(`{"titles":[
+				{"key":"series/tmdb/1399/e63056","kind":"episode","library":"` + lib + `",
+					"with":["series/tmdb/1399/e63057","series/tmdb/2/e1","series/tmdb/1399/s1",5],"ids":{"imdb":"tt1480055"}},
+				{"key":"series/tmdb/1399/e63057","kind":"episode","library":"` + lib + `","with":"series/tmdb/1399/e63056"}]` +
+				tail.Load().(string) + `}`)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, "application/json", body))
+		_, _ = w.Write(body)
+	}))
+	defer fake.Close()
+	peer := *aOnB
+	peer.Address, peer.PublicKey = fake.URL, k.Public()
+	if n, err := b.s.SyncTitles(ctx, &peer); err != nil || n != 2 {
+		t.Fatalf("read %d, %v", n, err)
+	}
+	if w, _ := b.s.Store.PeerWith(ctx, peer.ID, "series/tmdb/1399/e63056"); strings.Join(w, ",") != "series/tmdb/1399/e63057" {
+		t.Errorf("with %v", w)
+	}
+	if w, _ := b.s.Store.PeerWith(ctx, peer.ID, "series/tmdb/1399/e63057"); w != nil {
+		t.Errorf("a with that isn't a list kept: %v", w)
+	}
+	for _, bad := range []string{`,"seq":"7"`, `,"next":5`, `,"changes":"yes"`, `,"gone":"x"`, `,"seq":null`, `,"seq":1.5`} {
+		tail.Store(bad)
+		if _, err := b.s.SyncTitles(ctx, &peer); err == nil {
+			t.Errorf("%s: read", bad)
+		}
+		if got, _ := b.s.Store.TitlesOfPeer(ctx, peer.ID); len(got) != 2 {
+			t.Errorf("%s: kept %d", bad, len(got))
 		}
 	}
 }
