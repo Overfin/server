@@ -1,55 +1,59 @@
 // Package msfp is an engine for MSFP, the Media Server Federation
-// Protocol (https://github.com/msfp-io/msfp-spec), version 1: it runs the
-// protocol between servers, and the server using it, the host, plugs in
-// through a few interfaces.
+// Protocol (https://github.com/msfp-io/msfp-spec), version 1. A media
+// server that uses it, the host, pairs with other servers by hand,
+// shares its titles with them and plays theirs for its own people,
+// without writing any of the protocol itself: the engine signs and
+// checks every call, keeps the pairings, keys, addresses and limits,
+// reads peers' catalogs, starts and relays playbacks, and does what time
+// asks (rotations, moves, retries). The host keeps its media, its people
+// and its pages; it plugs in through a few interfaces.
 //
-// A host opens one engine for the life of its process, mounts its
-// handler, and calls it from its panel:
+// # The minimum
 //
-//	store, err := jsonfile.Open("data/msfp")
+// A server that only pairs needs an address, a store and the routes:
+//
+//	store, err := jsonfile.Open("data/msfp") // its records, sealed with a key file
 //	…
 //	eng, err := msfp.Open(ctx, msfp.Config{
-//		Address: "https://media.example.org",
+//		Address: "https://media.example.org", // where peers call it, https only
 //		Store:   store,
 //	})
 //	…
 //	mux.Handle("/api/v1/federation/", eng.FederationHandler())
-//	go eng.Run(ctx)
+//	mux.Handle("/api/v1/stream/", eng.StreamHandler(nil))
+//	go eng.Run(ctx) // what time does
+//
+// Mount the handlers on the raw path, with no authentication in front and
+// no compression of their answers. Then, from the host's panel:
 //
 //	code, _, err := eng.MakeCode(ctx, "for Alice") // send it to the other operator
 //	peer, err := eng.RedeemCode(ctx, pasted)        // a code the other operator sent
+//	_, err = eng.Accept(ctx, id)                    // after both compared fingerprints
 //
-// What the engine does so far: this server's keys (the current one and
-// the next, sealed), pairing codes (made, listed, withdrawn, read,
-// redeemed), pair and hello both ways, the states ours, theirs, paired
-// and gone, accepting and ending a pairing (its keys forgotten), the
-// versions and parts each peer speaks, its pins, nonces in memory, the
-// limits of MSFP core section 8.3, signed answers and refusals; keys
-// that change (core section 12): Rotate, KeyStolen, a peer's rotate and
-// revoke, a pending key confirmed (ConfirmRotation), suspension, and
-// what 30 days do to each; addresses that change (core section 13):
-// SetAddress, announced once this server reaches itself there, and
-// peers' moves, confirmed by a hello at their new address; servers that
-// can't be called (core section 7.5): SetUncallable, the scheduled
-// hellos, rotations and revocations pulled from hello answers, and
-// peers that can't be called, never connected to; the discovery document
-// (core section 11): served when the host turns it on
-// (DiscoveryHandler), and peers' fetched for the base path of every call
-// to them; this server's own certificate pins, read at its addresses
-// unless the host gives them. The catalog, playback and media come next.
+// # Sharing and playing
 //
-// Mount the handlers on the raw path, with no authentication in front
-// and no compression of their answers:
+// To share, the host gives Config a Catalog (its libraries and titles), a
+// Playback (starting and stopping a stream) and a Media (serving it): see
+// host.go. Its operator chooses what each peer is offered (SetOffers) and
+// which of a peer's libraries this server reads (SetWants); the engine
+// keeps peers' titles in the Store, where the host reads them as it
+// likes. Its viewers play a peer's title through Play, Progress, Stop and
+// Fetch, at a route of the host's own. Events (Config.Notifier) tell the
+// host what happened, for its panel and its logs.
 //
-//	mux.Handle(prefix+"/api/v1/federation/", eng.FederationHandler())
-//	mux.Handle("/.well-known/msfp", eng.DiscoveryHandler())
+// # More
 //
-// The protocol's pieces (keys, codes, signatures, strict JSON, pins,
-// statements) are package msfp/wire. Neither package imports anything
-// but the standard library and filippo.io/edwards25519.
+// Keys that change (Rotate, KeyStolen, ConfirmRotation), addresses that
+// change (SetAddress), servers that can't be called (SetUncallable), the
+// discovery document (DiscoveryHandler) and certificate pins are all
+// handled here; the host only calls the method its operator chose.
+// msfp/wire holds the protocol's pieces (keys, codes, signatures, strict
+// JSON, statements); msfp/store/jsonfile and msfp/store/memory are ready
+// stores. Neither package imports anything but the standard library and
+// filippo.io/edwards25519.
 //
-// A host shares by giving Config a Catalog, a Playback and a Media
-// (host.go); its viewers play peers' titles through Play, Progress, Stop
-// and Fetch, at a route of its own. examples/share-folder is a whole host
-// in a few hundred lines.
+// examples/share-folder is a whole host in a few hundred lines: a folder
+// of films shared with the servers it pairs with, typed commands for a
+// panel. The engine's API, in words, is api/engine.md and api/host.md in
+// the specification's repository.
 package msfp

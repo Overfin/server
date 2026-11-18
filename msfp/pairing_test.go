@@ -169,3 +169,74 @@ func hasEvent[T msfp.Event](evs []msfp.Event) bool {
 	}
 	return false
 }
+
+// Run's hourly work goes by Config.Clock: an expired code is tidied once
+// the engine's clock passes the hour, whatever the wall clock says.
+func TestRunHourByClock(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	clock := newClock(1800000000)
+	a := newServer(t, msfp.Config{Clock: clock})
+	if _, _, err := a.eng.MakeCode(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	stored := func() int {
+		n := 0
+		a.store.Read(context.Background(), func(tx msfp.Tx) error {
+			codes, err := tx.Codes()
+			n = len(codes)
+			return err
+		})
+		return n
+	}
+	done := make(chan struct{})
+	go func() { a.eng.Run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	time.Sleep(200 * time.Millisecond) // its first round, at once, is over
+	if stored() != 1 {
+		t.Fatal("the code went before it expired")
+	}
+	clock.Add(25 * time.Hour)
+	deadline := time.Now().Add(5 * time.Second)
+	for stored() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the expired code is still stored")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// A call refused with an unsigned 404, as by a peer that just
+// restarted, is tried once more a second later, signed again with a new
+// nonce (MSFP core section 6.5); a second refusal stands.
+func TestUnsigned404RetriedOnce(t *testing.T) {
+	ctx := context.Background()
+	a := newServer(t, msfp.Config{})
+	b := newServer(t, msfp.Config{})
+	_, aOnB := pair(t, a, b)
+	before := len(a.exchanges("hello"))
+	a.mu.Lock()
+	a.refuse404 = 1
+	a.mu.Unlock()
+	start := time.Now()
+	if _, err := b.eng.Check(ctx, aOnB.ID); err != nil {
+		t.Fatalf("retried: %v", err)
+	}
+	if d := time.Since(start); d < time.Second {
+		t.Errorf("retried after %v", d)
+	}
+	x := a.exchanges("hello")
+	if len(x) != before+1 {
+		t.Fatalf("%d hellos reached A", len(x)-before)
+	}
+	a.mu.Lock()
+	a.refuse404 = 2
+	a.mu.Unlock()
+	if _, err := b.eng.Check(ctx, aOnB.ID); !errors.Is(err, msfp.ErrUnreachable) {
+		t.Errorf("refused twice: %v", err)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.refuse404 != 0 {
+		t.Errorf("%d refusals left: not tried again", a.refuse404)
+	}
+}

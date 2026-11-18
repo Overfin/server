@@ -52,6 +52,10 @@ var errNotHeard = errors.New("an unsigned refusal")
 // ErrUnreachable).
 var errNoConnection = errors.New("couldn't connect")
 
+// restartRetry is how long a call refused with an unsigned 404 waits
+// before its one retry (MSFP core section 6.5).
+const restartRetry = time.Second
+
 // reply is a peer's signed answer: its status, and for a refusal the
 // problem type its body gives ("" for none) and its retryAfter.
 type reply struct {
@@ -99,6 +103,18 @@ func (e *Engine) call(ctx context.Context, p *PeerRecord, call string, in, out a
 		e.announceSoon(p)
 	}
 	r, err := e.exchange(ctx, p, call, in, out, e.signerFor(p))
+	if call != callPair && errors.Is(err, errNotHeard) && r.status == http.StatusNotFound {
+		// Maybe it just restarted, and refuses what is dated before: once
+		// more a second later, signed again with a new nonce (MSFP core
+		// section 6.5, "Retrying").
+		t := time.NewTimer(restartRetry)
+		select {
+		case <-t.C:
+			r, err = e.exchange(ctx, p, call, in, out, e.signerFor(p))
+		case <-ctx.Done():
+			t.Stop()
+		}
+	}
 	if call != callPair {
 		e.calledPeer(p, err)
 	}

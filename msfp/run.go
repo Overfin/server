@@ -32,16 +32,18 @@ const forgetAfter = 365 * 24 * time.Hour
 
 // Run does the engine's background work until ctx ends, then returns
 // ctx's error. Without it, the engine still answers peers and the
-// operator, but nothing happens with time. Call Run or RunOnce, never
-// both.
+// operator, but nothing happens with time. The hour is Config.Clock's;
+// the ticks of a second are real time. Call Run or RunOnce, never both.
 func (e *Engine) Run(ctx context.Context) error {
 	t := time.NewTicker(tickEvery)
 	defer t.Stop()
+	// The hourly work by Config.Clock, the engine's time; a clock set
+	// back runs it again rather than waiting for the hour it left.
 	var hourly time.Time
 	for {
 		var err error
-		if time.Since(hourly) >= tidyEvery {
-			hourly = time.Now()
+		if now := e.now(); now.Sub(hourly) >= tidyEvery || now.Before(hourly) {
+			hourly = now
 			err = e.RunOnce(ctx)
 		} else {
 			e.tick(ctx)

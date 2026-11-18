@@ -138,6 +138,9 @@ type server struct {
 	// it couldn't be reached.
 	mu   sync.Mutex
 	down bool
+	// refuse404 answers the next requests, that many, with a plain 404,
+	// as a server that just restarted answers requests dated before.
+	refuse404 int
 	// last is the last request served and its answer, as they went;
 	// see, when set, is shown each request first.
 	last exchange
@@ -250,10 +253,17 @@ func newServerWith(t *testing.T, cfg msfp.Config, opts serverOpts) *server {
 	s := &server{events: &events{}, h: http.NotFoundHandler()}
 	s.srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
-		down := s.down
+		down, refuse := s.down, s.refuse404 > 0
+		if refuse {
+			s.refuse404--
+		}
 		s.mu.Unlock()
 		if down {
 			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
+		if refuse {
+			http.NotFound(w, r)
 			return
 		}
 		body, _ := io.ReadAll(r.Body)
