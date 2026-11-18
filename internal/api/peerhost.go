@@ -107,7 +107,9 @@ func (h PeerHost) Describe(ctx context.Context, copy string) (msfp.CopyInfo, err
 // the tracks the engine chose are applied, and the playback is admitted
 // by the pairing's limits (req.Admit, the engine's count) and then by
 // this server's transcodes, less those kept for its own people
-// (PeerTranscodeReserve).
+// (PeerTranscodeReserve). A remux that Progress later finds re-encoding
+// its video is moved into the pairing's transcodes by the slot Admit
+// gave (msfp.Slot.Transcoding), and stopped when none is left.
 func (h PeerHost) Start(ctx context.Context, req msfp.StartRequest) (msfp.Started, error) {
 	pb, err := h.playback()
 	if err != nil {
@@ -145,20 +147,11 @@ func (h PeerHost) Start(ctx context.Context, req msfp.StartRequest) (msfp.Starte
 	}
 	lim.RefuseOverLimit = true
 	id := playback.PeerPrefix + req.Peer.ID
-	var slot msfp.Slot
-	admit := func(method string) (func(), error) {
-		s, err := req.Admit(method)
-		if err != nil {
-			return nil, err
-		}
-		slot = s
-		return s.Release, nil
-	}
 	w := &recorder{header: http.Header{}}
 	r, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/", nil)
 	o, ok := pb.open(w, r, openArgs{req: startRequest{AudioTrack: req.AudioTrack, SubtitleTrack: req.SubtitleTrack,
 		StartPositionMs: req.StartMs}, pr: pr, kbps: kbps, item: req.Copy, uid: uid, ja: ja, lim: lim, device: req.Peer.Name,
-		accountID: id, profileID: id, sessionID: id, peerTracks: true, admit: admit})
+		accountID: id, profileID: id, sessionID: id, peerTracks: true, admit: req.Admit})
 	if !ok {
 		if w.err != nil {
 			return msfp.Started{}, w.err
@@ -166,7 +159,6 @@ func (h PeerHost) Start(ctx context.Context, req msfp.StartRequest) (msfp.Starte
 		return msfp.Started{}, w.refusal()
 	}
 	s, out := o.stream, o.out
-	_ = slot
 	// Its previews, by the same set Describe gave.
 	pb.previews(ctx, s, ja, uid, func(int) string { return "" })
 	pb.Logger.Info("playback started for a paired server", "playback", s.ID, "peer", req.Peer.Name, "method", o.dec.Method,
@@ -223,6 +215,11 @@ func (h PeerHost) Progress(ctx context.Context, handle string, positionMs int64,
 		return msfp.ErrNotFound
 	}
 	pb.Tickets.Progress(s, positionMs*10_000, paused, time.Now())
+	// Whether a remux really copies the video, as for our own people's;
+	// one that re-encodes counts in the pairing's transcodes (Start).
+	if pb.Tickets.Method(s) == "remux" {
+		s.Checked.Do(func() { go pb.checkRemux(s) })
+	}
 	if err := pb.Library.Jellyfin.ReportProgress(ctx, s.Auth, pb.state(s, pb.Tickets.Snapshot(s))); err != nil {
 		pb.Logger.Warn("could not report progress", "playback", s.ID, "err", err)
 	}

@@ -91,6 +91,16 @@ type fakeJellyfin struct {
 	onPlaybackInfo func()
 	// streamStatus, when set, is how a file played as it is is answered.
 	streamStatus int
+	// remux streams the movie with its video copied, by Jellyfin's
+	// reasons; reencodes then has its session say the video is
+	// re-encoded after all.
+	remux, reencodes bool
+}
+
+func (f *fakeJellyfin) setRemux(remux, reencodes bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.remux, f.reencodes = remux, reencodes
 }
 
 func (f *fakeJellyfin) setTrickplay(none bool, set map[string]int) {
@@ -219,6 +229,13 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	if r.URL.Path == "/Sessions" {
+		// The device's session, as VideoCopied reads it.
+		f.calls = append(f.calls, "GET /Sessions")
+		json.NewEncoder(w).Encode([]map[string]any{{"NowPlayingItem": map[string]any{"Id": fmt.Sprintf("%032x", 1)},
+			"TranscodingInfo": map[string]any{"IsVideoDirect": !f.reencodes}}})
+		return
+	}
 	if q.Get("userId") != userJF && (!f.partnerSeesAll || q.Get("userId") != partnerJF) && !strings.HasPrefix(r.URL.Path, "/MediaSegments/") &&
 		!strings.HasPrefix(strings.ToLower(r.URL.Path), "/videos/") {
 		w.WriteHeader(http.StatusBadRequest)
@@ -295,12 +312,16 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_, named := asked["AudioStreamIndex"]
 		direct := f.direct || (f.unmarked && !named)
+		reasons := "VideoCodecNotSupported,AudioCodecNotSupported"
+		if f.remux {
+			reasons = "ContainerNotSupported"
+		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"PlaySessionId": "abc123",
 			"MediaSources": []map[string]any{{
 				"Id": fmt.Sprintf("%032x", 1), "Name": "1080p", "Protocol": "File", "Path": "/mnt/media/secret.mkv",
 				"SupportsTranscoding": true, "TranscodingSubProtocol": "hls", "SupportsDirectPlay": direct,
-				"TranscodingUrl": "/videos/" + fmt.Sprintf("%032x", 1) + "/master.m3u8?ApiKey=" + token + "&MediaSourceId=x&TranscodeReasons=VideoCodecNotSupported,AudioCodecNotSupported" + "&AudioStreamIndex=" + strconv.Itoa(streamed),
+				"TranscodingUrl": "/videos/" + fmt.Sprintf("%032x", 1) + "/master.m3u8?ApiKey=" + token + "&MediaSourceId=x&TranscodeReasons=" + reasons + "&AudioStreamIndex=" + strconv.Itoa(streamed),
 				"RunTimeTicks":   72000000000, "Container": "mkv", "Bitrate": 9258000,
 				"MediaStreams": []map[string]any{
 					{"Index": 0, "Type": "Video", "Codec": "hevc", "Profile": "Main 10", "Width": 3840, "Height": 2160, "BitDepth": 10,

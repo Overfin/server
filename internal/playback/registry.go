@@ -69,6 +69,11 @@ type Stream struct {
 
 	// Checked runs once: whether a remux really copies the video.
 	Checked sync.Once
+	// Reencoding, for a paired server's playback, is told when a remux
+	// turns out to re-encode its video: it counts it in the pairing's
+	// transcodes, false when none is left (msfp.Slot.Transcoding). Set
+	// before the stream is registered.
+	Reencoding func() bool
 }
 
 // Over is closed when the playback ends, however it ends (stopped,

@@ -592,3 +592,41 @@ func TestPeerPlaybackEndedByOwner(t *testing.T) {
 		t.Errorf("B's operator: %v", r)
 	}
 }
+
+// A remux of B's that turns out to re-encode its video counts in the
+// pairing's transcodes (msfp.Slot.Transcoding): with one left, it plays
+// on; with none, B stops it.
+func TestPeerRemuxThatReencodes(t *testing.T) {
+	for _, transcodes := range []int{1, 0} {
+		t.Run(fmt.Sprint("transcodes=", transcodes), func(t *testing.T) {
+			ctx := context.Background()
+			x := pairForPlay(t)
+			x.fakeB.setDirect(false)
+			x.fakeB.setRemux(true, true)
+			if err := x.b.SetLimits(ctx, x.aOnB.ID, msfp.Limits{Streams: 2, Transcodes: transcodes}); err != nil {
+				t.Fatal(err)
+			}
+			s := x.playPeer(t)
+			if v := x.b.Playbacks(); len(v) != 1 || v[0].Method != "remux" {
+				t.Fatalf("B's playbacks: %+v", v)
+			}
+			if status, _ := post(t, x.srvA, "/api/v1/playback/"+s.ID+"/progress", `{"positionMs":600000}`); status != 204 {
+				t.Fatal("progress")
+			}
+			waitFor(t, "B's check of the remux", func() bool { return x.fakeB.called("GET /Sessions") == 1 })
+			if transcodes == 0 {
+				if r := x.ending(t); r != msfp.EndOperator {
+					t.Errorf("over the pairing's transcodes: %v", r)
+				}
+				return
+			}
+			waitFor(t, "B counting it a transcode", func() bool {
+				live := livePlaybacks(x.onB)
+				return len(live) == 1 && x.onB.Method(live[0]) == "transcode"
+			})
+			if v := x.b.Playbacks(); len(v) != 1 {
+				t.Errorf("B's playbacks: %+v", v)
+			}
+		})
+	}
+}

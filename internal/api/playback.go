@@ -735,7 +735,8 @@ func languageTag(s string) string {
 // copies the video. The reasons Jellyfin gives beforehand don't cover
 // everything it decides when it starts encoding (converting HDR for a
 // screen, say); a remux that re-encodes is a transcode, and counts as one
-// from then on.
+// from then on, for a paired server's playback in its pairing's
+// transcodes too.
 func (pb Playback) checkRemux(s *playback.Stream) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -747,6 +748,12 @@ func (pb Playback) checkRemux(s *playback.Stream) {
 	if found && !copied {
 		pb.Tickets.Reencodes(s)
 		pb.Logger.Info("a playback taken for a remux re-encodes its video: counted as a transcode", "playback", s.ID)
+		// A paired server's: counted in its pairing's transcodes too, and
+		// stopped when none is left (MSFP playback section 6).
+		if s.Reencoding != nil && !s.Reencoding() {
+			pb.Logger.Info("a paired server's playback re-encodes its video, over its pairing's transcodes: stopped", "playback", s.ID)
+			pb.end(s, "over the pairing's transcodes", "")
+		}
 	}
 }
 
@@ -1060,8 +1067,9 @@ type openArgs struct {
 	peerTracks bool
 	// admit, for a paired server's playback, counts it by the pairing's
 	// limits once the method is known, before this server's own count
-	// (msfp.StartRequest.Admit); it gives what frees that count.
-	admit func(method string) (release func(), err error)
+	// (msfp.StartRequest.Admit); its slot frees that count, and moves a
+	// remux found to re-encode into the pairing's transcodes.
+	admit func(method string) (msfp.Slot, error)
 }
 
 // opened is a copy opened: its playback registered, and the session's
@@ -1232,7 +1240,7 @@ func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*op
 	// second refuses.
 	release := func() {}
 	if o.admit != nil {
-		free, err := o.admit(dec.Method)
+		slot, err := o.admit(dec.Method)
 		if err != nil {
 			if rec, ok := w.(*recorder); ok {
 				rec.err = err
@@ -1240,7 +1248,7 @@ func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*op
 			problem.Send(w, problem.StreamLimitReached, "")
 			return nil, false
 		}
-		release = free
+		release, s.Reencoding = slot.Release, slot.Transcoding
 	}
 	// Checked and registered at once, so two starts can't both pass.
 	replaced, err := pb.Tickets.Admit(s, pr.StartTimeTicks, time.Now(), o.lim, o.device)
