@@ -213,6 +213,10 @@ type Verifier struct {
 	// Host is this server's own host, as its address names it: a request
 	// signed for another server is refused, even if sent here.
 	Host string
+	// Former, when set, gives the host of this server's address before it
+	// moved, accepted too while the move lasts (core section 13.1), or ""
+	// once it no longer is.
+	Former func() string
 	// Seen remembers the nonces already accepted. Shared by the Verifiers
 	// a server makes over its life (each settings change rebuilds them),
 	// so a request can't be replayed across one; nil for one of its own.
@@ -243,6 +247,9 @@ type Verified struct {
 	// Known: a server this one knows (paired or not yet), not a stranger
 	// heard while a code is live.
 	Known bool
+	// Former: signed for this server's former host (Verifier.Former), not
+	// its current one: the sender hasn't moved to its new address yet.
+	Former bool
 }
 
 // Check verifies r, whose body is body, at now. It checks only that the
@@ -291,9 +298,18 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 	if !ok {
 		return Verified{}, ErrSignature
 	}
-	msg := requestMessage(r.Method, v.Host, r.URL.RequestURI(), date, nonce, body)
-	if !verify(key, msg, sig) {
-		return Verified{}, ErrSignature
+	// Signed for this server's host, or, while it moves, for its former
+	// one: each is tried (section 6.2).
+	former := false
+	if !verify(key, requestMessage(r.Method, v.Host, r.URL.RequestURI(), date, nonce, body), sig) {
+		old := ""
+		if v.Former != nil {
+			old = v.Former()
+		}
+		if old == "" || !verify(key, requestMessage(r.Method, old, r.URL.RequestURI(), date, nonce, body), sig) {
+			return Verified{}, ErrSignature
+		}
+		former = true
 	}
 	// Only once the signature is good, and the key one this server hears,
 	// is the nonce remembered: nobody can fill the memory with nonces, or
@@ -312,7 +328,7 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 			if !v.Seen.add(string(key), nonce, now, false) {
 				return Verified{}, ErrSignature
 			}
-			return Verified{Key: ed25519.PublicKey(key), Nonce: nonce}, ErrForgotten
+			return Verified{Key: ed25519.PublicKey(key), Nonce: nonce, Former: former}, ErrForgotten
 		}
 	}
 	if v.Seen == nil {
@@ -321,7 +337,7 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 	if !v.Seen.add(string(key), nonce, now, known) {
 		return Verified{}, ErrSignature
 	}
-	return Verified{Key: ed25519.PublicKey(key), Nonce: nonce, Known: known}, nil
+	return Verified{Key: ed25519.PublicKey(key), Nonce: nonce, Known: known, Former: former}, nil
 }
 
 // maxNoncesPerKey caps the nonces remembered for one known server's key:
