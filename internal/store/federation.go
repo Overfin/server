@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -759,22 +760,32 @@ type PeerTitle struct {
 	// a film's or an episode's.
 	Audio     []string `json:"audio,omitempty"`
 	Subtitles []string `json:"subtitles,omitempty"`
+	// With, for an episode, are the keys of the other episodes its copies
+	// hold (a file of two episodes), in byte order, at most 16 (MSFP
+	// video, section 4.2).
+	With []string `json:"with,omitempty"`
+	// IDs are the title's IMDb and TheTVDB IDs, as TMDB gives them (MSFP
+	// video, section 4.3): a film's or a series', an episode's IMDb ID.
+	// Sent only: a paired server's aren't kept, Overfin knowing titles by
+	// TMDB's.
+	IDs map[string]string `json:"ids,omitempty"`
 }
 
 // TitlesInLibraries lists, in key order after after, at most limit of the
 // identified titles the given libraries hold (films, series, seasons,
-// episodes; files TMDB doesn't know are left out), each once, with one of
-// the libraries holding it, by its public ID (PublicLibraryIDs, which
-// must have given each library one).
-func (s *Store) TitlesInLibraries(ctx context.Context, libraries []string, after string, limit int) ([]PeerTitle, error) {
+// episodes, by their TMDB keys: files TMDB doesn't know are left out),
+// each once, with one of the libraries holding it, by its public ID
+// (PublicLibraryIDs, which must have given each library one). full says
+// whether it looked at limit titles: there may be more after the last.
+func (s *Store) TitlesInLibraries(ctx context.Context, libraries []string, after string, limit int) (titles []PeerTitle, full bool, err error) {
 	return s.titlesIn(ctx, libraries, nil, after, limit)
 }
 
 // titlesIn is TitlesInLibraries, of keys only when keys isn't nil.
-func (s *Store) titlesIn(ctx context.Context, libraries, keys []string, after string, limit int) ([]PeerTitle, error) {
+func (s *Store) titlesIn(ctx context.Context, libraries, keys []string, after string, limit int) ([]PeerTitle, bool, error) {
 	out := []PeerTitle{}
 	if len(libraries) == 0 {
-		return out, nil
+		return out, false, nil
 	}
 	args := []any{after}
 	marks := ""
@@ -785,59 +796,188 @@ func (s *Store) titlesIn(ctx context.Context, libraries, keys []string, after st
 		marks += "?"
 		args = append(args, l)
 	}
+	libArgs := args[1:]
 	only := ""
 	if keys != nil {
-		only = ` AND title_key IN (SELECT value FROM json_each(?))`
+		only = ` AND c.title_key IN (SELECT value FROM json_each(?))`
 		args = append(args, jsonList(keys))
 	}
 	args = append(args, limit)
 	// The library given is one holding it, by the ID paired servers know
 	// it by (PublicLibraryIDs: only libraries that have one are read), the
-	// first in byte order.
+	// first in byte order. Only keys of TMDB's (MSFP video, section 4): a
+	// title Overfin knows by another source's ID isn't sent.
 	rows, err := s.read.QueryContext(ctx, `SELECT c.title_key, min(c.kind), min(f.public_id) FROM catalog_items c
 		JOIN federation_libraries f ON f.library_id = c.library_id
 		WHERE c.title_key > ? AND c.library_id IN (`+marks+`) AND c.kind IN ('movie', 'series', 'season', 'episode')
-			AND c.title_key NOT LIKE 'item/%'`+strings.ReplaceAll(only, "title_key", "c.title_key")+`
+			AND (c.title_key GLOB 'movie/tmdb/*' OR c.title_key GLOB 'series/tmdb/*')`+only+`
 		GROUP BY c.title_key ORDER BY c.title_key LIMIT ?`, args...)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer rows.Close()
+	looked := 0
 	for rows.Next() {
 		var t PeerTitle
 		if err := rows.Scan(&t.Key, &t.Kind, &t.Library); err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		out = append(out, t)
+		looked++
+		// In MSFP's one form only: a key in another would be one more
+		// title there, which nobody can play.
+		if k, ok := msfp.ParseVideoKey(t.Key); ok && k.Kind == t.Kind {
+			out = append(out, t)
+		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
+	rows.Close()
+	full := looked == limit
 	// Each one's languages: every copy's in those libraries.
 	for i := range out {
 		if out[i].Kind != "movie" && out[i].Kind != "episode" {
 			continue
 		}
 		langs, err := s.read.QueryContext(ctx, `SELECT audio_tags, subtitle_tags FROM catalog_items
-			WHERE title_key = ? AND library_id IN (`+marks+`)`, append([]any{out[i].Key}, args[1:1+len(libraries)]...)...)
+			WHERE title_key = ? AND library_id IN (`+marks+`)`, append([]any{out[i].Key}, libArgs...)...)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		for langs.Next() {
 			var audio, subs sql.NullString
 			if err := langs.Scan(&audio, &subs); err != nil {
 				langs.Close()
-				return nil, err
+				return nil, false, err
 			}
 			out[i].Audio = mergeTags(out[i].Audio, audio.String)
 			out[i].Subtitles = mergeTags(out[i].Subtitles, subs.String)
 		}
 		langs.Close()
 		if err := langs.Err(); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
-	return out, nil
+	if err := s.addWith(ctx, out, marks, libArgs); err != nil {
+		return nil, false, err
+	}
+	if err := s.addOtherIDs(ctx, out); err != nil {
+		return nil, false, err
+	}
+	return out, full, nil
+}
+
+// addWith gives each episode of titles the other episodes its copies in
+// the libraries (marks, args) hold: those of the same file (range_of).
+func (s *Store) addWith(ctx context.Context, titles []PeerTitle, marks string, args []any) error {
+	at := map[string]int{}
+	var episodes []string
+	for i, t := range titles {
+		if t.Kind == "episode" {
+			at[t.Key] = i
+			episodes = append(episodes, t.Key)
+		}
+	}
+	if len(episodes) == 0 {
+		return nil
+	}
+	// The copies of these episodes that hold several, and every episode
+	// key of the same file: its first (the item) and the rest (range_of).
+	err := s.each(ctx, func(rows *sql.Rows) error {
+		var key, other string
+		if err := rows.Scan(&key, &other); err != nil {
+			return err
+		}
+		i := at[key]
+		if k, ok := msfp.ParseVideoKey(other); ok && k.Kind == "episode" && other != key && !slices.Contains(titles[i].With, other) {
+			titles[i].With = append(titles[i].With, other)
+		}
+		return nil
+	}, `WITH files AS (
+			SELECT c.title_key AS key, coalesce(c.range_of, c.id) AS file FROM catalog_items c
+			WHERE c.kind = 'episode' AND c.title_key IN (SELECT value FROM json_each(?)) AND c.library_id IN (`+marks+`)
+				AND (c.range_of IS NOT NULL OR EXISTS (SELECT 1 FROM catalog_items r WHERE r.range_of = c.id)))
+		SELECT f.key, o.title_key FROM files f JOIN catalog_items o ON o.id = f.file OR o.range_of = f.file
+		WHERE o.title_key IS NOT NULL`, append([]any{jsonList(episodes)}, args...)...)
+	if err != nil {
+		return err
+	}
+	for i := range titles {
+		if w := titles[i].With; len(w) > 0 {
+			slices.Sort(w)
+			titles[i].With = w[:min(len(w), msfp.MaxWith)]
+		}
+	}
+	return nil
+}
+
+// addOtherIDs gives films, series and episodes their other IDs, as TMDB
+// gives them: a film's or a series' IMDb and TheTVDB IDs, an episode's
+// IMDb ID (only those known by TMDB's ID of it).
+func (s *Store) addOtherIDs(ctx context.Context, titles []PeerTitle) error {
+	// Each looked for by its table's key, [key, kind or series, TMDB ID],
+	// so that it's found by index.
+	at := map[string]int{}
+	var titleKeys, episodeKeys [][]any
+	for i, t := range titles {
+		k, _ := msfp.ParseVideoKey(t.Key)
+		switch {
+		case k.Kind == "movie" || k.Kind == "series":
+			titleKeys = append(titleKeys, []any{t.Key, k.Kind, strconv.FormatInt(k.TMDB, 10)})
+		case k.Kind == "episode" && k.EpisodeID > 0:
+			episodeKeys = append(episodeKeys, []any{t.Key, strconv.FormatInt(k.TMDB, 10), k.EpisodeID})
+		default:
+			continue
+		}
+		at[t.Key] = i
+	}
+	list := func(l [][]any) string {
+		b, _ := json.Marshal(l)
+		return string(b)
+	}
+	add := func(key, scheme string, value sql.NullString) {
+		if !value.Valid || !msfp.OtherID(scheme, value.String) {
+			return
+		}
+		t := &titles[at[key]]
+		if t.IDs == nil {
+			t.IDs = map[string]string{}
+		}
+		t.IDs[scheme] = value.String
+	}
+	if len(titleKeys) > 0 {
+		err := s.each(ctx, func(rows *sql.Rows) error {
+			var key string
+			var imdb, tvdb sql.NullString
+			if err := rows.Scan(&key, &imdb, &tvdb); err != nil {
+				return err
+			}
+			add(key, "imdb", imdb)
+			add(key, "tvdb", tvdb)
+			return nil
+		}, `SELECT j.value ->> 0, t.imdb, t.tvdb FROM json_each(?) j
+			JOIN catalog_titles t ON t.kind = j.value ->> 1 AND t.tmdb = j.value ->> 2`, list(titleKeys))
+		if err != nil {
+			return err
+		}
+	}
+	if len(episodeKeys) > 0 {
+		err := s.each(ctx, func(rows *sql.Rows) error {
+			var key string
+			var imdb sql.NullString
+			if err := rows.Scan(&key, &imdb); err != nil {
+				return err
+			}
+			add(key, "imdb", imdb)
+			return nil
+		}, `SELECT j.value ->> 0, i.imdb FROM json_each(?) j
+			JOIN episode_imdb i ON i.series = j.value ->> 1 AND i.tmdb_id = j.value ->> 2
+			WHERE i.imdb IS NOT NULL`, list(episodeKeys))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // mergeTags adds a JSON list's tags to tags, each once.
@@ -892,17 +1032,17 @@ func (s *Store) PutPeerTitles(ctx context.Context, peerID string, reading int64,
 	}
 	defer tx.Rollback()
 	// When each arrived is kept: what the peer held already isn't new.
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO peer_titles (peer_id, title_key, kind, library_id, audio, subtitles, added_at, seen)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO peer_titles (peer_id, title_key, kind, library_id, audio, subtitles, with_keys, added_at, seen)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (peer_id, title_key) DO UPDATE SET kind = excluded.kind, library_id = excluded.library_id,
-			audio = excluded.audio, subtitles = excluded.subtitles, seen = max(seen, excluded.seen)`)
+			audio = excluded.audio, subtitles = excluded.subtitles, with_keys = excluded.with_keys, seen = max(seen, excluded.seen)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 	now := s.now().Unix()
 	for _, t := range titles {
-		if _, err := stmt.ExecContext(ctx, peerID, t.Key, t.Kind, t.Library, jsonList(t.Audio), jsonList(t.Subtitles), now, reading); err != nil {
+		if _, err := stmt.ExecContext(ctx, peerID, t.Key, t.Kind, t.Library, jsonList(t.Audio), jsonList(t.Subtitles), jsonList(t.With), now, reading); err != nil {
 			return err
 		}
 	}
@@ -949,7 +1089,7 @@ func (s *Store) PeerTitleCounts(ctx context.Context) (map[string]int, error) {
 
 // TitlesOfPeer lists what we know a peer holds for us, in key order.
 func (s *Store) TitlesOfPeer(ctx context.Context, peerID string) ([]PeerTitle, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT title_key, kind, library_id, audio, subtitles FROM peer_titles
+	rows, err := s.read.QueryContext(ctx, `SELECT title_key, kind, library_id, audio, subtitles, with_keys FROM peer_titles
 		WHERE peer_id = ? ORDER BY title_key`, peerID)
 	if err != nil {
 		return nil, err
@@ -958,14 +1098,26 @@ func (s *Store) TitlesOfPeer(ctx context.Context, peerID string) ([]PeerTitle, e
 	out := []PeerTitle{}
 	for rows.Next() {
 		var t PeerTitle
-		var audio, subs sql.NullString
-		if err := rows.Scan(&t.Key, &t.Kind, &t.Library, &audio, &subs); err != nil {
+		var audio, subs, with sql.NullString
+		if err := rows.Scan(&t.Key, &t.Kind, &t.Library, &audio, &subs, &with); err != nil {
 			return nil, err
 		}
-		t.Audio, t.Subtitles = mergeTags(nil, audio.String), mergeTags(nil, subs.String)
+		t.Audio, t.Subtitles, t.With = mergeTags(nil, audio.String), mergeTags(nil, subs.String), mergeTags(nil, with.String)
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// PeerWith is what a peer said of one of its episodes' copies: the other
+// episodes it holds (MSFP video, section 4.2); none for a title it
+// doesn't hold for us.
+func (s *Store) PeerWith(ctx context.Context, peerID, key string) ([]string, error) {
+	var with sql.NullString
+	err := s.read.QueryRowContext(ctx, `SELECT with_keys FROM peer_titles WHERE peer_id = ? AND title_key = ?`, peerID, key).Scan(&with)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return mergeTags(nil, with.String), err
 }
 
 // SetPeerLimits sets what a peer may use of this server at once.
@@ -1012,9 +1164,11 @@ func (s *Store) SetPeerVersions(ctx context.Context, peerID, versions string) er
 // PeerCopies lists our copies of a film or an episode in the libraries we
 // offer a peer; none when the title isn't offered it.
 func (s *Store) PeerCopies(ctx context.Context, peerID, key string) ([]PeerCopy, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT i.id, i.audio_tags FROM catalog_items i
+	// An episode a file holds after its first is that file's item
+	// (range_of): what plays.
+	rows, err := s.read.QueryContext(ctx, `SELECT coalesce(i.range_of, i.id) AS item, min(i.audio_tags) FROM catalog_items i
 		JOIN peer_offers o ON o.peer_id = ? AND o.library_id = i.library_id
-		WHERE i.title_key = ? AND i.kind IN ('movie', 'episode') ORDER BY i.id`, peerID, key)
+		WHERE i.title_key = ? AND i.kind IN ('movie', 'episode') GROUP BY item ORDER BY item`, peerID, key)
 	if err != nil {
 		return nil, err
 	}
@@ -1174,7 +1328,7 @@ func (s *Store) ChangedTitles(ctx context.Context, peerID string, libraries []st
 	}
 	present = []PeerTitle{}
 	if len(libraries) > 0 {
-		if present, err = s.titlesIn(ctx, libraries, keys, "", len(keys)); err != nil {
+		if present, _, err = s.titlesIn(ctx, libraries, keys, "", len(keys)); err != nil {
 			return nil, nil, "", false, err
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -186,11 +187,11 @@ func TestPeerTitles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.TitlesInLibraries(ctx, []string{"films", "films4k"}, "", 1)
+	got, _, err := s.TitlesInLibraries(ctx, []string{"films", "films4k"}, "", 1)
 	if err != nil || len(got) != 1 || got[0].Key != "movie/tmdb/14160" || got[0].Library != public["films"] {
 		t.Fatalf("first page: %+v, %v", got, err)
 	}
-	got, _ = s.TitlesInLibraries(ctx, []string{"films", "films4k"}, got[0].Key, 10)
+	got, _, _ = s.TitlesInLibraries(ctx, []string{"films", "films4k"}, got[0].Key, 10)
 	// Heat is in both: the library given is the first of their public IDs.
 	if len(got) != 1 || got[0].Key != "movie/tmdb/949" || got[0].Library != min(public["films"], public["films4k"]) {
 		t.Fatalf("second page (Heat once, the unidentified file and the other library left out): %+v", got)
@@ -199,10 +200,10 @@ func TestPeerTitles(t *testing.T) {
 	if a, s := got[0].Audio, got[0].Subtitles; len(a) != 2 || a[0] != "en" || a[1] != "fr-CA" || len(s) != 1 || s[0] != "fr" {
 		t.Fatalf("languages: %v %v", a, s)
 	}
-	if only, _ := s.TitlesInLibraries(ctx, []string{"films"}, "movie/tmdb/14160", 10); len(only[0].Audio) != 1 {
+	if only, _, _ := s.TitlesInLibraries(ctx, []string{"films"}, "movie/tmdb/14160", 10); len(only[0].Audio) != 1 {
 		t.Fatalf("languages from a library not asked for: %+v", only)
 	}
-	if got, _ := s.TitlesInLibraries(ctx, nil, "", 10); len(got) != 0 {
+	if got, _, _ := s.TitlesInLibraries(ctx, nil, "", 10); len(got) != 0 {
 		t.Fatalf("no library: %+v", got)
 	}
 	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A", nil)
@@ -553,5 +554,116 @@ func TestFederationAddress(t *testing.T) {
 	}
 	if a, _ := s.FederationAddress(ctx); a.Former != "" || !a.MovedAt.IsZero() || a.Current != "https://a.example.org" {
 		t.Fatalf("after the move ended: %+v", a)
+	}
+}
+
+// What a paired server is told of each title (MSFP video, sections 3 and
+// 4): TMDB's keys only, never a title known by IMDb's or TheTVDB's ID; an
+// episode of a file holding several, the others it holds (with); films,
+// series and episodes, their other IDs as TMDB gives them. And the copy
+// of an episode a file holds after its first is that file's item.
+func TestPeerTitlesVideoMembers(t *testing.T) {
+	s, ctx := openTest(t), context.Background()
+	id := func(n int) string { return fmt.Sprintf("%032x", n) }
+	n := func(i int) *int { return &i }
+	s.PutCatalog(ctx, []CatalogItem{
+		{ID: id(1), Kind: "movie", Name: "The Matrix", SortName: "matrix", TMDB: "603", LibraryID: "lib"},
+		{ID: id(2), Kind: "movie", Name: "Known by IMDb", SortName: "k", IMDb: "tt0133093", LibraryID: "lib"},
+		{ID: id(3), Kind: "series", Name: "By TVDB", SortName: "b", TVDB: "81189", LibraryID: "lib"},
+		{ID: id(4), Kind: "season", Name: "S1", SortName: "s1", SeriesID: id(3), SeasonNumber: n(1), LibraryID: "lib"},
+		{ID: id(10), Kind: "series", Name: "GoT", SortName: "got", TMDB: "1399", LibraryID: "lib"},
+		{ID: id(11), Kind: "season", Name: "S1", SortName: "s1", SeriesID: id(10), SeasonNumber: n(1), LibraryID: "lib"},
+		{ID: id(12), Kind: "episode", Name: "E1-E2", SortName: "e1", SeriesID: id(10), SeasonID: id(11), SeasonNumber: n(1),
+			EpisodeNumber: n(1), EpisodeNumberEnd: n(2), LibraryID: "lib", AudioTags: []string{"en"}},
+		{ID: id(13), Kind: "episode", Name: "E3", SortName: "e3", SeriesID: id(10), SeasonID: id(11), SeasonNumber: n(1),
+			EpisodeNumber: n(3), LibraryID: "lib"},
+	}, 1)
+	s.db.ExecContext(ctx, `INSERT INTO own_episodes (series, season, episode, tmdb_id) VALUES ('1399', 1, 1, 63056), ('1399', 1, 2, 63057)`)
+	s.db.ExecContext(ctx, `INSERT INTO catalog_titles (kind, tmdb, name, overview, status, seen_at, imdb, tvdb)
+		VALUES ('movie', '603', 'The Matrix', '', 0, 0, 'tt0133093', NULL), ('series', '1399', 'GoT', '', 0, 0, 'tt0944947', '121361')`)
+	s.db.ExecContext(ctx, `INSERT INTO episode_imdb (series, tmdb_id, imdb, checked_at) VALUES ('1399', 63056, 'tt1480055', 0), ('1399', 63057, 'bad', 0)`)
+	if err := s.RefreshTitleKeys(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PublicLibraryIDs(ctx, []string{"lib"}); err != nil {
+		t.Fatal(err)
+	}
+	got, full, err := s.TitlesInLibraries(ctx, []string{"lib"}, "", 100)
+	if err != nil || full {
+		t.Fatal(err, full)
+	}
+	byKey := map[string]PeerTitle{}
+	var keys []string
+	for _, pt := range got {
+		byKey[pt.Key] = pt
+		keys = append(keys, pt.Key)
+	}
+	want := []string{"movie/tmdb/603", "series/tmdb/1399", "series/tmdb/1399/e63056", "series/tmdb/1399/e63057",
+		"series/tmdb/1399/s1", "series/tmdb/1399/s1/e3"}
+	if !slices.Equal(keys, want) {
+		t.Fatalf("keys %v, want %v", keys, want)
+	}
+	if w := byKey["series/tmdb/1399/e63056"].With; !slices.Equal(w, []string{"series/tmdb/1399/e63057"}) {
+		t.Errorf("the file's first episode: with %v", w)
+	}
+	if w := byKey["series/tmdb/1399/e63057"].With; !slices.Equal(w, []string{"series/tmdb/1399/e63056"}) {
+		t.Errorf("the file's second episode: with %v", w)
+	}
+	if w := byKey["series/tmdb/1399/s1/e3"].With; w != nil {
+		t.Errorf("an episode alone in its file: with %v", w)
+	}
+	if ids := byKey["movie/tmdb/603"].IDs; len(ids) != 1 || ids["imdb"] != "tt0133093" {
+		t.Errorf("film ids %v", ids)
+	}
+	if ids := byKey["series/tmdb/1399"].IDs; len(ids) != 2 || ids["imdb"] != "tt0944947" || ids["tvdb"] != "121361" {
+		t.Errorf("series ids %v", ids)
+	}
+	if ids := byKey["series/tmdb/1399/e63056"].IDs; len(ids) != 1 || ids["imdb"] != "tt1480055" {
+		t.Errorf("episode ids %v", ids)
+	}
+	if ids := byKey["series/tmdb/1399/e63057"].IDs; ids != nil {
+		t.Errorf("an IMDb ID not in its form sent: %v", ids)
+	}
+	// The second episode plays the file.
+	key, _ := hex.DecodeString(strings.Repeat("ab", 32))
+	p, err := s.AddPeer(ctx, key, "https://b.example.org", "B", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPeerOffers(ctx, p.ID, []string{"lib"}); err != nil {
+		t.Fatal(err)
+	}
+	copies, err := s.PeerCopies(ctx, p.ID, "series/tmdb/1399/e63057")
+	if err != nil || len(copies) != 1 || copies[0].Item != id(12) || !slices.Equal(copies[0].Audio, []string{"en"}) {
+		t.Errorf("copies %+v %v", copies, err)
+	}
+	// A page looked at whole is full, whatever was left out of it.
+	if _, full, _ := s.TitlesInLibraries(ctx, []string{"lib"}, "", len(want)); !full {
+		t.Error("a full page not said so")
+	}
+}
+
+// A paired server's with is kept with its episode, for watching them all.
+func TestPeerWith(t *testing.T) {
+	s, ctx := openTest(t), context.Background()
+	key, _ := hex.DecodeString(strings.Repeat("cd", 32))
+	p, err := s.AddPeer(ctx, key, "https://b.example.org", "B", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPeerTitles(ctx, p.ID, []PeerTitle{{Key: "series/tmdb/1/e1", Kind: "episode", Library: "L",
+		With: []string{"series/tmdb/1/e2"}}, {Key: "series/tmdb/1/e3", Kind: "episode", Library: "L"}}); err != nil {
+		t.Fatal(err)
+	}
+	if w, err := s.PeerWith(ctx, p.ID, "series/tmdb/1/e1"); err != nil || !slices.Equal(w, []string{"series/tmdb/1/e2"}) {
+		t.Errorf("%v %v", w, err)
+	}
+	for _, k := range []string{"series/tmdb/1/e3", "series/tmdb/1/e9"} {
+		if w, err := s.PeerWith(ctx, p.ID, k); err != nil || w != nil {
+			t.Errorf("%s: %v %v", k, w, err)
+		}
+	}
+	if got, _ := s.TitlesOfPeer(ctx, p.ID); len(got) != 2 || !slices.Equal(got[0].With, []string{"series/tmdb/1/e2"}) {
+		t.Errorf("%+v", got)
 	}
 }
