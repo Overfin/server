@@ -12,11 +12,13 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/overfin/server/internal/api"
 	"github.com/overfin/server/internal/federation"
+	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/seal"
 	"github.com/overfin/server/internal/store"
@@ -554,5 +556,71 @@ func TestRemotePlaybacksStoppedAfterARestart(t *testing.T) {
 			t.Fatal("still remembered")
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// B's play answer with a member of the wrong type (MSFP core section
+// 2.3): A refuses it, tells its viewer the title isn't playable, and stops
+// the playback the answer named, which B ends (playback section 2.3).
+// A title and a next, whatever they hold, are dropped: never refused.
+func TestPeerPlayAnswerOfWrongTypes(t *testing.T) {
+	var bKeys **federation.Service
+	var change atomic.Value
+	change.Store(func(m map[string]any) {})
+	x := pairForPlayWith(t, true, func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v1/federation/play" {
+				h.ServeHTTP(w, r)
+				return
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, r)
+			var m map[string]any
+			if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &m) != nil {
+				t.Errorf("B's play: %d %s", rec.Code, rec.Body)
+				return
+			}
+			change.Load().(func(map[string]any))(m)
+			body, _ := json.Marshal(m)
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set(msfp.HeaderSignature, msfp.SignResponse((*bKeys).Keys.Current(), r.Header.Get(msfp.HeaderNonce), 200, "application/json", body))
+			_, _ = w.Write(body)
+		})
+	})
+	bKeys = &x.b
+	live := func() int {
+		return len(x.onB.Where(func(*playback.Stream) bool { return true }))
+	}
+	start := func() (int, string) {
+		status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
+		var p struct{ Type, ID string }
+		json.Unmarshal([]byte(body), &p)
+		if status == 201 {
+			post(t, x.srvA, "/api/v1/playback/"+p.ID+"/stop", `{}`)
+		}
+		return status, p.Type
+	}
+	change.Store(func(m map[string]any) { m["title"], m["next"] = "anything", 7 })
+	if status, _ := start(); status != 201 {
+		t.Fatalf("a title and a next of another type: %d", status)
+	}
+	for name, f := range map[string]func(map[string]any){
+		"durationMs a string":    func(m map[string]any) { m["durationMs"] = "7200000" },
+		"audioTracks not a list": func(m map[string]any) { m["audioTracks"] = "a1" },
+		"trickplay's columns a string": func(m map[string]any) {
+			m["trickplay"] = map[string]any{"tileWidth": 320, "tileHeight": 180, "columns": "10", "rows": 10, "intervalMs": 10000, "tileCount": 1, "sheets": []string{}}
+		},
+	} {
+		change.Store(f)
+		if status, typ := start(); status != http.StatusConflict || typ != "not-playable" {
+			t.Errorf("%s: %d %s", name, status, typ)
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for live() != 0 && time.Now().Before(deadline) {
+			time.Sleep(50 * time.Millisecond)
+		}
+		if n := live(); n != 0 {
+			t.Errorf("%s: %d playbacks left on B", name, n)
+		}
 	}
 }

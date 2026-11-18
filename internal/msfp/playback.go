@@ -24,13 +24,14 @@ func PlayID(s string) bool { return playIDRe.MatchString(s) }
 func ID(s string) bool { return idRe.MatchString(s) }
 
 // TrackID reads a track ID of the given kind ('a' for audio, 's' for
-// subtitles): the letter and 1 to 3 digits; false for anything else.
+// subtitles; playback section 2.1, video section 5.1): the letter and 1
+// to 3 digits; false for anything else.
 func TrackID(id string, kind byte) (int, bool) {
-	if len(id) < 2 || len(id) > 4 || id[0] != kind {
+	if len(id) < 2 || len(id) > 4 || id[0] != kind || strings.Trim(id[1:], "0123456789") != "" {
 		return 0, false
 	}
-	n, ok := decimal(id[1:], 3, true)
-	return int(n), ok
+	n, err := strconv.Atoi(id[1:])
+	return n, err == nil
 }
 
 // StreamRoot is a server's stream root (media section 1) at address,

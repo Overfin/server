@@ -1024,6 +1024,10 @@ type openArgs struct {
 	// nil for this server's own site, which knows them as "ver_" and
 	// Jellyfin's.
 	versionID func(sourceID string) string
+	// wantVersion, with versionID, is the version a paired server asks
+	// for: the copy's version of that ID, when it has one (MSFP playback,
+	// section 2.6).
+	wantVersion string
 	// peerTracks: req's tracks are a paired server's, checked against
 	// the copy's own before Jellyfin hears of them; one the copy doesn't
 	// have counts as none asked for (MSFP playback, section 2.6). This
@@ -1099,6 +1103,19 @@ func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*op
 	}
 	if !decide() {
 		return nil, false
+	}
+	// The version asked for, when it is one of the copy's others: chosen
+	// before the tracks, which are its.
+	if o.wantVersion != "" && o.versionID != nil && pr.MediaSourceID == "" {
+		for _, src := range info.MediaSources {
+			if id, err := jellyfin.NormalizeID(src.Id); err == nil && o.versionID(id) == o.wantVersion && src.Id != dec.Source.Id {
+				pr.MediaSourceID = src.Id
+				if !decide() {
+					return nil, false
+				}
+				break
+			}
+		}
 	}
 	// The languages, for tracks not asked for: those chosen for this title
 	// while watching it, else the profile's preferences, when the video

@@ -10,6 +10,7 @@ import (
 	"github.com/overfin/server/internal/federation"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/problem"
+	"github.com/overfin/server/internal/store"
 )
 
 // A playback started on a paired server right after one stopped there
@@ -121,5 +122,21 @@ func TestPeerPlayRequestNoNull(t *testing.T) {
 	b, _ = json.Marshal(peerPlayRequest{Title: "movie/tmdb/949", Capabilities: full, AudioLanguage: "fr"})
 	if strings.Contains(string(b), "null") || strings.Contains(string(b), `""`) {
 		t.Errorf("with capabilities: %s", b)
+	}
+}
+
+// The copy a paired server's play picks (MSFP playback, section 2.6): the
+// one versionId names, else the first whose audio has the language (its
+// region first), else the first.
+func TestPickCopy(t *testing.T) {
+	copies := []store.PeerCopy{{Item: "i1", Audio: []string{"en"}}, {Item: "i2", Audio: []string{"fr"}}, {Item: "i3", Audio: []string{"fr-CA"}}}
+	versionID := func(item string) string { return "ver_" + item }
+	for _, c := range []struct{ version, language, want string }{
+		{"", "", "i1"}, {"", "fr-CA", "i3"}, {"", "fr-BE", "i2"}, {"", "de", "i1"},
+		{"ver_i3", "en", "i3"}, {"ver_i9", "fr", "i2"}, {"ver_i1", "fr-CA", "i1"},
+	} {
+		if got := pickCopy(copies, c.version, c.language, versionID); got != c.want {
+			t.Errorf("%q %q: %s, want %s", c.version, c.language, got, c.want)
+		}
 	}
 }

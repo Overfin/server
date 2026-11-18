@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/overfin/server/internal/textclean"
 	"github.com/overfin/server/internal/tracks"
@@ -47,6 +48,9 @@ type peerPlayRequest struct {
 	SubtitleLanguage string `json:"subtitleLanguage,omitempty"`
 	AudioTrack       string `json:"audioTrack,omitempty"`
 	SubtitleTrack    string `json:"subtitleTrack,omitempty"`
+	// VersionID is a version from a former answer of the same title: the
+	// copy to play (MSFP playback, section 2.6).
+	VersionID string `json:"versionId,omitempty"`
 }
 
 var languageTagRe = regexp.MustCompile(`^[A-Za-z0-9-]{0,12}$`)
@@ -76,10 +80,11 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
-	ref, known := store.ParseTitleKey(req.Title)
+	// A film's or an episode's key, in MSFP's one form (video section 4).
 	// The same bounds as this server's own playbacks (a number past them
 	// would wrap when made into Jellyfin's ticks or bits).
-	if !known || (ref.Kind != "movie" && ref.Kind != "episode") || req.StartPositionMs < 0 || req.StartPositionMs > maxPositionMs ||
+	key, known := msfp.ParseVideoKey(req.Title)
+	if !known || !key.Playable() || req.StartPositionMs < 0 || req.StartPositionMs > maxPositionMs ||
 		req.MaxBitrateKbps < 0 || req.MaxBitrateKbps > maxKbps ||
 		req.Capabilities.MaxBitrateKbps < 0 || req.Capabilities.MaxBitrateKbps > maxKbps ||
 		!languageTagRe.MatchString(req.AudioLanguage) || !languageTagRe.MatchString(req.SubtitleLanguage) {
@@ -101,20 +106,23 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	item := pickCopy(copies, req.AudioLanguage)
+	// Version IDs are this server's own for that peer: a key's MAC of
+	// Jellyfin's, which tells it nothing (MSFP catalog, section 2.1).
+	versionID := func(sourceID string) string { return "ver_" + fed.Keys.Opaque("version", peer.ID, sourceID) }
+	item := pickCopy(copies, req.VersionID, req.AudioLanguage, versionID)
 
 	var pr jellyfin.PlaybackRequest
 	pr.StartTimeTicks = req.StartPositionMs * 10_000
 	// A malformed track is refused; a well-formed one is Jellyfin's to
 	// hear only once it is one of the copy's (open, peerTracks).
-	if _, ok := trackIndex(req.AudioTrack, 'a'); req.AudioTrack != "" && !ok {
+	if _, ok := msfp.TrackID(req.AudioTrack, 'a'); req.AudioTrack != "" && !ok {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
 	off := -1
 	pr.SubtitleStreamIndex = &off
 	if req.SubtitleTrack != "" && req.SubtitleTrack != "off" {
-		if _, ok := trackIndex(req.SubtitleTrack, 's'); !ok {
+		if _, ok := msfp.TrackID(req.SubtitleTrack, 's'); !ok {
 			problem.Send(w, problem.InvalidRequest, "")
 			return
 		}
@@ -155,7 +163,7 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 		StartPositionMs: req.StartPositionMs}, pr: pr, kbps: kbps, item: item, uid: uid, ja: ja,
 		wantAudio: req.AudioLanguage, wantSubtitles: req.SubtitleLanguage, lim: lim, device: peer.Name,
 		accountID: id, profileID: id, sessionID: id, urlBase: fed.AddressFor(peer), origin: origin(peer.Address), peerTracks: true,
-		versionID: func(sourceID string) string { return "ver_" + fed.Keys.Opaque("version", peer.ID, sourceID) }})
+		versionID: versionID, wantVersion: req.VersionID})
 	if !ok {
 		return
 	}
@@ -187,9 +195,18 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 	fed.Answer(w, nonce, out)
 }
 
-// pickCopy is the copy whose audio has the language (its region, else the
-// language alone), else the first.
-func pickCopy(copies []store.PeerCopy, language string) string {
+// pickCopy is the copy version names (by versionID of its item, which is
+// its own version's), else the one whose audio has the language (its
+// region, else the language alone), else the first (MSFP playback,
+// section 2.6).
+func pickCopy(copies []store.PeerCopy, version, language string, versionID func(string) string) string {
+	if version != "" {
+		for _, c := range copies {
+			if versionID(c.Item) == version {
+				return c.Item
+			}
+		}
+	}
 	if language != "" {
 		for _, exact := range []bool{true, false} {
 			for _, c := range copies {
@@ -456,9 +473,16 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 		pb.end(old, "stopped", "")
 	}
 	remoteStops.wait(ctx, peer.ID, 5*time.Second)
+	// A version the viewer picked is one that server gave (its form
+	// checked when its answer was): passed back as it is.
+	version := ""
+	if msfp.ID(req.VersionID) {
+		version = req.VersionID
+	}
+	var raw json.RawMessage
 	reply, err := fed.CallReply(ctx, peer, "/api/v1/federation/play", peerPlayRequest{Title: key, Capabilities: req.Capabilities.ForPeer(),
 		StartPositionMs: req.StartPositionMs, MaxBitrateKbps: roundKbps(kbps), AudioLanguage: wantAudio, SubtitleLanguage: wantSubtitles,
-		AudioTrack: req.AudioTrack, SubtitleTrack: req.SubtitleTrack}, &out)
+		AudioTrack: req.AudioTrack, SubtitleTrack: req.SubtitleTrack, VersionID: version}, &raw)
 	if errors.Is(err, federation.ErrBackingOff) {
 		// It asked to wait: busy now, the viewer may try again later.
 		problem.Send(w, problem.ServerBusy, "")
@@ -480,6 +504,16 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	}
 	if reply.Status != http.StatusOK {
 		problem.Send(w, peerRefusal(reply), "")
+		return
+	}
+	// A member of the wrong type fails the answer (MSFP core section 2.3):
+	// its playback, when it names one, is stopped (playback section 2.3).
+	if !readPlayAnswer(raw, &out) {
+		pb.Logger.Warn("a paired server answered a playback with members of the wrong type", "peer", peer.Name)
+		if msfp.PlayID(out.ID) {
+			pb.stopRemote(peer, out.ID, 0)
+		}
+		problem.Send(w, problem.NotPlayable, "")
 		return
 	}
 	// Its URLs are its stream's, on its address, nothing else; its words
@@ -574,31 +608,45 @@ func peerRefusal(r federation.Reply) problem.Type {
 	return problem.NotPlayable
 }
 
+// readPlayAnswer reads a paired server's play answer into out: false
+// when a member is of the wrong type, out's ID then read alone. Its title
+// and next are dropped, whatever they hold (MSFP playback, section 2.3):
+// this server gives its own.
+func readPlayAnswer(raw json.RawMessage, out *sessionJSON) bool {
+	var members map[string]json.RawMessage
+	if json.Unmarshal(raw, &members) != nil {
+		return false
+	}
+	delete(members, "title")
+	delete(members, "next")
+	without, err := json.Marshal(members)
+	if err == nil && msfp.DecodeAnswer(without, out) == nil {
+		return true
+	}
+	*out = sessionJSON{}
+	var id struct {
+		ID string `json:"id"`
+	}
+	if msfp.DecodeEntry(raw, &id) == nil {
+		out.ID = id.ID
+	}
+	return false
+}
+
 // keepPeerURLs checks a paired server's playback: its stream's,
 // subtitles' and previews' sheets' URLs must be files of one stream of its
-// own, at its address. It gives that stream's base, up to its ticket and
-// "/".
+// own, at its address, of the forms MSFP gives (media section 1, video
+// section 6.1). It gives that stream's base, up to its ticket and "/".
 func keepPeerURLs(out *sessionJSON, address string) (string, bool) {
-	prefix := strings.TrimSuffix(address, "/") + "/api/v1/stream/"
-	ticket, _, found := strings.Cut(strings.TrimPrefix(out.Stream.URL, prefix), "/")
-	if !strings.HasPrefix(out.Stream.URL, prefix) || !found || !ticketRe.MatchString(ticket) {
+	base, ok := msfp.StreamBase(out.Stream.URL, msfp.StreamRoot(address), out.Stream.Protocol)
+	if !ok || !msfp.PlayID(out.ID) {
 		return "", false
 	}
-	base := prefix + ticket + "/"
-	ok := func(u string) bool {
-		rest, in := strings.CutPrefix(u, base)
-		name, track, sub := strings.Cut(rest, "/")
-		if sub {
-			return in && (name == "subtitles" || name == "pictures") && msfp.FileName(track)
-		}
-		return in && msfp.FileName(rest)
-	}
-	if !ok(out.Stream.URL) || (out.Stream.Protocol != "hls" && out.Stream.Protocol != "file") || !playIDRe.MatchString(out.ID) {
-		return "", false
-	}
+	// A subtitle track at subtitles/<its ID>, or pictures/<its ID> for
+	// PGS; one without a URL has nothing to fetch.
 	for _, list := range [][]trackJSON{out.SubtitleTracks, out.ForcedTracks} {
 		for _, t := range list {
-			if t.URL != "" && !ok(t.URL) {
+			if t.URL != "" && (!msfp.FileName(t.ID) || t.URL != msfp.SubtitleURL(base, t.ID, t.Pictures)) {
 				return "", false
 			}
 		}
@@ -606,7 +654,7 @@ func keepPeerURLs(out *sessionJSON, address string) (string, bool) {
 	// Sheet n of its previews is at "trickplay/n" of the same stream.
 	if tp := out.Trickplay; tp != nil {
 		for n, u := range tp.Sheets {
-			if u != base+"trickplay/"+strconv.Itoa(n) {
+			if u != msfp.SheetURL(base, n) {
 				return "", false
 			}
 		}
@@ -614,28 +662,11 @@ func keepPeerURLs(out *sessionJSON, address string) (string, bool) {
 	return base, true
 }
 
-// Bounds on a paired server's seek-bar previews (MSFP video, section 5.5): tiles
-// and sheets of sizes this server re-encodes (images.MaxDimension), a
-// sheet count that a film's previews never need more than.
-const (
-	maxPeerTile      = 2048
-	maxPeerGrid      = 100
-	maxPeerSheetSide = 4096
-	maxPeerSheets    = 1000
-	minPeerInterval  = 100
-	maxPeerInterval  = 3_600_000
-)
-
-// peerLayoutOK says whether a paired server's previews are within those
-// bounds, one sheet listed for each the tiles fill.
+// peerLayoutOK says whether a paired server's previews are within MSFP's
+// bounds (video section 5.5), one sheet listed for each the tiles fill.
 func peerLayoutOK(tp *trickplayJSON) bool {
-	in := func(v, lo, hi int) bool { return v >= lo && v <= hi }
-	if !in(tp.TileWidth, 1, maxPeerTile) || !in(tp.TileHeight, 1, maxPeerTile) || !in(tp.Columns, 1, maxPeerGrid) ||
-		!in(tp.Rows, 1, maxPeerGrid) || tp.Columns*tp.TileWidth > maxPeerSheetSide || tp.Rows*tp.TileHeight > maxPeerSheetSide ||
-		!in(tp.IntervalMs, minPeerInterval, maxPeerInterval) || !in(tp.TileCount, 1, maxPeerSheets*tp.Columns*tp.Rows) {
-		return false
-	}
-	return len(tp.Sheets) == sheetCount(*layoutOf(tp))
+	return msfp.Trickplay{TileWidth: tp.TileWidth, TileHeight: tp.TileHeight, Columns: tp.Columns, Rows: tp.Rows,
+		IntervalMs: tp.IntervalMs, TileCount: tp.TileCount, Sheets: len(tp.Sheets)}.InBounds()
 }
 
 // layoutOf is a set of previews' layout, as a playback keeps it.
@@ -691,7 +722,7 @@ func cleanPeerText(out *sessionJSON) bool {
 	clean := func(list []trackJSON) []trackJSON {
 		kept := list[:0]
 		for _, t := range list {
-			if !peerIDRe.MatchString(t.ID) {
+			if !msfp.ID(t.ID) {
 				continue
 			}
 			t.Label = peerLabel(t.Label)
@@ -715,7 +746,7 @@ func cleanPeerText(out *sessionJSON) bool {
 	// IDs as this server's own look, the duration a duration, skip markers
 	// of the kinds there are, within the title (rules 15 and 96).
 	for _, id := range []*string{&out.VersionID, &out.AudioTrack, &out.SubtitleTrack, &out.ForcedTrack} {
-		if !peerIDRe.MatchString(*id) && *id != "off" {
+		if !msfp.ID(*id) && *id != "off" {
 			*id = ""
 		}
 	}
@@ -731,7 +762,7 @@ func cleanPeerText(out *sessionJSON) bool {
 	out.Segments = segments
 	versions := out.Versions[:0]
 	for _, v := range out.Versions {
-		if !peerIDRe.MatchString(v.ID) {
+		if !msfp.ID(v.ID) {
 			continue
 		}
 		if v.Name = peerLabel(v.Name); v.Name != "" {
@@ -887,10 +918,6 @@ func (pb Playback) chooseRemoteTracks(w http.ResponseWriter, r *http.Request, s 
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
-
-// peerIDRe is what a paired server's IDs (tracks, versions) may be: plain
-// and short, as this server's own are.
-var peerIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 // segmentKinds are the skip markers there are (Jellyfin's, in lower case).
 var segmentKinds = []string{"intro", "outro", "recap", "preview", "commercial"}

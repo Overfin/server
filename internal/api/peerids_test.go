@@ -142,3 +142,26 @@ func TestPeerCapabilitiesExactCase(t *testing.T) {
 		t.Fatalf("the site's own: %d %s", code, direct())
 	}
 }
+
+// play takes a film's or an episode's key in MSFP's one form only (video
+// section 4): another form of the same film, a key of another source, a
+// season, is refused (playback section 2.2, step 1). A versionId from a
+// former answer is taken; one that is none of the copies' is ignored.
+func TestPeerPlayKeysAndVersions(t *testing.T) {
+	x := newPeerPlayer(t)
+	for _, key := range []string{"movie/tmdb/0949", "movie/imdb/tt0113277", "series/tmdb/1399/s1", "series/tmdb/1399", "movie/tmdb/949/"} {
+		if _, status := x.play(map[string]any{"title": key}); status != 400 {
+			t.Errorf("%s: %d", key, status)
+		}
+	}
+	first, status := x.play(nil)
+	if status != 200 {
+		t.Fatal(status)
+	}
+	if s, status := x.play(map[string]any{"versionId": first.VersionID}); status != 200 || s.VersionID != first.VersionID {
+		t.Errorf("its version: %d %+v", status, s)
+	}
+	if s, status := x.play(map[string]any{"versionId": "ver_other"}); status != 200 || s.VersionID != first.VersionID {
+		t.Errorf("another version: %d %+v", status, s)
+	}
+}
