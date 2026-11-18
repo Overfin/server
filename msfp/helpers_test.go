@@ -3,11 +3,16 @@ package msfp_test
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -174,13 +179,42 @@ func (s *server) lastExchange() exchange {
 	return s.last
 }
 
+// handlerOf is an engine's handlers, as a host mounts them: the
+// discovery document at /.well-known/msfp, the federation calls under
+// the prefix.
+func handlerOf(e *msfp.Engine) http.Handler {
+	fed, disc := e.FederationHandler(), e.DiscoveryHandler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/msfp" {
+			disc.ServeHTTP(w, r)
+			return
+		}
+		fed.ServeHTTP(w, r)
+	})
+}
+
+// serverOpts are what newServerWith adds to newServer: readPins leaves
+// Config.Pins nil, so the engine reads them; cert is the certificate it
+// serves (httptest's by default).
+type serverOpts struct {
+	readPins bool
+	cert     *tls.Certificate
+	// conn, when set, is told of every connection the server accepts.
+	conn func()
+}
+
 // newServer starts a TLS test server, then an engine at its address,
 // configured by cfg (Address, Store, Notifier and AllowLoopback are set
 // here when left empty).
 func newServer(t *testing.T, cfg msfp.Config) *server {
 	t.Helper()
+	return newServerWith(t, cfg, serverOpts{})
+}
+
+func newServerWith(t *testing.T, cfg msfp.Config, opts serverOpts) *server {
+	t.Helper()
 	s := &server{events: &events{}, h: http.NotFoundHandler()}
-	s.srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s.srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		down := s.down
 		s.mu.Unlock()
@@ -209,11 +243,22 @@ func newServer(t *testing.T, cfg msfp.Config) *server {
 		w.WriteHeader(rec.Code)
 		w.Write(rec.Body.Bytes())
 	}))
+	if opts.cert != nil {
+		s.srv.TLS = &tls.Config{Certificates: []tls.Certificate{*opts.cert}}
+	}
+	if opts.conn != nil {
+		s.srv.Config.ConnState = func(_ net.Conn, st http.ConnState) {
+			if st == http.StateNew {
+				opts.conn()
+			}
+		}
+	}
+	s.srv.StartTLS()
 	t.Cleanup(s.srv.Close)
 	if cfg.Address == "" {
 		cfg.Address = s.srv.URL
 	}
-	if cfg.Pins == nil {
+	if cfg.Pins == nil && !opts.readPins {
 		// Its certificate's pin, named in its hellos, as a host with a
 		// certificate of its own does (MSFP core section 3.2).
 		cfg.Pins = []string{wire.Pin(s.srv.Certificate())}
@@ -239,7 +284,7 @@ func newServer(t *testing.T, cfg msfp.Config) *server {
 		t.Fatal(err)
 	}
 	s.mu.Lock()
-	s.eng, s.h = eng, eng.FederationHandler()
+	s.eng, s.h = eng, handlerOf(eng)
 	s.mu.Unlock()
 	return s
 }
@@ -266,7 +311,7 @@ func (s *server) reopen(t *testing.T, cfg msfp.Config) {
 		t.Fatal(err)
 	}
 	s.mu.Lock()
-	s.eng, s.h, s.store = eng, eng.FederationHandler(), cfg.Store
+	s.eng, s.h, s.store = eng, handlerOf(eng), cfg.Store
 	s.mu.Unlock()
 }
 
@@ -286,7 +331,8 @@ func onlyPeer(t *testing.T, e *msfp.Engine) msfp.PeerView {
 	return peers[0]
 }
 
-// pair pairs b with a: a makes a code, b redeems it, a accepts.
+// pair pairs b with a: a makes a code, b redeems it, a accepts. Each
+// may have other peers.
 func pair(t *testing.T, a, b *server) (aSide, bSide msfp.PeerView) {
 	t.Helper()
 	ctx := context.Background()
@@ -294,12 +340,155 @@ func pair(t *testing.T, a, b *server) (aSide, bSide msfp.PeerView) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.eng.RedeemCode(ctx, code); err != nil {
+	bSide, err = b.eng.RedeemCode(ctx, code)
+	if err != nil {
 		t.Fatal(err)
 	}
-	waiting := onlyPeer(t, a.eng)
-	if _, err := a.eng.Accept(ctx, waiting.ID); err != nil {
-		t.Fatal(err)
+	peers, _ := a.eng.Peers(ctx)
+	for _, p := range peers {
+		if p.State == msfp.Ours {
+			aSide, err = a.eng.Accept(ctx, p.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
-	return onlyPeer(t, a.eng), onlyPeer(t, b.eng)
+	if aSide.ID == "" {
+		t.Fatal("no peer waiting on", a.srv.URL)
+	}
+	bSide, _ = b.eng.Peer(ctx, bSide.ID)
+	return aSide, bSide
 }
+
+// mapDialer connects to the address mapped for the one asked, or to the
+// one asked: so a test gives one server's address another destination
+// for one engine alone. It checks nothing (a test's own Dialer).
+type mapDialer struct {
+	mu sync.Mutex
+	to map[string]string
+}
+
+func (d *mapDialer) set(from, to string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.to == nil {
+		d.to = map[string]string{}
+	}
+	d.to[from] = to
+}
+
+func (d *mapDialer) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
+	d.mu.Lock()
+	to, ok := d.to[addr]
+	d.mu.Unlock()
+	if !ok {
+		to = addr
+	}
+	return (&net.Dialer{}).DialContext(ctx, network, to)
+}
+
+// hostOf is a test server's host:port.
+func hostOf(srv *httptest.Server) string { return srv.Listener.Addr().String() }
+
+// alias is another listener for s's engine, as a new address of it: it
+// answers as s does while on, with a plain 404 otherwise, and logs what
+// it is asked. cert is its certificate (httptest's for nil).
+type alias struct {
+	srv *httptest.Server
+	mu  sync.Mutex
+	on  bool
+	got []string // the paths asked
+}
+
+func (s *server) alias(t *testing.T, on bool, cert *tls.Certificate) *alias {
+	t.Helper()
+	a := &alias{on: on}
+	a.srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		a.mu.Lock()
+		on := a.on
+		a.got = append(a.got, r.URL.Path)
+		a.mu.Unlock()
+		s.mu.Lock()
+		h := s.h
+		s.mu.Unlock()
+		if !on {
+			http.NotFound(w, r)
+			return
+		}
+		h.ServeHTTP(w, r)
+	}))
+	if cert != nil {
+		a.srv.TLS = &tls.Config{Certificates: []tls.Certificate{*cert}}
+	}
+	a.srv.StartTLS()
+	t.Cleanup(a.srv.Close)
+	return a
+}
+
+func (a *alias) set(on bool) { a.mu.Lock(); a.on = on; a.mu.Unlock() }
+
+func (a *alias) asked() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.got...)
+}
+
+// has says whether an event of type T was told, and gives the last.
+func has[T msfp.Event](e *events) (T, bool) {
+	var last T
+	found := false
+	for _, ev := range e.all() {
+		if v, ok := ev.(T); ok {
+			last, found = v, true
+		}
+	}
+	return last, found
+}
+
+// waitAll waits for the background work of every engine given.
+func waitAll(servers ...*server) {
+	for _, s := range servers {
+		s.eng.WaitForTest()
+	}
+}
+
+// closedAddr is an address nothing listens at.
+func closedAddr(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	l.Close()
+	return addr
+}
+
+// selfSigned is a certificate for 127.0.0.1, its own.
+func selfSigned(t *testing.T) tls.Certificate {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+		NotBefore: time.Unix(1700000000, 0), NotAfter: time.Unix(1900000000, 0)}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, pub, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, _ := x509.ParseCertificate(der)
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: priv, Leaf: leaf}
+}
+
+func mustHex(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// typeName is an event's type, as %T writes it.
+func typeName(ev msfp.Event) string { return fmt.Sprintf("%T", ev) }

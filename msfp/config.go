@@ -13,7 +13,10 @@ import (
 // required; every other field has a safe default.
 type Config struct {
 	// Address is this server's address, https://host[:port], without a
-	// path (MSFP core section 5.2).
+	// path (MSFP core section 5.2). Another than at the last start is a
+	// move (SetAddress). While this server can't be called
+	// (SetUncallable), it is kept for when it can again: its address is
+	// then the one of the .invalid form the engine made.
 	Address string
 	// Store keeps the engine's records: msfp/store/jsonfile for a small
 	// host, msfp/store/memory for tests, or the host's own database.
@@ -28,10 +31,20 @@ type Config struct {
 	Sealer Sealer
 
 	// Prefix is where the host mounts the routes, before
-	// /api/v1/federation/ and /api/v1/stream/; "" by default.
+	// /api/v1/federation/ and /api/v1/stream/; "" by default. A server
+	// with one serves its discovery document (Discovery), or its peers
+	// can't find its calls (MSFP core section 11). Segments of A-Z a-z
+	// 0-9 . _ ~ - only, as "/srv/media".
 	Prefix string
+	// Discovery serves the discovery document at /.well-known/msfp
+	// (DiscoveryHandler). Off by default: a server that serves it tells
+	// anyone it federates (MSFP core sections 11 and 14).
+	Discovery bool
 	// Pins are this server's certificate pins, named in its hellos (MSFP
-	// core section 3.2). Default: none.
+	// core section 3.2), whatever its address: nothing is read. nil, by
+	// default: the engine reads them, connecting to its own address (and
+	// to its former one during a move) as a peer would. A host behind a
+	// proxy that serves several certificates gives them all here.
 	Pins []string
 	// AllowLoopback lets the default Dialer connect to peers on this
 	// machine (MSFP core section 3.3). Off by default.

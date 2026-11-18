@@ -2,6 +2,7 @@ package msfp
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -23,7 +24,7 @@ import (
 
 // defaultBase is where the federation calls are, unless a peer's
 // discovery document says otherwise (MSFP core section 11).
-const defaultBase = "/api/v1/federation/"
+const defaultBase = wire.DefaultBase
 
 // maxAnswer caps what is read of an answer (MSFP core section 3).
 const maxAnswer = 4 << 20
@@ -40,6 +41,12 @@ const (
 // errNotHeard is an unsigned refusal: the peer doesn't hear the key the
 // request was signed with (wrapped in ErrUnreachable).
 var errNotHeard = errors.New("an unsigned refusal")
+
+// errNoConnection is a call that couldn't connect: no route, refused,
+// timed out, a name that doesn't resolve, TLS failing; but a certificate
+// refused, or a destination this server refuses (wrapped in
+// ErrUnreachable).
+var errNoConnection = errors.New("couldn't connect")
 
 // reply is a peer's signed answer: its status, and for a refusal the
 // problem type its body gives ("" for none) and its retryAfter.
@@ -60,7 +67,10 @@ func (e *Engine) call(ctx context.Context, p *PeerRecord, call string, in, out a
 		// A peer that can't be called: no connection at all (MSFP core
 		// section 7.5).
 		return reply{}, ErrUncallable
-	case !p.Suspended.IsZero():
+	case !p.Suspended.IsZero() && !(call == callHello && background && e.saysUncallable()):
+		// Nothing is asked of a revoked key (MSFP core section 12.6), but
+		// the scheduled hello of a server that can't be called, so that a
+		// rotation can still reach it.
 		return reply{}, ErrSuspended
 	case p.OurKey == KeyLost && call != callPair:
 		// It never moved to our new key, and knows no key of ours now
@@ -79,7 +89,15 @@ func (e *Engine) call(ctx context.Context, p *PeerRecord, call string, in, out a
 		// (MSFP core section 12.4).
 		p = e.rotateAtContact(ctx, p, background)
 	}
+	if call != callHello && call != callPair && notMoved(p, e.ourHost()) {
+		// Still on our former address: told of the new one, at each
+		// contact (MSFP core section 13.1, step 2).
+		e.announceSoon(p)
+	}
 	r, err := e.exchange(ctx, p, call, in, out, e.signerFor(p))
+	if call != callPair {
+		e.calledPeer(p, err)
+	}
 	if errors.Is(err, errNotHeard) && p.OurKey == KeyOld {
 		// Our old key no longer heard there: it may have moved without our
 		// seeing its answer. A hello under the new key tells; then the
@@ -106,10 +124,7 @@ func (e *Engine) exchange(ctx context.Context, p *PeerRecord, call string, in, o
 		// An address that never resolves (MSFP core section 5.2).
 		return reply{}, ErrUncallable
 	}
-	base := p.Base
-	if base == "" {
-		base = defaultBase
-	}
+	base := cmp.Or(p.Base, defaultBase)
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.Address+base+call, bytes.NewReader(body))
@@ -131,8 +146,9 @@ func (e *Engine) exchange(ctx context.Context, p *PeerRecord, call string, in, o
 			return reply{}, ErrCertificateRefused.with(errors.New(p.Address))
 		}
 		// The client's error quotes the URL: fine here (no ticket in a
-		// federation call's), but kept short.
-		return reply{}, ErrUnreachable.with(unwrapURL(err))
+		// federation call's), but kept short. It couldn't connect, as a
+		// hello answer's callsFailed says (MSFP core section 7.5).
+		return reply{}, ErrUnreachable.with(fmt.Errorf("%w: %w", errNoConnection, unwrapURL(err)))
 	}
 	defer res.Body.Close()
 	// No content coding (MSFP core section 3): refused like a badly

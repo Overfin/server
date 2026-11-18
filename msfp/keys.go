@@ -670,7 +670,7 @@ func (e *Engine) rotateSoon(p *PeerRecord) {
 func (e *Engine) helloUnderNew(ctx context.Context, p *PeerRecord) (*PeerRecord, bool) {
 	current := e.current()
 	var raw json.RawMessage
-	if _, err := e.exchange(ctx, p, callHello, e.ourHello(viewOf(p), nil), &raw, current); err != nil {
+	if _, err := e.exchange(ctx, p, callHello, e.ourHello(ctx, viewOf(p), p, false), &raw, current); err != nil {
 		return p, false
 	}
 	if !e.peerMoved(ctx, p.ID, current.Public()) {

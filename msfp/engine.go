@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/url"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/overfin/server/msfp/wire"
@@ -20,9 +20,15 @@ import (
 // plugs in through Config. One engine per server, for the life of the
 // process; it is safe to use from many goroutines at once.
 type Engine struct {
-	cfg  Config
-	log  *slog.Logger
-	host string // the host of cfg.Address, as requests are signed for
+	cfg Config
+	log *slog.Logger
+
+	// configured is the address the host gives (Config.Address, then
+	// SetAddress): this server's address whenever it can be called.
+	// addr is where this server is, as the server record holds it,
+	// put in effect with the keys (changeServer). Both under keysMu.
+	configured string
+	addr       addressState
 
 	// keys are this server's keys, as the store holds them, opened:
 	// read under keysMu. recordMu makes every write of the server record
@@ -36,9 +42,24 @@ type Engine struct {
 	// at a time: a second one while one runs is ErrRotationUnderWay.
 	keyAction sync.Mutex
 
-	verifier *wire.Verifier
+	// verifier checks requests, for this server's host now; made again
+	// when it changes, on the same nonces.
+	verifier atomic.Pointer[wire.Verifier]
+	nonces   *wire.Nonces
 	limits   *callLimits
 	conns    *peerClients
+
+	// discovery: the discovery document is served (SetDiscovery).
+	discovery atomic.Bool
+	// pins are this server's own pins, as read at its addresses.
+	pins ownPins
+	// sched is what Run does when (address checks, scheduled hellos,
+	// announcements, confirmations), and what this server remembers of
+	// its calls to each peer, in memory.
+	sched schedule
+	// bg is the work started in the background (a peer's new address
+	// confirmed, a discovery document fetched), for tests to wait on.
+	bg sync.WaitGroup
 
 	// asked is when each peer in state theirs was last sent a hello
 	// because the panel was open (PanelOpen), by ID.
@@ -92,19 +113,25 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 	case err != nil:
 		return nil, ErrInvalidAddress.with(err)
 	}
-	u, _ := url.Parse(cfg.Address)
-	e := &Engine{cfg: cfg, log: cfg.Logger, host: u.Host}
-	if e.cfg.Name == nil {
-		e.cfg.Name = func() string { return e.host }
+	if wire.Uncallable(cfg.Address) {
+		return nil, ErrInvalidAddress.with(errors.New("the address of a server that can't be called is made by the engine (SetUncallable)"))
 	}
+	if err := wire.CheckBase(cfg.Prefix + defaultBase); err != nil {
+		return nil, ErrInvalidAddress.with(fmt.Errorf("Config.Prefix %q: %w", cfg.Prefix, err))
+	}
+	e := &Engine{cfg: cfg, log: cfg.Logger, configured: cfg.Address}
+	if e.cfg.Name == nil {
+		e.cfg.Name = func() string { return wire.Host(e.named(e.address())) }
+	}
+	e.discovery.Store(cfg.Discovery)
+	// Nonces in memory only (MSFP core section 6.5): requests dated
+	// before this start are refused.
+	e.nonces = wire.NewNonces(e.now())
+	e.limits = newCallLimits(cfg.Limits)
+	e.conns = &peerClients{e: e}
 	if err := e.loadKeys(ctx); err != nil {
 		return nil, err
 	}
-	// Nonces in memory only (MSFP core section 6.5): requests dated
-	// before this start are refused.
-	e.verifier = &wire.Verifier{Host: e.host, Seen: wire.NewNonces(e.now()), Admit: e.admit, Forgotten: e.forgotten}
-	e.limits = newCallLimits(cfg.Limits)
-	e.conns = &peerClients{e: e}
 	return e, nil
 }
 
@@ -133,9 +160,13 @@ func (e *Engine) newID(prefix string) (string, error) {
 }
 
 // loadKeys reads this server's keys, making them on the very first
-// start, and notes the configured address.
+// start, and notes the configured address: a different one than noted
+// last starts a move (MSFP core section 13.1), announced once this server
+// reaches itself there (Run checks it at once). While this server can't
+// be called, it stays at its address of the .invalid form.
 func (e *Engine) loadKeys(ctx context.Context) error {
-	return e.changeServer(ctx, func(tx Tx, r *ServerRecord) error {
+	moved := false
+	err := e.changeServer(ctx, func(tx Tx, r *ServerRecord) error {
 		if r.Current == nil {
 			made, err := e.newServer()
 			if err != nil {
@@ -143,11 +174,25 @@ func (e *Engine) loadKeys(ctx context.Context) error {
 			}
 			*r = *made
 		}
-		// A different address: noted. Telling peers of a move (MSFP core
-		// section 13) comes with a later step of the engine.
-		r.Address = e.cfg.Address
+		if !r.Uncallable && r.Address != e.cfg.Address {
+			from := r.Address
+			if err := e.startMove(tx, r, e.cfg.Address); err != nil {
+				return err
+			}
+			moved = true
+			e.log.Info("msfp: this server's address changed; peers are told once it answers there", "from", from, "to", r.Address)
+		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	// A move not announced yet, begun now or before a restart: this
+	// server tries its new address at once.
+	if a := e.address(); moved || a.former != "" && !a.reached {
+		e.reachNow()
+	}
+	return nil
 }
 
 // errUnchanged, from a changeServer's fn, leaves everything as it was;
@@ -249,7 +294,10 @@ func (e *Engine) openKeys(r ServerRecord) error {
 	}
 	e.keysMu.Lock()
 	e.keys = k
+	e.addr = addressState{address: r.Address, former: r.Former, movedAt: r.MovedAt, reached: r.Reached,
+		uncallable: r.Uncallable, uncallableAddress: r.UncallableAddress}
 	e.keysMu.Unlock()
+	e.newVerifier()
 	return nil
 }
 
@@ -332,4 +380,4 @@ func (e *Engine) agreed(p *PeerRecord) (core int, parts map[string]int) {
 }
 
 // name is this server's name, as peers show it.
-func (e *Engine) name() string { return cleanName(e.cfg.Name(), e.cfg.Address) }
+func (e *Engine) name() string { return cleanName(e.cfg.Name(), e.named(e.address())) }

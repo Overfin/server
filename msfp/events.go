@@ -1,6 +1,9 @@
 package msfp
 
-import "log/slog"
+import (
+	"log/slog"
+	"time"
+)
 
 // Event is something the operator's panel or the viewers' pages may want
 // to show at once. Tell them apart with a type switch:
@@ -87,6 +90,47 @@ type OurKeyLost struct{ Peer, Name string }
 // OurKeyLost). An event of this server: PeerID is "".
 type RotationEnded struct{ Lost int }
 
+// Addresses (core sections 7.5 and 13).
+
+// AddressAnnounced: this server reached itself at its new address, and
+// told its peers: they move to it as they confirm it (section 13.1,
+// step 2). An event of this server: PeerID is "".
+type AddressAnnounced struct{ Address string }
+
+// MoveEnded: this server's move is over, its former address no longer
+// accepted: every peer moved (NotMoved 0), or 30 days passed and
+// NotMoved of them hadn't (section 13.1). An event of this server.
+type MoveEnded struct{ NotMoved int }
+
+// NotMovedLate: a peer still calls this server's former address 3 days
+// after the move was announced. A warning (section 13.1).
+type NotMovedLate struct{ Peer, Name string }
+
+// PeerMoved: a peer's new address was confirmed (or, for a peer that
+// can't be called, read from its hello) and stored (section 13.2).
+type PeerMoved struct{ Peer, Name, From, To string }
+
+// PeerMoveFailing: a peer's new address has failed to answer as it for
+// a day: it is still called at its old one (section 13.2, step 3). A
+// warning, once per move.
+type PeerMoveFailing struct {
+	Peer, Name, Address string
+	Since               time.Time
+}
+
+// InboundChanged: a peer says it can't be called now (Inbound InboundNo),
+// or can again (InboundConfirming: its address is checked first), or its
+// address answered and it is called again (InboundYes); section 7.5.
+type InboundChanged struct {
+	Peer, Name string
+	Inbound    Inbound
+}
+
+// CallsFailed: a peer's hello answer said this server's last calls to it
+// couldn't connect: the panel may suggest "this server can't be called"
+// (section 7.5). Nothing else changes.
+type CallsFailed struct{ Peer, Name string }
+
 func (e PeerWaiting) PeerID() string      { return e.Peer }
 func (e PeerPaired) PeerID() string       { return e.Peer }
 func (e PeerGone) PeerID() string         { return e.Peer }
@@ -100,6 +144,13 @@ func (e PeerRotated) PeerID() string      { return e.Peer }
 func (e RotationAnswered) PeerID() string { return e.Peer }
 func (e OurKeyLost) PeerID() string       { return e.Peer }
 func (RotationEnded) PeerID() string      { return "" }
+func (AddressAnnounced) PeerID() string   { return "" }
+func (MoveEnded) PeerID() string          { return "" }
+func (e NotMovedLate) PeerID() string     { return e.Peer }
+func (e PeerMoved) PeerID() string        { return e.Peer }
+func (e PeerMoveFailing) PeerID() string  { return e.Peer }
+func (e InboundChanged) PeerID() string   { return e.Peer }
+func (e CallsFailed) PeerID() string      { return e.Peer }
 
 // notify tells the host events, in order, one at a time, outside the
 // engine's locks: the first caller to find nobody telling becomes the

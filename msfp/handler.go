@@ -84,6 +84,10 @@ type request struct {
 	peer *PeerRecord
 	// signer is the key the answer is signed with; nil: nothing signed.
 	signer *wire.Key
+	// ours is the host of ours it was signed for: the current one, or the
+	// former one during a move (play's URLs are built on it, MSFP core
+	// section 13.1, step 5).
+	ours string
 }
 
 // FederationHandler serves the calls peers make, under
@@ -194,8 +198,12 @@ func (e *Engine) check(req *request, call string) (free func(), res response, ok
 		return nil, plain404, false
 	}
 	req.body = body
-	v, err := e.verifier.Check(r, body, e.now())
+	v, err := e.verifier.Load().Check(r, body, e.now())
 	req.v = v
+	req.ours = e.ourHost()
+	if v.Former {
+		req.ours = e.formerHost()
+	}
 	if errors.Is(err, wire.ErrForgotten) {
 		// A server whose pairing ended when our key was stolen: its hello
 		// gets the revocation, for 30 days (MSFP core section 12.7).
@@ -221,6 +229,9 @@ func (e *Engine) check(req *request, call string) (free func(), res response, ok
 		req.peer = p
 		k := e.signerFor(p)
 		req.signer = &k
+		// Which of our addresses it calls: one still on our former is told
+		// of the new one (MSFP core section 13.1).
+		e.heardAt(r.Context(), p, v.Former)
 		// A revoked key is heard for rotate and revoke only (MSFP core
 		// section 12.6).
 		if !p.Suspended.IsZero() && call != callRotate && call != callRevoke {
@@ -276,8 +287,13 @@ func (e *Engine) admit(r *http.Request, key ed25519.PublicKey) (heard, known boo
 }
 
 // forgotten says whether a key is a server's whose pairing with this
-// one ended, and that isn't a peer again.
+// one ended, and that isn't a peer again; or this server's own current
+// key, which it hears only from itself, checking it is reached at its
+// new address (answersAt): it gets the signed 404 of a forgotten key.
 func (e *Engine) forgotten(r *http.Request, key ed25519.PublicKey) bool {
+	if wire.SameKey(key, e.current().Public()) {
+		return true
+	}
 	hash := sha256.Sum256(key)
 	found := false
 	err := e.cfg.Store.Read(r.Context(), func(tx Tx) error {

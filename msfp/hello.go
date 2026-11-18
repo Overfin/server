@@ -34,10 +34,21 @@ type helloMessage struct {
 	// NextCommitment repeats the commitment the peer holds of us: sent
 	// only to a peer that knows our current key (MSFP core section 12.5).
 	NextCommitment string `json:"nextCommitment,omitempty"`
-	// In answers to a peer that can't be called, while it knows us by
-	// our old key (pullable).
-	Rotation   *wire.RotateBody `json:"rotation,omitempty"`
+	// Inbound is false while this server can't be called (MSFP core
+	// section 7.5); absent otherwise.
+	Inbound *bool `json:"inbound,omitempty"`
+	// KnownKey, in requests of a server that can't be called: the key it
+	// checks the peer's answers against (MSFP core section 12.4).
+	KnownKey string `json:"knownKey,omitempty"`
+	// Rotation is, in such a request, "pending" or "refused" (a string);
+	// in answers to such a server, while it knows us by our old key, our
+	// rotation statement (a *wire.RotateBody), with, when that key was
+	// revoked, the revocation.
+	Rotation   any              `json:"rotation,omitempty"`
 	Revocation *wire.RevokeBody `json:"revocation,omitempty"`
+	// CallsFailed, in answers: our last calls to the caller couldn't
+	// connect.
+	CallsFailed bool `json:"callsFailed,omitempty"`
 }
 
 // endedHello is the hello that ends a pairing, and its answer: state
@@ -46,17 +57,35 @@ type endedHello struct {
 	State string `json:"state"`
 }
 
-// ourHello is the hello this server sends or answers p in state (paired
-// or waiting): its versions, pins and address, and to a peer that knows
-// our current key, our commitment (nil p: none). Core and parts are
-// always sent, parts {} when none is on (MSFP core section 10.2: a
-// server that speaks version 1 sends both in every hello).
-func (e *Engine) ourHello(state string, p *PeerRecord) helloMessage {
+// ourHello is the hello this server sends or answers (answering) p in
+// state (paired or waiting): its versions and the address it names; its
+// pins, or, while it can't be called, inbound false and, in its
+// requests, the key it knows p by (knownKey) and p's rotation it waits
+// on; to a peer that knows our current key, our commitment (nil p:
+// none). Core and parts are always sent, parts {} when none is on (MSFP
+// core section 10.2: a server that speaks version 1 sends both in every
+// hello).
+func (e *Engine) ourHello(ctx context.Context, state string, p *PeerRecord, answering bool) helloMessage {
 	v := e.versions()
-	h := helloMessage{State: state, Core: v.Core, Parts: v.Parts, Certificates: wire.CleanPins(e.cfg.Pins),
-		Address: e.cfg.Address}
+	named := e.named(e.address())
+	h := helloMessage{State: state, Core: v.Core, Parts: v.Parts, Address: named}
 	if p != nil && p.OurKey == KeyCurrent {
 		h.NextCommitment = wire.Encode64(e.commitment())
+	}
+	if !wire.Uncallable(named) {
+		h.Certificates = e.ownPins(ctx, answering)
+		return h
+	}
+	no := false
+	h.Inbound = &no
+	if !answering && p != nil {
+		h.KnownKey = wire.Encode64(p.Key)
+		switch {
+		case p.Pending != nil && wire.SameKey(p.Pending.Old, p.Key):
+			h.Rotation = wire.StatePending
+		case p.Refused != nil:
+			h.Rotation = wire.RotationRefused
+		}
 	}
 	return h
 }
@@ -95,7 +124,9 @@ func (e *Engine) hello(req *request) response {
 	}
 	var events []Event
 	var now PeerRecord
+	confirm := false
 	err = e.cfg.Store.Update(ctx, func(tx Tx) error {
+		events, confirm = nil, false
 		q, err := tx.Peer(p.ID)
 		if err != nil || q == nil {
 			return cmp.Or[error](err, ErrNotFound)
@@ -103,7 +134,8 @@ func (e *Engine) hello(req *request) response {
 		if msg.State == helloPaired {
 			events = append(events, e.theyPaired(q)...)
 		}
-		events = append(events, e.keepHello(q, msg)...)
+		ev, c := e.keepHello(q, msg)
+		events, confirm = append(events, ev...), c
 		q.Seen = e.now().Truncate(time.Second)
 		now = *q
 		return tx.PutPeer(*q)
@@ -115,13 +147,17 @@ func (e *Engine) hello(req *request) response {
 		return refuse(probInternal)
 	}
 	e.notify(events...)
+	if confirm {
+		e.confirmSoon(p.ID)
+	}
 	// From a peer that can't be called: which of our keys it knows us by
 	// (MSFP core section 12.4); then our rotation for it to pull.
 	if msg.Uncallable {
 		now = *e.knownKey(ctx, req, &now, msg)
 	}
-	h := e.ourHello(viewOf(&now), &now)
+	h := e.ourHello(ctx, viewOf(&now), &now, true)
 	e.pullable(&now, &h)
+	h.CallsFailed = e.callsFailedTo(now.ID)
 	return answer(h)
 }
 
@@ -139,28 +175,37 @@ func (e *Engine) theyPaired(p *PeerRecord) []Event {
 }
 
 // keepHello keeps what a peer's signed hello, request or answer, says
-// of it: whether it can be called, its pins, its versions. Its
+// of it: whether it can be called (first: where its address is checked,
+// or stored at once, depends on it), its address (keepAddress: confirm
+// says a confirmation is due), its pins, its versions. Its
 // nextCommitment, its form checked by wire.ReadHello, is ignored: a
-// commitment comes from pair or a rotation only (MSFP core section
-// 12.5). An address other than the one stored is checked before it is
-// kept (section 13.2), which comes with a later step of the engine: it
-// is ignored until then.
-func (e *Engine) keepHello(p *PeerRecord, h wire.Hello) []Event {
-	if h.Uncallable {
-		p.Inbound = InboundNo
-	} else {
-		p.Inbound = InboundYes
-	}
+// commitment comes from pair or a rotation only (MSFP core section 12.5).
+func (e *Engine) keepHello(p *PeerRecord, h wire.Hello) (events []Event, confirm bool) {
+	events = e.keepInbound(p, h.Uncallable)
+	ev, confirm := e.keepAddress(p, h.Address)
+	events = append(events, ev...)
 	p.Pins = wire.CleanPins(h.Certificates)
 	if p.Versions != nil && reflect.DeepEqual(*p.Versions, h.Versions) {
-		return nil
+		return events, confirm
 	}
 	v := h.Versions
 	p.Versions = &v
 	if core, _ := e.agreed(p); core == 0 {
 		e.log.Info("msfp: a peer speaks no version of MSFP's core this server speaks", "peer", p.ID, "name", p.Name)
 	}
-	return []Event{VersionsChanged{Peer: p.ID, Name: p.Name}}
+	return append(events, VersionsChanged{Peer: p.ID, Name: p.Name}), confirm
+}
+
+// keepCallsFailed keeps a hello answer's callsFailed: shown on the panel
+// (CallsFailed, when it turns true), nothing else (MSFP core section 7.5).
+func (e *Engine) keepCallsFailed(p *PeerRecord, failed bool) []Event {
+	was := p.CallsFailed
+	p.CallsFailed = failed
+	if failed && !was {
+		e.log.Info("msfp: a peer says this server's calls to it couldn't connect; maybe this server can't be called", "peer", p.ID)
+		return []Event{CallsFailed{Peer: p.ID, Name: p.Name}}
+	}
+	return nil
 }
 
 // Accept is this server's operator accepting a peer that redeemed our
@@ -260,14 +305,19 @@ func (e *Engine) Check(ctx context.Context, id string) (PeerView, error) {
 	return e.check1(ctx, id, false)
 }
 
-// check1 is Check, as the operator asks it, or in the background.
+// check1 is Check, as the operator asks it, or in the background. While
+// this server can't be called, an answer's rotation is applied too (after
+// its revocation), and of a suspended peer's answers, that only (MSFP
+// core sections 12.4 and 12.6).
 func (e *Engine) check1(ctx context.Context, id string, background bool) (PeerView, error) {
 	rec, err := e.peerRecord(ctx, id)
 	if err != nil {
 		return PeerView{}, err
 	}
+	msg := e.ourHello(ctx, viewOf(rec), rec, false)
+	uncallable := msg.Inbound != nil
 	var raw json.RawMessage
-	r, err := e.call(ctx, rec, callHello, e.ourHello(viewOf(rec), rec), &raw, background)
+	r, err := e.call(ctx, rec, callHello, msg, &raw, background)
 	if err != nil {
 		return PeerView{}, err
 	}
@@ -284,27 +334,47 @@ func (e *Engine) check1(ctx context.Context, id string, background bool) (PeerVi
 		if err != nil {
 			return PeerView{}, ErrUnreachable.with(err)
 		}
-		// A revocation, in an answer signed with the key it revokes:
-		// suspended, and nothing else of that answer kept (MSFP core
-		// sections 9.2, 12.6 and 12.7). Any server applies it.
-		if pulled := ans.Pull(rec.Key, e.now()); pulled.Revocation != nil {
-			ev, err := e.revoked(ctx, id, rec.Key)
-			if err != nil {
-				return PeerView{}, err
+		pulled := ans.Pull(rec.Key, e.now())
+		if !rec.Suspended.IsZero() || pulled.Revocation != nil {
+			// A revocation, in an answer signed with the key it revokes:
+			// suspended, and nothing else of that answer kept (MSFP core
+			// sections 9.2, 12.6 and 12.7). Any server applies it; one that
+			// can't be called then applies its rotation, the only thing it
+			// reads of a suspended peer's answers.
+			if pulled.Revocation != nil && rec.Suspended.IsZero() {
+				ev, err := e.revoked(ctx, id, rec.Key)
+				if err != nil {
+					return PeerView{}, err
+				}
+				e.notify(ev...)
 			}
-			e.notify(ev...)
+			if uncallable {
+				e.pulledRotation(ctx, id, pulled.Rotation)
+			}
 			return e.Peer(ctx, id)
 		}
+		confirm := false
 		err = e.updatePeer(ctx, id, func(q *PeerRecord) {
-			events = e.keepHello(q, ans)
+			var ev []Event
+			ev, confirm = e.keepHello(q, ans)
+			events = ev
 			if ans.State == helloPaired {
 				events = append(events, e.theyPaired(q)...)
 			}
+			events = append(events, e.keepCallsFailed(q, ans.CallsFailed)...)
 			q.Seen = e.now().Truncate(time.Second)
 		})
 		if err != nil {
 			return PeerView{}, err
 		}
+		e.notify(events...)
+		if confirm {
+			e.confirmSoon(id)
+		}
+		if uncallable {
+			e.pulledRotation(ctx, id, pulled.Rotation)
+		}
+		return e.Peer(ctx, id)
 	case http.StatusNotFound:
 		// It doesn't know us, or suspended our key: gone (MSFP core
 		// section 9.2). Its pins and versions stay as they were.
@@ -320,11 +390,26 @@ func (e *Engine) check1(ctx context.Context, id string, background bool) (PeerVi
 		}
 		e.notify(events...)
 		return PeerView{}, ErrUnknown
-	default:
-		return PeerView{}, refusalError(r.status, r.problem)
 	}
-	e.notify(events...)
-	return e.Peer(ctx, id)
+	return PeerView{}, refusalError(r.status, r.problem)
+}
+
+// pulledRotation applies a rotation pulled from a hello answer, checked
+// (wire.Hello.Pull), as a rotate would be (MSFP core section 12.4, step
+// 2): once the peer's new key is current, the next hello goes at once,
+// with knownKey the new key (step 3).
+func (e *Engine) pulledRotation(ctx context.Context, id string, rot *wire.Rotation) {
+	if rot == nil {
+		return
+	}
+	state, err := e.receiveRotation(ctx, id, *rot)
+	switch {
+	case errors.Is(err, errRefused):
+	case err != nil:
+		e.log.Warn("msfp: a peer's change of key couldn't be kept", "peer", id, "error", err)
+	case state == wire.StateRotated:
+		e.helloNow(id)
+	}
 }
 
 // updatePeer changes a peer in a transaction: ErrNotFound when it is
@@ -366,6 +451,9 @@ func (e *Engine) PanelOpen() {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*callTimeout)
 		defer cancel()
+		if e.saysUncallable() {
+			return // it asks on its own schedule (scheduledHellos)
+		}
 		peers, err := e.Peers(ctx)
 		if err != nil {
 			e.log.Warn("msfp: the peers couldn't be read", "error", err)

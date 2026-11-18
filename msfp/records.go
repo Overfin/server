@@ -37,11 +37,17 @@ type ServerRecord struct {
 	// IDsSecret is the secret of opaque IDs, sealed ("msfp ids secret").
 	// It never changes.
 	IDsSecret []byte `json:"idsSecret"`
-	// Address is the address noted last; Former the one before it, and
-	// MovedAt when it changed, while a move lasts (MSFP core section 13.1).
+	// Address is where this server is now: the address noted last, or
+	// the UncallableAddress while it can't be called. Former is the one
+	// before it, MovedAt when it changed, while a move lasts (MSFP core
+	// section 13.1); Reached, that this server reached itself at Address,
+	// so that its move is announced (until then its hellos name Former).
+	// A Former of the .invalid form is never accepted as a host (no former
+	// address is kept for a move from it): it is only named until Reached.
 	Address string    `json:"address"`
 	Former  string    `json:"former,omitempty"`
 	MovedAt time.Time `json:"movedAt,omitzero"`
+	Reached bool      `json:"reached,omitempty"`
 	// Uncallable is the operator's setting "this server can't be called",
 	// and UncallableAddress the https://msfp-<26>.invalid address made
 	// for it, kept (MSFP core section 7.5).
@@ -102,11 +108,13 @@ type PeerRecord struct {
 
 	// Address.
 	//
-	// Address is where to call it, Base its base path ("" for the
-	// default, /api/v1/federation/). Move is an address it announced, not
-	// confirmed yet. OurAddress is the host of ours its requests were
-	// last signed for. Inbound says whether it can be called;
-	// CallsFailed, that its answer said our calls to it couldn't connect.
+	// Address is where to call it, Base its base path from its discovery
+	// document ("" for the default, /api/v1/federation/). Move is an
+	// address it announced, not confirmed yet. OurAddress is the host of
+	// ours (host[:port]) its requests were last signed for: it moved to
+	// our new address once that is our current host. Inbound says whether
+	// it can be called; CallsFailed, that its latest hello answer said our
+	// calls to it couldn't connect.
 	Address     string    `json:"address"`
 	Base        string    `json:"base,omitempty"`
 	Move        *PeerMove `json:"move,omitempty"`
@@ -158,12 +166,15 @@ type PeerRecord struct {
 }
 
 // PeerMove is an address a peer announced, being checked (MSFP core
-// section 13.2).
+// section 13.2): since when, when a confirming hello was last sent there
+// (Tried), since when those failed (FailingSince), and whether the
+// operator was warned of it (after a day).
 type PeerMove struct {
 	Address      string    `json:"address"`
 	Since        time.Time `json:"since"`
 	Tried        time.Time `json:"tried,omitzero"`
 	FailingSince time.Time `json:"failingSince,omitzero"`
+	Warned       bool      `json:"warned,omitempty"`
 }
 
 // RefusedKey is a key a peer tried to rotate to, refused.

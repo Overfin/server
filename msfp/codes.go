@@ -41,7 +41,9 @@ func (e *Engine) MakeCode(ctx context.Context, note string) (string, CodeView, e
 	if err != nil {
 		return "", CodeView{}, err
 	}
-	if rec.Uncallable {
+	if rec.Uncallable || e.saysUncallable() {
+		// Nobody could redeem it (MSFP core section 7.5): the other
+		// operator makes one.
 		return "", CodeView{}, ErrNoCodes
 	}
 	secret, err := e.random(wire.SecretSize)
@@ -53,7 +55,7 @@ func (e *Engine) MakeCode(ctx context.Context, note string) (string, CodeView, e
 		return "", CodeView{}, err
 	}
 	now := e.now()
-	code := wire.Code{Address: e.cfg.Address, Key: e.current().Public(), Secret: secret,
+	code := wire.Code{Address: e.named(e.address()), Key: e.current().Public(), Secret: secret,
 		Expires: now.Add(wire.CodeLifetime).Truncate(time.Second)}
 	sealed, err := e.cfg.Sealer.Seal(secret, sealCode)
 	if err != nil {
@@ -159,8 +161,10 @@ type pairAnswer struct {
 }
 
 // RedeemCode is this server's operator pasting another server's code:
-// it calls that server's pair, and adds it as a peer waiting for its
-// operator (state theirs). Errors: ErrCodeInvalid, ErrCodeExpired,
+// it fetches that server's discovery document (its base path), calls its
+// pair, and adds it as a peer waiting for its operator (state theirs).
+// While this server can't be called, its pair says so (inbound false,
+// its address of the .invalid form). Errors: ErrCodeInvalid, ErrCodeExpired,
 // ErrOwnCode, ErrAlreadyPeer, ErrPlainHTTP, ErrRefusedDestination,
 // ErrUnreachable, ErrCodeRefused (used, withdrawn, expired there, or not
 // its own).
@@ -170,12 +174,17 @@ func (e *Engine) RedeemCode(ctx context.Context, text string) (PeerView, error) 
 		return PeerView{}, err
 	}
 	commitment := wire.Encode64(e.commitment())
-	req := pairRequest{Address: e.cfg.Address, Name: e.name(),
+	ours := e.named(e.address())
+	req := pairRequest{Address: ours, Name: e.name(),
 		SecretHash:     wire.Encode64(wire.SecretHash(c.Secret)),
-		Proof:          wire.PairingProof(c.Secret, e.current().Public(), e.cfg.Address),
+		Proof:          wire.PairingProof(c.Secret, e.current().Public(), ours),
 		NextCommitment: &commitment}
+	if wire.Uncallable(ours) {
+		no := false
+		req.Inbound = &no
+	}
 	var ans pairAnswer
-	maker := &PeerRecord{Address: c.Address, Key: c.Key, Inbound: InboundYes}
+	maker := &PeerRecord{Address: c.Address, Key: c.Key, Inbound: InboundYes, Base: e.fetchBase(ctx, c.Address)}
 	r, err := e.call(ctx, maker, callPair, req, &ans, false)
 	switch {
 	case err != nil:
@@ -197,7 +206,7 @@ func (e *Engine) RedeemCode(ctx context.Context, text string) (PeerView, error) 
 	}
 	now := e.now().Truncate(time.Second)
 	p := PeerRecord{ID: id, Key: c.Key, Name: cleanName(ans.Name, c.Address), Created: now, Seen: now,
-		State: Theirs, Address: c.Address, Inbound: InboundYes,
+		State: Theirs, Address: c.Address, Base: maker.Base, Inbound: InboundYes,
 		Commitment: theirs, CommitmentFrom: "pair", CommitmentTold: true, Limits: *e.cfg.NewPairing}
 	err = e.cfg.Store.Update(ctx, func(tx Tx) error {
 		// Paired meanwhile (its own code, redeemed by it at once)?
@@ -251,7 +260,7 @@ func (e *Engine) pair(req *request) response {
 	}
 	now := e.now().Truncate(time.Second)
 	p := PeerRecord{ID: id, Key: req.v.Key, Name: cleanName(body.Name, body.Address), Created: now, Seen: now,
-		State: Ours, Address: body.Address, Inbound: InboundYes,
+		State: Ours, Address: body.Address, OurAddress: req.ours, Inbound: InboundYes,
 		Commitment: commitment, CommitmentFrom: "pair", CommitmentTold: true, Limits: *e.cfg.NewPairing}
 	if uncallable {
 		p.Inbound = InboundNo
@@ -302,6 +311,11 @@ func (e *Engine) pair(req *request) response {
 	}
 	e.log.Info("msfp: a server redeemed a code, waiting for the operator", "peer", p.ID, "name", p.Name)
 	e.notify(PeerWaiting{Peer: p.ID, Name: p.Name, Fingerprint: wire.Fingerprint(p.Key)})
+	if !uncallable {
+		// Its base path, from its discovery document (MSFP core section
+		// 11), for every call to it.
+		e.background(func(ctx context.Context) { e.keepBase(ctx, p.ID, p.Address) })
+	}
 	return answer(pairAnswer{Name: e.name(), NextCommitment: wire.Encode64(e.commitment())})
 }
 

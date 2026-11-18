@@ -15,3 +15,13 @@ func (e *Engine) FinishRotationForTest(ctx context.Context, old []byte) (bool, e
 func (e *Engine) PeerMovedForTest(ctx context.Context, id string, current []byte) bool {
 	return e.peerMoved(ctx, id, current)
 }
+
+// WaitForTest waits for the work the engine started in the background
+// (confirmations of peers' new addresses, discovery documents fetched).
+func (e *Engine) WaitForTest() { e.bg.Wait() }
+
+// FetchBaseForTest is fetchBase: the base path address's discovery
+// document gives ("" for the default).
+func (e *Engine) FetchBaseForTest(ctx context.Context, address string) string {
+	return e.fetchBase(ctx, address)
+}
