@@ -462,3 +462,48 @@ func TestCatalogBumpSeq(t *testing.T) {
 		t.Fatalf("a bump listed: %+v %v", page, err)
 	}
 }
+
+// Pictures (MSFP video section 3.2): each copy's, kept stepped, given to
+// the engine with the title; copies listed best first, so that play
+// without a version plays the one the title's picture describes; a new
+// picture is a change of the title; a peer's kept with its title.
+func TestPictures(t *testing.T) {
+	s, ctx := openTest(t), context.Background()
+	id := func(n int) string { return fmt.Sprintf("%032x", n) }
+	s.PutCatalog(ctx, []CatalogItem{
+		{ID: id(1), Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "949", LibraryID: "lib", Height: 1080},
+		{ID: id(2), Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "949", LibraryID: "lib"},
+		{ID: id(3), Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "949", LibraryID: "lib", Height: 2200, HDR: []string{"dv", "hdr10"}},
+		{ID: id(4), Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "949", LibraryID: "lib", Height: 2160},
+	}, 1)
+	if err := s.RefreshTitleKeys(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var kept string
+	s.db.QueryRowContext(ctx, `SELECT picture FROM catalog_items WHERE id = ?`, id(3)).Scan(&kept)
+	if kept != `{"height":2160,"hdr":["hdr10","dv"]}` {
+		t.Errorf("kept: %s", kept)
+	}
+	cat := MSFPCatalog{S: s}
+	page, err := cat.Titles(ctx, []string{"lib"}, "", 10)
+	if err != nil || len(page.Titles) != 1 {
+		t.Fatal(err, page)
+	}
+	if p := page.Titles[0].(*msfp.VideoTitle).Pictures; len(p) != 3 {
+		t.Errorf("pictures: %+v", p)
+	}
+	copies, err := cat.Copies(ctx, "movie/tmdb/949", []string{"lib"})
+	var order []string
+	for _, c := range copies {
+		order = append(order, c.Handle)
+	}
+	if err != nil || !slices.Equal(order, []string{id(3), id(4), id(1), id(2)}) {
+		t.Errorf("copies: %v %v", order, err)
+	}
+	head, _, _ := s.TitleChanges(ctx)
+	s.PutCatalog(ctx, []CatalogItem{{ID: id(1), Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "949", LibraryID: "lib", Height: 720}}, 1)
+	changes, err := cat.Changes(ctx, []string{"lib"}, head, "", 10)
+	if err != nil || len(changes.Present) != 1 {
+		t.Errorf("a new picture: %+v %v", changes, err)
+	}
+}

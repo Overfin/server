@@ -287,4 +287,8 @@ func TestConvert(t *testing.T) {
 	if it.Video != "2160p HDR · HEVC" {
 		t.Errorf("video %q", it.Video)
 	}
+	// And as paired servers are told of it.
+	if it.Height != 2160 || !slices.Equal(it.HDR, []string{"hdr10"}) {
+		t.Errorf("picture %d %v", it.Height, it.HDR)
+	}
 }

@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+
+	"github.com/overfin/server/msfp"
 )
 
 // Copy is what a title's page says of one of its copies: its picture's
@@ -12,6 +15,9 @@ type Copy struct {
 	ID               string
 	Video            string
 	Audio, Subtitles []string
+	// Picture is its picture as paired servers are told of it (MSFP video
+	// section 3.2); nil when its size isn't known.
+	Picture *msfp.Picture
 }
 
 // Copies are the index's copies of ids, in the order given; those the
@@ -24,7 +30,7 @@ func (s *Store) Copies(ctx context.Context, ids []string) ([]Copy, error) {
 	for i, id := range ids {
 		args[i] = id
 	}
-	rows, err := s.read.QueryContext(ctx, `SELECT id, coalesce(video, ''), coalesce(audio_tags, ''), coalesce(subtitle_tags, '')
+	rows, err := s.read.QueryContext(ctx, `SELECT id, coalesce(video, ''), coalesce(audio_tags, ''), coalesce(subtitle_tags, ''), picture
 		FROM catalog_items WHERE id IN (`+marks(len(ids))+`)`, args...)
 	if err != nil {
 		return nil, err
@@ -34,8 +40,12 @@ func (s *Store) Copies(ctx context.Context, ids []string) ([]Copy, error) {
 	for rows.Next() {
 		var c Copy
 		var audio, subtitles string
-		if err := rows.Scan(&c.ID, &c.Video, &audio, &subtitles); err != nil {
+		var picture sql.NullString
+		if err := rows.Scan(&c.ID, &c.Video, &audio, &subtitles, &picture); err != nil {
 			return nil, err
+		}
+		if p, ok := readPicture(picture); ok {
+			c.Picture = &p
 		}
 		json.Unmarshal([]byte(audio), &c.Audio)
 		json.Unmarshal([]byte(subtitles), &c.Subtitles)

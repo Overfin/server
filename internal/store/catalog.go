@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/overfin/server/msfp"
 )
 
 // ---- Jellyfin service account ---------------------------------------------------
@@ -121,9 +123,25 @@ type CatalogItem struct {
 	// Video is its picture's neutral name ("2160p HDR · HEVC"), as the
 	// player names versions; "" when unknown.
 	Video string
+	// Height and HDR are its picture for paired servers (MSFP video
+	// section 3.2, playback.Picture); kept stepped, as sent. Height 0:
+	// unknown.
+	Height int
+	HDR    []string
 	// EpisodeNumberEnd is the last episode a file holding several holds
 	// (S01E01-E02: 2); nil for one.
 	EpisodeNumberEnd *int
+}
+
+// pictureJSON is a copy's picture as kept, stepped as paired servers are
+// told of it (msfp.BestPicture): NULL when its size isn't known.
+func pictureJSON(height int, hdr []string) any {
+	p, ok := msfp.BestPicture([]msfp.Picture{{Height: height, HDR: hdr}})
+	if !ok {
+		return nil
+	}
+	b, _ := json.Marshal(p)
+	return string(b)
 }
 
 // rangeID is the index row of an episode n held by item, after its first:
@@ -147,8 +165,8 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 	stmt, err := tx.PrepareContext(ctx, `INSERT INTO catalog_items (id, kind, name, sort_name, year,
 		series_id, season_id, season_number, episode_number, tmdb, imdb, tvdb, rating,
 		primary_tag, backdrop_tag, thumb_tag, seen, library_id, added_at, premiere_date, community_rating,
-		folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages, audio_tags, subtitle_tags, video)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages, audio_tags, subtitle_tags, video, picture)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET kind = excluded.kind, name = excluded.name,
 			sort_name = excluded.sort_name, year = excluded.year, series_id = excluded.series_id,
 			season_id = excluded.season_id, season_number = excluded.season_number,
@@ -159,7 +177,8 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 			premiere_date = excluded.premiere_date, community_rating = excluded.community_rating,
 			folder_name = excluded.folder_name, file_name = excluded.file_name, runtime_ms = excluded.runtime_ms,
 			jellyfin_tmdb = excluded.jellyfin_tmdb, audio_languages = excluded.audio_languages,
-			audio_tags = excluded.audio_tags, subtitle_tags = excluded.subtitle_tags, video = excluded.video`)
+			audio_tags = excluded.audio_tags, subtitle_tags = excluded.subtitle_tags, video = excluded.video,
+			picture = excluded.picture`)
 	if err != nil {
 		return err
 	}
@@ -190,7 +209,8 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 			nullString(it.PrimaryTag), nullString(it.BackdropTag), nullString(it.ThumbTag), pass,
 			nullString(it.LibraryID), added, nullString(it.PremiereDate), it.CommunityRating,
 			nullString(it.FolderName), nullString(it.FileName), nullInt64(it.RuntimeMs), nullString(it.TMDB),
-			jsonList(it.AudioLanguages), jsonList(it.AudioTags), jsonList(it.SubtitleTags), nullString(it.Video)); err != nil {
+			jsonList(it.AudioLanguages), jsonList(it.AudioTags), jsonList(it.SubtitleTags), nullString(it.Video),
+			pictureJSON(it.Height, it.HDR)); err != nil {
 			return err
 		}
 		if arrived {
@@ -220,10 +240,10 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 				if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_items (id, kind, name, sort_name, year,
 						series_id, season_id, season_number, episode_number, tmdb, imdb, tvdb, rating,
 						primary_tag, backdrop_tag, thumb_tag, seen, library_id, added_at, premiere_date, community_rating,
-						folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages, audio_tags, subtitle_tags, video, range_of)
+						folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages, audio_tags, subtitle_tags, video, picture, range_of)
 					SELECT ?, kind, name, sort_name, year, series_id, season_id, season_number, ?, tmdb, imdb, tvdb, rating,
 						primary_tag, backdrop_tag, thumb_tag, seen, library_id, added_at, premiere_date, community_rating,
-						folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages, audio_tags, subtitle_tags, video, id
+						folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages, audio_tags, subtitle_tags, video, picture, id
 					FROM catalog_items WHERE id = ? AND true
 					ON CONFLICT (id) DO UPDATE SET kind = excluded.kind, name = excluded.name, sort_name = excluded.sort_name,
 						year = excluded.year, series_id = excluded.series_id, season_id = excluded.season_id,
@@ -234,7 +254,8 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 						community_rating = excluded.community_rating, folder_name = excluded.folder_name,
 						file_name = excluded.file_name, runtime_ms = excluded.runtime_ms, jellyfin_tmdb = excluded.jellyfin_tmdb,
 						audio_languages = excluded.audio_languages, audio_tags = excluded.audio_tags,
-						subtitle_tags = excluded.subtitle_tags, video = excluded.video, range_of = excluded.range_of`,
+						subtitle_tags = excluded.subtitle_tags, video = excluded.video, picture = excluded.picture,
+						range_of = excluded.range_of`,
 					rangeID(it.ID, n), n, it.ID); err != nil {
 					return err
 				}

@@ -67,26 +67,62 @@ func (c MSFPCatalog) Titles(ctx context.Context, libraries []string, after strin
 // libraries: each a Jellyfin item, an episode a file holds after its
 // first being that file's item (range_of), what plays. Its handle is the
 // item's ID; its name, the copy's video as a neutral name ("2160p HDR ·
-// HEVC").
+// HEVC"). The best first, as the engine ranks pictures (MSFP video
+// section 3.2: the greatest height, then HDR): play without a version
+// plays the copy the title's picture describes.
 func (c MSFPCatalog) Copies(ctx context.Context, key string, libraries []string) ([]msfp.Copy, error) {
 	if len(libraries) == 0 {
 		return nil, nil
 	}
 	var out []msfp.Copy
+	var pictures []msfp.Picture
 	err := c.S.each(ctx, func(rows *sql.Rows) error {
 		var cp msfp.Copy
-		var audio sql.NullString
-		if err := rows.Scan(&cp.Handle, &audio, &cp.Library, &cp.Name); err != nil {
+		var audio, picture sql.NullString
+		if err := rows.Scan(&cp.Handle, &audio, &cp.Library, &cp.Name, &picture); err != nil {
 			return err
 		}
 		cp.Audio = mergeTags(nil, audio.String)
 		out = append(out, cp)
+		p, _ := readPicture(picture)
+		pictures = append(pictures, p)
 		return nil
-	}, `SELECT coalesce(i.range_of, i.id) AS item, min(i.audio_tags), min(i.library_id), coalesce(min(f.video), 'Version')
+	}, `SELECT coalesce(i.range_of, i.id) AS item, min(i.audio_tags), min(i.library_id), coalesce(min(f.video), 'Version'), min(f.picture)
 		FROM catalog_items i LEFT JOIN catalog_items f ON f.id = coalesce(i.range_of, i.id)
 		WHERE i.title_key = ? AND i.kind IN ('movie', 'episode') AND i.library_id IN (SELECT value FROM json_each(?))
 		GROUP BY item ORDER BY item`, key, jsonOrEmpty(libraries))
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	// Stable: copies alike stay in the order of their IDs.
+	order := make([]int, len(out))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int {
+		switch {
+		case pictures[a].Better(pictures[b]):
+			return -1
+		case pictures[b].Better(pictures[a]):
+			return 1
+		}
+		return 0
+	})
+	sorted := make([]msfp.Copy, len(out))
+	for i, j := range order {
+		sorted[i] = out[j]
+	}
+	return sorted, nil
+}
+
+// readPicture reads a copy's picture as kept (pictureJSON); false when
+// its size isn't known.
+func readPicture(s sql.NullString) (msfp.Picture, bool) {
+	var p msfp.Picture
+	if !s.Valid || json.Unmarshal([]byte(s.String), &p) != nil || p.Height <= 0 {
+		return msfp.Picture{}, false
+	}
+	return p, true
 }
 
 // Seq is the number of the last change noted in the catalog.
@@ -191,21 +227,25 @@ func (s *Store) titlesIn(ctx context.Context, libraries, keys []string, after st
 	if err != nil {
 		return nil, false, err
 	}
-	// Each one's languages: every copy's in those libraries.
+	// Each one's languages, every copy's in those libraries, and each
+	// copy's picture (the engine sends the best).
 	for _, v := range videos {
 		if v.Kind != "movie" && v.Kind != "episode" {
 			continue
 		}
 		err := s.each(ctx, func(rows *sql.Rows) error {
-			var audio, subs sql.NullString
-			if err := rows.Scan(&audio, &subs); err != nil {
+			var audio, subs, picture sql.NullString
+			if err := rows.Scan(&audio, &subs, &picture); err != nil {
 				return err
 			}
 			v.Audio = mergeTags(v.Audio, audio.String)
 			v.Subtitles = mergeTags(v.Subtitles, subs.String)
+			if p, ok := readPicture(picture); ok {
+				v.Pictures = append(v.Pictures, p)
+			}
 			return nil
-		}, `SELECT audio_tags, subtitle_tags FROM catalog_items
-			WHERE title_key = ? AND library_id IN (SELECT value FROM json_each(?))`, v.Key, libs)
+		}, `SELECT audio_tags, subtitle_tags, picture FROM catalog_items
+			WHERE title_key = ? AND library_id IN (SELECT value FROM json_each(?)) ORDER BY id`, v.Key, libs)
 		if err != nil {
 			return nil, false, err
 		}

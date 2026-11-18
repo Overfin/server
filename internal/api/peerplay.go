@@ -29,30 +29,43 @@ func (pb Playback) engine() *msfp.Engine {
 // the person's language when another has it (ROADMAP.md milestone 6).
 
 // source is where a title plays from: one of our copies, or a paired
-// server.
+// server (what it sent of the title in theirs).
 type source struct {
-	item string // a Jellyfin item here
-	peer string // a paired server's ID
+	item   string // a Jellyfin item here
+	peer   string // a paired server's ID
+	theirs *store.PeerSource
 }
 
 // sourceOf picks where a film or an episode plays for p, in language (a
-// tag; "" for no preference): our copy with it, a paired server's with
-// it, our copy, a paired server's. Ours are those p may see; paired
-// servers' only for a profile not limited to some libraries, within its
-// ceiling and hidden tags.
+// tag; "" for no preference): the first of sourcesOf, none when there is
+// none.
 func (l Library) sourceOf(ctx context.Context, p *store.Profile, id, language string) (source, error) {
+	all, err := l.sourcesOf(ctx, p, id, language)
+	if err != nil || len(all) == 0 {
+		return source{}, err
+	}
+	return all[0], nil
+}
+
+// sourcesOf lists where a film or an episode may play for p, in language
+// (a tag; "" for no preference), in the order playing picks: our copies
+// with it, paired servers' with it, our other copies, other paired
+// servers'. Ours are those p may see; paired servers' only for a profile
+// not limited to some libraries, within its ceiling and hidden tags, in
+// the order they were paired. Each copy and each paired server once.
+func (l Library) sourcesOf(ctx context.Context, p *store.Profile, id, language string) ([]source, error) {
 	ref, ok := titleRef(id)
 	if !ok || (ref.Kind != "movie" && ref.Kind != "episode" && ref.Kind != "item") {
-		return source{}, nil
+		return nil, nil
 	}
 	st := l.Provisioner.Store
 	infos, err := st.TitleInfos(ctx, []string{ref.Key()}, today(), "")
 	if err != nil {
-		return source{}, err
+		return nil, err
 	}
 	a, err := l.access(ctx, p)
 	if err != nil {
-		return source{}, err
+		return nil, err
 	}
 	var ours []string
 	if t := infos[ref.Key()]; t != nil && len(t.Items) > 0 {
@@ -61,7 +74,7 @@ func (l Library) sourceOf(ctx context.Context, p *store.Profile, id, language st
 		} else {
 			allowed, _, err := st.AllowedItems(ctx, *a, t.Items)
 			if err != nil {
-				return source{}, err
+				return nil, err
 			}
 			for _, item := range t.Items {
 				if allowed[item] {
@@ -73,32 +86,29 @@ func (l Library) sourceOf(ctx context.Context, p *store.Profile, id, language st
 	var peers []store.PeerSource
 	if ref.Kind != "item" {
 		if peers, err = l.peerSources(ctx, a, ref); err != nil {
-			return source{}, err
+			return nil, err
 		}
 	}
+	audio := map[string][]string{}
 	if language != "" {
-		audio, err := st.ItemAudio(ctx, ours)
-		if err != nil {
-			return source{}, err
+		if audio, err = st.ItemAudio(ctx, ours); err != nil {
+			return nil, err
 		}
+	}
+	var out []source
+	for _, with := range []bool{true, false} {
 		for _, item := range ours {
-			if speaks(audio[item], language) {
-				return source{item: item}, nil
+			if (language != "" && speaks(audio[item], language)) == with {
+				out = append(out, source{item: item})
 			}
 		}
-		for _, ps := range peers {
-			if speaks(ps.Audio, language) {
-				return source{peer: ps.Peer}, nil
+		for i, ps := range peers {
+			if (language != "" && speaks(ps.Audio, language)) == with {
+				out = append(out, source{peer: ps.Peer, theirs: &peers[i]})
 			}
 		}
 	}
-	if len(ours) > 0 {
-		return source{item: ours[0]}, nil
-	}
-	if len(peers) > 0 {
-		return source{peer: peers[0].Peer}, nil
-	}
-	return source{}, nil
+	return out, nil
 }
 
 // speaks says whether audio has language: its region, or the language

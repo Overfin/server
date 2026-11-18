@@ -117,6 +117,8 @@ type meJSON struct {
 	Limits meLimitsJSON `json:"limits"`
 	// Home is how the operator set the site's home page.
 	Home meHomeJSON `json:"home"`
+	// TitlePages is how the operator set titles' pages.
+	TitlePages meTitlePagesJSON `json:"titlePages"`
 	// Tastes says whether the account is asked what it likes, and whether
 	// it answered (or chose not to).
 	Tastes meTastesJSON `json:"tastes"`
@@ -135,6 +137,12 @@ type meHomeJSON struct {
 	// MissingTitles: titles no library has are shown among what's
 	// trending and in the slideshow.
 	MissingTitles bool `json:"missingTitles"`
+}
+
+type meTitlePagesJSON struct {
+	// Availability: a film's or an episode's page says where it's
+	// available (this server, paired servers).
+	Availability bool `json:"availability"`
 }
 
 type meLimitsJSON struct {
@@ -305,6 +313,9 @@ func (s *Sessions) me(r *http.Request, acct *store.Account, prof *store.Profile)
 		out.Language = acct.Language
 	}
 	if out.Home.MissingTitles, err = s.Store.HomeMissing(ctx); err != nil {
+		return meJSON{}, err
+	}
+	if out.TitlePages.Availability, err = s.Store.TitleAvailability(ctx); err != nil {
 		return meJSON{}, err
 	}
 	if out.Tastes.Asked, err = s.Store.TastesAsked(ctx); err != nil {

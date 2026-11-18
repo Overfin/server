@@ -185,9 +185,11 @@ func TestFederationConverted(t *testing.T) {
 		peer.Limits != (msfp.Limits{Streams: 3, Transcodes: 1, BitrateKbps: 8000}) || peer.TheirLimits == nil ||
 		*peer.TheirLimits != (msfp.Limits{Streams: 2, Transcodes: 1}) || !slices.Equal(peer.Offers, []string{"films"}) || peer.OffersSeq != 40 ||
 		len(peer.Wants) != 1 || !peer.Wants[0].Wanted || peer.Wants[0].Gone || peer.Inbound != msfp.InboundYes ||
-		peer.CatalogRead.Seq != 42 || !slices.Equal(peer.CatalogRead.Wants, []string{"lib_x"}) {
+		peer.CatalogRead.Seq != 0 || !slices.Equal(peer.CatalogRead.Wants, []string{"lib_x"}) {
 		t.Fatalf("peer: %+v", peer)
 	}
+	// Its reading up to change 42 was converted, then forgotten by
+	// 131_pictures.sql: its titles are read whole once, pictures and all.
 	if labels, _ := s.PeerWantLabels(ctx, "pb"); labels["lib_x"] != "Theirs" {
 		t.Fatalf("labels: %v", labels)
 	}

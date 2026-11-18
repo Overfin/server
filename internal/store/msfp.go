@@ -429,11 +429,11 @@ func (t *msfpTx) PutPeerTitles(peer string, reading int64, titles []msfp.Title) 
 	if len(titles) == 0 {
 		return nil
 	}
-	stmt, err := t.tx.PrepareContext(t.ctx, `INSERT INTO peer_titles (peer_id, title_key, kind, library_id, audio, subtitles, with_keys, ids, added_at, seen)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	stmt, err := t.tx.PrepareContext(t.ctx, `INSERT INTO peer_titles (peer_id, title_key, kind, library_id, audio, subtitles, with_keys, ids, video, added_at, seen)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (peer_id, title_key) DO UPDATE SET kind = excluded.kind, library_id = excluded.library_id,
 			audio = excluded.audio, subtitles = excluded.subtitles, with_keys = excluded.with_keys, ids = excluded.ids,
-			seen = max(seen, excluded.seen)`)
+			video = excluded.video, seen = max(seen, excluded.seen)`)
 	if err != nil {
 		return err
 	}
@@ -445,13 +445,17 @@ func (t *msfpTx) PutPeerTitles(peer string, reading int64, titles []msfp.Title) 
 		if !ok || len(v.Libraries) != 1 {
 			return errNotVideo
 		}
-		var ids any
+		var ids, video any
 		if len(v.IDs) > 0 {
 			b, _ := json.Marshal(v.IDs)
 			ids = string(b)
 		}
+		if v.Video != nil {
+			b, _ := json.Marshal(v.Video)
+			video = string(b)
+		}
 		if _, err := stmt.ExecContext(t.ctx, peer, v.Key, v.Kind, v.Libraries[0], jsonList(v.Audio), jsonList(v.Subtitles),
-			jsonList(v.With), ids, now, reading); err != nil {
+			jsonList(v.With), ids, video, now, reading); err != nil {
 			return err
 		}
 	}
@@ -477,9 +481,12 @@ func (t *msfpTx) peerTitles(query string, args ...any) ([]msfp.Title, error) {
 	err := t.each(func(rows *sql.Rows) error {
 		var v msfp.VideoTitle
 		var library string
-		var audio, subs, with, ids sql.NullString
-		if err := rows.Scan(&v.Key, &v.Kind, &library, &audio, &subs, &with, &ids); err != nil {
+		var audio, subs, with, ids, video sql.NullString
+		if err := rows.Scan(&v.Key, &v.Kind, &library, &audio, &subs, &with, &ids, &video); err != nil {
 			return err
+		}
+		if p, ok := readPicture(video); ok {
+			v.Video = &p
 		}
 		v.Libraries = []string{library}
 		v.Audio, v.Subtitles, v.With = mergeTags(nil, audio.String), mergeTags(nil, subs.String), mergeTags(nil, with.String)
@@ -490,7 +497,7 @@ func (t *msfpTx) peerTitles(query string, args ...any) ([]msfp.Title, error) {
 		}
 		out = append(out, &v)
 		return nil
-	}, `SELECT title_key, kind, library_id, audio, subtitles, with_keys, ids FROM peer_titles `+query, args...)
+	}, `SELECT title_key, kind, library_id, audio, subtitles, with_keys, ids, video FROM peer_titles `+query, args...)
 	return out, err
 }
 

@@ -446,6 +446,8 @@ func convert(raw jellyfin.IndexItem) (store.CatalogItem, bool) {
 	if v := playback.Describe(jellyfin.MediaSource{MediaStreams: raw.MediaStreams}); v != "Version" {
 		it.Video = v
 	}
+	// And as paired servers are told of it.
+	it.Height, it.HDR = playback.Picture(jellyfin.MediaSource{MediaStreams: raw.MediaStreams})
 	// Its languages as the player lists them, for its title's sources.
 	audio, subtitles, _ := tracks.Read(raw.MediaStreams)
 	for _, t := range audio {

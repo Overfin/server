@@ -25,6 +25,10 @@ export interface Home {
   missingTitles: boolean;
 }
 
+export interface TitlePages {
+  availability: boolean;
+}
+
 export interface Reason {
   code: string;
   text: string;

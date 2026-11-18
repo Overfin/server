@@ -1,13 +1,13 @@
 <!-- Branding: the operator's own name, logo and banners, instead of
      Overfin's, wherever people look (the control panel stays Overfin's),
-     and the site's home page. -->
+     the site's home page, and its title pages. -->
 <script lang="ts">
   import { PageHead, Card, Setting, Badge, Status, Busy, Notice, Loading, toast } from '@overfin/ui';
   import { api } from '../lib/api';
   import { message } from '../lib/format';
   import { unsaved } from '../lib/router.svelte';
   import BrandingFile from '../parts/library/BrandingFile.svelte';
-  import type { Branding, Home } from '../lib/types-library';
+  import type { Branding, Home, TitlePages } from '../lib/types-library';
 
   // The files branding may have: what each is for.
   const kinds = [
@@ -22,11 +22,15 @@
   let on = $state(false);
   let name = $state('');
   let missing = $state(false);
+  let titles = $state<TitlePages | null>(null);
+  let availability = $state(true);
+  let titlesFailure = $state('');
   let failure = $state('');
   let homeFailure = $state('');
 
   // Leaving with changes not saved asks first.
-  $effect(() => unsaved(() => (!!b && (on !== b.on || name.trim() !== b.name)) || (!!home && missing !== home.missingTitles)));
+  $effect(() => unsaved(() => (!!b && (on !== b.on || name.trim() !== b.name)) || (!!home && missing !== home.missingTitles)
+    || (!!titles && availability !== titles.availability)));
 
   function settle(next: Branding) {
     b = next;
@@ -34,11 +38,13 @@
     name = next.name;
   }
 
-  Promise.all([api<Branding>('GET', '/admin/api/branding'), api<Home>('GET', '/admin/api/home')]).then(
-    ([br, h]) => {
+  Promise.all([api<Branding>('GET', '/admin/api/branding'), api<Home>('GET', '/admin/api/home'), api<TitlePages>('GET', '/admin/api/title-pages')]).then(
+    ([br, h, tp]) => {
       settle(br);
       home = h;
       missing = h.missingTitles;
+      titles = tp;
+      availability = tp.availability;
     },
     (err) => (problem = message(err)),
   );
@@ -61,16 +67,22 @@
     toast('Home page saved.');
   }
 
+  async function saveTitles() {
+    titlesFailure = '';
+    titles = await api<TitlePages>('PUT', '/admin/api/title-pages', { availability });
+    toast('Title pages saved.');
+  }
+
   // The site's header (dark on every page), and the sign-in page on a
   // light screen, as people will see them.
   const banner = (light: boolean) => (light ? (b?.files['banner-light'] || b?.files['banner-dark']) : b?.files['banner-dark']);
 </script>
 
-<PageHead title="Branding" description="Your site's name, logo and banner, instead of Overfin's, and its home page." />
+<PageHead title="Branding" description="Your site's name, logo and banner, instead of Overfin's, its home page and its title pages." />
 
 {#if problem}
   <Notice warn>{problem}</Notice>
-{:else if !b || !home}
+{:else if !b || !home || !titles}
   <Loading />
 {:else}
   <div class="cards">
@@ -95,6 +107,16 @@
       {#snippet foot()}
         <Status text={homeFailure} kind={homeFailure ? 'error' : ''} />
         <Busy kind="primary" action={saveHome} fail={(err) => (homeFailure = err.message)}>Save</Busy>
+      {/snippet}
+    </Card>
+
+    <Card title="Title pages" description="What a film's or an episode's page says besides its picture and languages.">
+      <Setting label="Show where titles are available" hint={'A line naming where each title can be played: your server, and the servers you share libraries with (Federation) that have it, the one Play uses first. Off: the line is hidden, and the page still shows the picture and languages of what Play uses.'}>
+        {#snippet children(ids)}<input type="checkbox" bind:checked={availability} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+      </Setting>
+      {#snippet foot()}
+        <Status text={titlesFailure} kind={titlesFailure ? 'error' : ''} />
+        <Busy kind="primary" action={saveTitles} fail={(err) => (titlesFailure = err.message)}>Save</Busy>
       {/snippet}
     </Card>
 

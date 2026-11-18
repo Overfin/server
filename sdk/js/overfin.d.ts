@@ -91,6 +91,8 @@ export interface Me {
   /** How the operator set the home page: missingTitles shows titles no
    * library has among what's trending and in the slideshow. */
   home: { missingTitles: boolean };
+  /** How the operator set title pages: availability lists where a film or an episode can be played (since 0.9). */
+  titlePages?: { availability: boolean };
   /** Whether the operator asks accounts what they like, and whether this
    * one answered (or chose to say nothing). */
   tastes: { asked: boolean; answered: boolean };
@@ -263,12 +265,33 @@ export interface TitleSummary {
   leavesAt?: string;
 }
 
+/** A picture: its height (480, 720, 1080, 1440, 2160 or 4320) and its HDR formats, none for standard range. */
+export interface Picture {
+  height: number;
+  hdr?: ('hdr10' | 'hlg' | 'dv')[];
+}
+
+/** One place a film or an episode plays from. */
+export interface TitleSource {
+  /** Absent when the page doesn't list where it's available. */
+  name?: string;
+  /** This server. */
+  local?: boolean;
+  video?: Picture;
+  audio?: string[];
+  subtitles?: string[];
+}
+
 /** A title's page: a series with its seasons, a season with its episodes. */
 export interface Title extends TitleSummary {
   /** Who directed and wrote an episode, the job as character ("Director", "Writer"); its guest stars are in cast (since 0.9). */
   crew?: { id?: string; name: string; character?: string; image?: ImageRef }[];
   /** A film's or an episode's copies the profile may see: picture and languages as the player names them, forced subtitles aside (since 0.9). */
   copies?: { video?: string; audio?: string[]; subtitles?: string[] }[];
+  /** Where a film or an episode plays from for the profile, in the order Play picks them (the first is Play's): this server (local, by its brand's name) and the paired servers holding it, each once, by the names the server's menu gives them; each with its best copy's picture and its languages, named in themselves. With showAvailability off, only the first, without its name (since 0.9). */
+  sources?: TitleSource[];
+  /** Whether the page lists sources: the control panel's setting, on by default (since 0.9). */
+  showAvailability?: boolean;
   /** The profile said it isn't interested in this film or series (since 0.9). */
   notInterested?: boolean;
   /** A film's or a series' place on the server by its value, among the titles of its kind the profile may see, 1 the most valued (since 0.9). */

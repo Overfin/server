@@ -7,6 +7,8 @@ import (
 	"errors"
 	"slices"
 	"time"
+
+	"github.com/overfin/server/msfp"
 )
 
 // Paired servers' titles, as this server's pages read them beside its
@@ -141,6 +143,9 @@ type PeerSource struct {
 	Peer, Name string
 	Audio      []string
 	Subtitles  []string
+	// Video is the picture it sent of the title (MSFP video section 3.2);
+	// nil when it sent none.
+	Video *msfp.Picture
 }
 
 // PeerSources lists the paired servers holding a film or an episode for
@@ -149,14 +154,17 @@ func (s *Store) PeerSources(ctx context.Context, key string) ([]PeerSource, erro
 	var out []PeerSource
 	err := s.each(ctx, func(rows *sql.Rows) error {
 		var ps PeerSource
-		var audio, subs sql.NullString
-		if err := rows.Scan(&ps.Peer, &ps.Name, &audio, &subs); err != nil {
+		var audio, subs, video sql.NullString
+		if err := rows.Scan(&ps.Peer, &ps.Name, &audio, &subs, &video); err != nil {
 			return err
 		}
 		ps.Audio, ps.Subtitles = mergeTags(nil, audio.String), mergeTags(nil, subs.String)
+		if p, ok := readPicture(video); ok {
+			ps.Video = &p
+		}
 		out = append(out, ps)
 		return nil
-	}, `SELECT t.peer_id, p.name, t.audio, t.subtitles FROM peer_titles t
+	}, `SELECT t.peer_id, p.name, t.audio, t.subtitles, t.video FROM peer_titles t
 		JOIN peers p ON p.id = t.peer_id AND p.state = 'paired' AND p.suspended_at IS NULL
 		WHERE t.title_key = ? AND t.kind IN ('movie', 'episode') ORDER BY p.paired_at, p.id`, key)
 	return out, err

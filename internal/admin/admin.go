@@ -318,6 +318,8 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("PUT /admin/api/genres-left-out", p.signedIn(p.setGenres))
 	mux.HandleFunc("GET /admin/api/home", p.signedIn(p.home))
 	mux.HandleFunc("PUT /admin/api/home", p.signedIn(p.setHome))
+	mux.HandleFunc("GET /admin/api/title-pages", p.signedIn(p.titlePages))
+	mux.HandleFunc("PUT /admin/api/title-pages", p.signedIn(p.setTitlePages))
 	mux.HandleFunc("PUT /admin/api/jellyfin", p.signedIn(p.setJellyfin))
 	mux.HandleFunc("PUT /admin/api/jellyfin/access", p.signedIn(p.setJellyfinAccess))
 	mux.HandleFunc("PUT /admin/api/tmdb-token", p.signedIn(p.setTMDBToken))
@@ -1195,6 +1197,46 @@ func (p *Panel) setHome(w http.ResponseWriter, r *http.Request, s *session) {
 	}
 	if err != nil {
 		p.Logger.Error("changing the home page's titles failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"type": "internal", "detail": "Overfin's log says why"})
+		return
+	}
+	writeJSON(w, http.StatusOK, req)
+}
+
+// titlePagesJSON is how titles' pages show on the site.
+type titlePagesJSON struct {
+	// Availability is whether a film's or an episode's page says where
+	// it's available: this server, and the paired servers holding it.
+	Availability bool `json:"availability"`
+}
+
+func (p *Panel) titlePages(w http.ResponseWriter, r *http.Request, s *session) {
+	on, err := p.Store.TitleAvailability(r.Context())
+	if err != nil {
+		p.Logger.Error("reading the title pages' settings failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"type": "internal", "detail": "Overfin's log says why"})
+		return
+	}
+	writeJSON(w, http.StatusOK, titlePagesJSON{Availability: on})
+}
+
+func (p *Panel) setTitlePages(w http.ResponseWriter, r *http.Request, s *session) {
+	var req titlePagesJSON
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": "not a valid request"})
+		return
+	}
+	ctx := r.Context()
+	old, err := p.Store.TitleAvailability(ctx)
+	if err == nil && old != req.Availability {
+		if err = p.Store.SetTitleAvailability(ctx, req.Availability); err == nil {
+			p.Logger.Info("where titles are available on their pages changed in the control panel", "on", req.Availability, "by", s.logID)
+		}
+	}
+	if err != nil {
+		p.Logger.Error("changing the title pages' settings failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"type": "internal", "detail": "Overfin's log says why"})
 		return
 	}

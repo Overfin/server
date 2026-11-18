@@ -284,6 +284,29 @@ func (s *Store) SetTitlesShown(ctx context.Context, shown string) error {
 	return err
 }
 
+// TitleAvailability is whether a title's page says where it's
+// available: this server, and the paired servers holding it; on until the
+// panel says otherwise.
+func (s *Store) TitleAvailability(ctx context.Context) (bool, error) {
+	var v []byte
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'title-availability'`).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	return string(v) != "off", err
+}
+
+// SetTitleAvailability changes it.
+func (s *Store) SetTitleAvailability(ctx context.Context, on bool) error {
+	v := "off"
+	if on {
+		v = "on"
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO meta (name, value) VALUES ('title-availability', ?)
+		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, []byte(v))
+	return err
+}
+
 // HomeMissing is whether the home page shows titles no library has, among
 // what's trending and in its slideshow; off until the panel says otherwise.
 func (s *Store) HomeMissing(ctx context.Context) (bool, error) {

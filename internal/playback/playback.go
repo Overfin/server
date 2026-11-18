@@ -413,6 +413,49 @@ func Describe(src jellyfin.MediaSource) string {
 	return strings.Join(parts, " · ")
 }
 
+// Picture is what a version's picture looks like, for paired servers
+// (MSFP video section 3.2): its height, a 16:9 picture's as wide for a
+// wider one (3840x1600 is 2160), and its HDR formats among "hdr10",
+// "hlg" and "dv", Dolby Vision with its base layer's. Height 0: no video
+// stream of known size.
+func Picture(src jellyfin.MediaSource) (height int, hdr []string) {
+	for _, ms := range src.MediaStreams {
+		if ms.Type != "Video" {
+			continue
+		}
+		height = max(ms.Height, (ms.Width*9+15)/16)
+		if ms.Width <= 0 || ms.Height <= 0 {
+			height = 0
+		}
+		return height, hdrFormats(ms.VideoRange, ms.VideoRangeType)
+	}
+	return 0, nil
+}
+
+// hdrFormats names a video stream's range as MSFP does: Jellyfin's
+// VideoRangeType (SDR, HDR10, HDR10Plus, HLG, DOVI, DOVIWithHDR10…), else
+// HDR10 for a stream only said to be HDR.
+func hdrFormats(rng, kind string) []string {
+	k := strings.ToLower(kind)
+	var out []string
+	switch {
+	case strings.Contains(k, "hdr10"):
+		out = append(out, "hdr10")
+	case strings.Contains(k, "hlg"):
+		out = append(out, "hlg")
+	case k == "doviwithel", k == "doviinvalid":
+		// Profile 7's base layer, and Dolby Vision Jellyfin can't read:
+		// HDR10 underneath.
+		out = append(out, "hdr10")
+	case k == "" && strings.EqualFold(rng, "HDR"):
+		out = append(out, "hdr10")
+	}
+	if strings.HasPrefix(k, "dovi") && k != "doviinvalid" {
+		out = append(out, "dv")
+	}
+	return out
+}
+
 // resolution names a picture size by its width first: films are wide, and
 // a 4K film at 2.39:1 is 3840x1600, which its height alone would call
 // 1080p.

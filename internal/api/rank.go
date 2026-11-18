@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/overfin/server/internal/lang"
 
 	"github.com/overfin/server/internal/store"
 )
@@ -79,19 +78,10 @@ func (l Library) copiesFor(ctx context.Context, p *store.Profile, items []string
 	if err != nil {
 		return nil, err
 	}
-	names := func(tags []string) []string {
-		var out []string
-		for _, t := range tags {
-			if n := lang.Name(t); n != "?" && !slices.Contains(out, n) {
-				out = append(out, n)
-			}
-		}
-		return out
-	}
 	var out []copyJSON
 	seen := map[string]bool{}
 	for _, c := range copies {
-		j := copyJSON{Video: c.Video, Audio: names(c.Audio), Subtitles: names(c.Subtitles)}
+		j := copyJSON{Video: c.Video, Audio: languageNames(nil, c.Audio), Subtitles: languageNames(nil, c.Subtitles)}
 		k := j.Video + "|" + strings.Join(j.Audio, ",") + "|" + strings.Join(j.Subtitles, ",")
 		if seen[k] || (j.Video == "" && len(j.Audio) == 0 && len(j.Subtitles) == 0) {
 			continue

@@ -3,6 +3,7 @@ package playback
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -309,5 +310,37 @@ func TestCapabilitiesExact(t *testing.T) {
 	if strings.Join(c.Containers, ",") != "mp4,webm" || strings.Join(c.VideoCodecs, ",") != "hevc" ||
 		strings.Join(c.AudioCodecs, ",") != "opus" || strings.Join(c.HDR, ",") != "hlg" || c.MaxHeight != 1080 {
 		t.Errorf("exact: %+v", c)
+	}
+}
+
+// A version's picture as paired servers are told of it (MSFP video
+// section 3.2): its height, a 16:9 picture's as wide for a wider one, and
+// its HDR formats.
+func TestPicture(t *testing.T) {
+	for _, c := range []struct {
+		stream jellyfin.MediaStream
+		height int
+		hdr    []string
+	}{
+		{jellyfin.MediaStream{Type: "Video", Width: 3840, Height: 1600, VideoRange: "HDR"}, 2160, []string{"hdr10"}},
+		{jellyfin.MediaStream{Type: "Video", Width: 1920, Height: 800, VideoRange: "SDR"}, 1080, nil},
+		{jellyfin.MediaStream{Type: "Video", Width: 1440, Height: 1080}, 1080, nil},
+		{jellyfin.MediaStream{Type: "Video", Width: 720, Height: 576}, 576, nil},
+		{jellyfin.MediaStream{Type: "Video", Width: 3840, Height: 2160, VideoRange: "HDR", VideoRangeType: "HDR10Plus"}, 2160, []string{"hdr10"}},
+		{jellyfin.MediaStream{Type: "Video", Width: 3840, Height: 2160, VideoRange: "HDR", VideoRangeType: "HLG"}, 2160, []string{"hlg"}},
+		{jellyfin.MediaStream{Type: "Video", Width: 3840, Height: 2160, VideoRange: "HDR", VideoRangeType: "DOVI"}, 2160, []string{"dv"}},
+		{jellyfin.MediaStream{Type: "Video", Width: 3840, Height: 2160, VideoRange: "HDR", VideoRangeType: "DOVIWithHDR10"}, 2160, []string{"hdr10", "dv"}},
+		{jellyfin.MediaStream{Type: "Video", Width: 3840, Height: 2160, VideoRange: "HDR", VideoRangeType: "DOVIWithHLG"}, 2160, []string{"hlg", "dv"}},
+		{jellyfin.MediaStream{Type: "Video", Width: 3840, Height: 2160, VideoRange: "SDR", VideoRangeType: "DOVIWithSDR"}, 2160, []string{"dv"}},
+		{jellyfin.MediaStream{Type: "Video", Width: 3840, Height: 2160, VideoRange: "HDR", VideoRangeType: "DOVIWithEL"}, 2160, []string{"hdr10", "dv"}},
+		{jellyfin.MediaStream{Type: "Video", Width: 3840, Height: 2160, VideoRange: "HDR", VideoRangeType: "DOVIInvalid"}, 2160, []string{"hdr10"}},
+		{jellyfin.MediaStream{Type: "Video", Width: 3840, Height: 2160, VideoRange: "SDR", VideoRangeType: "SDR"}, 2160, nil},
+		{jellyfin.MediaStream{Type: "Video", Codec: "hevc"}, 0, nil},
+		{jellyfin.MediaStream{Type: "Audio", Width: 1920, Height: 1080}, 0, nil},
+	} {
+		h, hdr := Picture(jellyfin.MediaSource{MediaStreams: []jellyfin.MediaStream{c.stream}})
+		if h != c.height || !slices.Equal(hdr, c.hdr) {
+			t.Errorf("%+v: %d %v, want %d %v", c.stream, h, hdr, c.height, c.hdr)
+		}
 	}
 }

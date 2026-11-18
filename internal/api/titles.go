@@ -82,6 +82,13 @@ type titleDetail struct {
 	// one's picture and languages, as the player names them (forced
 	// subtitles aside).
 	Copies []copyJSON `json:"copies,omitempty"`
+	// Sources are where a film or an episode plays from for the profile,
+	// in the order playing picks them (the first is Play's): this server
+	// and the paired servers holding it, each once (availability.go).
+	// ShowAvailability is the control panel's setting: off, the page
+	// doesn't list them, and only the first is given, nameless.
+	Sources          []sourceJSON `json:"sources,omitempty"`
+	ShowAvailability bool         `json:"showAvailability"`
 	// Rank is a film's or a series' place on the server by its value,
 	// among the titles of its kind the profile may see (1 the most
 	// valued); absent when it has none.
@@ -570,6 +577,10 @@ func (l Library) title(w http.ResponseWriter, r *http.Request) {
 	}
 	if ref.Kind == "movie" || ref.Kind == "episode" {
 		if out.Copies, err = l.copiesFor(ctx, p, t.Items); err != nil {
+			l.storeError(w, err)
+			return
+		}
+		if out.Sources, out.ShowAvailability, err = l.availability(ctx, p, id, ref); err != nil {
 			l.storeError(w, err)
 			return
 		}
