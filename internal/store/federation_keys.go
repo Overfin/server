@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/ed25519"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -207,45 +208,94 @@ func (s *Store) RotateFederationKey(ctx context.Context, newSeed, nextSeed, next
 	return tx.Commit()
 }
 
-// FinishFederationRotation ends a change of key: the old key is deleted,
-// and the peers that hadn't moved from it are lost (OurKeyLost): they
-// must pair again.
-func (s *Store) FinishFederationRotation(ctx context.Context) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
+// sealedPublic reads one of this server's keys in tx, sealed under
+// context: its public key, nil when there's none.
+func (s *Store) sealedPublic(ctx context.Context, tx *sql.Tx, name, context string) (ed25519.PublicKey, error) {
+	sealed, err := metaValue(ctx, tx, name)
+	if err != nil || sealed == nil {
+		return nil, err
 	}
-	defer tx.Rollback()
+	seed, err := s.box.Open(sealed, context)
+	if err != nil {
+		return nil, err
+	}
+	k, err := msfp.KeyFromSeed(seed)
+	if err != nil {
+		return nil, err
+	}
+	return k.Public(), nil
+}
+
+// endRotation deletes the old key in tx, and marks lost the peers that
+// hadn't moved from it: how many.
+func endRotation(ctx context.Context, tx *sql.Tx) (int, error) {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE name IN ('federation-old-key', 'federation-rotated-at',
 		'federation-old-revoked')`); err != nil {
-		return err
+		return 0, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE peers SET our_key = 'lost' WHERE our_key = 'old'`); err != nil {
-		return err
+	res, err := tx.ExecContext(ctx, `UPDATE peers SET our_key = 'lost' WHERE our_key = 'old'`)
+	if err != nil {
+		return 0, err
 	}
-	return tx.Commit()
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+// FinishFederationRotation ends the change of key away from old: the old
+// key is deleted, and the peers that hadn't moved from it are lost
+// (OurKeyLost), how many: they must pair again. Only if old is still the
+// old key: a change finished late, after the next one began, would end
+// that one instead; ended false then, and nothing changes.
+func (s *Store) FinishFederationRotation(ctx context.Context, old ed25519.PublicKey) (ended bool, lost int, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, 0, err
+	}
+	defer tx.Rollback()
+	now, err := s.sealedPublic(ctx, tx, "federation-old-key", federationOldContext)
+	if err != nil || now == nil || !msfp.SameKey(now, old) {
+		return false, 0, err
+	}
+	if lost, err = endRotation(ctx, tx); err != nil {
+		return false, 0, err
+	}
+	return true, lost, tx.Commit()
 }
 
 // ReplaceFederationKey gives the server a new key and a new next key,
 // with no rotation: what a server does after revoking a key whose next
 // key is lost (MSFP core section 12.7, case 2). Every peer knew it by the
 // revoked key, so every pairing ends, each peer's keys remembered as
-// forgotten: they are made again with new codes.
+// forgotten: they are made again with new codes. All in one transaction:
+// no pairing ends unless the key is replaced too.
 func (s *Store) ReplaceFederationKey(ctx context.Context, newSeed, nextSeed, nextCommitment []byte) error {
-	peers, err := s.Peers(ctx)
-	if err != nil {
-		return err
-	}
-	for _, p := range peers {
-		if err := s.DeletePeer(ctx, p.ID); err != nil && !errors.Is(err, ErrNotFound) {
-			return err
-		}
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM peers`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := s.deletePeerTx(ctx, tx, id, true); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE name IN ('federation-old-key', 'federation-rotated-at',
 		'federation-old-revoked')`); err != nil {
 		return err
@@ -383,6 +433,46 @@ func (s *Store) SetPeerRefused(ctx context.Context, id string, key []byte, at ti
 
 // What a peer knows of this server's key.
 
+// PeerMovedTo notes that a peer, on our old key, knows us by current
+// now, our current key: it holds our commitment too, from the statement.
+// Only while current is still our current key, during a change of key:
+// a move seen late, after the next change began, is to a key that is
+// the old one now; moved false then, and nothing changes. The last peer
+// to move ends the change at once, in the same transaction (ended): the
+// old key deleted, no one lost.
+func (s *Store) PeerMovedTo(ctx context.Context, id string, current ed25519.PublicKey) (moved, ended bool, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, false, err
+	}
+	defer tx.Rollback()
+	now, err := s.sealedPublic(ctx, tx, "federation-key", federationKeyContext)
+	if err != nil || !msfp.SameKey(now, current) {
+		return false, false, err
+	}
+	if old, err := s.sealedPublic(ctx, tx, "federation-old-key", federationOldContext); err != nil || old == nil {
+		return false, false, err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE peers SET our_key = '', rotation_answer = '', commitment_told = 1
+		WHERE id = ? AND our_key = 'old'`, id)
+	if err != nil {
+		return false, false, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return false, false, nil
+	}
+	var left int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM peers WHERE our_key = 'old'`).Scan(&left); err != nil {
+		return false, false, err
+	}
+	if left == 0 {
+		if _, err := endRotation(ctx, tx); err != nil {
+			return false, false, err
+		}
+	}
+	return true, left == 0, tx.Commit()
+}
+
 // SetOurKey notes what a peer knows of our key (OurKeyCurrent, …Old,
 // …Lost) and its latest answer to our rotate. Moved to our current key,
 // it holds our commitment, from the statement.
@@ -392,17 +482,23 @@ func (s *Store) SetOurKey(ctx context.Context, id, state, answer string) error {
 	return err
 }
 
+// ClaimRotate notes at as when we last sent a peer on our old key a
+// rotate, unless one went after since: false then, and none is to be
+// sent. One statement: of calls at once, one only gets to send it.
+func (s *Store) ClaimRotate(ctx context.Context, id string, at, since time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE peers SET rotate_sent_at = ? WHERE id = ? AND our_key = 'old'
+		AND (rotate_sent_at IS NULL OR rotate_sent_at <= ?)`, at.Unix(), id, since.Unix())
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // SetRotateSent notes when we last sent a peer a rotate.
 func (s *Store) SetRotateSent(ctx context.Context, id string, at time.Time) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE peers SET rotate_sent_at = ? WHERE id = ?`, at.Unix(), id)
 	return err
-}
-
-// PeersOnOldKey counts the peers that haven't moved from our old key.
-func (s *Store) PeersOnOldKey(ctx context.Context) (int, error) {
-	var n int
-	err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM peers WHERE our_key = 'old'`).Scan(&n)
-	return n, err
 }
 
 func unixTime(v sql.NullInt64) *time.Time {

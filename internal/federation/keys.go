@@ -19,7 +19,11 @@ import (
 // is under way, and the next key's commitment. The store holds them, the
 // seeds sealed; Keys is what's in effect now.
 type Keys struct {
-	mu      sync.RWMutex
+	mu sync.RWMutex
+	// loading makes one reload at a time, from reading the store to
+	// putting what it read in effect: a reload that read before a change
+	// can't put its keys back after the reload that followed the change.
+	loading sync.Mutex
 	current msfp.Key
 	// old is the key before current while peers still move from it (nil:
 	// no change under way), since when.
@@ -94,6 +98,8 @@ func keysOf(k store.FederationKeys) (*Keys, error) {
 
 // reload reads the keys again from the store, after a change.
 func (k *Keys) reload(ctx context.Context, st *store.Store) error {
+	k.loading.Lock()
+	defer k.loading.Unlock()
 	stored, err := st.FederationKeys(ctx)
 	if err != nil {
 		return err

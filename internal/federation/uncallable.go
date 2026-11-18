@@ -78,7 +78,7 @@ func (s *Service) readKnownKey(ctx context.Context, w http.ResponseWriter, nonce
 	old, _, ok := s.Keys.Old()
 	switch {
 	case msfp.SameKey(h.KnownKey, s.Keys.Current().Public()):
-		s.peerMoved(ctx, p)
+		s.peerMoved(ctx, p, h.KnownKey)
 		s.signsFor(w, nonce, s.Keys.Current())
 	case ok && msfp.SameKey(h.KnownKey, old.Public()) && h.RotationState != "" && h.RotationState != p.RotationAnswer:
 		if err := s.Store.SetOurKey(ctx, p.ID, store.OurKeyOld, h.RotationState); err != nil {

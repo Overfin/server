@@ -527,3 +527,61 @@ func TestRevokeWithoutNextKey(t *testing.T) {
 		t.Fatal("A didn't suspend B")
 	}
 }
+
+// What the end of a change of key, or a peer's move, learnt late does
+// once the next change began: nothing. Here in the order that went wrong
+// (a hello, or the hourly round, seen first, its effect last): A changes
+// its key once, C never moving; our operator changes it again (C lost,
+// D now on the old key); then the first change's end, and a move to its
+// key, arrive. Neither may delete the second change's old key, nor mark
+// D moved or lost.
+func TestLateEndOfChange(t *testing.T) {
+	ctx := context.Background()
+	a, _, bOnA, _ := pairedPair(t)
+	cOnA := unreachablePeer(t, a)
+	if err := a.s.Rotate(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	first, _, ok := a.s.Keys.Old()
+	if !ok {
+		t.Fatal("A dropped its old key, C hasn't moved")
+	}
+	firstNew := a.s.Keys.Current()
+	dOnA := unreachablePeer(t, a)
+	if err := a.s.Rotate(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	second, _, ok := a.s.Keys.Old()
+	if !ok || !msfp.SameKey(second.Public(), firstNew.Public()) {
+		t.Fatal("A's second change isn't under way")
+	}
+	if peer(t, a, cOnA.ID).OurKey != store.OurKeyLost || peer(t, a, bOnA.ID).OurKey != store.OurKeyCurrent {
+		t.Fatal("the second change didn't end the first")
+	}
+	// D "moved" to the first change's new key: the old key now.
+	a.s.peerMoved(ctx, peer(t, a, dOnA.ID), firstNew.Public())
+	if got := peer(t, a, dOnA.ID); got.OurKey != store.OurKeyOld {
+		t.Fatalf("D after a late move: %q", got.OurKey)
+	}
+	// The first change's end, from a peer's last move or the hourly round.
+	if err := a.s.finishRotation(ctx, first.Public()); err != nil {
+		t.Fatal(err)
+	}
+	if old, _, ok := a.s.Keys.Old(); !ok || !msfp.SameKey(old.Public(), second.Public()) {
+		t.Fatal("a late end deleted the second change's old key")
+	}
+	if stored, err := a.s.Store.FederationKeys(ctx); err != nil || stored.Old == nil {
+		t.Fatalf("the stored old key after a late end: %v", err)
+	}
+	if got := peer(t, a, dOnA.ID); got.OurKey != store.OurKeyOld {
+		t.Fatalf("D after a late end: %q", got.OurKey)
+	}
+	// D moving to the key of now ends the second change.
+	a.s.peerMoved(ctx, peer(t, a, dOnA.ID), a.s.Keys.Current().Public())
+	if got := peer(t, a, dOnA.ID); got.OurKey != store.OurKeyCurrent {
+		t.Fatalf("D after its move: %q", got.OurKey)
+	}
+	if _, _, ok := a.s.Keys.Old(); ok {
+		t.Fatal("A kept its old key, every peer moved")
+	}
+}

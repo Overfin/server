@@ -303,16 +303,26 @@ const (
 )
 
 // rotateAtContact sends p a rotate unless one went within the spacing,
-// and returns p as it is then.
+// and returns p as it is then. Of contacts at once, one only sends it:
+// the store gives the right to (ClaimRotate).
 func (s *Service) rotateAtContact(ctx context.Context, p *store.Peer) *store.Peer {
 	spacing := rotateAtSpacing
 	if p.RotationAnswer == msfp.StatePending {
 		spacing = rotatePendingAtSpacing
 	}
-	if p.RotateSent != nil && s.now().Sub(*p.RotateSent) < spacing {
+	now := s.now()
+	if p.RotateSent != nil && now.Sub(*p.RotateSent) < spacing {
 		return p
 	}
-	s.sendRotate(ctx, p)
+	claimed, err := s.Store.ClaimRotate(ctx, p.ID, now, now.Add(-spacing))
+	if err != nil {
+		s.Logger.Error("federation: a rotate couldn't be noted", "error", err)
+		return p
+	}
+	if !claimed {
+		return p
+	}
+	s.rotateNoted(ctx, p, now)
 	if q, err := s.Store.PeerByID(ctx, p.ID); err == nil {
 		return q
 	}
@@ -322,8 +332,7 @@ func (s *Service) rotateAtContact(ctx context.Context, p *store.Peer) *store.Pee
 // sendRotate tells p our key changed (MSFP core section 12.4): a rotate,
 // newly dated, signed with the old key.
 func (s *Service) sendRotate(ctx context.Context, p *store.Peer) {
-	old, _, ok := s.Keys.Old()
-	if !ok || p.OurKey != store.OurKeyOld {
+	if _, _, ok := s.Keys.Old(); !ok || p.OurKey != store.OurKeyOld {
 		return
 	}
 	now := s.now()
@@ -331,7 +340,17 @@ func (s *Service) sendRotate(ctx context.Context, p *store.Peer) {
 		s.Logger.Error("federation: a rotate couldn't be noted", "error", err)
 		return
 	}
-	rot := msfp.SignRotation(old, s.Keys.Current(), s.Keys.NextCommitment(), now)
+	s.rotateNoted(ctx, p, now)
+}
+
+// rotateNoted sends p the rotate noted as sent at now (sendRotate).
+func (s *Service) rotateNoted(ctx context.Context, p *store.Peer, now time.Time) {
+	old, _, ok := s.Keys.Old()
+	if !ok {
+		return
+	}
+	current := s.Keys.Current()
+	rot := msfp.SignRotation(old, current, s.Keys.NextCommitment(), now)
 	var answer struct {
 		State string `json:"state"`
 	}
@@ -344,7 +363,7 @@ func (s *Service) sendRotate(ctx context.Context, p *store.Peer) {
 	case err != nil:
 		s.Logger.Info("federation: a peer couldn't be told of this server's new key", "name", p.Name, "error", err)
 	case r.Status == http.StatusOK && answer.State == msfp.StateRotated:
-		s.peerMoved(ctx, p)
+		s.peerMoved(ctx, p, current.Public())
 	case r.Status == http.StatusAccepted:
 		s.Store.SetOurKey(ctx, p.ID, store.OurKeyOld, msfp.StatePending)
 		s.Logger.Info("federation: a peer's operator has to confirm this server's new key", "name", p.Name)
@@ -361,10 +380,11 @@ func (s *Service) sendRotate(ctx context.Context, p *store.Peer) {
 // moved (MSFP core section 12.4).
 func (s *Service) helloUnderNew(ctx context.Context, p *store.Peer) (*store.Peer, bool) {
 	var raw json.RawMessage
-	if _, err := s.callOnce(ctx, p, helloPath, s.ourHello(ctx, p, viewOf(p), false), &raw, s.Keys.Current()); err != nil {
+	current := s.Keys.Current()
+	if _, err := s.callOnce(ctx, p, helloPath, s.ourHello(ctx, p, viewOf(p), false), &raw, current); err != nil {
 		return p, false
 	}
-	s.peerMoved(ctx, p)
+	s.peerMoved(ctx, p, current.Public())
 	q, err := s.Store.PeerByID(ctx, p.ID)
 	if err != nil {
 		return p, false
@@ -372,35 +392,48 @@ func (s *Service) helloUnderNew(ctx context.Context, p *store.Peer) (*store.Peer
 	return q, true
 }
 
-// peerMoved is p knowing us by the new key now; the last one to move ends
-// the change, the old key deleted.
-func (s *Service) peerMoved(ctx context.Context, p *store.Peer) {
-	if err := s.Store.SetOurKey(ctx, p.ID, store.OurKeyCurrent, ""); err != nil {
+// peerMoved is p knowing us by current, our new key, now; the last one
+// to move ends the change, the old key deleted. The store notes it only
+// if current is still our key: a move seen late, after the next change
+// of key began, was to the key that is old now, and changes nothing.
+// Called with or without rotations held: it doesn't take it.
+func (s *Service) peerMoved(ctx context.Context, p *store.Peer, current ed25519.PublicKey) {
+	moved, ended, err := s.Store.PeerMovedTo(ctx, p.ID, current)
+	if err != nil {
 		s.Logger.Error("federation: a peer's move to this server's new key couldn't be kept", "error", err)
 		return
 	}
-	s.Logger.Info("federation: a peer moved to this server's new key", "name", p.Name)
-	if n, err := s.Store.PeersOnOldKey(ctx); err == nil && n == 0 {
-		s.finishRotation(ctx)
+	if !moved {
+		return
 	}
+	s.Logger.Info("federation: a peer moved to this server's new key", "name", p.Name)
+	if !ended {
+		return
+	}
+	if err := s.Keys.reload(ctx, s.Store); err != nil {
+		s.Logger.Error("federation: this server's keys couldn't be read again", "error", err)
+		return
+	}
+	s.Logger.Info("federation: every peer moved to this server's new key; the old one deleted")
 }
 
-// finishRotation ends a change of key: the old key deleted, peers that
-// didn't move told to pair again (in the panel).
-func (s *Service) finishRotation(ctx context.Context) error {
-	n, err := s.Store.PeersOnOldKey(ctx)
+// finishRotation ends the change of key away from old: the old key
+// deleted, peers that didn't move told to pair again (in the panel).
+// Only that change: one that ended meanwhile, and the next one begun
+// since, are left as they are (Store.FinishFederationRotation).
+func (s *Service) finishRotation(ctx context.Context, old ed25519.PublicKey) error {
+	ended, n, err := s.Store.FinishFederationRotation(ctx, old)
 	if err != nil {
-		return err
-	}
-	if err := s.Store.FinishFederationRotation(ctx); err != nil {
 		return err
 	}
 	if err := s.Keys.reload(ctx, s.Store); err != nil {
 		return err
 	}
-	if n > 0 {
+	switch {
+	case !ended:
+	case n > 0:
 		s.Logger.Warn("federation: this server's old key deleted; servers that didn't move to the new one must pair again", "servers", n)
-	} else {
+	default:
 		s.Logger.Info("federation: every peer moved to this server's new key; the old one deleted")
 	}
 	return nil
@@ -448,8 +481,8 @@ func (s *Service) Rotate(ctx context.Context, nextKey string) error {
 // rotateTo moves this server to next; revoked says its current key was
 // just revoked.
 func (s *Service) rotateTo(ctx context.Context, next msfp.Key, revoked bool) error {
-	if _, _, ok := s.Keys.Old(); ok {
-		if err := s.finishRotation(ctx); err != nil {
+	if old, _, ok := s.Keys.Old(); ok {
+		if err := s.finishRotation(ctx, old.Public()); err != nil {
 			return err
 		}
 	}
@@ -510,8 +543,8 @@ func (s *Service) Revoke(ctx context.Context, nextKey string, withoutNext bool) 
 	}
 	// A change under way is finished first: every peer left then knows
 	// us by the key revoked.
-	if _, _, ok := s.Keys.Old(); ok {
-		if err := s.finishRotation(ctx); err != nil {
+	if old, _, ok := s.Keys.Old(); ok {
+		if err := s.finishRotation(ctx, old.Public()); err != nil {
 			return false, err
 		}
 	}
@@ -598,9 +631,10 @@ const rotateDaily = 24 * time.Hour
 // once.
 func (s *Service) Maintain(ctx context.Context) {
 	now := s.now()
-	if _, since, ok := s.Keys.Old(); ok && now.Sub(since) >= KeyOverlap {
+	// That change only: one our operator made meanwhile isn't ended.
+	if old, since, ok := s.Keys.Old(); ok && now.Sub(since) >= KeyOverlap {
 		rotations.Lock()
-		err := s.finishRotation(ctx)
+		err := s.finishRotation(ctx, old.Public())
 		rotations.Unlock()
 		if err != nil {
 			s.Logger.Error("federation: the old key couldn't be deleted", "error", err)

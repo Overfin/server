@@ -474,6 +474,15 @@ func (s *Store) deletePeer(ctx context.Context, id string, remember bool) error 
 		return err
 	}
 	defer tx.Rollback()
+	if err := s.deletePeerTx(ctx, tx, id, remember); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// deletePeerTx is deletePeer in tx, for a caller that removes more with
+// it, all or nothing.
+func (s *Store) deletePeerTx(ctx context.Context, tx *sql.Tx, id string, remember bool) error {
 	var key, previous []byte
 	switch err := tx.QueryRowContext(ctx, `SELECT public_key, previous_key FROM peers WHERE id = ?`, id).Scan(&key, &previous); {
 	case errors.Is(err, sql.ErrNoRows):
@@ -512,10 +521,8 @@ func (s *Store) deletePeer(ctx context.Context, id string, remember bool) error 
 			}
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM peers WHERE id = ?`, id); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err := tx.ExecContext(ctx, `DELETE FROM peers WHERE id = ?`, id)
+	return err
 }
 
 // PeerForgotten says whether a key is a server's whose pairing with this
