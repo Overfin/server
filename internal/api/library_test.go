@@ -412,6 +412,8 @@ type options struct {
 	// engine (its address the test server's, its name fedName or "B").
 	federation **msfp.Engine
 	fedName    string
+	// events, when set, hears the engine's events too.
+	events func(msfp.Event)
 	// tickets, when set, receives the server's playbacks.
 	tickets **playback.Tickets
 	// wrap, when set, wraps the server's handler (to stand in for a
@@ -550,6 +552,9 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 			Notifier: notifier(func(ev msfp.Event) {
 				if e, ok := ev.(msfp.RemotePlaybackEnded); ok {
 					cur.RemoteEnded(e.Playback)
+				}
+				if o.events != nil {
+					o.events(ev)
 				}
 			}),
 			NotFound: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { problem.Send(w, problem.NotFound, "") })})

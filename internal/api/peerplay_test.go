@@ -42,7 +42,10 @@ type twoServers struct {
 	a, b       *msfp.Engine
 	onB        *playback.Tickets
 	aOnB, bOnA msfp.PeerView
-	pbA        api.Playback
+	pbA, pbB   api.Playback
+	// endedOnB are B's engine's endings of A's playbacks, as they come
+	// (the first 16).
+	endedOnB chan msfp.PlaybackEnded
 }
 
 // pairForPlay makes twoServers.
@@ -55,8 +58,16 @@ func pairForPlay(t *testing.T) *twoServers {
 func pairForPlayWith(t *testing.T, wrapB func(http.Handler) http.Handler) *twoServers {
 	t.Helper()
 	ctx := context.Background()
-	var x twoServers
-	x.srvB, x.fakeB = newServerWith(t, options{store: &x.stB, federation: &x.b, tickets: &x.onB, wrap: wrapB})
+	x := twoServers{endedOnB: make(chan msfp.PlaybackEnded, 16)}
+	x.srvB, x.fakeB = newServerWith(t, options{store: &x.stB, federation: &x.b, tickets: &x.onB, playback: &x.pbB, wrap: wrapB,
+		events: func(ev msfp.Event) {
+			if e, ok := ev.(msfp.PlaybackEnded); ok {
+				select {
+				case x.endedOnB <- e:
+				default: // a test not listening
+				}
+			}
+		}})
 	x.fakeB.setDirect(true)
 	x.stB.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "Heat", SortName: "heat",
 		TMDB: "949", LibraryID: "films", AudioTags: []string{"fr"}}}, 1)
@@ -456,5 +467,128 @@ func TestRemotePlaybackEndsWhenPeerUncallable(t *testing.T) {
 	}
 	if code, _ := viewerGet(t, x.srvA, s.Stream.URL); code != http.StatusNotFound {
 		t.Fatalf("A still relays B's stream, B saying it can't be called: %d", code)
+	}
+}
+
+// playPeer starts A's viewer's playback of B's film, and fetches its
+// stream once.
+func (x *twoServers) playPeer(t *testing.T) peerSession {
+	t.Helper()
+	status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
+	var s peerSession
+	json.Unmarshal([]byte(body), &s)
+	if status != 201 {
+		t.Fatalf("play: %d %s", status, body)
+	}
+	if code, _ := viewerGet(t, x.srvA, s.Stream.URL); code != 200 {
+		t.Fatalf("the stream: %d", code)
+	}
+	return s
+}
+
+// ending waits for B's engine's next ending of a playback of A's.
+func (x *twoServers) ending(t *testing.T) msfp.EndReason {
+	t.Helper()
+	select {
+	case ev := <-x.endedOnB:
+		return ev.Reason
+	case <-time.After(5 * time.Second):
+		t.Fatal("B's playback didn't end")
+		return ""
+	}
+}
+
+// waitFor waits until ok says yes.
+func waitFor(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !ok() {
+		if time.Now().After(deadline) {
+			t.Fatal(what)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// A's viewer's progress reaches B at the first report, and a pause at
+// once: B's live view (the control panel's Now playing) shows where the
+// paired server's viewer is.
+func TestPeerProgressShownByOwner(t *testing.T) {
+	x := pairForPlay(t)
+	s := x.playPeer(t)
+	onB := func(positionMs int64, paused bool) func() bool {
+		return func() bool {
+			live := x.onB.Live(time.Now())
+			return len(live) == 1 && live[0].PositionMs == positionMs && live[0].Paused == paused
+		}
+	}
+	if status, body := post(t, x.srvA, "/api/v1/playback/"+s.ID+"/progress", `{"positionMs":600000}`); status != 204 {
+		t.Fatalf("progress: %d %s", status, body)
+	}
+	waitFor(t, "B's live view after the first report", onB(600_000, false))
+	if status, _ := post(t, x.srvA, "/api/v1/playback/"+s.ID+"/progress", `{"positionMs":610000,"paused":true}`); status != 204 {
+		t.Fatal("progress")
+	}
+	waitFor(t, "B's live view after a pause", onB(610_000, true))
+	if status, _ := post(t, x.srvA, "/api/v1/playback/"+s.ID+"/progress", `{"positionMs":610000}`); status != 204 {
+		t.Fatal("progress")
+	}
+	waitFor(t, "B's live view after the resume", onB(610_000, false))
+	if v := x.b.Playbacks(); len(v) != 1 || v[0].State != "active" {
+		t.Errorf("B's engine's playbacks: %+v", v)
+	}
+}
+
+// Every way A ends its viewer's playback of B's film tells B at once
+// (stop): the viewer's player stopping, A's idle cleanup, the viewer
+// signing out.
+func TestPeerPlaybackEndsWithViewer(t *testing.T) {
+	x := pairForPlay(t)
+	s := x.playPeer(t)
+	if status, _ := post(t, x.srvA, "/api/v1/playback/"+s.ID+"/stop", `{"positionMs":5000}`); status != 204 {
+		t.Fatal("stop")
+	}
+	if r := x.ending(t); r != msfp.EndStopped {
+		t.Errorf("the player stopped: %v", r)
+	}
+	x.playPeer(t)
+	x.pbA.EndIdle(time.Now().Add(api.IdleTimeout + time.Minute))
+	if r := x.ending(t); r != msfp.EndStopped {
+		t.Errorf("A's idle cleanup: %v", r)
+	}
+	x.playPeer(t)
+	mine := livePlaybacks(x.pbA.Tickets)
+	if len(mine) != 1 {
+		t.Fatalf("A's playbacks: %d", len(mine))
+	}
+	x.pbA.EndOf(mine[0].AccountID, mine[0].SessionID) // signing out
+	if r := x.ending(t); r != msfp.EndStopped {
+		t.Errorf("signed out: %v", r)
+	}
+	waitFor(t, "B's playbacks after A's endings", func() bool { return len(livePlaybacks(x.onB)) == 0 && len(x.b.Playbacks()) == 0 })
+}
+
+// B ending A's playback by its own rules says why: its idle cleanup is
+// expiry, the operator's stop the operator's; A's viewer's player stops
+// at its next report.
+func TestPeerPlaybackEndedByOwner(t *testing.T) {
+	x := pairForPlay(t)
+	s := x.playPeer(t)
+	x.pbB.EndIdle(time.Now().Add(api.IdleTimeout + time.Minute))
+	if r := x.ending(t); r != msfp.EndExpired {
+		t.Errorf("B's idle cleanup: %v", r)
+	}
+	post(t, x.srvA, "/api/v1/playback/"+s.ID+"/progress", `{"positionMs":1000}`)
+	waitFor(t, "A's playback after B's ending", func() bool {
+		status, _ := viewerGet(t, x.srvA, "/api/v1/playback/"+s.ID)
+		return status == http.StatusGone
+	})
+	x.playPeer(t)
+	live := livePlaybacks(x.onB)
+	if len(live) != 1 || !x.pbB.EndByAdmin(live[0].ID) {
+		t.Fatalf("B's playbacks: %d", len(live))
+	}
+	if r := x.ending(t); r != msfp.EndOperator {
+		t.Errorf("B's operator: %v", r)
 	}
 }
