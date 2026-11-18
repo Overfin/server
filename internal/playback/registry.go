@@ -2,6 +2,7 @@ package playback
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"sort"
@@ -147,8 +148,11 @@ type Snapshot struct {
 
 // Tickets is the registry of playbacks.
 type Tickets struct {
-	mu       sync.Mutex
-	byTicket map[string]*Stream
+	mu sync.Mutex
+	// byTicket finds a playback by a hash of its ticket, never the ticket
+	// itself: how long a lookup takes tells nothing of how much of a
+	// ticket matched (MSFP media, section 1).
+	byTicket map[[32]byte]*Stream
 	byID     map[string]*Stream
 	ended    map[string]Ended
 	// devices are the Jellyfin device IDs in use, by live playbacks or by
@@ -163,7 +167,7 @@ const endedFor = time.Hour
 
 // NewTickets returns an empty registry.
 func NewTickets(maxAge time.Duration) *Tickets {
-	return &Tickets{byTicket: map[string]*Stream{}, byID: map[string]*Stream{}, ended: map[string]Ended{},
+	return &Tickets{byTicket: map[[32]byte]*Stream{}, byID: map[string]*Stream{}, ended: map[string]Ended{},
 		devices: map[string]bool{}, MaxAge: maxAge}
 }
 
@@ -176,10 +180,10 @@ func (t *Tickets) Add(s *Stream, startTicks int64, now time.Time) {
 
 func (t *Tickets) add(s *Stream, startTicks int64, now time.Time) {
 	s.ID = ids.New("play")
-	s.Ticket = random(24)
+	s.Ticket = random(24) // 192 bits, never reused (MSFP media, section 1)
 	s.started, s.lastSeen, s.positionTicks, s.earliestTicks = now, now, startTicks, startTicks
 	s.over = make(chan struct{})
-	t.byTicket[s.Ticket] = s
+	t.byTicket[ticketHash(s.Ticket)] = s
 	t.byID[s.ID] = s
 }
 
@@ -272,7 +276,7 @@ func (t *Tickets) live(s *Stream, now time.Time) bool {
 func (t *Tickets) ByTicket(ticket, sessionID, profileID string, now time.Time) (*Stream, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	s, ok := t.byTicket[ticket]
+	s, ok := t.byTicket[ticketHash(ticket)]
 	if !ok || !t.live(s, now) || s.SessionID != sessionID || s.ProfileID != profileID {
 		return nil, false
 	}
@@ -286,7 +290,7 @@ func (t *Tickets) ByTicket(ticket, sessionID, profileID string, now time.Time) (
 func (t *Tickets) ByPeerTicket(ticket string, now time.Time) (*Stream, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	s, ok := t.byTicket[ticket]
+	s, ok := t.byTicket[ticketHash(ticket)]
 	if !ok || !t.live(s, now) || s.Origin == "" || !strings.HasPrefix(s.SessionID, PeerPrefix) {
 		return nil, false
 	}
@@ -409,7 +413,7 @@ func (t *Tickets) remove(s *Stream, reason, by string, now time.Time) bool {
 		return false
 	}
 	delete(t.byID, s.ID)
-	delete(t.byTicket, s.Ticket)
+	delete(t.byTicket, ticketHash(s.Ticket))
 	delete(t.devices, s.Auth.DeviceID)
 	close(s.over)
 	t.ended[s.ID+"/"+s.ProfileID] = Ended{Reason: reason, By: by, at: now}
@@ -566,6 +570,9 @@ func (t *Tickets) Idle(now time.Time, idle time.Duration) []*Stream {
 
 // random returns n random bytes as URL-safe text. Tickets get 24 bytes, well
 // above the 128-bit minimum (rule 35).
+// ticketHash is what a ticket is looked up by.
+func ticketHash(ticket string) [32]byte { return sha256.Sum256([]byte(ticket)) }
+
 func random(n int) string {
 	b := make([]byte, n)
 	rand.Read(b)

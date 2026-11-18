@@ -335,19 +335,12 @@ func (s Stream) proxy(w http.ResponseWriter, r *http.Request, st *playback.Strea
 	_, _ = io.Copy(w, res.Body)
 }
 
-// mediaType keeps an upstream content type only when it is audio or video;
-// anything else is sent as opaque bytes, never as something a browser would
-// render (and nosniff is set on every response).
-func mediaType(ct string) string {
-	t, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(ct)), ";")
-	// Never a playlist's type (audio/mpegurl, audio/x-mpegurl): players
-	// would read it as one, unchecked.
-	if (strings.HasPrefix(t, "video/") || strings.HasPrefix(t, "audio/")) && !strings.Contains(t, "mpegurl") &&
-		msfp.FileName(strings.ReplaceAll(t, "/", "-")) {
-		return t
-	}
-	return "application/octet-stream"
-}
+// mediaType keeps an upstream content type only when it is audio or video,
+// as MSFP media section 3 says of what a viewer's server relays (letters,
+// digits and .+- only, never a playlist's); anything else is sent as
+// opaque bytes, never as something a browser would render (and nosniff is
+// set on every response).
+func mediaType(ct string) string { return msfp.RelayedMediaType(ct) }
 
 // subtitleReads bounds how many subtitle tracks are held in memory at
 // once: each is read whole before it is checked (a PGS track may be up to
