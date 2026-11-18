@@ -28,7 +28,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/overfin/server/internal/msfp"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // Config is the whole configuration. Field tags give the TOML key names.
@@ -712,7 +712,7 @@ func (c *Config) validate() error {
 	}
 
 	for _, pin := range c.Site.Certificates {
-		if !msfp.ValidPin(pin) {
+		if !wire.ValidPin(pin) {
 			add("site.certificates: %q isn't a certificate's pin (base64url of the SHA-256 of its public key, 43 characters)", pin)
 		}
 	}

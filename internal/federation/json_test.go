@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // Names match exactly: "State" is an unknown member, ignored; null is
@@ -16,17 +16,17 @@ import (
 // into lists and nested objects.
 func TestDecodeJSONExact(t *testing.T) {
 	var msg helloMessage
-	if err := msfp.DecodeJSON([]byte(`{"State":"ended"}`), &msg); err != nil || msg.State != "" {
+	if err := wire.DecodeJSON([]byte(`{"State":"ended"}`), &msg); err != nil || msg.State != "" {
 		t.Errorf("another case: %+v %v", msg, err)
 	}
-	if err := msfp.DecodeJSON([]byte(`{"state":"paired","certificates":null}`), &msg); err == nil {
+	if err := wire.DecodeJSON([]byte(`{"state":"paired","certificates":null}`), &msg); err == nil {
 		t.Error("null accepted in a request")
 	}
 	var a titlesAnswer
-	if err := msfp.DecodeAnswer([]byte(`{"titles":[],"next":null}`), &a); err == nil {
+	if err := wire.DecodeAnswer([]byte(`{"titles":[],"next":null}`), &a); err == nil {
 		t.Error("null accepted at the top of an answer")
 	}
-	err := msfp.DecodeAnswer([]byte(`{"titles":[{"key":"movie/tmdb/1","KIND":"movie","kind":"movie","Library":"x","library":"l","audio":null}],"Seq":3}`), &a)
+	err := wire.DecodeAnswer([]byte(`{"titles":[{"key":"movie/tmdb/1","KIND":"movie","kind":"movie","Library":"x","library":"l","audio":null}],"Seq":3}`), &a)
 	if err != nil || len(a.Titles) != 1 || a.Titles[0].Kind != "movie" || a.Titles[0].Library != "l" || a.Seq != 0 {
 		t.Errorf("nested: %+v %v", a, err)
 	}
@@ -38,13 +38,13 @@ func TestDecodeJSONExact(t *testing.T) {
 		``, `[`, `{"a":` + strings.Repeat("[", 100) + strings.Repeat("]", 100) + `}`,
 	} {
 		var x titlesAnswer
-		if err := msfp.DecodeJSON([]byte(bad), &x); err == nil {
+		if err := wire.DecodeJSON([]byte(bad), &x); err == nil {
 			t.Errorf("accepted: %s", bad)
 		}
 	}
 	// Escapes that are fine: a pair, a backslash before a u.
 	var m map[string]string
-	if err := msfp.DecodeJSON([]byte(`{"a":"🎬","b":"\\ud800"}`), &m); err != nil || m["a"] != "🎬" || m["b"] != `\ud800` {
+	if err := wire.DecodeJSON([]byte(`{"a":"🎬","b":"\\ud800"}`), &m); err != nil || m["a"] != "🎬" || m["b"] != `\ud800` {
 		t.Errorf("good escapes: %v %v", m, err)
 	}
 }
@@ -128,7 +128,7 @@ func rawCall(t *testing.T, s *server, p *store.Peer, path, body string) int {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	msfp.SignRequest(req, []byte(body), s.s.Keys.Current(), s.s.now())
+	wire.SignRequest(req, []byte(body), s.s.Keys.Current(), s.s.now())
 	res, err := s.s.conns(p, true).client.Do(req)
 	if err != nil {
 		t.Fatal(err)

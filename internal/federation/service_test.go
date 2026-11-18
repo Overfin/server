@@ -17,11 +17,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/outbound"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/seal"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // server is one Overfin's federation, on a test server of its own.
@@ -125,7 +125,7 @@ func TestPairing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.s.UseCode(ctx, "garbage"); !errors.Is(err, msfp.ErrCode) {
+	if _, err := b.s.UseCode(ctx, "garbage"); !errors.Is(err, wire.ErrCode) {
 		t.Fatalf("garbage code: %v", err)
 	}
 	if _, err := a.s.UseCode(ctx, code); !errors.Is(err, ErrOwnCode) {
@@ -139,7 +139,7 @@ func TestPairing(t *testing.T) {
 		t.Fatalf("B's view of A: %+v", pa)
 	}
 	pb := onlyPeer(t, a)
-	if pb.State != store.PeerOurs || pb.Name != "B" || !msfp.SameKey(pb.PublicKey, b.s.Keys.Current().Public()) {
+	if pb.State != store.PeerOurs || pb.Name != "B" || !wire.SameKey(pb.PublicKey, b.s.Keys.Current().Public()) {
 		t.Fatalf("A's view of B: %+v", pb)
 	}
 	// The code is used up: a third server can't use it.
@@ -193,20 +193,20 @@ func TestRefused(t *testing.T) {
 // Every route answers the same plain 404 to anyone without a pairing.
 func TestStrangers(t *testing.T) {
 	a := newServer(t, "A")
-	stranger := msfp.NewKey()
+	stranger := wire.NewKey()
 	for _, path := range []string{"/api/v1/federation/hello", "/api/v1/federation/pair"} {
 		body := []byte(`{"state":"paired"}`)
 		req, _ := http.NewRequest("POST", a.url+path, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		msfp.SignRequest(req, body, stranger, a.s.now())
+		wire.SignRequest(req, body, stranger, a.s.now())
 		client := a.s.conns(&store.Peer{}, true).client // any certificate, its own
 		res, err := client.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
 		res.Body.Close()
-		if res.StatusCode != http.StatusNotFound || res.Header.Get(msfp.HeaderSignature) != "" {
-			t.Errorf("%s: %d, signed %q", path, res.StatusCode, res.Header.Get(msfp.HeaderSignature))
+		if res.StatusCode != http.StatusNotFound || res.Header.Get(wire.HeaderSignature) != "" {
+			t.Errorf("%s: %d, signed %q", path, res.StatusCode, res.Header.Get(wire.HeaderSignature))
 		}
 		// Unsigned.
 		res, err = client.Post(a.url+path, "application/json", strings.NewReader(`{}`))
@@ -226,7 +226,7 @@ func TestImpostor(t *testing.T) {
 	ctx := context.Background()
 	a, b, mallory := newServer(t, "A"), newServer(t, "B"), newServer(t, "Mallory")
 	code, _, _ := a.s.NewCode(ctx, "")
-	c, _ := msfp.ParseCode(code)
+	c, _ := wire.ParseCode(code)
 	// The code, its address changed to Mallory's, who also made a code of
 	// her own with the same secret to answer it.
 	c.Address = mallory.url
@@ -589,7 +589,7 @@ func TestSyncTitlesPageTooLarge(t *testing.T) {
 	ctx := context.Background()
 	a, b, _, aOnB := pairedPair(t)
 	lib := pub(t, a, "films")[0]
-	k := msfp.NewKey()
+	k := wire.NewKey()
 	var n atomic.Int64
 	n.Store(titlesPage + 1)
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -606,7 +606,7 @@ func TestSyncTitlesPageTooLarge(t *testing.T) {
 			body, _ = json.Marshal(map[string]any{"titles": titles})
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, "application/json", body))
+		w.Header().Set(wire.HeaderSignature, wire.SignResponse(k, r.Header.Get(wire.HeaderNonce), 200, "application/json", body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()
@@ -632,7 +632,7 @@ func TestSyncTitlesBounded(t *testing.T) {
 	maxPeerTitles = 12_000
 	a, b, _, aOnB := pairedPair(t)
 	lib := pub(t, a, "films")[0]
-	k := msfp.NewKey()
+	k := wire.NewKey()
 	var pages atomic.Int64
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body []byte
@@ -647,7 +647,7 @@ func TestSyncTitlesBounded(t *testing.T) {
 			body, _ = json.Marshal(map[string]any{"titles": titles, "next": fmt.Sprintf("movie/tmdb/%d", p*10_000+titlesPage)})
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, "application/json", body))
+		w.Header().Set(wire.HeaderSignature, wire.SignResponse(k, r.Header.Get(wire.HeaderNonce), 200, "application/json", body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()
@@ -667,7 +667,7 @@ func TestSyncTitlesSkipsOddOnesAlone(t *testing.T) {
 	ctx := context.Background()
 	a, b, _, aOnB := pairedPair(t)
 	lib := pub(t, a, "films")[0]
-	k := msfp.NewKey()
+	k := wire.NewKey()
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := []byte(`{"libraries":[{"id":"` + lib + `","name":"Films","kind":"movies"}]}`)
 		if r.URL.Path != "/api/v1/federation/libraries" {
@@ -679,7 +679,7 @@ func TestSyncTitlesSkipsOddOnesAlone(t *testing.T) {
 				{"key":"movie/tmdb/5","kind":"movie","library":"` + lib + `"}],"seq":7}`)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, "application/json", body))
+		w.Header().Set(wire.HeaderSignature, wire.SignResponse(k, r.Header.Get(wire.HeaderNonce), 200, "application/json", body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()
@@ -702,7 +702,7 @@ func TestSyncTitlesSkipsOddOnesAlone(t *testing.T) {
 func TestTheirLibrariesOddOnes(t *testing.T) {
 	ctx := context.Background()
 	_, b, _, aOnB := pairedPair(t)
-	k := msfp.NewKey()
+	k := wire.NewKey()
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := []byte(`{"libraries":[
 			{"id":"lib_A","name":"Films","kind":"movies"},
@@ -714,7 +714,7 @@ func TestTheirLibrariesOddOnes(t *testing.T) {
 			{"id":"lib_N","name":42,"kind":7}],
 			"limits":{"streams":"two"}}`)
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, "application/json", body))
+		w.Header().Set(wire.HeaderSignature, wire.SignResponse(k, r.Header.Get(wire.HeaderNonce), 200, "application/json", body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()
@@ -741,7 +741,7 @@ func TestSyncTitlesWithAndWrongTypes(t *testing.T) {
 	ctx := context.Background()
 	a, b, _, aOnB := pairedPair(t)
 	lib := pub(t, a, "films")[0]
-	k := msfp.NewKey()
+	k := wire.NewKey()
 	var tail atomic.Value
 	tail.Store(`,"seq":7`)
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -754,7 +754,7 @@ func TestSyncTitlesWithAndWrongTypes(t *testing.T) {
 				tail.Load().(string) + `}`)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, "application/json", body))
+		w.Header().Set(wire.HeaderSignature, wire.SignResponse(k, r.Header.Get(wire.HeaderNonce), 200, "application/json", body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()

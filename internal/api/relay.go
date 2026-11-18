@@ -19,12 +19,12 @@ import (
 	"time"
 
 	"github.com/overfin/server/internal/federation"
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/outbound"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/slots"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // A paired server's title plays through this server (rule 97): the
@@ -213,12 +213,12 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 		length = n
 	}
 	if !media {
-		limit := int64(msfp.MaxPlaylist)
+		limit := int64(wire.MaxPlaylist)
 		switch {
 		case what.vtt:
-			limit = msfp.MaxWebVTT
+			limit = wire.MaxWebVTT
 		case what.pgs:
-			limit = msfp.MaxPGS
+			limit = wire.MaxPGS
 		}
 		body, err := io.ReadAll(io.LimitReader(res.Body, limit+1))
 		if err != nil || int64(len(body)) > limit {
@@ -228,11 +228,11 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 		contentType := "application/vnd.apple.mpegurl"
 		switch {
 		case what.playlist:
-			subset := msfp.MediaSubset
+			subset := wire.MediaSubset
 			if what.path == "master.m3u8" {
-				subset = msfp.MasterSubset
+				subset = wire.MasterSubset
 			}
-			kept, err := msfp.FilterPlaylist(body, subset)
+			kept, err := wire.FilterPlaylist(body, subset)
 			if err != nil {
 				l.Logger.Warn("refused a paired server's playlist", "playback", st.ID, "err", err)
 				problem.Send(w, problem.NotFound, "")
@@ -242,17 +242,17 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 			if what.path == "master.m3u8" {
 				// What it names is fetched as a playlist, and checked as
 				// one, whatever its name (players read it as one).
-				rm.NamePlaylists(msfp.URILines(kept))
+				rm.NamePlaylists(wire.URILines(kept))
 			}
 		case what.vtt:
-			vtt, ok := msfp.RebuildWebVTT(body)
+			vtt, ok := wire.RebuildWebVTT(body)
 			if !ok {
 				problem.Send(w, problem.NotFound, "")
 				return
 			}
 			body, contentType = vtt, "text/vtt; charset=utf-8"
 		case what.pgs:
-			if msfp.CheckPGS(body) != nil {
+			if wire.CheckPGS(body) != nil {
 				problem.Send(w, problem.NotFound, "")
 				return
 			}

@@ -19,10 +19,10 @@ import (
 
 	"github.com/overfin/server/internal/api"
 	"github.com/overfin/server/internal/federation"
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/seal"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // viewer is another server, A, paired with the test server, B, whose
@@ -584,7 +584,7 @@ func TestPeerPlayAnswerOfWrongTypes(t *testing.T) {
 			change.Load().(func(map[string]any))(m)
 			body, _ := json.Marshal(m)
 			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set(msfp.HeaderSignature, msfp.SignResponse((*bKeys).Keys.Current(), r.Header.Get(msfp.HeaderNonce), 200, "application/json", body))
+			w.Header().Set(wire.HeaderSignature, wire.SignResponse((*bKeys).Keys.Current(), r.Header.Get(wire.HeaderNonce), 200, "application/json", body))
 			_, _ = w.Write(body)
 		})
 	})
@@ -652,10 +652,10 @@ func TestRemotePlaybackEndsWhenPeerUncallable(t *testing.T) {
 		t.Fatalf("the stream through A: %d", code)
 	}
 	hello := []byte(`{"state":"paired","core":[1],"parts":{"catalog":[1],"playback":[1],"media":[1],"video":[1]},` +
-		`"address":"` + msfp.NewUncallableAddress() + `","inbound":false}`)
+		`"address":"` + wire.NewUncallableAddress() + `","inbound":false}`)
 	req, _ := http.NewRequest("POST", x.srvA.URL+"/api/v1/federation/hello", bytes.NewReader(hello))
 	req.Header.Set("Content-Type", "application/json")
-	msfp.SignRequest(req, hello, x.b.Keys.Current(), time.Now())
+	wire.SignRequest(req, hello, x.b.Keys.Current(), time.Now())
 	res, err := x.srvA.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -707,7 +707,7 @@ func TestPeerPlayURLsOnTheSignedHost(t *testing.T) {
 		body := []byte(`{"title":"movie/tmdb/949","capabilities":{}}`)
 		req, _ := http.NewRequest("POST", at+"/api/v1/federation/play", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		msfp.SignRequest(req, body, a.Keys.Current(), time.Now())
+		wire.SignRequest(req, body, a.Keys.Current(), time.Now())
 		res, err := client.Do(req)
 		if err != nil {
 			t.Fatal(err)

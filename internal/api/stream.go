@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/overfin/server/internal/jellyfin"
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/slots"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // Stream serves what a playback session plays: the media file, rewritten
@@ -174,7 +174,7 @@ func (s Stream) find(w http.ResponseWriter, r *http.Request) (*playback.Stream, 
 
 func (s Stream) serve(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if hasQuery(r) || !msfp.FileName(name) {
+	if hasQuery(r) || !wire.FileName(name) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -227,7 +227,7 @@ func (s Stream) playlist(w http.ResponseWriter, r *http.Request, st *playback.St
 	up playback.Upstream, rewrite func([]byte, playback.Upstream) (*playback.Rewritten, error)) {
 
 	l := s.Playback.Library
-	body, err := l.Jellyfin.ReadSmall(r.Context(), a, up.Path, up.Query, msfp.MaxPlaylist)
+	body, err := l.Jellyfin.ReadSmall(r.Context(), a, up.Path, up.Query, wire.MaxPlaylist)
 	if err != nil {
 		s.upstreamError(w, st, err)
 		return
@@ -340,11 +340,11 @@ func (s Stream) proxy(w http.ResponseWriter, r *http.Request, st *playback.Strea
 // digits and .+- only, never a playlist's); anything else is sent as
 // opaque bytes, never as something a browser would render (and nosniff is
 // set on every response).
-func mediaType(ct string) string { return msfp.RelayedMediaType(ct) }
+func mediaType(ct string) string { return wire.RelayedMediaType(ct) }
 
 // subtitleReads bounds how many subtitle tracks are held in memory at
 // once: each is read whole before it is checked (a PGS track may be up to
-// msfp.MaxPGS), so many asked together could otherwise take hundreds
+// wire.MaxPGS), so many asked together could otherwise take hundreds
 // of megabytes. A read waits for a slot as long as its request lasts; the
 // slot is freed once the track is checked, before it's sent.
 var subtitleReads = make(chan struct{}, 4)
@@ -438,11 +438,11 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 	}
 	free = sync.OnceFunc(free)
 	defer free()
-	body := s.stretch(w, r, st, index, part, msfp.MaxWebVTT)
+	body := s.stretch(w, r, st, index, part, wire.MaxWebVTT)
 	if body == nil {
 		return
 	}
-	vtt, ok := msfp.RebuildWebVTT(body)
+	vtt, ok := wire.RebuildWebVTT(body)
 	if !ok {
 		s.Playback.Library.Logger.Warn("refused upstream subtitles", "playback", st.ID)
 		problem.Send(w, problem.NotFound, "")
@@ -490,11 +490,11 @@ func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
 	}
 	free = sync.OnceFunc(free)
 	defer free()
-	body := s.stretch(w, r, st, index, part, msfp.MaxPGS)
+	body := s.stretch(w, r, st, index, part, wire.MaxPGS)
 	if body == nil {
 		return
 	}
-	if err := msfp.CheckPGS(body); err != nil {
+	if err := wire.CheckPGS(body); err != nil {
 		s.Playback.Library.Logger.Warn("refused upstream picture subtitles", "playback", st.ID)
 		problem.Send(w, problem.NotFound, "")
 		return

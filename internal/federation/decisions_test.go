@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // MSFP version 1 as decided on 2026-11-18 (core section 18, items 37 to
@@ -39,13 +39,13 @@ func TestPairNeedsCommitments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := msfp.ParseCode(text)
+	c, err := wire.ParseCode(text)
 	if err != nil {
 		t.Fatal(err)
 	}
 	key := b.s.Keys.Current()
-	req := pairRequest{Address: b.url, Name: "B", SecretHash: msfp.Encode64(store.PairingSecretHash(c.Secret)),
-		Proof: msfp.PairingProof(c.Secret, key.Public(), b.url)}
+	req := pairRequest{Address: b.url, Name: "B", SecretHash: wire.Encode64(store.PairingSecretHash(c.Secret)),
+		Proof: wire.PairingProof(c.Secret, key.Public(), b.url)}
 	status, _ := signedCall(t, b, &store.Peer{Address: a.url}, pairPath, marshal(t, req), key)
 	if status != http.StatusNotFound {
 		t.Fatalf("a pair without nextCommitment: %d", status)
@@ -79,13 +79,13 @@ func TestRotationBackToFormerKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := a.s.Keys.Current()
-	if got := peer(t, b, aOnB.ID); !msfp.SameKey(got.PublicKey, second.Public()) {
+	if got := peer(t, b, aOnB.ID); !wire.SameKey(got.PublicKey, second.Public()) {
 		t.Fatal("B didn't follow A's change of key")
 	}
 	// No commitment held: any other key would wait for B's operator.
 	exec(t, b, `UPDATE peers SET next_commitment = NULL, commitment_from = ''`)
 	toB := onlyPeer(t, a)
-	back := msfp.SignRotation(second, first, nil, a.s.now())
+	back := wire.SignRotation(second, first, nil, a.s.now())
 	if status, body := signedCall(t, a, toB, rotatePath, marshal(t, back.Body()), second); status != http.StatusConflict ||
 		!strings.Contains(body, "rotation-refused") {
 		t.Fatalf("a rotation back to the former key: %d %s", status, body)
@@ -93,11 +93,11 @@ func TestRotationBackToFormerKey(t *testing.T) {
 	// After the previous key's 10 minutes, dropped: still refused, from
 	// the history.
 	exec(t, b, `UPDATE peers SET previous_key = NULL, previous_until = NULL`)
-	back = msfp.SignRotation(second, first, nil, a.s.now())
+	back = wire.SignRotation(second, first, nil, a.s.now())
 	if status, _ := signedCall(t, a, toB, rotatePath, marshal(t, back.Body()), second); status != http.StatusConflict {
 		t.Fatalf("a rotation back to a key of the history: %d", status)
 	}
-	other := msfp.SignRotation(second, msfp.NewKey(), nil, a.s.now())
+	other := wire.SignRotation(second, wire.NewKey(), nil, a.s.now())
 	if status, _ := signedCall(t, a, toB, rotatePath, marshal(t, other.Body()), second); status != http.StatusAccepted {
 		t.Fatalf("a rotation to a new key: %d", status)
 	}
@@ -109,8 +109,8 @@ func TestEndForgetsPendingKey(t *testing.T) {
 	ctx := context.Background()
 	a, b, _, aOnB := pairedPair(t)
 	exec(t, b, `UPDATE peers SET next_commitment = NULL, commitment_from = ''`)
-	pending := msfp.NewKey()
-	rot := msfp.SignRotation(a.s.Keys.Current(), pending, nil, a.s.now())
+	pending := wire.NewKey()
+	rot := wire.SignRotation(a.s.Keys.Current(), pending, nil, a.s.now())
 	if status, _ := signedCall(t, a, onlyPeer(t, a), rotatePath, marshal(t, rot.Body()), a.s.Keys.Current()); status != http.StatusAccepted {
 		t.Fatalf("rotate: %d", status)
 	}
@@ -133,7 +133,7 @@ func TestRevokedKeyNotHeardAfterRotation(t *testing.T) {
 		t.Fatalf("revoke and rotate: %v %v", rotated, err)
 	}
 	got := peer(t, b, aOnB.ID)
-	if got.Suspended != nil || !msfp.SameKey(got.PublicKey, a.s.Keys.Current().Public()) {
+	if got.Suspended != nil || !wire.SameKey(got.PublicKey, a.s.Keys.Current().Public()) {
 		t.Fatal("B didn't follow A to its committed key")
 	}
 	hello := []byte(`{"state":"paired","core":[1],"parts":{"catalog":[1]}}`)
@@ -164,7 +164,7 @@ func TestRevocationAnswersAfterNewKey(t *testing.T) {
 		t.Helper()
 		req, _ := http.NewRequest("POST", b.url+helloPath, bytes.NewReader(hello))
 		req.Header.Set("Content-Type", "application/json")
-		nonce := msfp.SignRequest(req, hello, a.s.Keys.Current(), c.now())
+		nonce := wire.SignRequest(req, hello, a.s.Keys.Current(), c.now())
 		res, err := a.s.conns(&store.Peer{Address: b.url}, true).client.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -174,15 +174,15 @@ func TestRevocationAnswersAfterNewKey(t *testing.T) {
 		return res.StatusCode, res.Header, body, nonce
 	}
 	status, h, body, nonce := ask()
-	if status != http.StatusOK || msfp.CheckResponse(revoked.Public(), nonce, status, "application/json", body, h.Get(msfp.HeaderSignature)) != nil {
+	if status != http.StatusOK || wire.CheckResponse(revoked.Public(), nonce, status, "application/json", body, h.Get(wire.HeaderSignature)) != nil {
 		t.Fatalf("a former peer's hello: %d %s, signed with the revoked key: %v", status, body,
-			msfp.CheckResponse(revoked.Public(), nonce, status, "application/json", body, h.Get(msfp.HeaderSignature)))
+			wire.CheckResponse(revoked.Public(), nonce, status, "application/json", body, h.Get(wire.HeaderSignature)))
 	}
 	var only map[string]json.RawMessage
 	if err := json.Unmarshal(body, &only); err != nil || len(only) != 1 || only["revocation"] == nil {
 		t.Fatalf("the answer holds more than the revocation: %s", body)
 	}
-	if _, err := msfp.ReadRevoke(only["revocation"], revoked.Public(), c.now()); err != nil {
+	if _, err := wire.ReadRevoke(only["revocation"], revoked.Public(), c.now()); err != nil {
 		t.Fatalf("the revocation: %v", err)
 	}
 	// A, whose suspension of B is undone as if revoke never reached it,
@@ -204,7 +204,7 @@ func TestRevocationAnswersAfterNewKey(t *testing.T) {
 		t.Fatal("the revoked key kept past its 30 days")
 	}
 	status, h, body, nonce = ask()
-	if status != http.StatusNotFound || msfp.CheckResponse(b.s.Keys.Current().Public(), nonce, status, h.Get("Content-Type"), body, h.Get(msfp.HeaderSignature)) != nil {
+	if status != http.StatusNotFound || wire.CheckResponse(b.s.Keys.Current().Public(), nonce, status, h.Get("Content-Type"), body, h.Get(wire.HeaderSignature)) != nil {
 		t.Fatalf("a former peer's hello after 30 days: %d %s", status, body)
 	}
 }
@@ -224,7 +224,7 @@ func TestNoCommonCore(t *testing.T) {
 	}
 	// B, told A speaks core 2 only: A's rotate is not-supported, signed.
 	exec(t, b, `UPDATE peers SET versions = '{"core":[2],"parts":{}}'`)
-	rot := msfp.SignRotation(a.s.Keys.Current(), msfp.NewKey(), nil, a.s.now())
+	rot := wire.SignRotation(a.s.Keys.Current(), wire.NewKey(), nil, a.s.now())
 	if status, body := signedCall(t, a, onlyPeer(t, a), rotatePath, marshal(t, rot.Body()), a.s.Keys.Current()); status != http.StatusNotFound ||
 		!strings.Contains(body, "not-supported") {
 		t.Fatalf("a rotate with no common core: %d %s", status, body)
@@ -260,7 +260,7 @@ func TestPinsOfBothAddressesWhileMoving(t *testing.T) {
 		ts.TLS = &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}}
 		ts.StartTLS()
 		t.Cleanup(ts.Close)
-		return ts.URL, msfp.Pin(cert)
+		return ts.URL, wire.Pin(cert)
 	}
 	now, nowPin := serve()
 	former, formerPin := serve()
@@ -269,7 +269,7 @@ func TestPinsOfBothAddressesWhileMoving(t *testing.T) {
 		t.Fatalf("no move: %v", got)
 	}
 	s.former, s.movedAt = former, time.Now()
-	want := msfp.CleanPins([]string{nowPin, formerPin})
+	want := wire.CleanPins([]string{nowPin, formerPin})
 	if got := s.ownCertificates(ctx, true); !slices.Equal(got, want) {
 		t.Fatalf("moving: %v, want %v", got, want)
 	}

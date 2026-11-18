@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // This server's federation keys (MSFP core sections 4 and 12), in meta:
@@ -261,7 +261,7 @@ func (s *Store) sealedPublic(ctx context.Context, tx *sql.Tx, name, context stri
 	if err != nil {
 		return nil, err
 	}
-	k, err := msfp.KeyFromSeed(seed)
+	k, err := wire.KeyFromSeed(seed)
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +295,7 @@ func (s *Store) FinishFederationRotation(ctx context.Context, old ed25519.Public
 	}
 	defer tx.Rollback()
 	now, err := s.sealedPublic(ctx, tx, "federation-old-key", federationOldContext)
-	if err != nil || now == nil || !msfp.SameKey(now, old) {
+	if err != nil || now == nil || !wire.SameKey(now, old) {
 		return false, 0, err
 	}
 	if lost, err = endRotation(ctx, tx); err != nil {
@@ -382,7 +382,7 @@ func (s *Store) ReplaceFederationKey(ctx context.Context, newSeed, nextSeed, nex
 // commitment; the statement kept in its history. It lifts a suspension,
 // and drops a pending rotation and a refused one. ErrNotFound if the
 // peer isn't there, or isn't on r.Old.
-func (s *Store) RotatePeer(ctx context.Context, id string, r msfp.Rotation, until, at time.Time) error {
+func (s *Store) RotatePeer(ctx context.Context, id string, r wire.Rotation, until, at time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -419,7 +419,7 @@ func (s *Store) PeerFormerKey(ctx context.Context, id string, key []byte) (bool,
 
 // SetPeerPending keeps a rotation waiting for our operator (r, or nil to
 // drop it).
-func (s *Store) SetPeerPending(ctx context.Context, id string, r *msfp.Rotation) error {
+func (s *Store) SetPeerPending(ctx context.Context, id string, r *wire.Rotation) error {
 	text := ""
 	if r != nil {
 		b, err := json.Marshal(r)
@@ -505,7 +505,7 @@ func (s *Store) PeerMovedTo(ctx context.Context, id string, current ed25519.Publ
 	}
 	defer tx.Rollback()
 	now, err := s.sealedPublic(ctx, tx, "federation-key", federationKeyContext)
-	if err != nil || !msfp.SameKey(now, current) {
+	if err != nil || !wire.SameKey(now, current) {
 		return false, false, err
 	}
 	if old, err := s.sealedPublic(ctx, tx, "federation-old-key", federationOldContext); err != nil || old == nil {

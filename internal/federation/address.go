@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // Changes of address (MSFP core section 13), this server's and its
@@ -88,7 +88,7 @@ func (s *Service) NoteAddress(ctx context.Context) error {
 	// this server's scheduled hellos, the first at once (Hellos); from it,
 	// by a hello to each, as for any move, even those whose requests were
 	// signed for this address before: they stored the other since.
-	fromUncallable := msfp.Uncallable(a.Former)
+	fromUncallable := wire.Uncallable(a.Former)
 	switch {
 	case s.Uncallable:
 		s.endMove(ctx, "this server can't be called")
@@ -196,7 +196,7 @@ func (s *Service) named() string {
 func (s *Service) Moving() (former string, since time.Time, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.former == "" || s.now().Sub(s.movedAt) >= msfp.AddressOverlap {
+	if s.former == "" || s.now().Sub(s.movedAt) >= wire.AddressOverlap {
 		return "", time.Time{}, false
 	}
 	return s.former, s.movedAt, true
@@ -206,7 +206,7 @@ func (s *Service) Moving() (former string, since time.Time, ok bool) {
 // under way, "" otherwise: what Verifier.Former accepts.
 func (s *Service) formerHost() string {
 	if former, _, ok := s.Moving(); ok {
-		return msfp.Host(former)
+		return wire.Host(former)
 	}
 	return ""
 }
@@ -325,7 +325,7 @@ func (s *Service) announceDue(id string) bool {
 // confirmed, in the background; the stored one again drops a move not
 // confirmed. An address that isn't one is ignored, the stored one kept.
 func (s *Service) announcedAddress(ctx context.Context, p *store.Peer, address string) error {
-	next, err := msfp.Announced(p.Address, address)
+	next, err := wire.Announced(p.Address, address)
 	if err != nil {
 		s.Logger.Info("federation: a peer named an address that isn't one; its stored address stays", "name", p.Name)
 		return nil
@@ -355,7 +355,7 @@ func (s *Service) announcedAddress(ctx context.Context, p *store.Peer, address s
 		return nil
 	}
 	if p.Move == nil || p.Move.Address != next {
-		p.Move = &msfp.Move{Address: next}
+		p.Move = &wire.Move{Address: next}
 		if err := s.Store.SetPeerMove(ctx, p.ID, p.Move); err != nil {
 			return err
 		}
@@ -405,7 +405,7 @@ var ErrMoveFailed = fmt.Errorf("%w at its new address", ErrUnreachable)
 // p's key, the new address is stored, with the pins that answer names,
 // those of the old address dropped; otherwise the old one stays, and the
 // failure is noted for the next try, an hour later at least.
-func (s *Service) confirmMove(ctx context.Context, p *store.Peer, m msfp.Move) error {
+func (s *Service) confirmMove(ctx context.Context, p *store.Peer, m wire.Move) error {
 	// A revoked key: no call at all, nor an answer under it taken (MSFP
 	// core section 12.6). The move waits for its rotation.
 	if p.Suspended != nil {
@@ -417,13 +417,13 @@ func (s *Service) confirmMove(ctx context.Context, p *store.Peer, m msfp.Move) e
 	there.Address, there.Certificates = m.Address, nil
 	var raw json.RawMessage
 	r, err := s.callOnce(ctx, &there, helloPath, s.ourHello(ctx, p, viewOf(p), false), &raw, s.signer(p))
-	var answer msfp.Hello
+	var answer wire.Hello
 	switch {
 	case err != nil:
 	case r.Status != http.StatusOK:
 		err = fmt.Errorf("%w: it answered %d", ErrMoveFailed, r.Status)
 	default:
-		if answer, err = msfp.ReadHello(raw, true); err != nil {
+		if answer, err = wire.ReadHello(raw, true); err != nil {
 			err = fmt.Errorf("%w: %v", ErrMoveFailed, err)
 		}
 	}
@@ -442,7 +442,7 @@ func (s *Service) confirmMove(ctx context.Context, p *store.Peer, m msfp.Move) e
 			"address", m.Address, "since", m.Failing, "error", err)
 		return err
 	}
-	moved, err := s.Store.MovePeer(ctx, p.ID, p.Address, m.Address, msfp.CleanPins(answer.Certificates))
+	moved, err := s.Store.MovePeer(ctx, p.ID, p.Address, m.Address, wire.CleanPins(answer.Certificates))
 	if err != nil || !moved {
 		return err
 	}
@@ -482,7 +482,7 @@ func (s *Service) confirmMove(ctx context.Context, p *store.Peer, m msfp.Move) e
 // new address that failed tried again.
 func (s *Service) maintainAddresses(ctx context.Context, peers []*store.Peer) {
 	s.mu.Lock()
-	over := s.former != "" && s.now().Sub(s.movedAt) >= msfp.AddressOverlap
+	over := s.former != "" && s.now().Sub(s.movedAt) >= wire.AddressOverlap
 	s.mu.Unlock()
 	switch {
 	case over:

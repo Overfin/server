@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // Keys are this server's federation keys (MSFP core sections 4 and 12),
@@ -24,10 +24,10 @@ type Keys struct {
 	// putting what it read in effect: a reload that read before a change
 	// can't put its keys back after the reload that followed the change.
 	loading sync.Mutex
-	current msfp.Key
+	current wire.Key
 	// old is the key before current while peers still move from it (nil:
 	// no change under way), since when.
-	old   *msfp.Key
+	old   *wire.Key
 	since time.Time
 	// oldRevoked: old was revoked, the change of key made after it.
 	oldRevoked bool
@@ -35,7 +35,7 @@ type Keys struct {
 	// since revokedAt (nil: none): kept 30 days for one use, the answers
 	// to the hellos of the servers whose pairing ended then (MSFP core
 	// section 12.7, case 2).
-	revoked   *msfp.Key
+	revoked   *wire.Key
 	revokedAt time.Time
 	// next is the commitment to the next key, whose seed is in the store
 	// or kept offline by the operator.
@@ -59,7 +59,7 @@ func LoadKeys(ctx context.Context, st *store.Store) (*Keys, error) {
 		return nil, err
 	}
 	if k.Current == nil {
-		if _, err := st.KeepFederationSeed(ctx, msfp.NewKey().Seed()); err != nil {
+		if _, err := st.KeepFederationSeed(ctx, wire.NewKey().Seed()); err != nil {
 			return nil, err
 		}
 	}
@@ -74,8 +74,8 @@ func LoadKeys(ctx context.Context, st *store.Store) (*Keys, error) {
 		}
 	}
 	if k.NextCommitment == nil {
-		next := msfp.NewKey()
-		if err := st.KeepFederationNext(ctx, next.Seed(), msfp.Commitment(next.Public())); err != nil {
+		next := wire.NewKey()
+		if err := st.KeepFederationNext(ctx, next.Seed(), wire.Commitment(next.Public())); err != nil {
 			return nil, err
 		}
 	}
@@ -87,20 +87,20 @@ func LoadKeys(ctx context.Context, st *store.Store) (*Keys, error) {
 
 // keysOf is what the store holds, in effect.
 func keysOf(k store.FederationKeys) (*Keys, error) {
-	current, err := msfp.KeyFromSeed(k.Current)
+	current, err := wire.KeyFromSeed(k.Current)
 	if err != nil {
 		return nil, err
 	}
 	keys := &Keys{current: current, next: k.NextCommitment, ids: k.IDs}
 	if k.Old != nil {
-		old, err := msfp.KeyFromSeed(k.Old)
+		old, err := wire.KeyFromSeed(k.Old)
 		if err != nil {
 			return nil, err
 		}
 		keys.old, keys.since, keys.oldRevoked = &old, k.RotatedAt, k.OldRevoked
 	}
 	if k.Revoked != nil {
-		revoked, err := msfp.KeyFromSeed(k.Revoked)
+		revoked, err := wire.KeyFromSeed(k.Revoked)
 		if err != nil {
 			return nil, err
 		}
@@ -130,7 +130,7 @@ func (k *Keys) reload(ctx context.Context, st *store.Store) error {
 }
 
 // Current is the key this server is known by, to peers that moved to it.
-func (k *Keys) Current() msfp.Key {
+func (k *Keys) Current() wire.Key {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 	return k.current
@@ -138,11 +138,11 @@ func (k *Keys) Current() msfp.Key {
 
 // Old is the key before the current one, while a change of key is under
 // way, and when the change began; false when none is.
-func (k *Keys) Old() (msfp.Key, time.Time, bool) {
+func (k *Keys) Old() (wire.Key, time.Time, bool) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 	if k.old == nil {
-		return msfp.Key{}, time.Time{}, false
+		return wire.Key{}, time.Time{}, false
 	}
 	return *k.old, k.since, true
 }
@@ -158,11 +158,11 @@ func (k *Keys) OldRevoked() bool {
 // Revoked is the key revoked with no next key safe, and when (MSFP core
 // section 12.7, case 2): kept for its 30 days only (Maintain deletes it
 // then); false when there's none.
-func (k *Keys) Revoked() (msfp.Key, time.Time, bool) {
+func (k *Keys) Revoked() (wire.Key, time.Time, bool) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 	if k.revoked == nil {
-		return msfp.Key{}, time.Time{}, false
+		return wire.Key{}, time.Time{}, false
 	}
 	return *k.revoked, k.revokedAt, true
 }
@@ -185,7 +185,7 @@ func (k *Keys) Opaque(what, peerID, id string) string {
 	k.mu.RUnlock()
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(what + "\n" + peerID + "\n" + id))
-	return msfp.Encode64(mac.Sum(nil)[:16])
+	return wire.Encode64(mac.Sum(nil)[:16])
 }
 
 // KeyOverlap is how long a change of key lasts at most, and how long a
@@ -212,17 +212,17 @@ var (
 )
 
 // NextKeyText is a next key's seed as the operator exports it.
-func NextKeyText(seed []byte) string { return nextKeyPrefix + msfp.Encode64(seed) }
+func NextKeyText(seed []byte) string { return nextKeyPrefix + wire.Encode64(seed) }
 
 // parseNextKey reads an exported next key: ErrNotNextKey if it isn't one.
-func parseNextKey(text string) (msfp.Key, error) {
+func parseNextKey(text string) (wire.Key, error) {
 	rest, ok := strings.CutPrefix(strings.TrimSpace(text), nextKeyPrefix)
 	if !ok {
-		return msfp.Key{}, ErrNotNextKey
+		return wire.Key{}, ErrNotNextKey
 	}
-	seed, ok := msfp.Decode64(rest, 32)
+	seed, ok := wire.Decode64(rest, 32)
 	if !ok {
-		return msfp.Key{}, ErrNotNextKey
+		return wire.Key{}, ErrNotNextKey
 	}
-	return msfp.KeyFromSeed(seed)
+	return wire.KeyFromSeed(seed)
 }

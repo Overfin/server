@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // moveTo is srv restarted with another site address, as its operator
@@ -70,7 +70,7 @@ func signedFor(t *testing.T, s, from *server, at string) string {
 	body := []byte(`{}`)
 	req := httptest.NewRequest("POST", at+playPath, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	msfp.SignRequest(req, body, from.s.Keys.Current(), from.s.now())
+	wire.SignRequest(req, body, from.s.Keys.Current(), from.s.now())
 	var got string
 	SignRefusals(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if c, ok := s.s.PeerRequest(w, r); ok {
@@ -291,7 +291,7 @@ func TestSuspendedPeerMoveNotConfirmed(t *testing.T) {
 		}
 	}
 	key := b.s.Keys.Current()
-	rev := msfp.SignRevocation(key, b.s.now())
+	rev := wire.SignRevocation(key, b.s.now())
 	if status, _ := signedCall(t, b, peer(t, b, aOnB.ID), revokePath, marshal(t, rev.Body()), key); status != 200 {
 		t.Fatalf("revoke: %d", status)
 	}

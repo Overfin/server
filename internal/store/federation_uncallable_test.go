@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // This server's setting: its address made once and kept, on or off; on,
@@ -14,9 +14,9 @@ import (
 func TestFederationUncallable(t *testing.T) {
 	s, ctx := openTest(t), context.Background()
 	made := 0
-	newAddress := func() string { made++; return msfp.NewUncallableAddress() }
+	newAddress := func() string { made++; return wire.NewUncallableAddress() }
 	on, first, err := s.FederationUncallable(ctx, newAddress)
-	if err != nil || on || msfp.CheckUncallable(first) != nil {
+	if err != nil || on || wire.CheckUncallable(first) != nil {
 		t.Fatalf("at first: %v %q %v", on, first, err)
 	}
 	if _, err := s.CreatePairingCode(ctx, bytes.Repeat([]byte{1}, 32), "", time.Now().Add(time.Hour)); err != nil {
@@ -47,7 +47,7 @@ func TestPeerInbound(t *testing.T) {
 		t.Fatalf("added: %+v, %v", p, err)
 	}
 	s.PutPeerTitles(ctx, p.ID, PeerReading(), []PeerTitle{{Key: "movie/tmdb/1", Kind: "movie", Library: "x"}})
-	s.SetPeerMove(ctx, p.ID, &msfp.Move{Address: "https://c.example.org"})
+	s.SetPeerMove(ctx, p.ID, &wire.Move{Address: "https://c.example.org"})
 	if err := s.SetPeerInbound(ctx, p.ID, InboundNo); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestPeerInbound(t *testing.T) {
 	if n, _ := s.PeerTitleCounts(ctx); n[p.ID] != 0 {
 		t.Errorf("its titles kept: %v", n)
 	}
-	invalid := msfp.NewUncallableAddress()
+	invalid := wire.NewUncallableAddress()
 	s.SetPeerAddress(ctx, p.ID, invalid)
 	s.SetPeerCallsFailed(ctx, p.ID, true)
 	s.SetPeerInbound(ctx, p.ID, InboundConfirming)

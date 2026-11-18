@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/overfin/server/internal/federation"
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/textclean"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // maxLabel is how long our name for a taken library's entry may be.
@@ -101,8 +101,8 @@ type refusedJSON struct {
 
 func peerOf(p *store.Peer) peerJSON {
 	j := peerJSON{ID: p.ID, Name: p.Name, Address: p.Address, State: p.State,
-		Fingerprint: msfp.Fingerprint(p.PublicKey), CreatedAt: p.Created.Format(time.RFC3339),
-		Unusable: !msfp.ValidKey(p.PublicKey), OtherVersion: !federation.SpeaksCore(p)}
+		Fingerprint: wire.Fingerprint(p.PublicKey), CreatedAt: p.Created.Format(time.RFC3339),
+		Unusable: !wire.ValidKey(p.PublicKey), OtherVersion: !federation.SpeaksCore(p)}
 	if p.Paired != nil {
 		j.PairedAt = p.Paired.Format(time.RFC3339)
 	}
@@ -114,13 +114,13 @@ func peerOf(p *store.Peer) peerJSON {
 		j.Commitment = ""
 	}
 	if p.Pending != nil {
-		j.Pending = &pendingJSON{Fingerprint: msfp.Fingerprint(p.Pending.New), Date: time.Unix(p.Pending.Date, 0).UTC().Format(time.RFC3339)}
+		j.Pending = &pendingJSON{Fingerprint: wire.Fingerprint(p.Pending.New), Date: time.Unix(p.Pending.Date, 0).UTC().Format(time.RFC3339)}
 	}
 	if p.Suspended != nil {
 		j.SuspendedAt = p.Suspended.Format(time.RFC3339)
 	}
 	if p.RefusedKey != nil && p.RefusedAt != nil {
-		j.Refused = &refusedJSON{Fingerprint: msfp.Fingerprint(p.RefusedKey), At: p.RefusedAt.Format(time.RFC3339)}
+		j.Refused = &refusedJSON{Fingerprint: wire.Fingerprint(p.RefusedKey), At: p.RefusedAt.Format(time.RFC3339)}
 	}
 	if !p.Callable() {
 		j.Inbound = p.Inbound
@@ -250,7 +250,7 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 	out := map[string]any{"available": true, "address": s.Address, "uncallable": s.Uncallable, "canSet": p.Uncallable != nil,
 		// The test setting federation.test_plain_http, on: said so.
 		"testPlainHTTP": strings.HasPrefix(s.Address, "http://"),
-		"fingerprint":   msfp.Fingerprint(s.Keys.Current().Public()), "codes": outCodes, "peers": outPeers,
+		"fingerprint":   wire.Fingerprint(s.Keys.Current().Public()), "codes": outCodes, "peers": outPeers,
 		"nextKey": map[string]any{"fingerprint": nextFingerprint, "onServer": nextOnServer}}
 	// A change of this server's key under way: since when, until when the
 	// old key is kept.
@@ -263,7 +263,7 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 	// whether the new address is still waited for, not announced yet.
 	if former, since, ok := s.Moving(); ok {
 		out["move"] = map[string]any{"former": former, "since": since.Format(time.RFC3339),
-			"until": since.Add(msfp.AddressOverlap).Format(time.RFC3339), "moved": others - notMoved, "of": others,
+			"until": since.Add(wire.AddressOverlap).Format(time.RFC3339), "moved": others - notMoved, "of": others,
 			"waiting": s.Waiting()}
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -349,16 +349,16 @@ func (p *Panel) previewPairingCode(w http.ResponseWriter, r *http.Request, _ *se
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request"})
 		return
 	}
-	c, err := msfp.ParseCode(req.Code)
+	c, err := wire.ParseCode(req.Code)
 	if err != nil {
 		p.pairingProblem(w, err)
 		return
 	}
-	if msfp.SameKey(c.Key, fed.Keys.Current().Public()) {
+	if wire.SameKey(c.Key, fed.Keys.Current().Public()) {
 		p.pairingProblem(w, federation.ErrOwnCode)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"address": c.Address, "fingerprint": msfp.Fingerprint(c.Key),
+	writeJSON(w, http.StatusOK, map[string]any{"address": c.Address, "fingerprint": wire.Fingerprint(c.Key),
 		"expiresAt": c.Expires.UTC().Format(time.RFC3339), "expired": !c.Expires.After(time.Now())})
 }
 
@@ -461,9 +461,9 @@ func (p *Panel) endPeer(w http.ResponseWriter, r *http.Request, s *session) {
 func (p *Panel) pairingProblem(w http.ResponseWriter, err error) {
 	detail := ""
 	switch {
-	case errors.Is(err, msfp.ErrCode):
+	case errors.Is(err, wire.ErrCode):
 		detail = "That isn't a pairing code. Paste the whole code, starting with msfp-pair-1."
-	case errors.Is(err, msfp.ErrPlainHTTP):
+	case errors.Is(err, wire.ErrPlainHTTP):
 		detail = "That code is for a server at a plain http:// address. Servers pair over HTTPS only: ask its operator to give it an https address, then a new code."
 	case errors.Is(err, federation.ErrOwnCode):
 		detail = "That's this server's own code: send it to the other server's operator instead."

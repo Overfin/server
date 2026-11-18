@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/outbound"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // Certificates between servers (SECURITY.md rule 99). A server is its key,
@@ -79,7 +79,7 @@ func (s *Service) conns(p *store.Peer, anyCert bool) *peerConns {
 	}
 	// Checked by VerifyConnection instead, which Go runs either way.
 	cfg.InsecureSkipVerify = true
-	cfg.VerifyConnection = msfp.VerifyPeer(cfg.RootCAs, cfg.Time, host, p.Certificates, anyCert)
+	cfg.VerifyConnection = wire.VerifyPeer(cfg.RootCAs, cfg.Time, host, p.Certificates, anyCert)
 	tr := t.Clone()
 	tr.TLSClientConfig = cfg
 	c := &peerConns{sig: sig, tls: cfg,
@@ -107,7 +107,7 @@ func (s *Service) TLSConfig(p *store.Peer) *tls.Config {
 // trusted or named. It gives p as it is then, and whether its pins
 // changed, so that trying again may work.
 func (s *Service) Repin(ctx context.Context, p *store.Peer, err error) (*store.Peer, bool) {
-	if !errors.Is(err, msfp.ErrUntrustedCertificate) || p.ID == "" {
+	if !errors.Is(err, wire.ErrUntrustedCertificate) || p.ID == "" {
 		return p, false
 	}
 	q, cerr := s.Check(ctx, p)
@@ -120,7 +120,7 @@ func (s *Service) Repin(ctx context.Context, p *store.Peer, err error) (*store.P
 // keepCertificates keeps the pins p named in a signed hello, replacing
 // those it named before: none, if it named none.
 func (s *Service) keepCertificates(ctx context.Context, p *store.Peer, named []string) error {
-	pins := msfp.CleanPins(named)
+	pins := wire.CleanPins(named)
 	if slices.Equal(pins, p.Certificates) {
 		return nil
 	}
@@ -244,5 +244,5 @@ func probe(ctx context.Context, u *url.URL) (string, error) {
 	if len(certs) == 0 {
 		return "", errors.New("no certificate")
 	}
-	return msfp.Pin(certs[0]), nil
+	return wire.Pin(certs[0]), nil
 }

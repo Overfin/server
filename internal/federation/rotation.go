@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // Changes of key (MSFP core section 12), this server's and its peers'.
@@ -58,16 +58,16 @@ func ptr[T any](v T) *T { return &v }
 // heardKey says whether key, which found p, is still heard: its current
 // key, or the one it rotated away from, for PreviousHeard.
 func heardKey(p *store.Peer, key ed25519.PublicKey, now time.Time) bool {
-	if msfp.SameKey(key, p.PublicKey) {
+	if wire.SameKey(key, p.PublicKey) {
 		return true
 	}
-	return msfp.SameKey(key, p.PreviousKey) && now.Before(p.PreviousUntil)
+	return wire.SameKey(key, p.PreviousKey) && now.Before(p.PreviousUntil)
 }
 
 // signer is the key this server signs with toward p: the old one while p
 // hasn't moved from it (MSFP core section 12.4), the current one
 // otherwise.
-func (s *Service) signer(p *store.Peer) msfp.Key {
+func (s *Service) signer(p *store.Peer) wire.Key {
 	if p.OurKey == store.OurKeyOld {
 		if old, _, ok := s.Keys.Old(); ok {
 			return old
@@ -91,7 +91,7 @@ func (s *Service) rotate(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	rot, err := msfp.ReadRotate(body, v.Key, s.now())
+	rot, err := wire.ReadRotate(body, v.Key, s.now())
 	if err != nil {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
@@ -103,7 +103,7 @@ func (s *Service) rotate(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		s.Logger.Error("federation: a peer's change of key couldn't be kept", "name", p.Name, "error", err)
 		problem.Send(w, problem.Internal, "")
-	case state == msfp.StatePending:
+	case state == wire.StatePending:
 		s.answerState(w, v.Nonce, http.StatusAccepted, state)
 	default:
 		s.answerState(w, v.Nonce, http.StatusOK, state)
@@ -112,7 +112,7 @@ func (s *Service) rotate(w http.ResponseWriter, r *http.Request) {
 
 // answerState answers {"state": state}, signed.
 func (s *Service) answerState(w http.ResponseWriter, nonce string, status int, state string) {
-	body, err := msfp.Marshal(map[string]string{"state": state})
+	body, err := wire.Marshal(map[string]string{"state": state})
 	if err != nil {
 		problem.Send(w, problem.Internal, "")
 		return
@@ -120,15 +120,15 @@ func (s *Service) answerState(w http.ResponseWriter, nonce string, status int, s
 	s.answerWith(w, nonce, status, body)
 }
 
-// receiveRotation handles a rotation from p, checked (msfp.ReadRotate), as
+// receiveRotation handles a rotation from p, checked (wire.ReadRotate), as
 // MSFP core section 12.3 says: rotated (its new key current now), pending
 // (for our operator to confirm), or errRefused.
-func (s *Service) receiveRotation(ctx context.Context, p *store.Peer, rot msfp.Rotation) (string, error) {
-	if !msfp.SameKey(rot.Old, p.PublicKey) {
+func (s *Service) receiveRotation(ctx context.Context, p *store.Peer, rot wire.Rotation) (string, error) {
+	if !wire.SameKey(rot.Old, p.PublicKey) {
 		// Signed with the key it moved from, still heard: a retry of the
 		// rotation that took effect changes nothing; any other is refused.
-		if msfp.SameKey(rot.New, p.PublicKey) {
-			return msfp.StateRotated, nil
+		if wire.SameKey(rot.New, p.PublicKey) {
+			return wire.StateRotated, nil
 		}
 		return "", errRefused
 	}
@@ -141,7 +141,7 @@ func (s *Service) receiveRotation(ctx context.Context, p *store.Peer, rot msfp.R
 		return "", errRefused
 	}
 	now := s.now()
-	match := p.NextCommitment != nil && bytes.Equal(msfp.Commitment(rot.New), p.NextCommitment)
+	match := p.NextCommitment != nil && bytes.Equal(wire.Commitment(rot.New), p.NextCommitment)
 	switch {
 	case match:
 		// The key it committed to: at once, a suspension lifted.
@@ -150,13 +150,13 @@ func (s *Service) receiveRotation(ctx context.Context, p *store.Peer, rot msfp.R
 		}
 		if p.Suspended != nil {
 			s.Logger.Warn("federation: a peer whose key was revoked moved to the key it had committed to: no longer suspended",
-				"name", p.Name, "fingerprint", msfp.Fingerprint(rot.New))
+				"name", p.Name, "fingerprint", wire.Fingerprint(rot.New))
 			s.changed(p.ID)
 		} else {
 			s.Logger.Info("federation: a peer changed its key, to the one it had committed to", "name", p.Name,
-				"from", msfp.Fingerprint(rot.Old), "to", msfp.Fingerprint(rot.New))
+				"from", wire.Fingerprint(rot.Old), "to", wire.Fingerprint(rot.New))
 		}
-		return msfp.StateRotated, nil
+		return wire.StateRotated, nil
 	case p.NextCommitment != nil || p.Suspended != nil:
 		// Someone holding its key tried to move the pairing to another
 		// key: refused, and shown to our operator.
@@ -164,20 +164,20 @@ func (s *Service) receiveRotation(ctx context.Context, p *store.Peer, rot msfp.R
 			return "", err
 		}
 		s.Logger.Warn("federation: a peer's change of key refused: the new key isn't the one it committed to",
-			"name", p.Name, "fingerprint", msfp.Fingerprint(rot.New))
+			"name", p.Name, "fingerprint", wire.Fingerprint(rot.New))
 		return "", errRefused
 	}
 	// No commitment: our operator confirms the new key's fingerprint
 	// with the other operator. Repeated, the newest statement is kept;
 	// another key replaces it.
-	if p.Pending == nil || !msfp.SameKey(p.Pending.New, rot.New) {
+	if p.Pending == nil || !wire.SameKey(p.Pending.New, rot.New) {
 		s.Logger.Info("federation: a peer changed its key, waiting for the operator to confirm it", "name", p.Name,
-			"fingerprint", msfp.Fingerprint(rot.New))
+			"fingerprint", wire.Fingerprint(rot.New))
 	}
 	if err := s.Store.SetPeerPending(ctx, p.ID, &rot); err != nil {
 		return "", err
 	}
-	return msfp.StatePending, nil
+	return wire.StatePending, nil
 }
 
 // keyTaken says whether p may not move to key (MSFP core section 12.3,
@@ -209,18 +209,18 @@ func (s *Service) revoke(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	if _, err := msfp.ReadRevoke(body, v.Key, s.now()); err != nil {
+	if _, err := wire.ReadRevoke(body, v.Key, s.now()); err != nil {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
-	if !msfp.SameKey(v.Key, p.PublicKey) {
+	if !wire.SameKey(v.Key, p.PublicKey) {
 		// The key it moved from, still heard for a while: no longer, at
 		// once. Its current key isn't concerned.
 		if err := s.Store.DropPreviousKey(ctx, p.ID); err != nil {
 			problem.Send(w, problem.Internal, "")
 			return
 		}
-		s.answerState(w, v.Nonce, http.StatusOK, msfp.StateSuspended)
+		s.answerState(w, v.Nonce, http.StatusOK, wire.StateSuspended)
 		return
 	}
 	suspended, err := s.Store.SuspendPeer(ctx, p.ID, s.now())
@@ -230,10 +230,10 @@ func (s *Service) revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	if suspended {
 		s.Logger.Warn("federation: a peer revoked its key: suspended until it moves to the key it committed to",
-			"name", p.Name, "fingerprint", msfp.Fingerprint(p.PublicKey))
+			"name", p.Name, "fingerprint", wire.Fingerprint(p.PublicKey))
 		s.changed(p.ID)
 	}
-	s.answerState(w, v.Nonce, http.StatusOK, msfp.StateSuspended)
+	s.answerState(w, v.Nonce, http.StatusOK, wire.StateSuspended)
 }
 
 // ConfirmRotation is our operator confirming a peer's new key, having
@@ -247,7 +247,7 @@ func (s *Service) ConfirmRotation(ctx context.Context, id string) (*store.Peer, 
 	if p.Suspended != nil {
 		return nil, ErrSuspended
 	}
-	if p.Pending == nil || !msfp.SameKey(p.Pending.Old, p.PublicKey) {
+	if p.Pending == nil || !wire.SameKey(p.Pending.Old, p.PublicKey) {
 		return nil, ErrNoPending
 	}
 	rot := *p.Pending
@@ -261,7 +261,7 @@ func (s *Service) ConfirmRotation(ctx context.Context, id string) (*store.Peer, 
 	if err := s.Store.RotatePeer(ctx, p.ID, rot, now.Add(PreviousHeard), now); err != nil {
 		return nil, err
 	}
-	s.Logger.Info("federation: a peer's new key confirmed by the operator", "name", p.Name, "fingerprint", msfp.Fingerprint(rot.New))
+	s.Logger.Info("federation: a peer's new key confirmed by the operator", "name", p.Name, "fingerprint", wire.Fingerprint(rot.New))
 	q, err := s.Store.PeerByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -311,7 +311,7 @@ const (
 // the store gives the right to (ClaimRotate).
 func (s *Service) rotateAtContact(ctx context.Context, p *store.Peer) *store.Peer {
 	spacing := rotateAtSpacing
-	if p.RotationAnswer == msfp.StatePending {
+	if p.RotationAnswer == wire.StatePending {
 		spacing = rotatePendingAtSpacing
 	}
 	now := s.now()
@@ -354,7 +354,7 @@ func (s *Service) rotateNoted(ctx context.Context, p *store.Peer, now time.Time)
 		return
 	}
 	current := s.Keys.Current()
-	rot := msfp.SignRotation(old, current, s.Keys.NextCommitment(), now)
+	rot := wire.SignRotation(old, current, s.Keys.NextCommitment(), now)
 	var answer struct {
 		State string `json:"state"`
 	}
@@ -366,10 +366,10 @@ func (s *Service) rotateNoted(ctx context.Context, p *store.Peer, now time.Time)
 	switch {
 	case err != nil:
 		s.Logger.Info("federation: a peer couldn't be told of this server's new key", "name", p.Name, "error", err)
-	case r.Status == http.StatusOK && answer.State == msfp.StateRotated:
+	case r.Status == http.StatusOK && answer.State == wire.StateRotated:
 		s.peerMoved(ctx, p, current.Public())
 	case r.Status == http.StatusAccepted:
-		s.Store.SetOurKey(ctx, p.ID, store.OurKeyOld, msfp.StatePending)
+		s.Store.SetOurKey(ctx, p.ID, store.OurKeyOld, wire.StatePending)
 		s.Logger.Info("federation: a peer's operator has to confirm this server's new key", "name", p.Name)
 	case r.Status == http.StatusConflict:
 		s.Store.SetOurKey(ctx, p.ID, store.OurKeyOld, "refused")
@@ -447,22 +447,22 @@ func (s *Service) finishRotation(ctx context.Context, old ed25519.PublicKey) err
 // or its seed on the server when text is empty. ErrNotNextKey for a text
 // that isn't the committed key, ErrNoNextKey when its seed isn't here and
 // none is given.
-func (s *Service) nextKey(ctx context.Context, text string) (msfp.Key, error) {
+func (s *Service) nextKey(ctx context.Context, text string) (wire.Key, error) {
 	if strings.TrimSpace(text) != "" {
 		k, err := parseNextKey(text)
-		if err != nil || !bytes.Equal(msfp.Commitment(k.Public()), s.Keys.NextCommitment()) {
-			return msfp.Key{}, ErrNotNextKey
+		if err != nil || !bytes.Equal(wire.Commitment(k.Public()), s.Keys.NextCommitment()) {
+			return wire.Key{}, ErrNotNextKey
 		}
 		return k, nil
 	}
 	stored, err := s.Store.FederationKeys(ctx)
 	if err != nil {
-		return msfp.Key{}, err
+		return wire.Key{}, err
 	}
 	if stored.Next == nil {
-		return msfp.Key{}, ErrNoNextKey
+		return wire.Key{}, ErrNoNextKey
 	}
-	return msfp.KeyFromSeed(stored.Next)
+	return wire.KeyFromSeed(stored.Next)
 }
 
 // rotations makes one change of key at a time.
@@ -484,21 +484,21 @@ func (s *Service) Rotate(ctx context.Context, nextKey string) error {
 
 // rotateTo moves this server to next; revoked says its current key was
 // just revoked.
-func (s *Service) rotateTo(ctx context.Context, next msfp.Key, revoked bool) error {
+func (s *Service) rotateTo(ctx context.Context, next wire.Key, revoked bool) error {
 	if old, _, ok := s.Keys.Old(); ok {
 		if err := s.finishRotation(ctx, old.Public()); err != nil {
 			return err
 		}
 	}
 	old := s.Keys.Current()
-	after := msfp.NewKey()
-	if err := s.Store.RotateFederationKey(ctx, next.Seed(), after.Seed(), msfp.Commitment(after.Public()), s.now(), revoked); err != nil {
+	after := wire.NewKey()
+	if err := s.Store.RotateFederationKey(ctx, next.Seed(), after.Seed(), wire.Commitment(after.Public()), s.now(), revoked); err != nil {
 		return err
 	}
 	if err := s.Keys.reload(ctx, s.Store); err != nil {
 		return err
 	}
-	s.Logger.Info("federation: this server's key changed", "from", msfp.Fingerprint(old.Public()), "to", msfp.Fingerprint(next.Public()))
+	s.Logger.Info("federation: this server's key changed", "from", wire.Fingerprint(old.Public()), "to", wire.Fingerprint(next.Public()))
 	// A peer that can't be called learns it in our answers to its next
 	// hello (MSFP core section 12.4).
 	s.each(ctx, func(p *store.Peer) bool { return p.OurKey == store.OurKeyOld && p.Callable() }, s.sendRotate)
@@ -536,7 +536,7 @@ func (s *Service) each(ctx context.Context, keep func(*store.Peer) bool, do func
 func (s *Service) Revoke(ctx context.Context, nextKey string, withoutNext bool) (rotated bool, err error) {
 	rotations.Lock()
 	defer rotations.Unlock()
-	var next msfp.Key
+	var next wire.Key
 	haveNext := false
 	if !withoutNext {
 		next, err = s.nextKey(ctx, nextKey)
@@ -553,8 +553,8 @@ func (s *Service) Revoke(ctx context.Context, nextKey string, withoutNext bool) 
 		}
 	}
 	key := s.Keys.Current()
-	statement := msfp.SignRevocation(key, s.now())
-	s.Logger.Warn("federation: this server's key revoked", "fingerprint", msfp.Fingerprint(key.Public()))
+	statement := wire.SignRevocation(key, s.now())
+	s.Logger.Warn("federation: this server's key revoked", "fingerprint", wire.Fingerprint(key.Public()))
 	// A peer that can't be called learns it in our answers to its next
 	// hello, signed with the key revoked, for 30 days (MSFP core section
 	// 12.6): only when this server moves to its next key, which keeps the
@@ -576,8 +576,8 @@ func (s *Service) Revoke(ctx context.Context, nextKey string, withoutNext bool) 
 	// it from a key they suspend. For 30 days, a hello from one of them
 	// is answered with the revocation, signed with the key revoked
 	// (MSFP core section 12.7, case 2: revocationAnswer).
-	fresh, after := msfp.NewKey(), msfp.NewKey()
-	if err := s.Store.ReplaceFederationKey(ctx, fresh.Seed(), after.Seed(), msfp.Commitment(after.Public()), s.now()); err != nil {
+	fresh, after := wire.NewKey(), wire.NewKey()
+	if err := s.Store.ReplaceFederationKey(ctx, fresh.Seed(), after.Seed(), wire.Commitment(after.Public()), s.now()); err != nil {
 		return false, err
 	}
 	if err := s.Keys.reload(ctx, s.Store); err != nil {
@@ -587,7 +587,7 @@ func (s *Service) Revoke(ctx context.Context, nextKey string, withoutNext bool) 
 		s.changed(p.ID)
 	}
 	s.Logger.Warn("federation: this server has a new key, without its next one: every pairing ended, to be made again",
-		"fingerprint", msfp.Fingerprint(fresh.Public()), "servers", len(peers))
+		"fingerprint", wire.Fingerprint(fresh.Public()), "servers", len(peers))
 	return false, nil
 }
 
@@ -598,7 +598,7 @@ func (s *Service) NextKey(ctx context.Context) (fingerprint string, onServer boo
 	if err != nil {
 		return "", false, err
 	}
-	return msfp.CommitmentFingerprint(s.Keys.NextCommitment()), stored.Next != nil, nil
+	return wire.CommitmentFingerprint(s.Keys.NextCommitment()), stored.Next != nil, nil
 }
 
 // ExportNextKey is the next key's seed as text, for our operator to keep
@@ -612,7 +612,7 @@ func (s *Service) ExportNextKey(ctx context.Context) (text, fingerprint string, 
 	if stored.Next == nil {
 		return "", "", ErrNoNextKey
 	}
-	return NextKeyText(stored.Next), msfp.CommitmentFingerprint(s.Keys.NextCommitment()), nil
+	return NextKeyText(stored.Next), wire.CommitmentFingerprint(s.Keys.NextCommitment()), nil
 }
 
 // DeleteNextKey deletes the next key's seed from the server, once our

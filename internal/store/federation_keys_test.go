@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // keyedTest is a store with a federation key, k.
-func keyedTest(t *testing.T) (*Store, msfp.Key) {
+func keyedTest(t *testing.T) (*Store, wire.Key) {
 	t.Helper()
-	s, k := openTest(t), msfp.NewKey()
+	s, k := openTest(t), wire.NewKey()
 	if _, err := s.KeepFederationSeed(context.Background(), k.Seed()); err != nil {
 		t.Fatal(err)
 	}
@@ -27,19 +27,19 @@ func keyedTest(t *testing.T) (*Store, msfp.Key) {
 func TestFederationRotationEndsItsOwn(t *testing.T) {
 	ctx := context.Background()
 	s, first := keyedTest(t)
-	p, err := s.AddPeer(ctx, msfp.NewKey().Public(), "https://b.example", "B", nil)
+	p, err := s.AddPeer(ctx, wire.NewKey().Public(), "https://b.example", "B", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	q, err := s.AddPeer(ctx, msfp.NewKey().Public(), "https://c.example", "C", nil)
+	q, err := s.AddPeer(ctx, wire.NewKey().Public(), "https://c.example", "C", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, after := msfp.NewKey(), msfp.NewKey()
-	if err := s.RotateFederationKey(ctx, second.Seed(), after.Seed(), msfp.Commitment(after.Public()), time.Now(), false); err != nil {
+	second, after := wire.NewKey(), wire.NewKey()
+	if err := s.RotateFederationKey(ctx, second.Seed(), after.Seed(), wire.Commitment(after.Public()), time.Now(), false); err != nil {
 		t.Fatal(err)
 	}
-	other := msfp.NewKey().Public()
+	other := wire.NewKey().Public()
 	if ended, _, err := s.FinishFederationRotation(ctx, other); err != nil || ended {
 		t.Fatalf("ended with another old key: %v, %v", ended, err)
 	}
@@ -74,11 +74,11 @@ func TestFederationRotationEndsItsOwn(t *testing.T) {
 func TestReplaceFederationKeyAllOrNothing(t *testing.T) {
 	ctx := context.Background()
 	s, k := keyedTest(t)
-	peerKey := msfp.NewKey().Public()
+	peerKey := wire.NewKey().Public()
 	if _, err := s.AddPeer(ctx, peerKey, "https://b.example", "B", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AddPeer(ctx, msfp.NewKey().Public(), "https://c.example", "C", nil); err != nil {
+	if _, err := s.AddPeer(ctx, wire.NewKey().Public(), "https://c.example", "C", nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, q := range []string{
@@ -91,8 +91,8 @@ func TestReplaceFederationKeyAllOrNothing(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	fresh, after := msfp.NewKey(), msfp.NewKey()
-	if err := s.ReplaceFederationKey(ctx, fresh.Seed(), after.Seed(), msfp.Commitment(after.Public()), time.Unix(1000, 0)); err == nil {
+	fresh, after := wire.NewKey(), wire.NewKey()
+	if err := s.ReplaceFederationKey(ctx, fresh.Seed(), after.Seed(), wire.Commitment(after.Public()), time.Unix(1000, 0)); err == nil {
 		t.Fatal("replaced, its write refused")
 	}
 	if peers, err := s.Peers(ctx); err != nil || len(peers) != 2 {
@@ -110,7 +110,7 @@ func TestReplaceFederationKeyAllOrNothing(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.ReplaceFederationKey(ctx, fresh.Seed(), after.Seed(), msfp.Commitment(after.Public()), time.Unix(1000, 0)); err != nil {
+	if err := s.ReplaceFederationKey(ctx, fresh.Seed(), after.Seed(), wire.Commitment(after.Public()), time.Unix(1000, 0)); err != nil {
 		t.Fatal(err)
 	}
 	if peers, err := s.Peers(ctx); err != nil || len(peers) != 0 {
@@ -151,12 +151,12 @@ func TestReplaceFederationKeyAllOrNothing(t *testing.T) {
 func TestClaimRotate(t *testing.T) {
 	ctx := context.Background()
 	s, _ := keyedTest(t)
-	p, err := s.AddPeer(ctx, msfp.NewKey().Public(), "https://b.example", "B", nil)
+	p, err := s.AddPeer(ctx, wire.NewKey().Public(), "https://b.example", "B", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	next, after := msfp.NewKey(), msfp.NewKey()
-	if err := s.RotateFederationKey(ctx, next.Seed(), after.Seed(), msfp.Commitment(after.Public()), time.Now(), false); err != nil {
+	next, after := wire.NewKey(), wire.NewKey()
+	if err := s.RotateFederationKey(ctx, next.Seed(), after.Seed(), wire.Commitment(after.Public()), time.Now(), false); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Unix(1_800_000_000, 0)

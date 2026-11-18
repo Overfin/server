@@ -11,9 +11,9 @@ import (
 	"testing"
 
 	"github.com/overfin/server/internal/federation"
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // fedPanel is a signed-in panel whose server has federation, on a test
@@ -209,7 +209,7 @@ func TestFederationPanelUnusableKey(t *testing.T) {
 	if _, err := s.Store.AddPeer(ctx, identity, "https://b.example.org", "B", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Store.AddPeer(ctx, msfp.NewKey().Public(), "https://c.example.org", "C", nil); err != nil {
+	if _, err := s.Store.AddPeer(ctx, wire.NewKey().Public(), "https://c.example.org", "C", nil); err != nil {
 		t.Fatal(err)
 	}
 	var st struct {
@@ -234,7 +234,7 @@ func TestFederationPanelUnusableKey(t *testing.T) {
 func TestFederationPanelWantsGone(t *testing.T) {
 	a, s := fedPanel(t, "A")
 	ctx := context.Background()
-	p, err := s.Store.AddPeer(ctx, msfp.NewKey().Public(), "https://b.example.org", "B", nil)
+	p, err := s.Store.AddPeer(ctx, wire.NewKey().Public(), "https://b.example.org", "B", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestFederationPanelWantsGone(t *testing.T) {
 type fakeUncallable struct{ db *store.Store }
 
 func (f fakeUncallable) FederationUncallable(ctx context.Context) (bool, error) {
-	on, _, err := f.db.FederationUncallable(ctx, msfp.NewUncallableAddress)
+	on, _, err := f.db.FederationUncallable(ctx, wire.NewUncallableAddress)
 	return on, err
 }
 
@@ -293,7 +293,7 @@ func TestFederationPanelUncallable(t *testing.T) {
 	if rec := a.do("POST", "/admin/api/federation/codes", `{"note":""}`, nil); rec.Code != 409 || !strings.Contains(rec.Body.String(), "no-codes") {
 		t.Fatalf("a code from a server that can't be called: %d %s", rec.Code, rec.Body)
 	}
-	pe, err := s.Store.AddPeer(context.Background(), msfp.NewKey().Public(), msfp.NewUncallableAddress(), "P", nil)
+	pe, err := s.Store.AddPeer(context.Background(), wire.NewKey().Public(), wire.NewUncallableAddress(), "P", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

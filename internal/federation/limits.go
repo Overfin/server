@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/overfin/server/internal/identity"
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/slots"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // Limits on the federation calls other servers make here, and what this
@@ -45,7 +45,7 @@ const (
 	forgetBucket = 10 * time.Minute
 
 	// What this server's own calls do after no answer: wait from
-	// backoffFirst, doubling each time, up to msfp.MaxRetryAfter (MSFP's "an
+	// backoffFirst, doubling each time, up to wire.MaxRetryAfter (MSFP's "an
 	// hour at most"), give or take a quarter.
 	backoffFirst = 2 * time.Second
 )
@@ -90,7 +90,7 @@ func (b *bucket) take(now time.Time, rate, burst float64) (ok bool, retryAfter i
 		b.tokens--
 		return true, 0
 	}
-	return false, max(1, min(msfp.MaxRetryAfter, int(math.Ceil((1-b.tokens)/rate))))
+	return false, max(1, min(wire.MaxRetryAfter, int(math.Ceil((1-b.tokens)/rate))))
 }
 
 func (l *Limits) now() time.Time {
@@ -353,12 +353,12 @@ func (l *Limits) unreached(key string) bool {
 }
 
 // backoff is how long background calls hold off after n calls in a row
-// went unanswered: backoffFirst, doubling, at most msfp.MaxRetryAfter seconds,
+// went unanswered: backoffFirst, doubling, at most wire.MaxRetryAfter seconds,
 // give or take a quarter so that servers don't all try again together.
 func backoff(n int) time.Duration {
 	d := backoffFirst << min(n-1, 20)
-	d = min(d, msfp.MaxRetryAfter*time.Second)
-	return min(time.Duration(float64(d)*(0.75+rand.Float64()/2)), msfp.MaxRetryAfter*time.Second)
+	d = min(d, wire.MaxRetryAfter*time.Second)
+	return min(time.Duration(float64(d)*(0.75+rand.Float64()/2)), wire.MaxRetryAfter*time.Second)
 }
 
 // waitTurn waits until a call to p may go again, when the peer asked for

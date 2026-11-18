@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // Changing an address (MSFP core section 13): this server's, which moves
@@ -108,7 +108,7 @@ func (s *Store) SetPeerOurAddress(ctx context.Context, id, address string) error
 // SetPeerMove keeps the address a peer's signed hello named, to be
 // confirmed (m nil clears it). A new address starts its own record of
 // tries.
-func (s *Store) SetPeerMove(ctx context.Context, id string, m *msfp.Move) error {
+func (s *Store) SetPeerMove(ctx context.Context, id string, m *wire.Move) error {
 	if m == nil {
 		_, err := s.db.ExecContext(ctx, `UPDATE peers SET new_address = '', new_address_tried = NULL,
 			new_address_failing = NULL WHERE id = ?`, id)

@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/outbound"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // Servers that can't be called (MSFP core section 7.5), this one and its
@@ -48,7 +48,7 @@ var (
 // certificate, or on our own refusal of its address, rather than to
 // connect.
 func certificateRefused(err error) bool {
-	return errors.Is(err, msfp.ErrUntrustedCertificate) || errors.Is(err, outbound.ErrRefused)
+	return errors.Is(err, wire.ErrUntrustedCertificate) || errors.Is(err, outbound.ErrRefused)
 }
 
 // knownKey is what this server's hello requests to p say, when it can't be
@@ -56,12 +56,12 @@ func certificateRefused(err error) bool {
 // and "pending" or "refused" while p's change of key waits for our
 // operator, or was refused.
 func (s *Service) knownKey(p *store.Peer) (key string, rotation any) {
-	key = msfp.Encode64(p.PublicKey)
+	key = wire.Encode64(p.PublicKey)
 	switch {
-	case p.Pending != nil && msfp.SameKey(p.Pending.Old, p.PublicKey):
-		return key, msfp.StatePending
+	case p.Pending != nil && wire.SameKey(p.Pending.Old, p.PublicKey):
+		return key, wire.StatePending
 	case p.RefusedKey != nil:
-		return key, msfp.RotationRefused
+		return key, wire.RotationRefused
 	}
 	return key, nil
 }
@@ -71,16 +71,16 @@ func (s *Service) knownKey(p *store.Peer) (key string, rotation any) {
 // our key changes, the new one means p moved, and this answer is signed
 // with it already; the old one, that it hasn't, and why when it says. A key
 // that is neither of ours is ignored.
-func (s *Service) readKnownKey(ctx context.Context, w http.ResponseWriter, nonce string, p *store.Peer, h msfp.Hello) {
+func (s *Service) readKnownKey(ctx context.Context, w http.ResponseWriter, nonce string, p *store.Peer, h wire.Hello) {
 	if p.OurKey != store.OurKeyOld || h.KnownKey == nil {
 		return
 	}
 	old, _, ok := s.Keys.Old()
 	switch {
-	case msfp.SameKey(h.KnownKey, s.Keys.Current().Public()):
+	case wire.SameKey(h.KnownKey, s.Keys.Current().Public()):
 		s.peerMoved(ctx, p, h.KnownKey)
 		s.signsFor(w, nonce, s.Keys.Current())
-	case ok && msfp.SameKey(h.KnownKey, old.Public()) && h.RotationState != "" && h.RotationState != p.RotationAnswer:
+	case ok && wire.SameKey(h.KnownKey, old.Public()) && h.RotationState != "" && h.RotationState != p.RotationAnswer:
 		if err := s.Store.SetOurKey(ctx, p.ID, store.OurKeyOld, h.RotationState); err != nil {
 			s.Logger.Error("federation: a peer's answer to this server's new key couldn't be kept", "error", err)
 		}
@@ -98,9 +98,9 @@ func (s *Service) pullable(p *store.Peer, h *helloMessage) {
 		return
 	}
 	now := s.now()
-	h.Rotation = msfp.SignRotation(old, s.Keys.Current(), s.Keys.NextCommitment(), now).Body()
+	h.Rotation = wire.SignRotation(old, s.Keys.Current(), s.Keys.NextCommitment(), now).Body()
 	if s.Keys.OldRevoked() {
-		body := msfp.SignRevocation(old, now).Body()
+		body := wire.SignRevocation(old, now).Body()
 		h.Revocation = &body
 	}
 }
@@ -117,7 +117,7 @@ func (s *Service) pullable(p *store.Peer, h *helloMessage) {
 // peer's hello with it for 30 days, so that a peer revoke didn't reach
 // learns of it too (section 12.7, case 2). Signed by the key it revokes,
 // it can only stop a pairing, never start or move one.
-func (s *Service) applyPulled(ctx context.Context, p *store.Peer, h msfp.Hello, onlyRotation bool) {
+func (s *Service) applyPulled(ctx context.Context, p *store.Peer, h wire.Hello, onlyRotation bool) {
 	pulled := h.Pull(p.PublicKey, s.now())
 	if pulled.Revocation != nil && !onlyRotation && p.Suspended == nil {
 		suspended, err := s.Store.SuspendPeer(ctx, p.ID, s.now())
@@ -127,7 +127,7 @@ func (s *Service) applyPulled(ctx context.Context, p *store.Peer, h msfp.Hello, 
 		}
 		if suspended {
 			s.Logger.Warn("federation: a peer revoked its key: suspended until it moves to the key it committed to",
-				"name", p.Name, "fingerprint", msfp.Fingerprint(p.PublicKey))
+				"name", p.Name, "fingerprint", wire.Fingerprint(p.PublicKey))
 			s.changed(p.ID)
 		}
 	}
@@ -143,7 +143,7 @@ func (s *Service) applyPulled(ctx context.Context, p *store.Peer, h msfp.Hello, 
 	case errors.Is(err, errRefused):
 	case err != nil:
 		s.Logger.Error("federation: a peer's change of key couldn't be kept", "name", p.Name, "error", err)
-	case state == msfp.StateRotated:
+	case state == wire.StateRotated:
 		s.helloNow(p.ID)
 	}
 }
@@ -160,7 +160,7 @@ func (s *Service) keepInbound(ctx context.Context, p *store.Peer, uncallable boo
 			return err
 		}
 		p.Inbound, p.Move = store.InboundNo, nil
-		s.lim().setUnreached(msfp.Encode64(p.PublicKey), false)
+		s.lim().setUnreached(wire.Encode64(p.PublicKey), false)
 		// Its titles are dropped, and nothing of it plays here any more:
 		// our viewers' playbacks from it end (no media is fetched from it).
 		s.changed(p.ID)
@@ -179,7 +179,7 @@ func (s *Service) keepInbound(ctx context.Context, p *store.Peer, uncallable boo
 // Hellos sends this server's scheduled hellos, when it can't be called
 // (MSFP core section 7.5): to every peer, suspended ones included, whose
 // turn it is, then its next turn set by where the pairing stands then
-// (msfp.NextHello: 20 seconds while its operator hasn't accepted, for a
+// (wire.NextHello: 20 seconds while its operator hasn't accepted, for a
 // day; 5 minutes once paired; an hour once gone). Each hello counts
 // against the peer's limits as any call does, and isn't sent while the
 // peer asked to wait or doesn't answer (Limits: the next turn then). The
@@ -239,7 +239,7 @@ func (s *Service) helloDue(id string, now time.Time) bool {
 // unless helloNow asked for one at once meanwhile.
 func (s *Service) helloDone(p *store.Peer) {
 	now := s.now()
-	wait := msfp.NextHello(operatorWaiting(p), p.State == store.PeerGone, now.Sub(p.Created))
+	wait := wire.NextHello(operatorWaiting(p), p.State == store.PeerGone, now.Sub(p.Created))
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if next, ok := s.turns[p.ID]; ok && next.IsZero() {

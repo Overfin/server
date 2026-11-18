@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // What a server names of its own: the operator's pins, or the one its
@@ -39,7 +39,7 @@ func TestOwnCertificates(t *testing.T) {
 	a := newServerOn(t, "A", true)
 	u, _ := url.Parse(a.url)
 	cert := tlsCertOf(t, u.Host)
-	if got, err := (&Certificates{}).For(ctx, a.url); err != nil || !slices.Equal(got, []string{msfp.Pin(cert)}) {
+	if got, err := (&Certificates{}).For(ctx, a.url); err != nil || !slices.Equal(got, []string{wire.Pin(cert)}) {
 		t.Fatalf("served: %v %v", got, err)
 	}
 }
@@ -64,7 +64,7 @@ func TestCertificatesNamedInHello(t *testing.T) {
 	ctx := context.Background()
 	a, b := newServerOn(t, "A", true), newServerOn(t, "B", true)
 	u, _ := url.Parse(a.url)
-	pin := msfp.Pin(tlsCertOf(t, u.Host))
+	pin := wire.Pin(tlsCertOf(t, u.Host))
 	code, _, _ := a.s.NewCode(ctx, "")
 	aOnB, err := b.s.UseCode(ctx, code)
 	if err != nil {
@@ -95,7 +95,7 @@ func TestCertificatesNamedInHello(t *testing.T) {
 	if aOnB, err = b.s.Check(ctx, aOnB); err != nil || len(aOnB.Certificates) != 0 {
 		t.Fatalf("after A named none: %+v %v", aOnB, err)
 	}
-	if _, err := b.s.TheirLibraries(ctx, aOnB); !errors.Is(err, msfp.ErrUntrustedCertificate) {
+	if _, err := b.s.TheirLibraries(ctx, aOnB); !errors.Is(err, wire.ErrUntrustedCertificate) {
 		t.Fatalf("libraries with nothing named: %v", err)
 	}
 	// A names it again: B's next call asks A's hello, and goes through.
@@ -153,7 +153,7 @@ func TestOwnCertificatesFirstFailureRetriedSoon(t *testing.T) {
 		}
 	}()
 	time.Sleep(100 * time.Millisecond)
-	if got, err := c.For(ctx, "https://"+addr); err != nil || !slices.Equal(got, []string{msfp.Pin(cert)}) {
+	if got, err := c.For(ctx, "https://"+addr); err != nil || !slices.Equal(got, []string{wire.Pin(cert)}) {
 		t.Fatalf("served now: %v %v", got, err)
 	}
 }
@@ -197,7 +197,7 @@ func TestOwnCertificatesFreshForHellos(t *testing.T) {
 	addr := "https://" + ln.Addr().String()
 	c := &Certificates{}
 	first, err := c.For(ctx, addr)
-	if err != nil || !slices.Equal(first, []string{msfp.Pin(tlsCertOf(t, u1.Host))}) {
+	if err != nil || !slices.Equal(first, []string{wire.Pin(tlsCertOf(t, u1.Host))}) {
 		t.Fatalf("first: %v %v", first, err)
 	}
 	mu.Lock()
@@ -207,7 +207,7 @@ func TestOwnCertificatesFreshForHellos(t *testing.T) {
 	if got, _ := c.For(ctx, addr); !slices.Equal(got, first) {
 		t.Fatalf("within the minute, For looked again: %v", got)
 	}
-	if got, err := c.Fresh(ctx, addr); err != nil || !slices.Equal(got, []string{msfp.Pin(tlsCertOf(t, u2.Host))}) {
+	if got, err := c.Fresh(ctx, addr); err != nil || !slices.Equal(got, []string{wire.Pin(tlsCertOf(t, u2.Host))}) {
 		t.Fatalf("a hello's answer names %v (%v), not the renewed one", got, err)
 	}
 }

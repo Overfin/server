@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/overfin/server/internal/ids"
-	"github.com/overfin/server/internal/msfp"
+	"github.com/overfin/server/msfp/wire"
 )
 
 const federationKeyContext = "federation key"
@@ -61,7 +61,7 @@ type PairingCode struct {
 	Expires time.Time `json:"expires"`
 }
 
-func pairingSecretHash(secret []byte) []byte { return msfp.SecretHash(secret) }
+func pairingSecretHash(secret []byte) []byte { return wire.SecretHash(secret) }
 
 // CreatePairingCode keeps a new pairing code's secret, sealed, until
 // expires.
@@ -123,7 +123,7 @@ type Peer struct {
 	Limits PeerLimits  `json:"limits"`
 	Theirs *PeerLimits `json:"theirs,omitempty"`
 	// Certificates are the pins of the TLS certificates it said, signed,
-	// its address serves (msfp.Pin): its own, not publicly trusted
+	// its address serves (wire.Pin): its own, not publicly trusted
 	// perhaps. Never sent to the panel.
 	Certificates []string `json:"-"`
 	// Versions is what its latest signed hello listed of MSFP's core and
@@ -143,7 +143,7 @@ type Peer struct {
 	PreviousUntil time.Time `json:"-"`
 	// Pending is a rotation to a key it has no commitment to, waiting for
 	// our operator to confirm the key's fingerprint; nil for none.
-	Pending *msfp.Rotation `json:"-"`
+	Pending *wire.Rotation `json:"-"`
 	// Suspended is when it revoked its key (nil: it didn't).
 	Suspended *time.Time `json:"-"`
 	// RefusedKey is a key it tried to rotate to that didn't match its
@@ -172,7 +172,7 @@ type Peer struct {
 	// Move is an address its signed hello named, not confirmed yet by a
 	// hello there answered under its key: Address stays until then. nil
 	// for none.
-	Move *msfp.Move `json:"-"`
+	Move *wire.Move `json:"-"`
 
 	// Servers that can't be called (MSFP core section 7.5).
 	//
@@ -351,7 +351,7 @@ func scanPeer(row interface{ Scan(...any) error }) (*Peer, error) {
 		return nil, err
 	}
 	if newAddress != "" {
-		p.Move = &msfp.Move{Address: newAddress}
+		p.Move = &wire.Move{Address: newAddress}
 		if t := unixTime(newTried); t != nil {
 			p.Move.Tried = *t
 		}
@@ -363,7 +363,7 @@ func scanPeer(row interface{ Scan(...any) error }) (*Peer, error) {
 		p.PreviousUntil = time.Unix(previousUntil.Int64, 0).UTC()
 	}
 	if pending != "" {
-		var r msfp.Rotation
+		var r wire.Rotation
 		if err := json.Unmarshal([]byte(pending), &r); err != nil {
 			return nil, fmt.Errorf("store: a peer's pending rotation: %w", err)
 		}
@@ -497,7 +497,7 @@ func (s *Store) deletePeerTx(ctx context.Context, tx *sql.Tx, id string, remembe
 			keys = append(keys, previous)
 		}
 		if pending != "" {
-			var r msfp.Rotation
+			var r wire.Rotation
 			if err := json.Unmarshal([]byte(pending), &r); err != nil {
 				return err
 			}
@@ -851,7 +851,7 @@ func (s *Store) titlesIn(ctx context.Context, libraries, keys []string, after st
 		looked++
 		// In MSFP's one form only: a key in another would be one more
 		// title there, which nobody can play.
-		if k, ok := msfp.ParseVideoKey(t.Key); ok && k.Kind == t.Kind {
+		if k, ok := wire.ParseVideoKey(t.Key); ok && k.Kind == t.Kind {
 			out = append(out, t)
 		}
 	}
@@ -915,7 +915,7 @@ func (s *Store) addWith(ctx context.Context, titles []PeerTitle, marks string, a
 			return err
 		}
 		i := at[key]
-		if k, ok := msfp.ParseVideoKey(other); ok && k.Kind == "episode" && other != key && !slices.Contains(titles[i].With, other) {
+		if k, ok := wire.ParseVideoKey(other); ok && k.Kind == "episode" && other != key && !slices.Contains(titles[i].With, other) {
 			titles[i].With = append(titles[i].With, other)
 		}
 		return nil
@@ -931,7 +931,7 @@ func (s *Store) addWith(ctx context.Context, titles []PeerTitle, marks string, a
 	for i := range titles {
 		if w := titles[i].With; len(w) > 0 {
 			slices.Sort(w)
-			titles[i].With = w[:min(len(w), msfp.MaxWith)]
+			titles[i].With = w[:min(len(w), wire.MaxWith)]
 		}
 	}
 	return nil
@@ -946,7 +946,7 @@ func (s *Store) addOtherIDs(ctx context.Context, titles []PeerTitle) error {
 	at := map[string]int{}
 	var titleKeys, episodeKeys [][]any
 	for i, t := range titles {
-		k, _ := msfp.ParseVideoKey(t.Key)
+		k, _ := wire.ParseVideoKey(t.Key)
 		switch {
 		case k.Kind == "movie" || k.Kind == "series":
 			titleKeys = append(titleKeys, []any{t.Key, k.Kind, strconv.FormatInt(k.TMDB, 10)})
@@ -962,7 +962,7 @@ func (s *Store) addOtherIDs(ctx context.Context, titles []PeerTitle) error {
 		return string(b)
 	}
 	add := func(key, scheme string, value sql.NullString) {
-		if !value.Valid || !msfp.OtherID(scheme, value.String) {
+		if !value.Valid || !wire.OtherID(scheme, value.String) {
 			return
 		}
 		t := &titles[at[key]]

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/slots"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // pairedPair is A and B paired, A offering B its films.
@@ -82,8 +82,8 @@ func drain(l *Limits, pick func(*Limits) *bucket) {
 func TestCallsOverTheLimits(t *testing.T) {
 	ctx := context.Background()
 	a, b, _, aOnB := pairedPair(t)
-	keyB := msfp.Encode64(b.s.Keys.Current().Public())
-	keyA := msfp.Encode64(a.s.Keys.Current().Public())
+	keyB := wire.Encode64(b.s.Keys.Current().Public())
+	keyA := wire.Encode64(a.s.Keys.Current().Public())
 	onA := stillClock(a)
 
 	drain(a.s.lim(), func(l *Limits) *bucket { return l.peers[keyB] })
@@ -118,7 +118,7 @@ func TestCallsOverTheLimits(t *testing.T) {
 func TestSyncTitlesWaitsItsTurn(t *testing.T) {
 	ctx := context.Background()
 	a, b, _, aOnB := pairedPair(t)
-	keyB := msfp.Encode64(b.s.Keys.Current().Public())
+	keyB := wire.Encode64(b.s.Keys.Current().Public())
 	// One call left: libraries goes, titles waits about a second (A's
 	// clock moves on once B is waiting).
 	onA := stillClock(a)
@@ -175,7 +175,7 @@ func TestCallsAtOnce(t *testing.T) {
 	if n := l.allSlots.InUse(""); n != 0 {
 		t.Fatalf("slots still held: %d", n)
 	}
-	keyB := msfp.Encode64(b.s.Keys.Current().Public())
+	keyB := wire.Encode64(b.s.Keys.Current().Public())
 	free, _ := l.peerSlots.Take(ctx, keyB)
 	if r, err := b.s.call(ctx, aOnB, "/api/v1/federation/libraries", struct{}{}, &answer); err != nil || r.Status != http.StatusTooManyRequests || r.RetryAfter < 1 {
 		t.Fatalf("its own at once: %+v %v", r, err)
@@ -264,11 +264,11 @@ func TestAddressLimitIPv6AndMemory(t *testing.T) {
 func TestPlayBusyIsAnAnswer(t *testing.T) {
 	ctx := context.Background()
 	_, b, _, aOnB := pairedPair(t)
-	k := msfp.NewKey()
+	k := wire.NewKey()
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := []byte(`{"type":"server-busy","title":"busy","status":503}`)
 		w.Header().Set("Content-Type", "application/problem+json")
-		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 503, "application/problem+json", body))
+		w.Header().Set(wire.HeaderSignature, wire.SignResponse(k, r.Header.Get(wire.HeaderNonce), 503, "application/problem+json", body))
 		w.WriteHeader(503)
 		_, _ = w.Write(body)
 	}))

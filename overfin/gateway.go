@@ -33,7 +33,6 @@ import (
 	"github.com/overfin/server/internal/keys"
 	"github.com/overfin/server/internal/library"
 	"github.com/overfin/server/internal/mail"
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/notices"
 	"github.com/overfin/server/internal/oidc"
 	"github.com/overfin/server/internal/pin"
@@ -49,6 +48,7 @@ import (
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/takeover"
 	"github.com/overfin/server/internal/tmdb"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // shared is what lives for the whole run, across configuration reloads: the
@@ -350,7 +350,7 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 // fedShared is what federation keeps across rebuilds.
 type fedShared struct {
 	keys  *federation.Keys
-	seen  *msfp.Nonces
+	seen  *wire.Nonces
 	http  *http.Client
 	certs *federation.Certificates
 	// limits are the limits on federation calls, and the memory of peers
@@ -374,24 +374,24 @@ func federationService(cfg *config.Config, sh *shared) *federation.Service {
 		return nil
 	}
 	db := sh.db
-	uncallable, address, err := db.FederationUncallable(context.Background(), msfp.NewUncallableAddress)
+	uncallable, address, err := db.FederationUncallable(context.Background(), wire.NewUncallableAddress)
 	if err != nil {
 		sh.logger.Error("federation: off, whether this server can be called couldn't be read", "error", err)
 		return nil
 	}
 	if !uncallable {
-		address = msfp.Origin(siteURL(cfg))
+		address = wire.Origin(siteURL(cfg))
 		if address == "" {
 			return nil
 		}
-		if _, err := msfp.NewCode(address, sh.fed.keys.Current().Public(), time.Now()); err != nil {
+		if _, err := wire.NewCode(address, sh.fed.keys.Current().Public(), time.Now()); err != nil {
 			sh.logger.Info("federation: off, the site's address isn't https://host alone", "address", address, "error", err)
 			return nil
 		}
 	}
 	// Its name, without branding: its site's host, even when it can't be
 	// called and federates under another.
-	named := cmp.Or(msfp.Origin(siteURL(cfg)), address)
+	named := cmp.Or(wire.Origin(siteURL(cfg)), address)
 	fed := &federation.Service{Store: db, Keys: sh.fed.keys, Address: address, Uncallable: uncallable, HTTP: sh.fed.http, Seen: sh.fed.seen,
 		Certificates: sh.fed.certs, Limits: sh.fed.limits, Logger: sh.logger, Name: func(ctx context.Context) string {
 			if b, err := db.Branding(ctx); err == nil && b.On && b.Name != "" {
@@ -869,7 +869,7 @@ func (g *gateway) SetPreviews(ctx context.Context, on bool) error {
 // FederationUncallable says whether this server's operator said it can't
 // be called (MSFP core section 7.5).
 func (g *gateway) FederationUncallable(ctx context.Context) (bool, error) {
-	on, _, err := g.sh.db.FederationUncallable(ctx, msfp.NewUncallableAddress)
+	on, _, err := g.sh.db.FederationUncallable(ctx, wire.NewUncallableAddress)
 	return on, err
 }
 

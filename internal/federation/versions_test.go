@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // Once paired, each side knows from the other's hello which parts of MSFP
@@ -19,7 +19,7 @@ import (
 func TestPairedKnowVersions(t *testing.T) {
 	_, b, bOnA, aOnB := pairedPair(t)
 	a := bOnA
-	for _, part := range []string{msfp.PartCatalog, msfp.PartPlayback, msfp.PartMedia, msfp.PartVideo} {
+	for _, part := range []string{wire.PartCatalog, wire.PartPlayback, wire.PartMedia, wire.PartVideo} {
 		if !b.s.Speaks(aOnB, part) {
 			t.Errorf("B doesn't speak %s with A", part)
 		}
@@ -27,7 +27,7 @@ func TestPairedKnowVersions(t *testing.T) {
 	if a.Versions == "" || aOnB.Versions == "" {
 		t.Fatalf("versions not kept: %q, %q", a.Versions, aOnB.Versions)
 	}
-	if b.s.Speaks(aOnB, msfp.PartMusic) {
+	if b.s.Speaks(aOnB, wire.PartMusic) {
 		t.Error("music, which Overfin doesn't list, is on")
 	}
 }
@@ -57,7 +57,7 @@ func TestCatalogOnly(t *testing.T) {
 	body := []byte(`{"title":"movie/tmdb/949"}`)
 	req := httptest.NewRequest("POST", a.url+playPath, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	nonce := msfp.SignRequest(req, body, b.s.Keys.Current(), b.s.now())
+	nonce := wire.SignRequest(req, body, b.s.Keys.Current(), b.s.now())
 	rec := httptest.NewRecorder()
 	SignRefusals(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := a.s.PeerRequest(w, r); ok {
@@ -65,15 +65,15 @@ func TestCatalogOnly(t *testing.T) {
 		}
 	})).ServeHTTP(rec, req)
 	if rec.Code != 404 || !bytes.Contains(rec.Body.Bytes(), []byte(`"not-supported"`)) ||
-		msfp.CheckResponse(a.s.Keys.Current().Public(), nonce, 404, rec.Header().Get("Content-Type"), rec.Body.Bytes(), rec.Header().Get(msfp.HeaderSignature)) != nil {
-		t.Fatalf("play: %d %s, signed %q", rec.Code, rec.Body, rec.Header().Get(msfp.HeaderSignature))
+		wire.CheckResponse(a.s.Keys.Current().Public(), nonce, 404, rec.Header().Get("Content-Type"), rec.Body.Bytes(), rec.Header().Get(wire.HeaderSignature)) != nil {
+		t.Fatalf("play: %d %s, signed %q", rec.Code, rec.Body, rec.Header().Get(wire.HeaderSignature))
 	}
 	// The caller, told so, makes no more calls of that part until the
 	// peer's next hello.
 	// (Asked again just now: not in the background, which the test would
 	// race with.)
 	b.s.rechecked = map[string]time.Time{aOnB.ID: b.s.now()}
-	b.s.refusedPart(aOnB, msfp.PartPlayback)
+	b.s.refusedPart(aOnB, wire.PartPlayback)
 	if _, err := b.s.call(ctx, aOnB, playPath, map[string]string{"title": "movie/tmdb/949"}, &struct{}{}); !errors.Is(err, ErrNotSupported) {
 		t.Fatalf("play after not-supported: %v", err)
 	}
@@ -105,13 +105,13 @@ func TestNoPartsBeforeHello(t *testing.T) {
 // changed on the way, was sent twice, or doesn't read as type/subtype.
 func TestAnswerMediaType(t *testing.T) {
 	_, b, _, aOnB := pairedPair(t)
-	k := msfp.NewKey()
+	k := wire.NewKey()
 	var served []string
 	signed := ""
 	fake := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := []byte(`{"state":"paired","core":[1]}`)
 		w.Header()["Content-Type"] = served
-		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, signed, body))
+		w.Header().Set(wire.HeaderSignature, wire.SignResponse(k, r.Header.Get(wire.HeaderNonce), 200, signed, body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()
@@ -150,16 +150,16 @@ func TestPlainHTTPCode(t *testing.T) {
 	ctx := context.Background()
 	b := newServer(t, "B")
 	plain := newServerOn(t, "A", false) // its address is http
-	msfp.AllowPlainHTTPForTests(true)
+	wire.AllowPlainHTTPForTests(true)
 	code, _, err := plain.s.NewCode(ctx, "")
-	msfp.AllowPlainHTTPForTests(false)
+	wire.AllowPlainHTTPForTests(false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.s.UseCode(ctx, code); !errors.Is(err, msfp.ErrPlainHTTP) {
+	if _, err := b.s.UseCode(ctx, code); !errors.Is(err, wire.ErrPlainHTTP) {
 		t.Fatalf("a plain http code: %v", err)
 	}
-	if _, _, err := plain.s.NewCode(ctx, ""); !errors.Is(err, msfp.ErrPlainHTTP) {
+	if _, _, err := plain.s.NewCode(ctx, ""); !errors.Is(err, wire.ErrPlainHTTP) {
 		t.Fatalf("a plain http code made: %v", err)
 	}
 }

@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/store"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // uncallableTo is srv built anew with its operator's setting "can't be
@@ -30,7 +30,7 @@ func uncallableTo(t *testing.T, srv *server, on bool) *server {
 	if err := srv.s.Store.SetFederationUncallable(ctx, on); err != nil {
 		t.Fatal(err)
 	}
-	_, address, err := srv.s.Store.FederationUncallable(ctx, msfp.NewUncallableAddress)
+	_, address, err := srv.s.Store.FederationUncallable(ctx, wire.NewUncallableAddress)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestUncallablePairing(t *testing.T) {
 		t.Fatalf("a code from a server that can't be called: %v", err)
 	}
 	a, b, bOnA, aOnB := uncallablePair(t)
-	if err := msfp.CheckUncallable(b.s.Address); err != nil || bOnA.Address != b.s.Address || bOnA.Inbound != store.InboundNo {
+	if err := wire.CheckUncallable(b.s.Address); err != nil || bOnA.Address != b.s.Address || bOnA.Inbound != store.InboundNo {
 		t.Fatalf("A's view of B: %q, %q, %v", bOnA.Address, bOnA.Inbound, err)
 	}
 	if n, err := b.s.SyncTitles(ctx, aOnB); err != nil || n != 1 {
@@ -268,7 +268,7 @@ func TestHelloSchedule(t *testing.T) {
 		t.Fatalf("gone, 5 hours: %d hellos", n)
 	}
 	// A pairing still waiting a day after the pair: every 5 minutes.
-	if got := msfp.HelloWait(true, false, 25*time.Hour); got != msfp.HelloPaired {
+	if got := wire.HelloWait(true, false, 25*time.Hour); got != wire.HelloPaired {
 		t.Errorf("waiting after a day: %v", got)
 	}
 	if hellos() == at {
@@ -292,12 +292,12 @@ func TestPulledRotation(t *testing.T) {
 		t.Fatalf("A's view of B: %q, rotate sent %v", got.OurKey, got.RotateSent)
 	}
 	b.s.Hellos(ctx) // its turn is 5 minutes away
-	if got := peer(t, b, aOnB.ID); msfp.SameKey(got.PublicKey, newKey) {
+	if got := peer(t, b, aOnB.ID); wire.SameKey(got.PublicKey, newKey) {
 		t.Fatal("B moved before its turn")
 	}
 	b.s.helloNow(aOnB.ID)
 	b.s.Hellos(ctx)
-	if got := peer(t, b, aOnB.ID); !msfp.SameKey(got.PublicKey, newKey) || got.CommitmentFrom != store.CommitmentRotation {
+	if got := peer(t, b, aOnB.ID); !wire.SameKey(got.PublicKey, newKey) || got.CommitmentFrom != store.CommitmentRotation {
 		t.Fatalf("B's view of A after the answer: %+v", got)
 	}
 	b.s.Hellos(ctx) // at once: knownKey, the new key
@@ -335,16 +335,16 @@ func TestPulledRotationPendingRefused(t *testing.T) {
 		b.s.Hellos(ctx)
 		got := peer(t, b, aOnB.ID)
 		switch {
-		case msfp.SameKey(got.PublicKey, newKey):
+		case wire.SameKey(got.PublicKey, newKey):
 			t.Fatalf("refused %v: B moved", refuse)
-		case !refuse && (got.Pending == nil || !msfp.SameKey(got.Pending.New, newKey)):
+		case !refuse && (got.Pending == nil || !wire.SameKey(got.Pending.New, newKey)):
 			t.Fatalf("B's pending rotation: %+v", got.Pending)
-		case refuse && !msfp.SameKey(got.RefusedKey, newKey):
+		case refuse && !wire.SameKey(got.RefusedKey, newKey):
 			t.Fatalf("B's refused key: %x", got.RefusedKey)
 		}
-		want := msfp.StatePending
+		want := wire.StatePending
 		if refuse {
-			want = msfp.RotationRefused
+			want = wire.RotationRefused
 		}
 		b.s.helloNow(aOnB.ID)
 		b.s.Hellos(ctx)
@@ -391,8 +391,8 @@ func TestPulledRevocation(t *testing.T) {
 		b.s.Hellos(ctx)
 		got := peer(t, b, aOnB.ID)
 		if !refuse {
-			if got.Suspended != nil || !msfp.SameKey(got.PublicKey, newKey) {
-				t.Fatalf("B's view of A: suspended %v, key moved %v", got.Suspended, msfp.SameKey(got.PublicKey, newKey))
+			if got.Suspended != nil || !wire.SameKey(got.PublicKey, newKey) {
+				t.Fatalf("B's view of A: suspended %v, key moved %v", got.Suspended, wire.SameKey(got.PublicKey, newKey))
 			}
 			b.s.Hellos(ctx)
 			if v := peer(t, a, bOnA.ID); v.OurKey != store.OurKeyCurrent {
@@ -401,7 +401,7 @@ func TestPulledRevocation(t *testing.T) {
 			noHits(t, b)
 			continue
 		}
-		if got.Suspended == nil || !msfp.SameKey(got.PublicKey, revoked) || !msfp.SameKey(got.RefusedKey, newKey) {
+		if got.Suspended == nil || !wire.SameKey(got.PublicKey, revoked) || !wire.SameKey(got.RefusedKey, newKey) {
 			t.Fatalf("B's view of A, the commitment wrong: %+v", got)
 		}
 		if _, err := b.s.SyncTitles(ctx, got); !errors.Is(err, ErrNotPaired) {
@@ -519,7 +519,7 @@ func TestUncallableConfirmFails(t *testing.T) {
 // vectors/v1/exchanges.json: inbound false, its address of that form,
 // knownKey, no pins.
 func TestUncallableHelloVector(t *testing.T) {
-	raw, err := os.ReadFile("../msfp/testdata/v1/exchanges.json")
+	raw, err := os.ReadFile("../../msfp/wire/testdata/v1/exchanges.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -535,9 +535,9 @@ func TestUncallableHelloVector(t *testing.T) {
 	}
 	var want map[string]any
 	json.Unmarshal([]byte(v.Exchanges[i].Body), &want)
-	a, _ := msfp.Decode64(want["knownKey"].(string), 32)
+	a, _ := wire.Decode64(want["knownKey"].(string), 32)
 	s := &Service{Uncallable: true, Address: want["address"].(string)}
-	body, err := msfp.Marshal(s.ourHello(context.Background(), &store.Peer{PublicKey: a}, helloPaired, false))
+	body, err := wire.Marshal(s.ourHello(context.Background(), &store.Peer{PublicKey: a}, helloPaired, false))
 	if err != nil {
 		t.Fatal(err)
 	}

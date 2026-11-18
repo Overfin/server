@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/overfin/server/internal/msfp"
 	"github.com/overfin/server/internal/outbound"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // A route that crashes frees its slots, and its refusal is signed: an
@@ -24,8 +24,8 @@ func TestSignRefusalsCrash(t *testing.T) {
 	}))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/v1/federation/hello", nil))
-	if !freed || rec.Code != 500 || rec.Header().Get(msfp.HeaderSignature) != "signed" {
-		t.Fatalf("freed %v, %d, signature %q", freed, rec.Code, rec.Header().Get(msfp.HeaderSignature))
+	if !freed || rec.Code != 500 || rec.Header().Get(wire.HeaderSignature) != "signed" {
+		t.Fatalf("freed %v, %d, signature %q", freed, rec.Code, rec.Header().Get(wire.HeaderSignature))
 	}
 }
 
@@ -86,7 +86,7 @@ func TestNoContentCoding(t *testing.T) {
 		t.Error("the transport asks for gzip")
 	}
 	_, b, _, aOnB := pairedPair(t)
-	k := msfp.NewKey()
+	k := wire.NewKey()
 	coding := ""
 	var asked []string
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +103,7 @@ func TestNoContentCoding(t *testing.T) {
 			w.Header().Set("Content-Encoding", coding)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, "application/json", body))
+		w.Header().Set(wire.HeaderSignature, wire.SignResponse(k, r.Header.Get(wire.HeaderNonce), 200, "application/json", body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()
