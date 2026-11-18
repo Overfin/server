@@ -5,7 +5,6 @@ package server
 import (
 	"encoding/json"
 	"log/slog"
-	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -148,13 +147,22 @@ func sameOrigin(reg *plugin.Registrar, next http.Handler) http.Handler {
 		}
 		switch r.Method {
 		case http.MethodPost, http.MethodPut, http.MethodPatch:
-			if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
+			if !isJSON(r.Header.Get("Content-Type")) {
 				refuse(w, r, problem.UnsupportedMediaType)
 				return
 			}
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isJSON says whether a Content-Type is application/json: its type and
+// subtype only, whatever its parameters say, even ones that don't parse
+// (MSFP core section 2.4 asks this of federation calls; the apps' API
+// is no stricter).
+func isJSON(contentType string) bool {
+	mt, _, _ := strings.Cut(contentType, ";")
+	return strings.EqualFold(strings.Trim(mt, " \t"), "application/json")
 }
 
 // refuse answers a request sameOrigin refuses: with t, or, for a

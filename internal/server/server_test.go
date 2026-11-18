@@ -194,6 +194,10 @@ func TestStateChangesMustBeJSON(t *testing.T) {
 		"multipart/form-data; boundary=x":   http.StatusUnsupportedMediaType,
 		"":                                  http.StatusUnsupportedMediaType,
 		"application/json; charset=utf-8":   http.StatusNotFound, // passes the check; no such route
+		// Parameters aren't read, whatever they say (MSFP core section 2.4).
+		"application/json; charset=a; charset=b": http.StatusNotFound,
+		"Application/JSON;;":                     http.StatusNotFound,
+		"application/jsonx":                      http.StatusUnsupportedMediaType,
 	} {
 		req, _ := http.NewRequest("POST", srv.URL+"/api/v1/whoami", strings.NewReader("{}"))
 		req.Header.Set("Remote-User", "abc123")
