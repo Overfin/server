@@ -37,8 +37,12 @@ network, and nothing is shared until both of you say so.
   ticket the browser never sees. The other server sees your server only
   (its gateway), never a viewer's address, browser, account or name.
 - **Titles, not files.** Servers tell each other their titles by their
-  TMDB ID, with their audio and subtitle languages: never file names,
-  paths or people.
+  TMDB ID, with their audio and subtitle languages, the IMDb and TheTVDB
+  IDs TMDB gives them, and, for a file holding two episodes, that it holds
+  both: never file names, paths or people. A title known here only by
+  another site's ID than TMDB's isn't shared. The IDs a server gives
+  others (its libraries', its versions', its playbacks' and their
+  tickets) are its own, and tell nothing of its files or of Jellyfin.
 - **Only what's yours to share.** A server only ever offers its own
   libraries. What it gets from one paired server is never passed on to
   another.
@@ -342,9 +346,13 @@ Overfin does key rotation and revocation (`rotate`, `revoke`, the next key
 commitment in `pair` and `hello`), address changes (core section 13) and
 servers that can't be called (core section 7.5: `inbound`, the scheduled
 `hello`s, `knownKey`, the rotations and revocations pulled in `hello`
-answers, `callsFailed`), but not yet the discovery document (its
-federation calls are always at `/api/v1/federation/`, so a new address is
-confirmed there, without fetching one).
+answers, `callsFailed`), and of the shared parts: episodes by TMDB's
+own IDs, `with` and `ids` sent and read (a paired server's `with` marks a
+file's episodes watched together; its `ids` aren't kept), `versionId` in
+`play`, WebVTT rebuilt and PGS checked both ways. Not the discovery
+document (core section 11, optional): its federation calls are always at
+`/api/v1/federation/`, so a new address is confirmed there, without
+fetching one, and a server under a path can't pair with it yet.
 
 ## Where it stands
 

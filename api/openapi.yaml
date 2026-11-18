@@ -4206,12 +4206,14 @@ paths:
       description: |
         Server to server, signed both ways as for pair, for a paired server
         only. A page of the identified titles (films, series, seasons,
-        episodes, by title key) in the libraries asked for, among those this
-        server offers the caller; others asked for are ignored. A film's or
-        an episode's audio and subtitle languages come with it, so the
-        caller never suggests a source without its viewer's language. Never
-        a file, a path or a media server's ID. Anyone else gets the plain
-        404.
+        episodes, by their TMDB title keys) in the libraries asked for,
+        among those this server offers the caller; others asked for are
+        ignored. A film's or an episode's audio and subtitle languages come
+        with it, so the caller never suggests a source without its viewer's
+        language; an episode of a file holding several, the others it holds
+        (`with`); a film, a series or an episode, its IMDb and TheTVDB IDs
+        as TMDB gives them (`ids`). Never a file, a path or a media server's
+        ID. Anyone else gets the plain 404.
 
         With `since` (the `seq` of an earlier answer), only what changed
         since then: `changes` is set, `titles` are the titles to keep (new
@@ -4251,6 +4253,13 @@ paths:
                         library: {type: string}
                         audio: {type: array, items: {type: string}, description: "Language tags, fr-CA"}
                         subtitles: {type: array, items: {type: string}}
+                        with: {type: array, items: {type: string}, description: "An episode's: the other episodes its file holds, at most 16"}
+                        ids:
+                          type: object
+                          description: "Its other IDs, as TMDB gives them: imdb (tt and 7 to 10 digits), tvdb"
+                          properties:
+                            imdb: {type: string}
+                            tvdb: {type: string}
                   next: {type: string, description: "Where the next page starts; absent after the last"}
                   changes: {type: boolean, description: "Only what changed since `since`"}
                   gone: {type: array, items: {type: string}, description: "With changes: keys no longer held"}
@@ -4263,9 +4272,10 @@ paths:
       summary: A paired server's viewer plays one of this server's titles
       description: |
         Server to server, signed both ways as for pair, for a paired server
-        only. The title (a film's or an episode's key) must be in a library
-        this server offers the caller. This server picks its copy (one with
-        the viewer's audio language when it has one) and the tracks, within
+        only. The title (a film's or an episode's TMDB key, in its one
+        form) must be in a library this server offers the caller. This
+        server picks its copy (the version asked for, else one with the
+        viewer's audio language when it has one) and the tracks, within
         the pairing's limits (streams, transcodes, bitrate) and the
         transcodes it keeps for its own people, and answers with the
         playback as POST /playback does, its stream's URLs on this server:
@@ -4290,8 +4300,10 @@ paths:
                 subtitleLanguage: {type: string}
                 audioTrack: {type: string}
                 subtitleTrack: {type: string}
+                versionId: {type: string, description: "A version from a former answer of the same title"}
       responses:
         "200": {description: "The playback, as POST /playback answers it. Signed."}
+        "400": {description: "A title that isn't a film's or an episode's key, a number or a tag out of range, a malformed track."}
         "404": {description: "Not signed, not a paired server, or a title not offered it; `not-supported` when playback isn't on between the two."}
         "409": {description: "The pairing's limit, or every transcode it may take, is reached."}
 
