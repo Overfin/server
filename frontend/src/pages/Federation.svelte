@@ -33,6 +33,11 @@
     refused?: { fingerprint: string; at: string };
     ourKey?: 'old' | 'lost';
     rotationAnswer?: 'pending' | 'refused';
+    // Addresses: still calling this server's former address (late: for
+    // some days); an address it says it moved to, being checked.
+    notMoved?: boolean;
+    moveLate?: boolean;
+    moving?: { address: string; failing?: string; warn?: boolean };
   }
   interface Lib {
     id: string;
@@ -71,6 +76,7 @@
     peers?: Peer[];
     nextKey?: { fingerprint: string; onServer: boolean };
     rotation?: { since: string; until: string };
+    move?: { former: string; since: string; until: string; moved: number; of: number };
   }
   interface Preview {
     address: string;
@@ -342,7 +348,17 @@
     return '';
   }
 
-  const attention = $derived((s?.peers ?? []).filter((p) => p.suspendedAt || p.pending || p.refused || p.ourKey === 'lost'));
+  // What its address needs said, "" for nothing.
+  function addressText(p: Peer): string {
+    if (p.moving?.failing)
+      return `It says it moved to ${p.moving.address}, which hasn't answered as it since ${day(p.moving.failing)}: it's still reached at its old address, and tried again every hour.`;
+    if (p.moving) return `It says it moved to ${p.moving.address}: checking it answers there.`;
+    if (p.moveLate) return `Still reaches this server at its former address, ${s?.move?.former ?? ''}: ask its operator whether it can reach the new one.`;
+    if (p.notMoved) return "Still reaches this server at its former address: it's told the new one at each contact.";
+    return '';
+  }
+
+  const attention = $derived((s?.peers ?? []).filter((p) => p.suspendedAt || p.pending || p.refused || p.ourKey === 'lost' || p.moving?.warn || p.moveLate));
 
   const kinds: Record<string, string> = { movies: 'Films', tvshows: 'Series', music: 'Music', musicvideos: 'Music videos', homevideos: 'Home videos', boxsets: 'Collections', books: 'Books', photos: 'Photos', mixed: 'Mixed' };
 
@@ -401,6 +417,9 @@
         {#snippet children()}<code class="fingerprint">{s?.nextKey?.fingerprint}</code>{/snippet}
       </Setting>
     {/if}
+    {#if s.move}
+      <Notice>This server's address changed {day(s.move.since)}, from <code>{s.move.former}</code>. Paired servers are told, and move by themselves: {s.move.moved} of {s.move.of} {s.move.moved === 1 ? 'has' : 'have'}. The former address is still accepted for those that haven't, until {when(s.move.until)}, or until all have moved.</Notice>
+    {/if}
     {#if s.rotation}
       <Notice>This server's key is changing since {day(s.rotation.since)}. Servers that haven't moved yet are told at each contact; the old key is kept for them until {when(s.rotation.until)}, then they must pair again.</Notice>
     {/if}
@@ -418,7 +437,7 @@
   {#if attention.length}
     <Notice warn>
       {#each attention as p (p.id)}
-        <div><strong>{p.name}</strong>: {p.refused && !p.suspendedAt && !p.pending ? `someone holding its key tried, ${ago(p.refused.at)}, to move the pairing to another key (${p.refused.fingerprint}). It was refused. Its operator may have lost control of its key: ask them.` : keyText(p)}</div>
+        <div><strong>{p.name}</strong>: {p.refused && !p.suspendedAt && !p.pending ? `someone holding its key tried, ${ago(p.refused.at)}, to move the pairing to another key (${p.refused.fingerprint}). It was refused. Its operator may have lost control of its key: ask them.` : p.suspendedAt || p.pending || p.ourKey === 'lost' ? keyText(p) : addressText(p)}</div>
       {/each}
     </Notice>
   {/if}
@@ -430,7 +449,7 @@
         <tbody>
           {#each s.peers ?? [] as p (p.id)}
             <tr>
-              <td><div class="name">{p.name}</div><div class="hint">{p.address}{#if p.address.startsWith('http://')}{' · plain http (test setting)'}{/if}</div><div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
+              <td><div class="name">{p.name}</div><div class="hint">{p.address}{#if p.address.startsWith('http://')}{' · plain http (test setting)'}{/if}</div>{#if addressText(p)}<div class="hint">{addressText(p)}</div>{/if}<div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
               <td class="hide-narrow"><div>{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint">{shareText(p)}</div>{/if}{#if p.seenAt}<div class="hint">heard from {ago(p.seenAt)}</div>{/if}</td>
               <td class="hide-narrow"><div><Badge kind={keyState(p).kind}>{keyState(p).text}</Badge></div><div><code class="fingerprint">{p.fingerprint}</code></div>{#if keyText(p)}<div class="hint key-text">{keyText(p)}</div>{/if}</td>
               <td class="row-actions">
