@@ -292,11 +292,15 @@ func readCapabilities(raw json.RawMessage) (Capabilities, bool) {
 
 // versionID is a copy's version ID toward a peer: a keyed MAC of its
 // handle under the IDs secret, which tells the peer nothing of it (MSFP
-// catalog section 2.1), stable as long as the handle is.
+// catalog section 2.1), stable as long as the handle is. Its form is
+// Overfin's from before the engine ("ver_", then the first 16 bytes of
+// HMAC-SHA-256 over "version", the peer's ID and the handle, a line feed
+// between each, base64url), so that the version IDs its peers kept stay
+// the same once it hosts the engine.
 func (e *Engine) versionID(peer, handle string) string {
 	m := hmac.New(sha256.New, e.ourKeys().ids)
-	m.Write([]byte("msfp version\n" + peer + "\n" + handle))
-	return "v" + wire.Encode64(m.Sum(nil)[:16])
+	m.Write([]byte("version\n" + peer + "\n" + handle))
+	return "ver_" + wire.Encode64(m.Sum(nil)[:16])
 }
 
 // sameLanguage says whether a tag matches the one asked: exactly
