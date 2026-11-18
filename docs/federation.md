@@ -1,6 +1,6 @@
 # Federation: sharing libraries between servers
 
-Pair your Overfin server with a friend's, and each of you picks which of
+Pair your server with a friend's, and each of you picks which of
 your libraries the other gets. Their films and series then show on your
 site beside your own, and your people play them there, with the sign-in,
 profiles, history and kids limits they already have. Nobody needs an
@@ -9,6 +9,15 @@ account on the other server, and nobody has to install anything.
 It works between servers whose operators trust each other: each pairing is
 made by hand, one server with one other. There is no directory, no open
 network, and nothing is shared until both of you say so.
+
+**The other server doesn't have to be Overfin.** Federation in Overfin is
+[MSFP](https://github.com/msfp-io/msfp-spec), the Media Server Federation
+Protocol: an open protocol of its own, with a public specification, test
+vectors and a conformance suite. Any media server that implements it
+can pair with yours. Today that's other Overfin servers; MSFP is built
+so that other servers can join, and Overfin's own implementation is an
+engine others can use ([below](#building-a-server-that-pairs)). Choosing
+Overfin doesn't tie your friends to Overfin.
 
 ## What your people see
 
@@ -352,6 +361,8 @@ test_plain_http = true
 allow_loopback = true   # both on this machine
 ```
 
+## Building a server that pairs
+
 Building your own server that pairs with Overfin? Servers speak MSFP, the
 Media Server Federation Protocol, version 1 (its core, and the parts
 catalog, playback, media and video; Overfin has no music): its
@@ -394,7 +405,9 @@ its versions to a paired server's viewer, named by its video ("2160p HDR
 ## Where it stands
 
 Pairing, sharing, the titles on the site and playback both ways work, and
-were tested between two servers in a real browser. Not done yet:
+were tested between two servers in a real browser, and between two servers
+over the internet. Other servers than Overfin can pair once they implement
+MSFP; none does yet. Not done yet:
 
 - watched and in-progress filters for series only a paired server has;
 - one server numbering a series' episodes differently from the other.
