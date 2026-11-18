@@ -1,11 +1,12 @@
 # Overfin
 
-**Your own streaming service, on top of Jellyfin.**
+**Your own streaming platform.**
 
-Share your films and series with family and friends the way a streaming
-service would: their own sign-in, profiles, kids limits that hold,
-wishlists, and a clean web app. Jellyfin stays private behind Overfin, and nobody needs
-a Jellyfin account.
+Overfin is a complete streaming service you run yourself: sign-in by email,
+profiles, kids limits that hold, wishlists, a fast web app and an Android
+app, and servers that can share their libraries with each other.
+Underneath, it runs its own Jellyfin, used only as the engine that reads
+and converts your files. Nobody sees it, and nobody needs an account on it.
 
 **Pair your server with your friends' servers**, and their libraries show
 on your site beside yours, playable with the sign-in your people already
