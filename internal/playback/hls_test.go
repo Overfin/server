@@ -98,28 +98,6 @@ func TestRewriteRefuses(t *testing.T) {
 	}
 }
 
-func TestSanitizeVTT(t *testing.T) {
-	in := "\uFEFFWEBVTT\r\n\r\nSTYLE\r\n::cue { background: url(http://198.51.100.1/x) }\r\n\r\nNOTE secret note\r\n\r\n" +
-		"1\r\n00:00:01.000 --> 00:00:04.000 position:10% align:start\r\n<i>Hello</i> <script>alert(1)</script>\r\n\r\n" +
-		"00:01:00.500 --> 00:01:02.000\r\n<c.yellow>World</c>\r\n"
-	out, ok := SanitizeVTT([]byte(in))
-	if !ok {
-		t.Fatal("refused a valid file")
-	}
-	want := "WEBVTT\n\n00:00:01.000 --> 00:00:04.000\nHello alert(1)\n\n00:01:00.500 --> 00:01:02.000\nWorld\n"
-	if string(out) != want {
-		t.Errorf("got:\n%q\nwant:\n%q", out, want)
-	}
-	if _, ok := SanitizeVTT([]byte("<html>")); ok {
-		t.Error("accepted a non-WebVTT file")
-	}
-	// Text that reads as markup in WebVTT is escaped, so it shows as is.
-	out, _ = SanitizeVTT([]byte("WEBVTT\n\n00:01.000 --> 00:02.000\nx < y & z > w, &lt;i&gt;\n"))
-	if want := "WEBVTT\n\n00:01.000 --> 00:02.000\nx &lt; y &amp; z &gt; w,\n"; string(out) != want {
-		t.Errorf("escaping: %q", out)
-	}
-}
-
 // An HDR video Jellyfin copies comes with SDR versions it would re-encode,
 // at the same bandwidth: only the copy is offered. Without a copy, every
 // version stays.

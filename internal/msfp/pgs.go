@@ -5,8 +5,8 @@ import (
 	"errors"
 )
 
-// Subtitles that are pictures (PGS, from Blu-rays; MSFP media, section
-// 3.3): a track served as it is, only when every part of it is
+// Subtitles that are pictures (PGS, from Blu-rays; MSFP video, section
+// 6.4): a track served as it is, only when every part of it is
 // well-formed and within its limits. The player decodes and draws it;
 // nothing in it is run, and a browser never renders it as a page.
 

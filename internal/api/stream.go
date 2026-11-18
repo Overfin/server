@@ -69,8 +69,6 @@ func (s Stream) trickplay(w http.ResponseWriter, r *http.Request) {
 	s.Playback.serveSheet(w, r, st, r.PathValue("sheet"))
 }
 
-const maxSubtitles = 5 << 20
-
 var (
 	ticketRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 	rangeRe  = regexp.MustCompile(`^bytes=\d{0,15}-\d{0,15}$`)
@@ -447,11 +445,11 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 	}
 	free = sync.OnceFunc(free)
 	defer free()
-	body := s.stretch(w, r, st, index, part, maxSubtitles)
+	body := s.stretch(w, r, st, index, part, msfp.MaxWebVTT)
 	if body == nil {
 		return
 	}
-	vtt, ok := playback.SanitizeVTT(body)
+	vtt, ok := msfp.RebuildWebVTT(body)
 	if !ok {
 		s.Playback.Library.Logger.Warn("refused upstream subtitles", "playback", st.ID)
 		problem.Send(w, problem.NotFound, "")

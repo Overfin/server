@@ -1,11 +1,6 @@
 package api
 
 import (
-	"encoding/hex"
-	"encoding/json"
-	"os"
-
-	"github.com/overfin/server/internal/playback"
 	"net/http"
 	"strings"
 	"testing"
@@ -45,37 +40,5 @@ func TestRelayErrorWithoutTicket(t *testing.T) {
 	}
 	if got := withoutURL(err).Error(); strings.Contains(got, "SECRETTICKET") || !strings.Contains(got, "Get") {
 		t.Errorf("logged as %q", got)
-	}
-}
-
-// The WebVTT cases of MSFP's media test vectors (vectors/v1/media.json of
-// https://github.com/msfp-io/msfp-spec, copied in the msfp package's
-// testdata), through the code that rebuilds what a paired server sends.
-func TestWebVTTVectors(t *testing.T) {
-	b, err := os.ReadFile("../msfp/testdata/v1/media.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var v struct {
-		WebVTT []struct {
-			Name   string `json:"name"`
-			Text   string `json:"text"`
-			Hex    string `json:"hex"`
-			Valid  bool   `json:"valid"`
-			Output string `json:"output"`
-		} `json:"webvtt"`
-	}
-	if err := json.Unmarshal(b, &v); err != nil || len(v.WebVTT) == 0 {
-		t.Fatal("no cases", err)
-	}
-	for _, c := range v.WebVTT {
-		in := []byte(c.Text)
-		if c.Hex != "" {
-			in, _ = hex.DecodeString(c.Hex)
-		}
-		out, ok := playback.SanitizeVTT(in)
-		if ok != c.Valid || (ok && string(out) != c.Output) {
-			t.Errorf("%s: %v %q, want %v %q", c.Name, ok, out, c.Valid, c.Output)
-		}
 	}
 }

@@ -53,3 +53,20 @@ func FuzzFilterPlaylist(f *testing.F) {
 		}
 	})
 }
+
+// A rebuilt WebVTT part is rebuilt again as it is: nothing in it is
+// read differently a second time (video section 6.3).
+func FuzzRebuildWebVTT(f *testing.F) {
+	f.Add([]byte("WEBVTT\n\n00:01.000 --> 00:02.000\n<b>Hi</b> &lt;i&gt;\n"))
+	f.Add([]byte("WEBVTT\r\n\r\n1\r\n00:00:01.000 --> 00:00:02.000 align:start\r\na < b &amp; c\r\n"))
+	f.Fuzz(func(t *testing.T, in []byte) {
+		out, ok := RebuildWebVTT(in)
+		if !ok {
+			return
+		}
+		again, ok := RebuildWebVTT(out)
+		if !ok || string(again) != string(out) {
+			t.Fatalf("%q rebuilt as %q, then %q", in, out, again)
+		}
+	})
+}

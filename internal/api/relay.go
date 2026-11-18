@@ -216,7 +216,7 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 		limit := int64(msfp.MaxPlaylist)
 		switch {
 		case what.vtt:
-			limit = maxSubtitles
+			limit = msfp.MaxWebVTT
 		case what.pgs:
 			limit = msfp.MaxPGS
 		}
@@ -245,7 +245,7 @@ func (s Stream) relay(w http.ResponseWriter, r *http.Request, st *playback.Strea
 				rm.NamePlaylists(msfp.URILines(kept))
 			}
 		case what.vtt:
-			vtt, ok := playback.SanitizeVTT(body)
+			vtt, ok := msfp.RebuildWebVTT(body)
 			if !ok {
 				problem.Send(w, problem.NotFound, "")
 				return

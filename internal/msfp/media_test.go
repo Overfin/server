@@ -39,9 +39,15 @@ func TestCheckPlaylist(t *testing.T) {
 
 // MSFP's media test vectors (https://github.com/msfp-io/msfp-spec,
 // vectors/v1/media.json), copied in testdata/v1/media.json: each
-// case through the code that checks what a paired server sends (the
-// WebVTT cases run where WebVTT is rebuilt, outside this package).
+// case through the code that checks what a paired server sends.
 type mediaVectors struct {
+	WebVTT []struct {
+		Name   string `json:"name"`
+		Text   string `json:"text"`
+		Hex    string `json:"hex"`
+		Valid  bool   `json:"valid"`
+		Output string `json:"output"`
+	} `json:"webvtt"`
 	HLS []struct {
 		Name  string `json:"name"`
 		Text  string `json:"text"`
@@ -75,6 +81,23 @@ func TestHLSVectors(t *testing.T) {
 	for _, c := range v.HLS {
 		if err := CheckPlaylist([]byte(c.Text)); (err == nil) != c.Valid {
 			t.Errorf("%s: %v, want valid %v", c.Name, err, c.Valid)
+		}
+	}
+}
+
+func TestWebVTTVectors(t *testing.T) {
+	v := readMediaVectors(t)
+	if len(v.WebVTT) == 0 {
+		t.Fatal("no WebVTT cases")
+	}
+	for _, c := range v.WebVTT {
+		in := []byte(c.Text)
+		if c.Hex != "" {
+			in, _ = hex.DecodeString(c.Hex)
+		}
+		out, ok := RebuildWebVTT(in)
+		if ok != c.Valid || (ok && string(out) != c.Output) {
+			t.Errorf("%s: %v %q, want %v %q", c.Name, ok, out, c.Valid, c.Output)
 		}
 	}
 }
