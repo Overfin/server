@@ -20,6 +20,7 @@
     wants: number;
     titles: number;
     unusable?: boolean;
+    otherVersion?: boolean;
     wantsGone?: number;
   }
   interface Lib {
@@ -40,6 +41,7 @@
     ours: Lib[];
     theirs: Lib[];
     reachable: boolean;
+    notSupported?: boolean;
     limits: Limits;
     theirLimits?: Limits;
   }
@@ -52,6 +54,7 @@
   interface State {
     available: boolean;
     address?: string;
+    testPlainHTTP?: boolean;
     fingerprint?: string;
     codes?: Code[];
     peers?: Peer[];
@@ -171,7 +174,7 @@
   async function accept(p: Peer) {
     const yes = await ask(
       `Accept ${p.name} (${p.address})? Compare its fingerprint with its operator first, by phone or a message you trust: ${p.fingerprint}. If they differ, refuse it.` +
-        (p.address.startsWith('http://') ? ' Its address is plain http: requests between your servers are signed, but what they say (titles, tickets) can be read on the way.' : ''),
+        (p.address.startsWith('http://') ? ' Its address is plain http, accepted only because of the test setting test_plain_http: never on a server in use.' : ''),
       { yes: 'Accept' },
     );
     if (!yes) return;
@@ -248,6 +251,7 @@
 
   function stateText(p: Peer): string {
     if (p.unusable) return "Unusable: its key isn't a valid one. Remove it, and pair again if it's yours";
+    if (p.otherVersion) return "It speaks another version of the federation protocol: the two servers can't share until one of them is updated";
     switch (p.state) {
       case 'ours':
         return 'Waiting for you to accept';
@@ -277,7 +281,7 @@
 {:else if !s}
   <Loading />
 {:else if !s.available}
-  <Notice warn>Federation needs the site's address, which codes give to other servers: set <code>site.url</code> in the configuration (or an HTTPS domain), as http(s)://host with nothing after it.</Notice>
+  <Notice warn>Federation needs the site's https address, which codes give to other servers: set <code>site.url</code> in the configuration (or an HTTPS domain), as https://host with nothing after it. Servers pair over HTTPS only.</Notice>
 {:else}
   <Card title="This server">
     <Setting label="Address" hint="Where other servers reach this one, as codes give it.">
@@ -286,8 +290,8 @@
     <Setting stack label="Fingerprint" hint="What the other operator compares, to be sure the code is really this server's.">
       {#snippet children()}<code class="fingerprint">{s?.fingerprint}</code>{/snippet}
     </Setting>
-    {#if s.address?.startsWith('http://')}
-      <Notice warn>The address is plain http: requests between servers are still signed, so neither can be impersonated, but what they say can be read on the way.</Notice>
+    {#if s.testPlainHTTP}
+      <Notice warn>The address is plain http, accepted only because the test setting <code>federation.test_plain_http</code> is on: what servers say can be read on the way. Never on a server in use.</Notice>
     {/if}
   </Card>
 
@@ -298,7 +302,7 @@
         <tbody>
           {#each s.peers ?? [] as p (p.id)}
             <tr>
-              <td><div class="name">{p.name}</div><div class="hint">{p.address}{#if p.address.startsWith('http://')}{' · plain http: readable on the way'}{/if}</div><div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
+              <td><div class="name">{p.name}</div><div class="hint">{p.address}{#if p.address.startsWith('http://')}{' · plain http (test setting)'}{/if}</div><div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
               <td class="hide-narrow"><div>{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint">{shareText(p)}</div>{/if}{#if p.seenAt}<div class="hint">heard from {ago(p.seenAt)}</div>{/if}</td>
               <td class="hide-narrow"><code class="fingerprint">{p.fingerprint}</code></td>
               <td class="row-actions">
@@ -361,7 +365,7 @@
 
 {#if using}
   <FormModal title="Use a code" description="The code another server's operator sent you." saveLabel="Read the code" save={read} close={() => (using = false)}>
-    <Field label="Code" wide><textarea bind:value={pasted} rows="4" spellcheck="false" autocomplete="off" placeholder="overfin-pair-1.…" required></textarea></Field>
+    <Field label="Code" wide><textarea bind:value={pasted} rows="4" spellcheck="false" autocomplete="off" placeholder="msfp-pair-1.…" required></textarea></Field>
   </FormModal>
 {/if}
 
@@ -376,7 +380,8 @@
     </div>
     <div class="setting stack">
       <div><div class="label">You want</div><div class="hint">Out of what {sharingWith.name} offers you.</div></div>
-      {#if !sharing.reachable}<Notice warn>{sharingWith.name} can't be reached now: what you want can't be changed until it can.</Notice>{/if}
+      {#if sharing.notSupported}<Notice warn>{sharingWith.name} doesn't share libraries with this server: it speaks another version of the federation protocol, or hasn't said which yet (Check asks it). What you want can't be changed until it does.</Notice>
+      {:else if !sharing.reachable}<Notice warn>{sharingWith.name} can't be reached now: what you want can't be changed until it can.</Notice>{/if}
       <div class="checks all">
         {#each sharing.theirs as l (l.id)}<label class="inline"><input type="checkbox" value={l.id} bind:group={want} disabled={!sharing.reachable} /> {l.name}{#if kindOf(l)} <span class="hint">({kindOf(l)})</span>{/if}{#if l.gone} <span class="hint">· no longer offered</span>{/if}</label>
         {:else}<span class="hint">{sharing.reachable ? `${sharingWith.name} offers you nothing yet.` : ''}</span>{/each}
@@ -409,7 +414,7 @@
       {#snippet children()}<code>{preview?.address}</code>{/snippet}
     </Setting>
     {#if preview?.address?.startsWith('http://')}
-      <Notice warn>That server's address is plain http: requests between your servers are still signed, so neither can be impersonated, but what they say (titles, tickets) can be read on the way.</Notice>
+      <Notice warn>That server's address is plain http, accepted only because the test setting <code>federation.test_plain_http</code> is on here. Never on a server in use.</Notice>
     {/if}
     <Setting stack label="Fingerprint" hint="Compare it with the other operator, by phone or a message you trust: if it differs, the code was changed on the way.">
       {#snippet children()}<code class="fingerprint">{preview?.fingerprint}</code>{/snippet}
