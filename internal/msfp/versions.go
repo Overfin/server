@@ -93,7 +93,7 @@ func readList(raw json.RawMessage) ([]int, error) {
 			break
 		}
 		var n int
-		if string(e) != "null" && json.Unmarshal(e, &n) == nil && n >= 0 && !slices.Contains(list, n) {
+		if isInteger(string(e)) && json.Unmarshal(e, &n) == nil && n >= 0 && !slices.Contains(list, n) {
 			list = append(list, n)
 		}
 	}

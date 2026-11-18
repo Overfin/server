@@ -34,6 +34,11 @@ func TestVersions(t *testing.T) {
 		{`{"state":"paired","core":[2,3,4,5,6,7,8,9,1],"parts":{}}`, false, map[string]int{}},
 		{`{"state":"paired","core":[-1,"1",1,1],"parts":{"catalog":[1],"Media":[1],"x_y":"x"}}`, true,
 			map[string]int{PartCatalog: 1}},
+		// Numbers that aren't integers as core section 2.3 says, ignored
+		// as entries too, not refused.
+		{`{"state":"paired","core":[2.5,1e0,-0,9007199254740992,true,1],"parts":{"catalog":[1.0,1],"playback":[1.5]}}`, true,
+			map[string]int{PartCatalog: 1}},
+		{`{"state":"paired","core":[1.0],"parts":{}}`, false, map[string]int{}},
 		// An empty list: that part not spoken.
 		{`{"state":"paired","core":[1],"parts":{"catalog":[],"playback":[1],"media":[1],"video":[1]}}`, true,
 			map[string]int{PartMedia: 1}},

@@ -59,6 +59,31 @@ func TestStrictJSONVectors(t *testing.T) {
 	}
 }
 
+// A number that isn't an integer is refused only where an integer is
+// read: in an integer field, a list or a map of them, or behind a
+// pointer; an unknown member holding one is ignored like any other
+// (core section 2.3).
+func TestNumbersOutsideIntegers(t *testing.T) {
+	var into struct {
+		N    int             `json:"n"`
+		P    *int64          `json:"p"`
+		List []uint          `json:"list"`
+		Map  map[string]int  `json:"map"`
+		Raw  json.RawMessage `json:"raw"`
+	}
+	for _, body := range []string{`{"n":1.5}`, `{"n":1e3}`, `{"n":-0}`, `{"n":9007199254740992}`, `{"p":2.0}`,
+		`{"list":[1,2.5]}`, `{"map":{"a":1E1}}`} {
+		if err := DecodeJSON([]byte(body), &into); err == nil {
+			t.Errorf("%s accepted", body)
+		}
+	}
+	for _, body := range []string{`{"n":1,"zz":2.5}`, `{"n":1,"zz":{"x":[1e300,-0,0.1]}}`, `{"raw":[1.5]}`, `{"N":1.5}`} {
+		if err := DecodeJSON([]byte(body), &into); err != nil {
+			t.Errorf("%s: %v", body, err)
+		}
+	}
+}
+
 // null is never a valid value (core section 2.3): refused anywhere in a
 // request, at the top of an answer; inside an answer, read as left out.
 // Marshal never writes one.

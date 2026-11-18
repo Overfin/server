@@ -138,7 +138,7 @@ func decodeTree(tree map[string]any, v any) error {
 // strictTree reads a body as I-JSON: UTF-8 without a byte order mark; no
 // surrogates (escaped or not) and no noncharacters; no object with the
 // same member name twice, compared once their escapes are decoded;
-// integers only, without fraction, exponent or -0, within ±(2^53 − 1).
+// numbers as JSON has them, an integer field's checked by keepExact.
 // Objects become map[string]any, numbers json.Number.
 // With nulls, null is a value; otherwise it is refused.
 func strictTree(body []byte, nulls bool) (any, error) {
@@ -225,6 +225,26 @@ func noncharacter(r rune) bool {
 // integerRe is a JSON integer: no fraction, no exponent, no leading zero.
 var integerRe = regexp.MustCompile(`^-?(0|[1-9][0-9]{0,15})$`)
 
+// isInteger says whether a JSON number is an integer as MSFP core
+// section 2.3 says: no fraction, no exponent, not -0, within
+// ±(2^53 − 1).
+func isInteger(s string) bool {
+	if !integerRe.MatchString(s) || s == "-0" {
+		return false
+	}
+	n, err := strconv.ParseInt(strings.TrimPrefix(s, "-"), 10, 64)
+	return err == nil && n <= maxInteger
+}
+
+// notInteger stands, in a body read for a struct, for a number that isn't
+// an integer where an integer field is: it can't be written, so the body
+// is refused (a member of the wrong type, core section 2.3).
+type notInteger struct{}
+
+func (notInteger) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("federation: not an integer")
+}
+
 // readValue reads one value, token by token.
 func readValue(dec *json.Decoder, depth int, nulls bool) (any, error) {
 	if depth > maxDepth {
@@ -268,14 +288,10 @@ func readValue(dec *json.Decoder, depth int, nulls bool) (any, error) {
 		}
 		return nil, ErrJSON
 	case json.Number:
-		s := string(t)
-		if !integerRe.MatchString(s) || s == "-0" {
-			return nil, ErrJSON
-		}
-		n, err := strconv.ParseInt(strings.TrimPrefix(s, "-"), 10, 64)
-		if err != nil || n > maxInteger {
-			return nil, ErrJSON
-		}
+		// Any I-JSON number: whether it is an integer is the field's
+		// question (keepExact), since a version list ignores entries
+		// that aren't (section 10.2) and unknown members are ignored
+		// whatever they hold.
 		return t, nil
 	case nil:
 		if !nulls {
@@ -392,6 +408,11 @@ func keepExact(v any, t reflect.Type) any {
 			out[i] = keepExact(value, t.Elem())
 		}
 		return out
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if n, ok := v.(json.Number); ok && !isInteger(string(n)) {
+			return notInteger{}
+		}
 	}
 	return v
 }
