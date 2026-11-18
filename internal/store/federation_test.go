@@ -45,19 +45,19 @@ func TestRedeemPairingCode(t *testing.T) {
 	key := bytes.Repeat([]byte{3}, 32)
 	hash := PairingSecretHash(secret)
 	refuse := func([]byte) bool { return false }
-	if _, err := s.RedeemPairingCode(ctx, hash, key, "https://b.example.org", "B", nil, refuse); !errors.Is(err, ErrNotFound) {
+	if _, err := s.RedeemPairingCode(ctx, hash, key, "https://b.example.org", "B", nil, false, refuse); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a refused proof: %v", err)
 	}
-	if _, err := s.RedeemPairingCode(ctx, PairingSecretHash([]byte("other")), key, "https://b.example.org", "B", nil,
+	if _, err := s.RedeemPairingCode(ctx, PairingSecretHash([]byte("other")), key, "https://b.example.org", "B", nil, false,
 		func([]byte) bool { return true }); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("another secret: %v", err)
 	}
 	var seen []byte
-	p, err := s.RedeemPairingCode(ctx, hash, key, "https://b.example.org", "B", nil, func(got []byte) bool { seen = got; return true })
+	p, err := s.RedeemPairingCode(ctx, hash, key, "https://b.example.org", "B", nil, false, func(got []byte) bool { seen = got; return true })
 	if err != nil || p.State != PeerOurs || !bytes.Equal(seen, secret) {
 		t.Fatalf("redeemed: %+v, %v (secret %x)", p, err, seen)
 	}
-	if _, err := s.RedeemPairingCode(ctx, hash, bytes.Repeat([]byte{4}, 32), "https://c.example.org", "C", nil,
+	if _, err := s.RedeemPairingCode(ctx, hash, bytes.Repeat([]byte{4}, 32), "https://c.example.org", "C", nil, false,
 		func([]byte) bool { return true }); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a code used twice: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestRedeemPairingCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	clock = clock.Add(2 * time.Hour)
-	if _, err := s.RedeemPairingCode(ctx, PairingSecretHash(secret2), bytes.Repeat([]byte{5}, 32), "https://d.example.org", "D", nil,
+	if _, err := s.RedeemPairingCode(ctx, PairingSecretHash(secret2), bytes.Repeat([]byte{5}, 32), "https://d.example.org", "D", nil, false,
 		func([]byte) bool { return true }); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("an expired code: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestRedeemPairingCode(t *testing.T) {
 	if _, err := s.CreatePairingCode(ctx, secret3, "", clock.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RedeemPairingCode(ctx, PairingSecretHash(secret3), key, "https://b.example.org", "B", nil,
+	if _, err := s.RedeemPairingCode(ctx, PairingSecretHash(secret3), key, "https://b.example.org", "B", nil, false,
 		func([]byte) bool { return true }); !errors.Is(err, ErrPeerExists) {
 		t.Fatalf("a known key: %v", err)
 	}

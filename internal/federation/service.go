@@ -493,7 +493,7 @@ func (s *Service) pair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := cleanName(req.Name, req.Address)
-	_, err := s.Store.RedeemPairingCode(r.Context(), hash, v.Key, req.Address, name, commitment, func(secret []byte) bool {
+	_, err := s.Store.RedeemPairingCode(r.Context(), hash, v.Key, req.Address, name, commitment, false, func(secret []byte) bool {
 		return msfp.CheckPairingProof(secret, v.Key, req.Address, req.Proof)
 	})
 	switch {

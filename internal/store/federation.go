@@ -175,7 +175,31 @@ type Peer struct {
 	// hello there answered under its key: Address stays until then. nil
 	// for none.
 	Move *msfp.Move `json:"-"`
+
+	// Servers that can't be called (MSFP core section 7.5).
+	//
+	// Inbound is InboundYes, InboundNo (it can't be called: never
+	// connected to) or InboundConfirming (it says it can again, not
+	// confirmed yet: still never connected to, but by the hello that
+	// confirms its address).
+	Inbound string `json:"-"`
+	// CallsFailed: its latest hello answer said its last calls to this
+	// server couldn't connect.
+	CallsFailed bool `json:"-"`
 }
+
+// Whether a peer can be called (MSFP core section 7.5).
+const (
+	InboundYes        = "yes"
+	InboundNo         = "no"
+	InboundConfirming = "confirming"
+)
+
+// Callable says whether this server may connect to the peer: it never
+// said it can't be called, or it said it can again and that was
+// confirmed. A Peer made by hand, not read from the store (a code's
+// server), can be.
+func (p *Peer) Callable() bool { return p.Inbound != InboundNo && p.Inbound != InboundConfirming }
 
 // Usable says whether the pairing is on: paired, and its key not
 // revoked.
@@ -225,9 +249,10 @@ var ErrPeerExists = errors.New("store: that server is already in the list")
 // stays).
 //
 // commitment is the server's next key commitment, from its request (nil
-// for none); ours goes in the answer, so it holds it.
+// for none); ours goes in the answer, so it holds it. uncallable: its
+// request said it can't be called (MSFP core section 7.5).
 func (s *Store) RedeemPairingCode(ctx context.Context, secretHash, publicKey []byte, address, name string, commitment []byte,
-	check func(secret []byte) bool) (*Peer, error) {
+	uncallable bool, check func(secret []byte) bool) (*Peer, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -261,6 +286,12 @@ func (s *Store) RedeemPairingCode(ctx context.Context, secretHash, publicKey []b
 	if err != nil {
 		return nil, err
 	}
+	if uncallable {
+		if _, err := tx.ExecContext(ctx, `UPDATE peers SET inbound = 'no' WHERE id = ?`, p.ID); err != nil {
+			return nil, err
+		}
+		p.Inbound = InboundNo
+	}
 	return p, tx.Commit()
 }
 
@@ -269,7 +300,7 @@ func (s *Store) RedeemPairingCode(ctx context.Context, secretHash, publicKey []b
 func insertPeer(ctx context.Context, tx *sql.Tx, now time.Time, publicKey []byte, address, name, state string, commitment []byte) (*Peer, error) {
 	now = now.UTC().Truncate(time.Second)
 	p := &Peer{ID: ids.New("peer"), PublicKey: publicKey, Address: address, Name: name, State: state, Created: now, Seen: &now,
-		CommitmentTold: true}
+		CommitmentTold: true, Inbound: InboundYes}
 	if commitment != nil {
 		p.NextCommitment, p.CommitmentFrom = commitment, CommitmentPair
 	}
@@ -306,7 +337,8 @@ func (s *Store) AddPeer(ctx context.Context, publicKey []byte, address, name str
 const peerSelect = `SELECT id, public_key, address, name, state, created_at, paired_at, seen_at,
 	max_streams, max_transcodes, max_bitrate_kbps, their_streams, their_transcodes, their_bitrate_kbps, certificates, versions,
 	next_commitment, commitment_from, previous_key, previous_until, pending_rotation, suspended_at, refused_key, refused_at,
-	our_key, rotation_answer, rotate_sent_at, commitment_told, our_address, new_address, new_address_tried, new_address_failing FROM peers`
+	our_key, rotation_answer, rotate_sent_at, commitment_told, our_address, new_address, new_address_tried, new_address_failing,
+	inbound, calls_failed FROM peers`
 
 func scanPeer(row interface{ Scan(...any) error }) (*Peer, error) {
 	var p Peer
@@ -319,7 +351,8 @@ func scanPeer(row interface{ Scan(...any) error }) (*Peer, error) {
 	if err := row.Scan(&p.ID, &p.PublicKey, &p.Address, &p.Name, &p.State, &created, &paired, &seen,
 		&p.Limits.Streams, &p.Limits.Transcodes, &p.Limits.BitrateKbps, &ts, &tt, &tb, &certificates, &p.Versions,
 		&p.NextCommitment, &p.CommitmentFrom, &p.PreviousKey, &previousUntil, &pending, &suspended, &p.RefusedKey, &refused,
-		&p.OurKey, &p.RotationAnswer, &rotateSent, &p.CommitmentTold, &p.OurAddress, &newAddress, &newTried, &newFailing); err != nil {
+		&p.OurKey, &p.RotationAnswer, &rotateSent, &p.CommitmentTold, &p.OurAddress, &newAddress, &newTried, &newFailing,
+		&p.Inbound, &p.CallsFailed); err != nil {
 		return nil, err
 	}
 	if newAddress != "" {

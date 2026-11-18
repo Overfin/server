@@ -453,7 +453,7 @@ func (s *Service) rotateTo(ctx context.Context, next msfp.Key) error {
 	}
 	old := s.Keys.Current()
 	after := msfp.NewKey()
-	if err := s.Store.RotateFederationKey(ctx, next.Seed(), after.Seed(), msfp.Commitment(after.Public()), s.now()); err != nil {
+	if err := s.Store.RotateFederationKey(ctx, next.Seed(), after.Seed(), msfp.Commitment(after.Public()), s.now(), false); err != nil {
 		return err
 	}
 	if err := s.Keys.reload(ctx, s.Store); err != nil {

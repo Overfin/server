@@ -37,6 +37,10 @@ type FederationKeys struct {
 	// it: nil when no change is under way. RotatedAt is when it began.
 	Old       []byte
 	RotatedAt time.Time
+	// OldRevoked: the old key was revoked, the change made after it
+	// (MSFP core section 12.7, case 1). Peers that can't be called pull
+	// the revocation from hello answers signed with it (section 12.6).
+	OldRevoked bool
 	// IDs is the secret that makes the IDs peers know this server's
 	// things by (federation's opaque IDs): it never changes.
 	IDs []byte
@@ -98,6 +102,11 @@ func (s *Store) FederationKeys(ctx context.Context) (FederationKeys, error) {
 		}
 		k.RotatedAt = time.Unix(n, 0).UTC()
 	}
+	revoked, err := metaValue(ctx, s.read, "federation-old-revoked")
+	if err != nil {
+		return k, err
+	}
+	k.OldRevoked = k.Old != nil && string(revoked) == "1"
 	return k, nil
 }
 
@@ -151,7 +160,8 @@ func setMeta(ctx context.Context, tx *sql.Tx, name string, value []byte) error {
 // nextSeed, with nextCommitment, as the new next key. Every peer that
 // knew us by the current key is then to be moved (OurKeyOld). A change
 // that was under way must be finished first (FinishFederationRotation).
-func (s *Store) RotateFederationKey(ctx context.Context, newSeed, nextSeed, nextCommitment []byte, at time.Time) error {
+// revoked says the current key was just revoked (OldRevoked).
+func (s *Store) RotateFederationKey(ctx context.Context, newSeed, nextSeed, nextCommitment []byte, at time.Time, revoked bool) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -171,12 +181,17 @@ func (s *Store) RotateFederationKey(ctx context.Context, newSeed, nextSeed, next
 	if err != nil {
 		return err
 	}
+	flag := []byte("0")
+	if revoked {
+		flag = []byte("1")
+	}
 	for _, m := range []struct {
 		name  string
 		value []byte
 	}{
 		{"federation-old-key", s.box.Seal(current, federationOldContext)},
 		{"federation-rotated-at", []byte(strconv.FormatInt(at.Unix(), 10))},
+		{"federation-old-revoked", flag},
 		{"federation-key", s.box.Seal(newSeed, federationKeyContext)},
 		{"federation-next-key", s.box.Seal(nextSeed, federationNextContext)},
 		{"federation-next-commitment", nextCommitment},
@@ -201,7 +216,8 @@ func (s *Store) FinishFederationRotation(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE name IN ('federation-old-key', 'federation-rotated-at')`); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE name IN ('federation-old-key', 'federation-rotated-at',
+		'federation-old-revoked')`); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE peers SET our_key = 'lost' WHERE our_key = 'old'`); err != nil {
@@ -230,7 +246,8 @@ func (s *Store) ReplaceFederationKey(ctx context.Context, newSeed, nextSeed, nex
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE name IN ('federation-old-key', 'federation-rotated-at')`); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE name IN ('federation-old-key', 'federation-rotated-at',
+		'federation-old-revoked')`); err != nil {
 		return err
 	}
 	for _, m := range []struct {
