@@ -3,7 +3,8 @@
 // server's own key and its fingerprint, the one-time pairing code, signed
 // requests and answers and their nonces, MSFP's strict JSON, addresses
 // (HTTPS only), certificate pins, hello and the versions of the core and
-// its parts; of its media and video parts, the checks of the playlists and
+// its parts, key rotation and revocation (their statements, the next key
+// commitment); of its media and video parts, the checks of the playlists and
 // PGS pictures a server relays from another.
 //
 // A server proves who it is with its key only, never with a web

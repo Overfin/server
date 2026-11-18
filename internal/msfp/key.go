@@ -67,8 +67,18 @@ const fingerprintBytes = 15
 // Fingerprint is a key in a form people can compare, read aloud or over
 // the phone: 24 letters and digits in groups of four, "ABCD-EFGH-…".
 func Fingerprint(public ed25519.PublicKey) string {
-	sum := sha256.Sum256(public)
-	text := base32.StdEncoding.EncodeToString(sum[:fingerprintBytes])
+	return CommitmentFingerprint(Commitment(public))
+}
+
+// CommitmentFingerprint is the fingerprint of the key a next key
+// commitment is to (section 12.5): both are made of the key's SHA-256, so
+// the next key's fingerprint is known from its commitment alone, its seed
+// kept offline.
+func CommitmentFingerprint(commitment []byte) string {
+	if len(commitment) < fingerprintBytes {
+		return ""
+	}
+	text := base32.StdEncoding.EncodeToString(commitment[:fingerprintBytes])
 	var b strings.Builder
 	for i := 0; i < len(text); i += 4 {
 		if i > 0 {

@@ -16,12 +16,16 @@ type Hello struct {
 	Certificates []string
 	// Address is its address now, "" when it gives none.
 	Address string
+	// NextCommitment is its next key commitment (section 12.5), 32
+	// bytes; nil when it gives none.
+	NextCommitment []byte
 }
 
 // ReadHello reads a hello's body: a request, or with answer, an answer.
 // A request without state, or with a member of the wrong type, is a bad
 // body (ErrJSON), as is an answer with one, but for certificates that
 // aren't a list, which in an answer only count as none (section 3.2).
+// A nextCommitment that isn't 32 bytes of base64url is a bad body too.
 // The members that go one way only (knownKey, rotation, revocation,
 // callsFailed) are not read here.
 func ReadHello(body []byte, answer bool) (Hello, error) {
@@ -67,12 +71,16 @@ func ReadHello(body []byte, answer bool) (Hello, error) {
 		}
 		h.Certificates = CleanPins(pins)
 	}
-	var s string
 	var b bool
 	if m.Address != nil && json.Unmarshal(m.Address, &h.Address) != nil ||
-		m.NextCommitment != nil && json.Unmarshal(m.NextCommitment, &s) != nil ||
 		m.Inbound != nil && json.Unmarshal(m.Inbound, &b) != nil {
 		return Hello{}, ErrJSON
+	}
+	if m.NextCommitment != nil {
+		var ok bool
+		if h.NextCommitment, ok = readBytes(m.NextCommitment, 32); !ok {
+			return Hello{}, ErrJSON
+		}
 	}
 	return h, nil
 }

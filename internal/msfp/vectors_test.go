@@ -18,8 +18,8 @@ import (
 // MSFP's version 1 test vectors (https://github.com/msfp-io/msfp-spec,
 // vectors/v1/), copied as they are in testdata/v1/: recomputed here with
 // the code, so the code keeps speaking the protocol they describe. The
-// rotation and revocation vectors, and the exchanges' members of servers
-// that can't be called, are for what Overfin doesn't do yet.
+// exchanges' members of servers that can't be called are for what
+// Overfin doesn't do yet.
 
 type vectorKey struct {
 	Seed        string `json:"seed"` // hex
