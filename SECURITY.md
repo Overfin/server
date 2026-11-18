@@ -902,7 +902,11 @@ anyone. Paired servers are not trusted at all (rule 94).
      again at most once an hour, and the operator is warned after a day.
      When this server's own address changes, requests signed for its
      former host are accepted too, 30 days at most, and no longer once
-     every peer signs for the new one; never a third host. A move to or
+     every peer signs for the new one; never a third host. The new
+     address is announced only once this server reaches itself there: a
+     hello signed with its own key, checked as rule 136 says, answered
+     by the signed 404 it gives its own key alone, over that request's
+     nonce; until then its hellos name the former. A move to or
      from an address of a server that can't be called (rule 140) keeps
      no former address, on either side. A stolen key
      can move its server's peers this way, until it is revoked (rule

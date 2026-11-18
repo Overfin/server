@@ -1,9 +1,11 @@
 package federation
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -61,6 +63,26 @@ func peerOn(t *testing.T, s *server, id string) *store.Peer {
 	return p
 }
 
+// signedFor is the address s takes from's request, signed for at's host,
+// as signed for (PeerCall.Address): what a play answer's URLs are on.
+func signedFor(t *testing.T, s, from *server, at string) string {
+	t.Helper()
+	body := []byte(`{}`)
+	req := httptest.NewRequest("POST", at+playPath, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	msfp.SignRequest(req, body, from.s.Keys.Current(), from.s.now())
+	var got string
+	SignRefusals(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if c, ok := s.s.PeerRequest(w, r); ok {
+			got = c.Address
+		}
+	})).ServeHTTP(httptest.NewRecorder(), req)
+	if got == "" {
+		t.Fatalf("a request signed for %s refused", at)
+	}
+	return got
+}
+
 // B's address changes (MSFP core section 13): A is told in a hello, calls
 // hello at the new address, which B answers under its key, and stores it;
 // B, once A's requests are signed for its new host, ends the move, and its
@@ -88,7 +110,7 @@ func TestAddressChange(t *testing.T) {
 		t.Fatalf("A's view of B, moved: move %+v, pins %v", moved.Move, moved.Certificates)
 	}
 	waitFor(t, "B ends its move", func() bool { _, _, ok := b2.s.Moving(); return !ok })
-	if got := peerOn(t, b2, aOnB.ID); got.OurAddress != b2.url || b2.s.AddressFor(got) != b2.url {
+	if got := peerOn(t, b2, aOnB.ID); got.OurAddress != b2.url {
 		t.Fatalf("B's view of A: calls %q", got.OurAddress)
 	}
 	// A calls the new address, and the catalog works there.
@@ -115,10 +137,13 @@ func TestAddressChange(t *testing.T) {
 	}
 }
 
-// B announces an address A must not connect to (link-local, where a
+// B's hello names an address A must not connect to (link-local, where a
 // cloud's metadata service answers: MSFP core section 3.3): A never
 // connects, keeps calling B's old address, which B still accepts during
-// its move, and notes the failure for its operator.
+// its move, and notes the failure for its operator. B itself, not
+// reaching itself there either (its own outbound rules), names its
+// former address meanwhile: A learns of the new one as a hello from
+// someone else naming it would tell it.
 func TestAddressChangeRefusedDestination(t *testing.T) {
 	ctx := context.Background()
 	a, b, bOnA, aOnB := pairedPair(t)
@@ -131,12 +156,17 @@ func TestAddressChangeRefusedDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	b2 := moveTo(t, b, "https://169.254.169.254", false)
-	waitFor(t, "A tries B's new address", func() bool {
-		p := peerOn(t, a, bOnA.ID)
-		return p.Move != nil && !p.Move.Failing.IsZero()
-	})
+	if !b2.s.Waiting() || b2.s.named() != b.url {
+		t.Fatalf("B, its new address refused: waiting %v, names %q", b2.s.Waiting(), b2.s.named())
+	}
+	exec(t, a, `UPDATE peers SET new_address = ? WHERE id = ?`, b2.url, bOnA.ID)
+	peers, err := a.s.Store.Peers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.s.maintainAddresses(ctx, peers)
 	p := peerOn(t, a, bOnA.ID)
-	if p.Address != b.url || p.Move.Address != b2.url {
+	if p.Address != b.url || p.Move == nil || p.Move.Address != b2.url || p.Move.Failing.IsZero() {
 		t.Fatalf("A's view of B: %q, move %+v", p.Address, p.Move)
 	}
 	// The old address still works: B accepts its former host.
@@ -147,8 +177,8 @@ func TestAddressChangeRefusedDestination(t *testing.T) {
 	if notMoved, _ := b2.s.NotMoved(onB); !notMoved {
 		t.Fatal("B counts A as moved")
 	}
-	// B's play answers to A name the address A calls.
-	if got := b2.s.AddressFor(onB); got != b.url {
+	// B's play answers to A name the address A signed for.
+	if got := signedFor(t, b2, a, b.url); got != b.url {
 		t.Fatalf("B's URLs for A on %q", got)
 	}
 	// A new try waits an hour.
@@ -157,11 +187,11 @@ func TestAddressChangeRefusedDestination(t *testing.T) {
 	}
 }
 
-// B announces an address where another server answers (C, under its own
-// key): the hello there isn't answered under B's key, so A keeps B's old
-// address; and once B names its stored address again, the move is
+// B's hello names an address where another server answers (C, under its
+// own key): the hello there isn't answered under B's key, so A keeps B's
+// old address; and once B names its stored address again, the move is
 // dropped, and B, whose peers all call that address, has no move to wait
-// for.
+// for. B itself, getting C's answer there, never names that address.
 func TestAddressChangeNotConfirmed(t *testing.T) {
 	ctx := context.Background()
 	a, b, bOnA, _ := pairedPair(t)
@@ -172,11 +202,19 @@ func TestAddressChangeNotConfirmed(t *testing.T) {
 		}
 	}
 	b2 := moveTo(t, b, c.url, false)
-	waitFor(t, "A tries B's new address", func() bool {
-		p := peerOn(t, a, bOnA.ID)
-		return p.Move != nil && !p.Move.Failing.IsZero()
-	})
-	if p := peerOn(t, a, bOnA.ID); p.Address != b.url || p.Move.Address != c.url {
+	if err := b2.s.answersAt(ctx, c.url); err == nil {
+		t.Fatal("B recognised C's answer as its own")
+	}
+	if !b2.s.Waiting() || b2.s.named() != b.url {
+		t.Fatalf("B, another server at its new address: waiting %v, names %q", b2.s.Waiting(), b2.s.named())
+	}
+	exec(t, a, `UPDATE peers SET new_address = ? WHERE id = ?`, c.url, bOnA.ID)
+	peers, err := a.s.Store.Peers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.s.maintainAddresses(ctx, peers)
+	if p := peerOn(t, a, bOnA.ID); p.Address != b.url || p.Move == nil || p.Move.Address != c.url || p.Move.Failing.IsZero() {
 		t.Fatalf("A's view of B: %q, move %+v", p.Address, p.Move)
 	}
 	// B goes back to its address before the move was confirmed: its
@@ -191,6 +229,52 @@ func TestAddressChangeNotConfirmed(t *testing.T) {
 	}
 	if p := peerOn(t, a, bOnA.ID); p.Address != b.url || p.Move != nil {
 		t.Fatalf("A's view of B after: %q, move %+v", p.Address, p.Move)
+	}
+}
+
+// B's new address doesn't reach it yet (MSFP core section 13.1, step 2):
+// B names its former address in its hellos, so A isn't told, until B's
+// own request there is answered under B's key; then A is told at once,
+// and moves.
+func TestAddressAnnouncedOnceItAnswers(t *testing.T) {
+	ctx := context.Background()
+	a, b, bOnA, aOnB := pairedPair(t)
+	for _, s := range []*server{a, b} {
+		if err := s.s.NoteAddress(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// B's new address: nothing behind it at first (a proxy not set up
+	// yet), then B.
+	var up atomic.Bool
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !up.Load() {
+			http.Error(w, "no route", http.StatusBadGateway)
+			return
+		}
+		b.routes.ServeHTTP(w, r)
+	}))
+	t.Cleanup(ts.Close)
+	b2 := moveTo(t, b, ts.URL, false)
+	time.Sleep(200 * time.Millisecond) // several tries
+	if !b2.s.Waiting() {
+		t.Fatal("B announces an address that doesn't answer")
+	}
+	// A hello from B, meanwhile, names the former address.
+	if _, err := b2.s.Check(ctx, peerOn(t, b2, aOnB.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if p := peerOn(t, a, bOnA.ID); p.Address != b.url || p.Move != nil {
+		t.Fatalf("A told of an address that doesn't answer: %q, move %+v", p.Address, p.Move)
+	}
+	up.Store(true)
+	waitFor(t, "A stores B's new address", func() bool { return peerOn(t, a, bOnA.ID).Address == ts.URL })
+	if b2.s.Waiting() || b2.s.named() != ts.URL {
+		t.Fatalf("B after: waiting %v, names %q", b2.s.Waiting(), b2.s.named())
+	}
+	// A now signs for the new host, and B's play answers are on it.
+	if got := signedFor(t, b2, a, ts.URL); got != ts.URL {
+		t.Fatalf("B's URLs for A on %q", got)
 	}
 }
 

@@ -108,6 +108,9 @@ type Service struct {
 	// while the move lasts (NoteAddress); "" for none.
 	former  string
 	movedAt time.Time
+	// waiting: this server's address, new, doesn't answer yet, and isn't
+	// announced (waitForAnswer).
+	waiting bool
 	// announced is when each peer was last sent a hello for our new
 	// address, at its contacts, by ID.
 	announced map[string]time.Time
@@ -195,8 +198,13 @@ func (s *Service) changed(peerID string) {
 }
 
 // forgotten says whether a key is a server's whose pairing with this one
-// ended.
+// ended, or this server's own: its check that its new address reaches it
+// (answersAt) gets the signed 404 of an unknown key, which only it can
+// recognise.
 func (s *Service) forgotten(r *http.Request, key ed25519.PublicKey) bool {
+	if key.Equal(s.Keys.Current().Public()) {
+		return true
+	}
 	f, err := s.Store.PeerForgotten(r.Context(), key)
 	return err == nil && f
 }
@@ -348,7 +356,7 @@ func (s *Service) ourHello(ctx context.Context, p *store.Peer, state string, ans
 	if state == helloEnded {
 		return helloMessage{State: helloEnded}
 	}
-	h := helloMessage{State: state, Core: ourVersions.Core, Parts: ourVersions.Parts, Address: s.Address}
+	h := helloMessage{State: state, Core: ourVersions.Core, Parts: ourVersions.Parts, Address: s.named()}
 	if !s.Uncallable {
 		h.Certificates = s.ownCertificates(ctx, answering)
 		return h
@@ -1853,25 +1861,42 @@ func ValidLimits(l store.PeerLimits) error {
 	return nil
 }
 
+// PeerCall is a request from a paired server, checked (PeerRequest).
+type PeerCall struct {
+	Peer  *store.Peer
+	Body  []byte
+	Nonce string
+	// Address is this server's address the request was signed for: its
+	// former one while it moves, for a peer that hasn't moved yet, its
+	// current one otherwise. A play answer's URLs are on it (MSFP core
+	// section 13.1, step 5; media section 1), so the peer, calling there,
+	// accepts them.
+	Address string
+}
+
 // PeerRequest checks a request from a paired server, for routes other
 // packages serve (playback): its signature, and that its key is a paired
 // server's. Anyone else gets the plain 404 and ok is false.
-func (s *Service) PeerRequest(w http.ResponseWriter, r *http.Request) (p *store.Peer, body []byte, nonce string, ok bool) {
+func (s *Service) PeerRequest(w http.ResponseWriter, r *http.Request) (c PeerCall, ok bool) {
 	v, body, ok := s.verified(w, r)
 	if !ok {
-		return nil, nil, "", false
+		return PeerCall{}, false
 	}
 	p, err := s.Store.PeerByKey(r.Context(), v.Key)
 	if err != nil || p.State != store.PeerPaired {
 		problem.Send(w, problem.NotFound, "")
-		return nil, nil, "", false
+		return PeerCall{}, false
 	}
 	if part := partOf[r.URL.Path]; part != "" && !s.Speaks(p, part) {
 		notSupported(w)
-		return nil, nil, "", false
+		return PeerCall{}, false
 	}
 	s.Store.PeerSeen(r.Context(), p.ID)
-	return p, body, v.Nonce, true
+	c = PeerCall{Peer: p, Body: body, Nonce: v.Nonce, Address: s.Address}
+	if former, _, moving := s.Moving(); v.Former && moving {
+		c.Address = former
+	}
+	return c, true
 }
 
 // Answer sends a paired server a signed JSON answer to its request.

@@ -141,6 +141,14 @@ Your server's address is your site's (`site.url`, or its HTTPS domain).
 Change it in the configuration and restart, as for any setting: paired
 servers follow by themselves, without pairing again.
 
+- **Paired servers are told once the new address answers.** Your
+  server first calls itself at the new address, through the same rules
+  as any call to a paired server (below), and tells paired servers only
+  once it gets its own answer back there: until then, it keeps naming the
+  old address, tries again (sooner at first, then every 5 minutes), and
+  the panel shows the move as waiting for the new address to answer. Your
+  server must therefore reach itself at its new address (not on loopback,
+  which is refused here too).
 - **Keep the old address working for a while.** Paired servers keep
   calling it until they've checked the new one, so serve both (two names
   on your reverse proxy, or the old port still open) until the panel
@@ -159,7 +167,8 @@ servers follow by themselves, without pairing again.
   addresses Overfin never connects to (below) apply to a new address
   too: it's refused, and the old one stays.
 - **Playback** goes on through the move: a playback started before keeps
-  its old address until it ends.
+  its old address until it ends, and a new one's streams are on the
+  address the paired server called.
 - **Certificates.** During the move, your server names to paired servers
   the certificates of both addresses, until the move ends.
 

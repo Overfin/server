@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -668,5 +669,54 @@ func TestRemotePlaybackEndsWhenPeerUncallable(t *testing.T) {
 	}
 	if code := viewer(); code != http.StatusNotFound {
 		t.Fatalf("A still relays B's stream, B saying it can't be called: %d", code)
+	}
+}
+
+// B moved from https://example.com to its test address (MSFP core
+// section 13.1): a play request A signed for the former host gets its
+// stream URL there, the host that request was signed for (step 5, media
+// section 1); one signed for the new host, on it.
+func TestPeerPlayURLsOnTheSignedHost(t *testing.T) {
+	ctx := context.Background()
+	var st *store.Store
+	var b *federation.Service
+	srv, fake := newServerWith(t, options{store: &st, federation: &b})
+	fake.setDirect(true)
+	st.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "Heat", SortName: "heat",
+		TMDB: "949", LibraryID: "films"}}, 1)
+	st.RefreshTitleKeys(ctx)
+	st.SetLibraries(ctx, []store.Library{{ID: "films", Item: []byte(`{"Name":"Films"}`)}})
+	a, _, _ := viewer(t, b, srv.Client())
+	const former = "https://example.com" // a name the test certificate holds
+	if _, err := st.NoteFederationAddress(ctx, former, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.NoteAddress(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if f, _, ok := b.Moving(); !ok || f != former {
+		t.Fatalf("B's move: %q %v", f, ok)
+	}
+	// Every host reaches B's test server.
+	tr := srv.Client().Transport.(*http.Transport).Clone()
+	tr.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, srv.Listener.Addr().String())
+	}
+	client := &http.Client{Transport: tr}
+	for _, at := range []string{former, srv.URL} {
+		body := []byte(`{"title":"movie/tmdb/949","capabilities":{}}`)
+		req, _ := http.NewRequest("POST", at+"/api/v1/federation/play", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		msfp.SignRequest(req, body, a.Keys.Current(), time.Now())
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var s peerSession
+		json.NewDecoder(res.Body).Decode(&s)
+		res.Body.Close()
+		if res.StatusCode != 200 || !strings.HasPrefix(s.Stream.URL, at+"/api/v1/stream/") {
+			t.Fatalf("play signed for %s: %d, stream %q", at, res.StatusCode, s.Stream.URL)
+		}
 	}
 }

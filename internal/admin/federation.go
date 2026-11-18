@@ -48,8 +48,8 @@ type peerJSON struct {
 	OtherVersion bool `json:"otherVersion,omitempty"`
 
 	// Its keys (MSFP core section 12). Commitment is where its next key
-	// commitment came from ("pair", "rotation", "hello" for trust on
-	// first use), "" for none: a change of its key then waits for you.
+	// commitment came from ("pair", "rotation"), "" for none: a change of
+	// its key then waits for you.
 	Commitment string `json:"commitment"`
 	// Pending is a change of its key waiting for you to confirm: the new
 	// key's fingerprint, and the statement's date.
@@ -259,10 +259,12 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 			"until": since.Add(federation.KeyOverlap).Format(time.RFC3339)}
 	}
 	// A change of this server's address under way: from which, since
-	// when, until when the former is accepted, and how many peers moved.
+	// when, until when the former is accepted, how many peers moved, and
+	// whether the new address is still waited for, not announced yet.
 	if former, since, ok := s.Moving(); ok {
 		out["move"] = map[string]any{"former": former, "since": since.Format(time.RFC3339),
-			"until": since.Add(msfp.AddressOverlap).Format(time.RFC3339), "moved": others - notMoved, "of": others}
+			"until": since.Add(msfp.AddressOverlap).Format(time.RFC3339), "moved": others - notMoved, "of": others,
+			"waiting": s.Waiting()}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

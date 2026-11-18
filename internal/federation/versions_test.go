@@ -60,7 +60,7 @@ func TestCatalogOnly(t *testing.T) {
 	nonce := msfp.SignRequest(req, body, b.s.Keys.Current(), b.s.now())
 	rec := httptest.NewRecorder()
 	SignRefusals(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, _, _, ok := a.s.PeerRequest(w, r); ok {
+		if _, ok := a.s.PeerRequest(w, r); ok {
 			t.Error("play passed with playback off")
 		}
 	})).ServeHTTP(rec, req)

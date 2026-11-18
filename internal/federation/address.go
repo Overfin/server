@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -18,9 +19,10 @@ import (
 // This server's address is its site's (Service.Address). When the
 // configured one changes, the next start notes it (NoteAddress): the one
 // before becomes the former address, still accepted, for requests signed
-// for its host, 30 days or until every peer signs for the new one; every
-// peer is told at once in a hello, and again at each contact while it
-// hasn't moved.
+// for its host, 30 days or until every peer signs for the new one. Once
+// this server answers at its new address (answersAt), every peer is told
+// at once in a hello, and again at each contact while it hasn't moved;
+// until then, its hellos name the former.
 //
 // A peer whose signed hello names another address than the one stored
 // keeps being called at the stored one until a hello at the new address,
@@ -48,16 +50,20 @@ const moveLate = 3 * 24 * time.Hour
 // hasn't moved to our new address, at its contacts.
 const announceSpacing = time.Minute
 
-// announceAfter is how long after a move is noted every peer is told:
-// the federation is noted as it's built, before this server answers at
-// its new address, and a peer that called back too soon would wait an hour
-// to try again. A peer that calls before then is told at once.
-var announceAfter = 15 * time.Second
+// How often this server tries its new address before it announces it
+// (answersAt): at once, then after answerRetryFirst, twice as long each
+// time, answerRetryMost at most.
+var (
+	answerRetryFirst = 5 * time.Second
+	answerRetryMost  = 5 * time.Minute
+)
 
 // NoteAddress notes the address this server federates under, once its
 // federation is built (the gateway's rebuilds): when it changed since the
-// last, a move begins, and every peer is told, in the background, once
-// this server answers at its new address (announceAfter).
+// last, a move begins. Every peer is told, in the background, only once
+// this server reaches itself at its new address (MSFP core section 13.1,
+// step 2: answersAt); until then its hellos name its former one. A move
+// already under way, from before a restart, is checked so again.
 func (s *Service) NoteAddress(ctx context.Context) error {
 	moved, err := s.Store.NoteFederationAddress(ctx, s.Address, s.now())
 	if err != nil {
@@ -71,9 +77,12 @@ func (s *Service) NoteAddress(ctx context.Context) error {
 	s.former, s.movedAt = a.Former, a.MovedAt
 	s.mu.Unlock()
 	if !moved {
+		if _, _, ok := s.Moving(); ok && !s.Uncallable {
+			s.waitForAnswer()
+		}
 		return nil
 	}
-	s.Logger.Info("federation: this server's address changed; paired servers are told", "from", a.Former, "to", s.Address)
+	s.Logger.Info("federation: this server's address changed; paired servers are told once it answers there", "from", a.Former, "to", s.Address)
 	// A move to or from an address of a server that can't be called: no
 	// peer calls the former, so it isn't kept. To it, peers are told by
 	// this server's scheduled hellos, the first at once (Hellos); from it,
@@ -95,15 +104,91 @@ func (s *Service) NoteAddress(ctx context.Context) error {
 		s.endMove(ctx, "every peer calls this server's address already")
 		return nil
 	}
+	s.waitForAnswer()
+	return nil
+}
+
+// waitForAnswer holds back the announcement of this server's address
+// until it answers there (answersAt), tried in the background, again and
+// again, until it does or this server federates under another address.
+// Then every peer is told, at once.
+func (s *Service) waitForAnswer() {
+	s.mu.Lock()
+	s.waiting = true
+	s.mu.Unlock()
 	go func() {
-		time.Sleep(announceAfter)
+		wait := answerRetryFirst
+		for tries := 1; ; tries++ {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			err := s.answersAt(ctx, s.Address)
+			cancel()
+			if err == nil {
+				break
+			}
+			if tries == 1 {
+				s.Logger.Info("federation: this server doesn't answer at its new address yet; paired servers are told once it does",
+					"address", s.Address, "error", err)
+			}
+			time.Sleep(wait)
+			wait = min(2*wait, answerRetryMost)
+			// Another address noted since (the operator changed it
+			// again: that one's own check takes over. Its storage
+			// closed: this server is stopping.
+			if a, err := s.Store.FederationAddress(context.Background()); err != nil || a.Current != s.Address {
+				return
+			}
+		}
+		s.mu.Lock()
+		s.waiting = false
+		s.mu.Unlock()
+		s.Logger.Info("federation: this server answers at its new address; paired servers are told", "address", s.Address)
 		ctx, cancel := context.WithTimeout(Background(context.Background()), time.Minute)
 		defer cancel()
 		s.each(ctx, func(p *store.Peer) bool { return p.State != store.PeerGone }, func(ctx context.Context, p *store.Peer) {
 			s.announce(ctx, p)
 		})
 	}()
+}
+
+// ErrNotOwnAnswer: this server's request to its own address wasn't
+// answered under its own key: another server, or none, answers there.
+var ErrNotOwnAnswer = errors.New("federation: not this server's own answer")
+
+// answersAt checks that address reaches this server, not another one
+// (MSFP core section 13.1, step 2): a hello there, signed with this
+// server's key for that address's host, as any call to a peer (refused
+// destinations refused, any certificate accepted). This server answers a
+// request under its own key with the signed 404 of a key it no longer
+// knows (forgotten); the signature covers the request's nonce, so only
+// this server, reached there, can have made it.
+func (s *Service) answersAt(ctx context.Context, address string) error {
+	key := s.Keys.Current()
+	self := &store.Peer{Address: address, PublicKey: key.Public()}
+	r, err := s.exchange(ctx, s.conns(self, true).client, self, helloPath, helloMessage{State: helloPaired}, &json.RawMessage{}, key)
+	switch {
+	case err != nil:
+		return err
+	case r.Status != http.StatusNotFound:
+		return fmt.Errorf("%w: it answered %d", ErrNotOwnAnswer, r.Status)
+	}
 	return nil
+}
+
+// Waiting says whether this server's new address is still being checked
+// before it's announced (waitForAnswer).
+func (s *Service) Waiting() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.waiting
+}
+
+// named is the address this server's hellos name: its former one while
+// its new one doesn't answer yet (MSFP core section 13.1, step 2).
+func (s *Service) named() string {
+	if former, _, ok := s.Moving(); ok && s.Waiting() {
+		return former
+	}
+	return s.Address
 }
 
 // Moving is this server's move of address under way: its former address,
@@ -124,17 +209,6 @@ func (s *Service) formerHost() string {
 		return msfp.Host(former)
 	}
 	return ""
-}
-
-// AddressFor is this server's address as p knows it: the former one
-// while p's requests are still signed for it, the current one otherwise.
-// A play answer's URLs are on it, so that p, still calling the former,
-// accepts them.
-func (s *Service) AddressFor(p *store.Peer) string {
-	if former, _, ok := s.Moving(); ok && p.OurAddress == former {
-		return former
-	}
-	return s.Address
 }
 
 // NotMoved says whether p still signs its requests for our former
@@ -226,10 +300,13 @@ func (s *Service) announce(ctx context.Context, p *store.Peer) {
 }
 
 // announceDue says whether a hello telling a peer our address may go now,
-// and notes it goes.
+// and notes it goes: never while that address doesn't answer yet.
 func (s *Service) announceDue(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.waiting {
+		return false // its new address doesn't answer yet: nothing to announce
+	}
 	now := s.now()
 	if last, ok := s.announced[id]; ok && now.Sub(last) < announceSpacing {
 		return false
