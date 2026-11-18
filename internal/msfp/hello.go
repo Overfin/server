@@ -66,6 +66,11 @@ type helloMembers struct {
 	CallsFailed json.RawMessage `json:"callsFailed"`
 }
 
+// versionMembers are a hello's members whose reader, readVersions, judges
+// what they hold: a null entry of a list is ignored, as an unknown part
+// is whatever its value (core sections 2.3 and 10.2).
+var versionMembers = []string{"core", "parts"}
+
 // ReadHello reads a hello's body: a request, or with answer, an answer.
 // A request without state, or with a member of the wrong type, is a bad
 // body (ErrJSON), as is an answer with one, but for certificates that
@@ -88,7 +93,7 @@ func ReadHello(body []byte, answer bool) (Hello, error) {
 	if answer {
 		err = DecodeAnswer(body, &m)
 	} else {
-		err = decodeIgnoring(body, &m, "knownKey", "rotation", "revocation", "callsFailed")
+		err = decodeRequest(body, &m, []string{"knownKey", "rotation", "revocation", "callsFailed"}, versionMembers)
 	}
 	if err != nil {
 		return Hello{}, err
@@ -138,7 +143,7 @@ func ReadHello(body []byte, answer bool) (Hello, error) {
 	if h.Uncallable {
 		// From a server that can't be called: read again, its knownKey
 		// and rotation kept this time, each a string or a bad body.
-		if err := decodeIgnoring(body, &m, "revocation", "callsFailed"); err != nil {
+		if err := decodeRequest(body, &m, []string{"revocation", "callsFailed"}, versionMembers); err != nil {
 			return Hello{}, err
 		}
 		var known, rotation string

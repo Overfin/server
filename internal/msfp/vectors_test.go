@@ -347,3 +347,43 @@ func TestSignatureHeadersOnce(t *testing.T) {
 		t.Error("a comma")
 	}
 }
+
+// What a receiver keeps of a hello's versions (vectors/v1/strict.json,
+// helloVersions): a number that isn't an integer ignored as an entry, an
+// unknown member or part ignored whatever its value, null included; the
+// lists of the wrong type a bad body (core sections 2.3 and 10.2).
+func TestHelloVersionVectors(t *testing.T) {
+	var v struct {
+		HelloVersions []struct {
+			Name, Text, Output string
+			Valid              bool
+		} `json:"helloVersions"`
+	}
+	readVectors(t, "strict.json", &v)
+	if len(v.HelloVersions) == 0 {
+		t.Fatal("no cases")
+	}
+	for _, c := range v.HelloVersions {
+		h, err := ReadHello([]byte(c.Text), false)
+		if (err == nil) != c.Valid {
+			t.Errorf("%s: %v, want valid %v", c.Name, err, c.Valid)
+			continue
+		}
+		if !c.Valid {
+			continue
+		}
+		sorted := func(list []int) []int {
+			out := append([]int{}, list...)
+			slices.Sort(out)
+			return out
+		}
+		kept := Versions{Core: sorted(h.Versions.Core), Parts: map[string][]int{}}
+		for name, list := range h.Versions.Parts {
+			kept.Parts[name] = sorted(list)
+		}
+		got, _ := json.Marshal(kept)
+		if string(got) != c.Output {
+			t.Errorf("%s: kept %s, want %s", c.Name, got, c.Output)
+		}
+	}
+}

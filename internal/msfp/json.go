@@ -7,6 +7,7 @@ import (
 	"io"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,10 +38,11 @@ var ErrJSON = errors.New("federation: not a valid body")
 // maxDepth bounds how deeply a body nests: MSFP's bodies are shallow.
 const maxDepth = 64
 
-// DecodeJSON reads a federation body, a JSON object, into v (a pointer),
-// as MSFP core section 2.3 says.
+// DecodeJSON reads a federation request, a JSON object, into v (a
+// pointer), as MSFP core section 2.3 says: null refused in every member
+// v knows, ignored, like any other value, in the members it doesn't.
 func DecodeJSON(body []byte, v any) error {
-	return decode(body, v, false, false)
+	return decodeRequest(body, v, nil, nil)
 }
 
 // DecodeAnswer reads a federation answer into v, as DecodeJSON does a
@@ -56,11 +58,17 @@ func DecodeEntry(raw []byte, v any) error {
 	return decode(raw, v, true, false)
 }
 
-// decodeIgnoring reads a request into v as DecodeJSON does, but for the
-// members named ignored, at its top, which are dropped first, whatever
-// their value, null included: a hello's knownKey and rotation, from a
-// server that can be called (core section 9.2).
-func decodeIgnoring(body []byte, v any, ignored ...string) error {
+// decodeRequest reads a request into v. null is never a valid value in
+// it (core section 2.3), but only in the members v knows: an unknown
+// member is ignored whatever it holds, null included. The members named
+// ignored, at the top, are dropped first, whatever their value: a
+// hello's knownKey and rotation, from a server that can be called
+// (section 9.2). Those named lenient are v's
+// own, refused when null themselves, but their reader judges what they
+// hold: a hello's version lists ignore entries that aren't integers,
+// null among them, and its parts the parts it doesn't know, whatever
+// their value (section 10.2).
+func decodeRequest(body []byte, v any, ignored, lenient []string) error {
 	tree, err := strictTree(body, true)
 	if err != nil {
 		return err
@@ -72,8 +80,14 @@ func decodeIgnoring(body []byte, v any, ignored ...string) error {
 	for _, name := range ignored {
 		delete(obj, name)
 	}
-	if holdsNull(obj) {
-		return ErrJSON // null is never a valid value in a request
+	known, ok := keepExact(obj, reflect.TypeOf(v)).(map[string]any)
+	if !ok {
+		known = obj // v reads itself: all of it counts
+	}
+	for name, value := range known {
+		if value == nil || !slices.Contains(lenient, name) && holdsNull(value) {
+			return ErrJSON
+		}
 	}
 	return decodeTree(obj, v)
 }

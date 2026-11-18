@@ -23,7 +23,7 @@ func TestVersions(t *testing.T) {
 		core  bool
 		parts map[string]int
 	}{
-		// Without core and parts: all of version 0, nothing in common.
+		// Without core and parts: none, nothing in common.
 		{`{"state":"paired"}`, false, map[string]int{}},
 		{`{"state":"paired","core":[1],"parts":{"catalog":[1],"playback":[1],"media":[1],"video":[1],"music":[1]}}`, true,
 			map[string]int{PartCatalog: 1, PartPlayback: 1, PartMedia: 1, PartVideo: 1}},
@@ -87,8 +87,17 @@ func TestVersionsNullInAnswer(t *testing.T) {
 	if _, err := ReadHello([]byte(`{"state":"paired","core":null}`), true); err == nil {
 		t.Error("core null at the top of an answer accepted")
 	}
-	if _, err := ReadHello([]byte(`{"state":"paired","core":[1,null]}`), false); err == nil {
-		t.Error("null in a request accepted")
+	// In a request, null in a version list is an entry to ignore too
+	// (core section 10.2), but a list of null is a bad body, and so is
+	// null in any other member.
+	if h, err := ReadHello([]byte(`{"state":"paired","core":[1,null]}`), false); err != nil || len(h.Versions.Core) != 1 {
+		t.Errorf("null in a request's version list: %+v, %v", h, err)
+	}
+	for _, body := range []string{`{"state":"paired","core":null}`, `{"state":"paired","parts":{"catalog":null}}`,
+		`{"state":"paired","certificates":["x",null]}`, `{"state":null}`} {
+		if _, err := ReadHello([]byte(body), false); err == nil {
+			t.Errorf("%s accepted", body)
+		}
 	}
 }
 
@@ -103,7 +112,7 @@ func TestHelloOneWayMembers(t *testing.T) {
 			t.Errorf("%s: %+v, %v", body, h, err)
 		}
 	}
-	for _, body := range []string{`{"state":"paired","knownKey":7,"address":null}`, `{"state":"paired","rotation":"x","core":[null]}`} {
+	for _, body := range []string{`{"state":"paired","knownKey":7,"address":null}`, `{"state":"paired","rotation":"x","core":null}`} {
 		if _, err := ReadHello([]byte(body), false); !errors.Is(err, ErrJSON) {
 			t.Errorf("%s: %v", body, err)
 		}

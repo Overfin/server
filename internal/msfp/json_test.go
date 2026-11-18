@@ -85,9 +85,25 @@ func TestNumbersOutsideIntegers(t *testing.T) {
 }
 
 // null is never a valid value (core section 2.3): refused anywhere in a
-// request, at the top of an answer; inside an answer, read as left out.
-// Marshal never writes one.
+// request's known members, at the top of an answer; inside an answer,
+// read as left out. In a request's unknown members, ignored like any
+// other value. Marshal never writes one.
 func TestNull(t *testing.T) {
+	var known struct {
+		Name  string            `json:"name"`
+		Inner struct{ A int }   `json:"inner"`
+		Map   map[string]string `json:"map"`
+	}
+	for _, body := range []string{`{"name":"x","later":null}`, `{"name":"x","later":{"a":[null]}}`, `{"inner":{"A":1,"B":null}}`} {
+		if err := DecodeJSON([]byte(body), &known); err != nil {
+			t.Errorf("%s: %v", body, err)
+		}
+	}
+	for _, body := range []string{`{"name":null}`, `{"inner":null}`, `{"inner":{"A":null}}`, `{"map":{"k":null}}`} {
+		if DecodeJSON([]byte(body), &known) == nil {
+			t.Errorf("%s accepted", body)
+		}
+	}
 	for _, body := range []string{`{"state":null}`, `{"list":[1,null]}`, `{"a":{"b":null}}`} {
 		var m map[string]any
 		if DecodeJSON([]byte(body), &m) == nil {

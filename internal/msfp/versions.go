@@ -45,15 +45,16 @@ type Versions struct {
 const maxVersions = 8
 
 // readVersions reads a hello's core and parts members, raw (nil when
-// absent), as core section 10.2 says: core left out means [0]; parts left
-// out, catalog, playback and media at [0]. Entries beyond 8 and entries
+// absent), as core section 10.2 says: absent means none, so a hello
+// without core leaves no core in common, and one without parts, no part.
+// Entries beyond 8 and entries
 // that aren't non-negative integers are ignored, duplicates count once.
 // A part this package doesn't know is ignored, whatever its value, so
 // that a later version may announce one in another shape. A core or a
 // known part's list that isn't a list, or parts that isn't an object, is
 // a bad body: ErrJSON.
 func readVersions(core, parts json.RawMessage) (Versions, error) {
-	v := Versions{Core: []int{0}, Parts: map[string][]int{PartCatalog: {0}, PartPlayback: {0}, PartMedia: {0}}}
+	v := Versions{Core: []int{}, Parts: map[string][]int{}}
 	if core != nil {
 		list, err := readList(core)
 		if err != nil {
@@ -66,7 +67,6 @@ func readVersions(core, parts json.RawMessage) (Versions, error) {
 		if json.Unmarshal(parts, &obj) != nil || obj == nil {
 			return Versions{}, ErrJSON
 		}
-		v.Parts = map[string][]int{}
 		for name, raw := range obj {
 			if _, known := needs[name]; !known {
 				continue // not a part we know: ignored, whatever it holds
