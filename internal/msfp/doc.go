@@ -7,8 +7,10 @@
 // commitment), changes of address (the former host accepted, the
 // announced address checked), servers that can't be called (their
 // address, their hello schedule, the statements their peers' answers
-// carry); of its media and video parts, the checks of the playlists and
-// PGS pictures a server relays from another.
+// carry); of its catalog and video parts, video title keys and what a
+// server keeps of a peer's titles; of playback and media, the forms of a
+// play answer's IDs, URLs and previews; of media and video, the checks of
+// the playlists, WebVTT and PGS pictures a server relays from another.
 //
 // A server proves who it is with its key only, never with a web
 // certificate, a name or an address. Two servers learn each other's keys
