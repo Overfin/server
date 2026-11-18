@@ -82,8 +82,10 @@ internet: [how it's built, and why](docs/architecture.md).
 
 ## Federation
 
-Two Overfin servers whose operators trust each other can pair, and share
-libraries both ways:
+Two servers whose operators trust each other can pair, and share
+libraries both ways. Federation is [MSFP](https://github.com/msfp-io/msfp-spec),
+an open protocol: the other server doesn't have to be Overfin, only to
+speak MSFP (today, other Overfin servers do).
 
 - **Their titles on your site**, in your menu ("Films (Alex's server)") or
   sorted into your own categories, in search, on title pages. A film you
