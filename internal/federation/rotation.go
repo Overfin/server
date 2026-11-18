@@ -283,30 +283,33 @@ func (s *Service) DismissRefused(ctx context.Context, id string) error {
 // This server's change of key.
 
 // rotateSoon tells p of our new key again, in the background: it just
-// called, under our old key. A peer whose operator was to confirm the key
-// is told at once, whenever the last one went: its call may be the first
-// since its operator confirmed, and it checks our answers against the new
-// key only.
+// called, under our old key.
 func (s *Service) rotateSoon(p *store.Peer) {
 	go func() {
 		ctx, cancel := context.WithTimeout(Background(context.Background()), 20*time.Second)
 		defer cancel()
-		if p.RotationAnswer == msfp.StatePending {
-			s.sendRotate(ctx, p)
-			return
-		}
 		s.rotateAtContact(ctx, p)
 	}()
 }
 
-// rotateAtSpacing is the least time between two rotates sent to a peer at
-// contacts: each call doesn't need its own.
-const rotateAtSpacing = time.Minute
+// The least time between two rotates sent to a peer at contacts: each call
+// doesn't need its own. A peer whose operator was to confirm our new key
+// is told sooner: its call may be the first since its operator confirmed,
+// and it checks our answers against the new key only, so until it's told
+// again, its calls fail.
+const (
+	rotateAtSpacing        = time.Minute
+	rotatePendingAtSpacing = 10 * time.Second
+)
 
-// rotateAtContact sends p a rotate unless one went within rotateAtSpacing,
+// rotateAtContact sends p a rotate unless one went within the spacing,
 // and returns p as it is then.
 func (s *Service) rotateAtContact(ctx context.Context, p *store.Peer) *store.Peer {
-	if p.RotateSent != nil && s.now().Sub(*p.RotateSent) < rotateAtSpacing {
+	spacing := rotateAtSpacing
+	if p.RotationAnswer == msfp.StatePending {
+		spacing = rotatePendingAtSpacing
+	}
+	if p.RotateSent != nil && s.now().Sub(*p.RotateSent) < spacing {
 		return p
 	}
 	s.sendRotate(ctx, p)

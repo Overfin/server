@@ -166,6 +166,7 @@ func TestRotateCommitmentMismatch(t *testing.T) {
 func TestRotateWithoutCommitment(t *testing.T) {
 	ctx := context.Background()
 	a, b, bOnA, aOnB := pairedPair(t)
+	c := sharedClock(a, b)
 	exec(t, b, `UPDATE peers SET next_commitment = NULL, commitment_from = ''`)
 	if err := a.s.Rotate(ctx, ""); err != nil {
 		t.Fatal(err)
@@ -187,6 +188,8 @@ func TestRotateWithoutCommitment(t *testing.T) {
 	if n, err := b.s.SyncTitles(ctx, peer(t, b, aOnB.ID)); err != nil || n != 1 {
 		t.Fatalf("B reading A's titles while pending: %d, %v", n, err)
 	}
+	// Its operator calls ours first: a while passes.
+	c.move(time.Minute)
 	if _, err := b.s.ConfirmRotation(ctx, aOnB.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -219,9 +222,8 @@ func TestCommitmentFromHello(t *testing.T) {
 	for _, s := range []*server{a, b} {
 		exec(t, s, `UPDATE peers SET next_commitment = NULL, commitment_from = '', commitment_told = 0`)
 	}
-	if _, err := a.s.Check(ctx, peer(t, a, bOnA.ID)); err != nil {
-		t.Fatal(err)
-	}
+	// A's hourly round sends B a hello carrying its commitment, once.
+	a.s.Maintain(ctx)
 	ab, ba := peer(t, b, aOnB.ID), peer(t, a, bOnA.ID)
 	if ab.CommitmentFrom != store.CommitmentHello || !bytes.Equal(ab.NextCommitment, a.s.Keys.NextCommitment()) {
 		t.Fatalf("B from A's hello: %x %q", ab.NextCommitment, ab.CommitmentFrom)
