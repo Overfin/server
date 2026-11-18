@@ -25,6 +25,8 @@ type Keys struct {
 	// no change under way), since when.
 	old   *msfp.Key
 	since time.Time
+	// oldRevoked: old was revoked, the change of key made after it.
+	oldRevoked bool
 	// next is the commitment to the next key, whose seed is in the store
 	// or kept offline by the operator.
 	next []byte
@@ -85,7 +87,7 @@ func keysOf(k store.FederationKeys) (*Keys, error) {
 		if err != nil {
 			return nil, err
 		}
-		keys.old, keys.since = &old, k.RotatedAt
+		keys.old, keys.since, keys.oldRevoked = &old, k.RotatedAt, k.OldRevoked
 	}
 	return keys, nil
 }
@@ -103,6 +105,7 @@ func (k *Keys) reload(ctx context.Context, st *store.Store) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.current, k.old, k.since, k.next, k.ids = fresh.current, fresh.old, fresh.since, fresh.next, fresh.ids
+	k.oldRevoked = fresh.oldRevoked
 	return nil
 }
 
@@ -122,6 +125,14 @@ func (k *Keys) Old() (msfp.Key, time.Time, bool) {
 		return msfp.Key{}, time.Time{}, false
 	}
 	return *k.old, k.since, true
+}
+
+// OldRevoked says whether the old key (Old) was revoked: the change of
+// key followed a revocation (MSFP core section 12.7, case 1).
+func (k *Keys) OldRevoked() bool {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	return k.old != nil && k.oldRevoked
 }
 
 // NextCommitment is the commitment to the next key (MSFP core section

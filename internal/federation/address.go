@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -28,8 +29,16 @@ import (
 // one stays; it's tried again at most once an hour, and the operator is
 // warned after a day.
 //
-// A peer that can't be called (MSFP core section 7.5) moves otherwise; it
-// isn't handled yet, as such peers aren't.
+// A peer that can't be called (MSFP core section 7.5) moves otherwise:
+// nothing calls it, so the address its signed hello names is stored at
+// once. One that says it can be called again is confirmed as a move is,
+// at its new address or, when it names none, at the one stored, before
+// anything else calls it.
+//
+// This server, turning "can't be called" on, moves to its address of the
+// form https://msfp-<26 characters>.invalid: nothing calls it there, so
+// no former address is kept, and every peer is told at once. Turning it
+// off, it moves back to its site's address, as any move.
 
 // moveLate is when the panel warns that a peer hasn't moved to this
 // server's new address (core section 13.1: "after some days").
@@ -65,7 +74,19 @@ func (s *Service) NoteAddress(ctx context.Context) error {
 		return nil
 	}
 	s.Logger.Info("federation: this server's address changed; paired servers are told", "from", a.Former, "to", s.Address)
-	if s.allMoved(ctx) {
+	// A move to or from an address of a server that can't be called: no
+	// peer calls the former, so it isn't kept. To it, peers are told by
+	// this server's scheduled hellos, the first at once (Hellos); from it,
+	// by a hello to each, as for any move, even those whose requests were
+	// signed for this address before: they stored the other since.
+	fromUncallable := msfp.Uncallable(a.Former)
+	if s.Uncallable || fromUncallable {
+		s.endMove(ctx, "this server could not be called, or can't be")
+	}
+	if s.Uncallable {
+		return nil
+	}
+	if !fromUncallable && s.allMoved(ctx) {
 		// Back to an address every peer still calls (a move undone
 		// before any followed it): nothing to wait for.
 		s.endMove(ctx, "every peer calls this server's address already")
@@ -229,6 +250,23 @@ func (s *Service) announcedAddress(ctx context.Context, p *store.Peer, address s
 		s.Logger.Info("federation: a peer named an address that isn't one; its stored address stays", "name", p.Name)
 		return nil
 	}
+	switch p.Inbound {
+	case store.InboundNo:
+		// It can't be called: nothing to confirm (MSFP core section 13.2).
+		if next == "" {
+			return nil
+		}
+		if err := s.Store.SetPeerAddress(ctx, p.ID, next); err != nil {
+			return err
+		}
+		s.Logger.Info("federation: a peer that can't be called moved", "name", p.Name, "from", p.Address, "to", next)
+		p.Address = next
+		return nil
+	case store.InboundConfirming:
+		// It can be called again: confirmed where it says it is now, or
+		// where it was (section 7.5).
+		next = cmp.Or(next, p.Address)
+	}
 	if next == "" {
 		if address == p.Address && p.Move != nil {
 			p.Move = nil
@@ -323,6 +361,14 @@ func (s *Service) confirmMove(ctx context.Context, p *store.Peer, m msfp.Move) e
 	if err != nil || !moved {
 		return err
 	}
+	if p.Inbound == store.InboundConfirming {
+		// It answers there: called again from now on (MSFP core section
+		// 7.5).
+		if err := s.Store.SetPeerInbound(ctx, p.ID, store.InboundYes); err != nil {
+			return err
+		}
+		s.Logger.Info("federation: a peer that couldn't be called can be again, its address confirmed", "name", p.Name, "address", m.Address)
+	}
 	s.Logger.Info("federation: a peer moved, its new address confirmed", "name", p.Name, "from", p.Address, "to", m.Address)
 	q, err := s.Store.PeerByID(ctx, p.ID)
 	if err != nil {
@@ -352,7 +398,7 @@ func (s *Service) maintainAddresses(ctx context.Context, peers []*store.Peer) {
 	}
 	now := s.now()
 	for _, p := range peers {
-		if notMoved, _ := s.NotMoved(p); notMoved {
+		if notMoved, _ := s.NotMoved(p); notMoved && p.Callable() {
 			s.announce(ctx, p)
 		}
 		if p.Move != nil && p.Move.Due(now) && s.startConfirming(p.ID) {

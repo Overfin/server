@@ -442,10 +442,12 @@ func (s *Service) Rotate(ctx context.Context, nextKey string) error {
 	if err != nil {
 		return err
 	}
-	return s.rotateTo(ctx, next)
+	return s.rotateTo(ctx, next, false)
 }
 
-func (s *Service) rotateTo(ctx context.Context, next msfp.Key) error {
+// rotateTo moves this server to next; revoked says its current key was
+// just revoked.
+func (s *Service) rotateTo(ctx context.Context, next msfp.Key, revoked bool) error {
 	if _, _, ok := s.Keys.Old(); ok {
 		if err := s.finishRotation(ctx); err != nil {
 			return err
@@ -453,14 +455,16 @@ func (s *Service) rotateTo(ctx context.Context, next msfp.Key) error {
 	}
 	old := s.Keys.Current()
 	after := msfp.NewKey()
-	if err := s.Store.RotateFederationKey(ctx, next.Seed(), after.Seed(), msfp.Commitment(after.Public()), s.now(), false); err != nil {
+	if err := s.Store.RotateFederationKey(ctx, next.Seed(), after.Seed(), msfp.Commitment(after.Public()), s.now(), revoked); err != nil {
 		return err
 	}
 	if err := s.Keys.reload(ctx, s.Store); err != nil {
 		return err
 	}
 	s.Logger.Info("federation: this server's key changed", "from", msfp.Fingerprint(old.Public()), "to", msfp.Fingerprint(next.Public()))
-	s.each(ctx, func(p *store.Peer) bool { return p.OurKey == store.OurKeyOld }, s.sendRotate)
+	// A peer that can't be called learns it in our answers to its next
+	// hello (MSFP core section 12.4).
+	s.each(ctx, func(p *store.Peer) bool { return p.OurKey == store.OurKeyOld && p.Callable() }, s.sendRotate)
 	return nil
 }
 
@@ -514,14 +518,18 @@ func (s *Service) Revoke(ctx context.Context, nextKey string, withoutNext bool) 
 	key := s.Keys.Current()
 	statement := msfp.SignRevocation(key, s.now())
 	s.Logger.Warn("federation: this server's key revoked", "fingerprint", msfp.Fingerprint(key.Public()))
-	s.each(ctx, func(p *store.Peer) bool { return p.OurKey == store.OurKeyCurrent }, func(ctx context.Context, p *store.Peer) {
+	// A peer that can't be called learns it in our answers to its next
+	// hello, signed with the key revoked, for 30 days (MSFP core section
+	// 12.6): only when this server moves to its next key, which keeps the
+	// revoked one as its old key meanwhile.
+	s.each(ctx, func(p *store.Peer) bool { return p.OurKey == store.OurKeyCurrent && p.Callable() }, func(ctx context.Context, p *store.Peer) {
 		var answer json.RawMessage
 		if r, err := s.call(ctx, p, revokePath, statement.Body(), &answer); err != nil || r.Status != http.StatusOK {
 			s.Logger.Info("federation: a peer couldn't be told this server's key is revoked", "name", p.Name, "status", r.Status, "error", err)
 		}
 	})
 	if haveNext {
-		return true, s.rotateTo(ctx, next)
+		return true, s.rotateTo(ctx, next, true)
 	}
 	peers, err := s.Store.Peers(ctx)
 	if err != nil {
@@ -614,6 +622,8 @@ func (s *Service) Maintain(ctx context.Context) {
 			s.changed(p.ID)
 			s.Logger.Warn("federation: a peer whose key was revoked 30 days ago, with no new key since, is gone: remove it, and pair again if you wish",
 				"name", p.Name)
+		case !p.Callable():
+			// Told in our answers to its hellos (MSFP core section 7.5).
 		case p.OurKey == store.OurKeyOld && (p.RotateSent == nil || now.Sub(*p.RotateSent) >= rotateDaily):
 			s.sendRotate(ctx, p)
 		case !p.CommitmentTold && p.Usable() && s.firstTell(p.ID):

@@ -4,11 +4,13 @@
 // MSFP are on with each peer, limits, and connections to paired servers.
 // The protocol itself (keys, pairing codes, signatures, strict JSON,
 // pins, versions, rotation and revocation statements) is package msfp;
-// changes of key, this server's and its peers', are rotation.go.
+// changes of key, this server's and its peers', are rotation.go; of
+// address, address.go; servers that can't be called, uncallable.go.
 package federation
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
@@ -63,8 +65,13 @@ type Service struct {
 	Keys *Keys
 	// Address is this server's site address, as its codes give it:
 	// https://host, without a path (plain http only with the test switch,
-	// msfp.AllowPlainHTTPForTests).
+	// msfp.AllowPlainHTTPForTests). With Uncallable, its address of the
+	// form https://msfp-<26 characters>.invalid instead.
 	Address string
+	// Uncallable: this server's operator says it can't be called (MSFP
+	// core section 7.5): it makes no codes, tells its peers in every
+	// pair and hello, and asks them on a schedule (Hellos).
+	Uncallable bool
 	// Name is what this server calls itself to its peers.
 	Name   func(context.Context) string
 	HTTP   *http.Client
@@ -112,6 +119,9 @@ type Service struct {
 	announced map[string]time.Time
 	// confirming are the peers whose new address is being checked, by ID.
 	confirming map[string]bool
+	// turns are when each peer's next scheduled hello goes, by ID, for a
+	// server that can't be called (Hellos): none yet, at once.
+	turns map[string]time.Time
 }
 
 // NewHTTPClient is the client for talking to peers: short timeouts, and
@@ -271,8 +281,8 @@ type pairRequest struct {
 	SecretHash string `json:"secretHash"`
 	Proof      string `json:"proof"`
 	// NextCommitment is the caller's next key commitment (MSFP core
-	// section 12.5). Inbound is read to check its form only: this server
-	// calls every peer.
+	// section 12.5). Inbound false: the caller can't be called (section
+	// 7.5).
 	NextCommitment *string `json:"nextCommitment,omitempty"`
 	Inbound        *bool   `json:"inbound,omitempty"`
 }
@@ -299,6 +309,23 @@ type helloMessage struct {
 	// NextCommitment is the sender's next key commitment, while the peer
 	// holds none from pair or a rotation (MSFP core section 12.5).
 	NextCommitment string `json:"nextCommitment,omitempty"`
+	// Inbound is false when this server can't be called (MSFP core
+	// section 7.5), and left out otherwise.
+	Inbound *bool `json:"inbound,omitempty"`
+
+	// The members that go one way only (core section 9.2).
+	//
+	// In requests from a server that can't be called: KnownKey, the key
+	// it checks the peer's answers against; Rotation, "pending" or
+	// "refused" while it hasn't moved to the peer's new key.
+	// In answers to one: Rotation, this server's rotation statement
+	// (msfp.RotateBody), and Revocation, its revocation statement, while
+	// it has moved from a revoked key. In any answer: CallsFailed, this
+	// server's last calls to the caller couldn't connect.
+	KnownKey    string           `json:"knownKey,omitempty"`
+	Rotation    any              `json:"rotation,omitempty"`
+	Revocation  *msfp.RevokeBody `json:"revocation,omitempty"`
+	CallsFailed bool             `json:"callsFailed,omitempty"`
 }
 
 // ourVersions is what this server speaks of MSFP (core section 10): core
@@ -319,14 +346,24 @@ func OurVersions() msfp.Versions {
 // ourHello is the hello this server sends p, or answers it, in state:
 // with its versions, pins and address, and its next key commitment while
 // p holds none from us, except for "ended", which says nothing else.
+// A server that can't be called names no pins (nothing is served at its
+// address), says so in each, and its requests say which key it knows p by
+// (MSFP core section 7.5).
 func (s *Service) ourHello(ctx context.Context, p *store.Peer, state string, answering bool) helloMessage {
 	if state == helloEnded {
 		return helloMessage{State: helloEnded}
 	}
-	h := helloMessage{State: state, Core: ourVersions.Core, Parts: ourVersions.Parts,
-		Certificates: s.ownCertificates(ctx, answering), Address: s.Address}
+	h := helloMessage{State: state, Core: ourVersions.Core, Parts: ourVersions.Parts, Address: s.Address}
 	if !p.CommitmentTold {
 		h.NextCommitment = msfp.Encode64(s.Keys.NextCommitment())
+	}
+	if !s.Uncallable {
+		h.Certificates = s.ownCertificates(ctx, answering)
+		return h
+	}
+	h.Inbound = ptr(false)
+	if !answering {
+		h.KnownKey, h.Rotation = s.knownKey(p)
 	}
 	return h
 }
@@ -417,8 +454,9 @@ func (s *Service) verified(w http.ResponseWriter, r *http.Request) (msfp.Verifie
 			return msfp.Verified{}, nil, false
 		}
 		// A peer still on our old key: told of the new one again, at
-		// each contact (section 12.4).
-		if p.OurKey == store.OurKeyOld {
+		// each contact (section 12.4); one that can't be called, in our
+		// answer to its hello (section 7.5).
+		if p.OurKey == store.OurKeyOld && p.Callable() {
 			s.rotateSoon(p)
 		}
 		// Which of our addresses it signed for: one still on our former
@@ -481,6 +519,13 @@ func (s *Service) pair(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
+	// A caller that can't be called has an address that never resolves
+	// (MSFP core section 5.2).
+	uncallable := req.Inbound != nil && !*req.Inbound
+	if msfp.CheckInbound(uncallable, req.Address) != nil {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
 	hash, ok := msfp.Decode64(req.SecretHash, 32)
 	var commitment []byte
 	if req.NextCommitment != nil {
@@ -493,7 +538,7 @@ func (s *Service) pair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := cleanName(req.Name, req.Address)
-	_, err := s.Store.RedeemPairingCode(r.Context(), hash, v.Key, req.Address, name, commitment, false, func(secret []byte) bool {
+	_, err := s.Store.RedeemPairingCode(r.Context(), hash, v.Key, req.Address, name, commitment, uncallable, func(secret []byte) bool {
 		return msfp.CheckPairingProof(secret, v.Key, req.Address, req.Proof)
 	})
 	switch {
@@ -526,9 +571,11 @@ func (s *Service) hello(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// state is required, and a string, and every member of its type (MSFP
-	// core section 9.2): otherwise nothing is kept.
+	// core section 9.2): otherwise nothing is kept. So is inbound false
+	// with an address that isn't of its form (section 5.2): its own, or
+	// the one stored when it names none.
 	msg, err := msfp.ReadHello(body, false)
-	if err != nil {
+	if err != nil || msfp.CheckInbound(msg.Uncallable, cmp.Or(msg.Address, p.Address)) != nil {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -558,20 +605,35 @@ func (s *Service) hello(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.Internal, "")
 		return
 	}
+	// From a server that can't be called: which of our keys it knows us
+	// by, before answering (MSFP core section 12.4).
+	if msg.Uncallable {
+		s.readKnownKey(ctx, w, v.Nonce, p, msg)
+	}
 	p, err = s.Store.PeerByID(ctx, p.ID)
 	if err != nil {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	s.answer(w, v.Nonce, s.ourHello(ctx, p, viewOf(p), true))
+	answer := s.ourHello(ctx, p, viewOf(p), true)
+	if msg.Uncallable {
+		s.pullable(p, &answer)
+	}
+	answer.CallsFailed = s.lim().unreached(msfp.Encode64(p.PublicKey))
+	s.answer(w, v.Nonce, answer)
 }
 
 // keepHello keeps what a peer's signed hello, request or answer, says of
-// it: its versions (MSFP core section 10.3), its pins (section 3.2), its
-// next key commitment if it never had one (section 12.5), and, for
-// another address than the one stored, the check of that address
-// (section 13.2).
+// it: whether it can be called (MSFP core section 7.5), its versions
+// (section 10.3), its pins (section 3.2), its next key commitment if it
+// never had one (section 12.5), and, for another address than the one
+// stored, the check of that address (section 13.2).
 func (s *Service) keepHello(ctx context.Context, p *store.Peer, h msfp.Hello) error {
+	// Whether it can be called first: where its address is checked, or
+	// stored at once, depends on it (MSFP core sections 7.5 and 13.2).
+	if err := s.keepInbound(ctx, p, h.Uncallable); err != nil {
+		return err
+	}
 	if err := s.keepCertificates(ctx, p, h.Certificates); err != nil {
 		return err
 	}
@@ -786,7 +848,13 @@ func (s *Service) call(ctx context.Context, p *store.Peer, path string, in, out 
 	// didn't follow our change of key in time: none either, it no longer
 	// knows any key of ours (section 12.4).
 	switch {
-	case p.Suspended != nil:
+	case !p.Callable() && path != pairPath:
+		// A peer that can't be called: no connection at all (MSFP core
+		// section 7.5). A code's server always can: it made the code.
+		return Reply{}, ErrUncallable
+	case p.Suspended != nil && !(s.Uncallable && path == helloPath):
+		// But for this server's scheduled hellos, if it can't be called:
+		// a rotation can still reach it (section 7.5).
 		return Reply{}, ErrSuspended
 	case p.OurKey == store.OurKeyLost:
 		return Reply{}, ErrKeyLost
@@ -812,6 +880,16 @@ func (s *Service) call(ctx context.Context, p *store.Peer, path string, in, out 
 	}
 	signer := s.signer(p)
 	r, err := s.callOnce(ctx, p, path, in, out, signer)
+	// Whether our calls connect, for its hellos' answers (callsFailed,
+	// MSFP core section 7.5): a signed answer says they do.
+	if path != pairPath {
+		switch {
+		case err == nil:
+			lim.setUnreached(key, false)
+		case errors.Is(err, errNoConnection):
+			lim.setUnreached(key, true)
+		}
+	}
 	if errors.Is(err, errNotHeard) && p.OurKey == store.OurKeyOld {
 		// Our old key no longer heard there: it may have moved without
 		// our seeing its answer. A hello under the new key tells
@@ -870,10 +948,18 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 	if err != nil {
 		return Reply{}, err
 	}
+	// An address that never resolves (MSFP core section 5.2): never
+	// even tried.
+	if msfp.Uncallable(p.Address) {
+		return Reply{}, fmt.Errorf("%w: %w", ErrUnreachable, ErrUncallable)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	nonce := msfp.SignRequest(req, body, key, s.now())
 	res, err := client.Do(req)
 	if err != nil {
+		if !certificateRefused(err) {
+			err = fmt.Errorf("%w: %w", errNoConnection, err)
+		}
 		return Reply{}, fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
 	defer res.Body.Close()
@@ -959,6 +1045,9 @@ func (s *Service) UseCode(ctx context.Context, text string) (*store.Peer, error)
 		SecretHash:     msfp.Encode64(store.PairingSecretHash(c.Secret)),
 		Proof:          msfp.PairingProof(c.Secret, s.Keys.Current().Public(), s.Address),
 		NextCommitment: ptr(msfp.Encode64(s.Keys.NextCommitment()))}
+	if s.Uncallable {
+		req.Inbound = ptr(false) // and its address is of that form
+	}
 	var answer pairAnswer
 	r, err := s.call(ctx, &store.Peer{Address: c.Address, PublicKey: c.Key}, pairPath, req, &answer)
 	switch {
@@ -991,6 +1080,10 @@ func (s *Service) Accept(ctx context.Context, id string) (*store.Peer, error) {
 		return nil, err
 	}
 	s.Logger.Info("federation: paired", "name", p.Name)
+	if !p.Callable() {
+		// It learns at its next scheduled hello (MSFP core section 7.5).
+		return p, nil
+	}
 	return s.Check(ctx, p)
 }
 
@@ -1007,6 +1100,11 @@ func (s *Service) End(ctx context.Context, id string) error {
 	}
 	s.changed(id)
 	s.Logger.Info("federation: pairing ended", "name", p.Name)
+	if !p.Callable() {
+		// Not told: its next hello gets the signed 404 of a forgotten key,
+		// and it marks us gone (MSFP core section 7.5).
+		return nil
+	}
 	var answer json.RawMessage
 	if _, err := s.call(ctx, p, helloPath, s.ourHello(ctx, p, helloEnded, false), &answer); err != nil {
 		s.Logger.Info("federation: the other server couldn't be told the pairing ended", "name", p.Name, "error", err)
@@ -1023,14 +1121,24 @@ func (s *Service) Check(ctx context.Context, p *store.Peer) (*store.Peer, error)
 	r, err := s.call(ctx, p, helloPath, s.ourHello(ctx, p, viewOf(p), false), &raw)
 	var answer msfp.Hello
 	if err == nil && r.Status == http.StatusOK {
-		// An answer with a member of the wrong type changes nothing.
-		if answer, err = msfp.ReadHello(raw, true); err != nil {
+		// An answer with a member of the wrong type changes nothing, nor
+		// does one with inbound false and an address not of its form
+		// (MSFP core section 5.2): as if it weren't signed.
+		answer, err = msfp.ReadHello(raw, true)
+		if err == nil {
+			err = msfp.CheckInbound(answer.Uncallable, cmp.Or(answer.Address, p.Address))
+		}
+		if err != nil {
 			err = fmt.Errorf("%w: %v", ErrUnreachable, err)
 		}
 	}
 	switch {
 	case err != nil:
 		return p, err
+	case r.Status == http.StatusOK && p.Suspended != nil:
+		// Suspended: of its answers to our scheduled hellos, its rotation
+		// only (MSFP core section 12.6).
+		s.applyPulled(ctx, p, answer, true)
 	case r.Status == http.StatusNotFound:
 		if p.State != store.PeerGone {
 			if _, err := s.Store.SetPeerState(ctx, p.ID, p.State, store.PeerGone); err != nil {
@@ -1053,12 +1161,25 @@ func (s *Service) Check(ctx context.Context, p *store.Peer) (*store.Peer, error)
 				return p, err
 			}
 		}
+		if answer.CallsFailed != p.CallsFailed {
+			if err := s.Store.SetPeerCallsFailed(ctx, p.ID, answer.CallsFailed); err != nil {
+				return p, err
+			}
+		}
+		// This server can't be called: its peer's changes of key come in
+		// its answers (MSFP core sections 12.4 and 12.6).
+		s.applyPulled(ctx, p, answer, false)
 	}
 	return s.Store.PeerByID(ctx, p.ID)
 }
 
 // NewCode makes a pairing code for our operator to send, noted as note.
 func (s *Service) NewCode(ctx context.Context, note string) (string, *store.PairingCode, error) {
+	if s.Uncallable {
+		// Nobody could redeem it (MSFP core section 7.5): ask the other
+		// operator for theirs.
+		return "", nil, ErrNoCodes
+	}
 	c, err := msfp.NewCode(s.Address, s.Keys.Current().Public(), s.now())
 	if err != nil {
 		return "", nil, err
@@ -1089,7 +1210,9 @@ func (s *Service) CheckSoon(peers []*store.Peer) {
 	}
 	now := s.now()
 	for _, p := range peers {
-		if p.State != store.PeerTheirs || now.Sub(s.asked[p.ID]) < checkEvery {
+		// A server that can't be called asks on its own schedule (Hellos);
+		// one that can't be called is never asked.
+		if s.Uncallable || !p.Callable() || p.State != store.PeerTheirs || now.Sub(s.asked[p.ID]) < checkEvery {
 			continue
 		}
 		s.asked[p.ID] = now
@@ -1206,6 +1329,9 @@ var ErrNotPaired = errors.New("federation: not paired yet")
 func (s *Service) TheirLibraries(ctx context.Context, p *store.Peer) ([]store.PeerLibrary, error) {
 	if !p.Usable() {
 		return nil, ErrNotPaired
+	}
+	if !p.Callable() {
+		return nil, ErrUncallable
 	}
 	// Each library read on its own: one that isn't one is skipped alone
 	// (MSFP catalog, section 2.2).
@@ -1527,6 +1653,9 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 	if !p.Usable() {
 		return 0, ErrNotPaired
 	}
+	if !p.Callable() {
+		return 0, ErrUncallable // nothing of it is read (MSFP catalog)
+	}
 	l, _ := s.readings.LoadOrStore(p.ID, &sync.Mutex{})
 	l.(*sync.Mutex).Lock()
 	defer l.(*sync.Mutex).Unlock()
@@ -1682,7 +1811,7 @@ func (s *Service) SyncAll(ctx context.Context) {
 		return
 	}
 	for _, p := range peers {
-		if !p.Usable() {
+		if !p.Usable() || !p.Callable() {
 			continue
 		}
 		// Each peer in its own time: a slow one doesn't hold the others up.

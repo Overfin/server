@@ -33,14 +33,24 @@ type server struct {
 	// routes is what its test server serves: a move (moveTo) gives it
 	// the federation built anew.
 	routes *routes
+	// site is its test server's address, whatever address it federates
+	// under (one that can't be called has another).
+	site string
 }
 
-// routes is a test server's handler, which a move replaces.
-type routes struct{ h atomic.Pointer[http.Handler] }
+// routes is a test server's handler, which a move replaces. hits counts
+// the requests it got: none, for a server that can't be called.
+type routes struct {
+	h    atomic.Pointer[http.Handler]
+	hits atomic.Int64
+}
 
 func (r *routes) set(h http.Handler) { r.h.Store(&h) }
 
-func (r *routes) ServeHTTP(w http.ResponseWriter, req *http.Request) { (*r.h.Load()).ServeHTTP(w, req) }
+func (r *routes) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	r.hits.Add(1)
+	(*r.h.Load()).ServeHTTP(w, req)
+}
 
 // newServer is one over HTTPS, as MSFP is (core section 3).
 func newServer(t *testing.T, name string) *server {
@@ -84,7 +94,7 @@ func newServerOn(t *testing.T, name string, withTLS bool) *server {
 	if err := reg.Load(Plugin{S: s}); err != nil {
 		t.Fatal(err)
 	}
-	return &server{s: s, url: ts.URL, db: db, routes: rt}
+	return &server{s: s, url: ts.URL, db: db, routes: rt, site: ts.URL}
 }
 
 // allParts is a peer's versions when it speaks all that this server does.

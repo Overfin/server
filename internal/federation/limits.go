@@ -71,6 +71,9 @@ type Limits struct {
 
 	// waits are this server's own calls' memory, by the peer's key.
 	waits map[string]*wait
+	// noConnection are the peers, by key, whose last call from this
+	// server couldn't connect (callsFailed, MSFP core section 7.5).
+	noConnection map[string]bool
 }
 
 type bucket struct {
@@ -324,6 +327,29 @@ func (l *Limits) heard(key string, answered bool, status, retryAfter int, now ti
 	default:
 		w.failures, w.backoffAt = 0, time.Time{}
 	}
+}
+
+// setUnreached keeps whether the last call to the peer with key couldn't
+// connect.
+func (l *Limits) setUnreached(key string, failed bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !failed {
+		delete(l.noConnection, key)
+		return
+	}
+	if l.noConnection == nil {
+		l.noConnection = map[string]bool{}
+	}
+	l.noConnection[key] = true
+}
+
+// unreached says whether the last call to the peer with key couldn't
+// connect: what its hellos are answered (callsFailed).
+func (l *Limits) unreached(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.noConnection[key]
 }
 
 // backoff is how long background calls hold off after n calls in a row

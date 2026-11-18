@@ -36,7 +36,7 @@ func moveTo(t *testing.T, srv *server, address string, listen bool) *server {
 	if err := s.NoteAddress(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	return &server{s: s, url: address, db: srv.db, routes: srv.routes}
+	return &server{s: s, url: address, db: srv.db, routes: srv.routes, site: srv.site}
 }
 
 // waitFor polls until ok, for the work done in the background.
