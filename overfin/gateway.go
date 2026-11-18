@@ -357,7 +357,8 @@ type fedShared struct {
 	limits *federation.Limits
 }
 
-// federationService is federation on this server, or nil when the site has
+// federationService is federation on this server, its address noted
+// (NoteAddress), or nil when the site has
 // no address a code could give (no site.url, HTTPS domain or sign-in
 // return address), one with a path (peers reach a server at its site's
 // root), or one that is plain http: MSFP is HTTPS only, but for the test
@@ -372,7 +373,7 @@ func federationService(cfg *config.Config, sh *shared) *federation.Service {
 		return nil
 	}
 	db := sh.db
-	return &federation.Service{Store: db, Keys: sh.fed.keys, Address: address, HTTP: sh.fed.http, Seen: sh.fed.seen,
+	fed := &federation.Service{Store: db, Keys: sh.fed.keys, Address: address, HTTP: sh.fed.http, Seen: sh.fed.seen,
 		Certificates: sh.fed.certs, Limits: sh.fed.limits, Logger: sh.logger, Name: func(ctx context.Context) string {
 			if b, err := db.Branding(ctx); err == nil && b.On && b.Name != "" {
 				return b.Name
@@ -380,6 +381,13 @@ func federationService(cfg *config.Config, sh *shared) *federation.Service {
 			u, _ := url.Parse(address)
 			return u.Host
 		}}
+	// A site address other than the last one federated under is a move
+	// (MSFP core section 13): paired servers are told, and the former
+	// address still accepted for a while.
+	if err := fed.NoteAddress(context.Background()); err != nil {
+		sh.logger.Error("federation: this server's address couldn't be noted", "error", err)
+	}
+	return fed
 }
 
 // newSite is the website Overfin serves beside the API: the one this build

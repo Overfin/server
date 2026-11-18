@@ -63,6 +63,21 @@ type peerJSON struct {
 	// to our rotate ("pending", "refused").
 	OurKey         string `json:"ourKey,omitempty"`
 	RotationAnswer string `json:"rotationAnswer,omitempty"`
+
+	// Addresses (MSFP core section 13). NotMoved: its requests are still
+	// signed for this server's former address; MoveLate, for some days.
+	// Moving is an address it says it moved to, not confirmed yet.
+	NotMoved bool        `json:"notMoved,omitempty"`
+	MoveLate bool        `json:"moveLate,omitempty"`
+	Moving   *movingJSON `json:"moving,omitempty"`
+}
+
+// movingJSON is a peer's new address, being checked: since when that
+// fails, and whether that's long enough to warn about.
+type movingJSON struct {
+	Address string `json:"address"`
+	Failing string `json:"failing,omitempty"`
+	Warn    bool   `json:"warn,omitempty"`
 }
 
 type pendingJSON struct {
@@ -180,11 +195,26 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 		return
 	}
 	outPeers := []peerJSON{}
+	now := time.Now()
+	notMoved, others := 0, 0
 	for _, pe := range peers {
 		j, err := p.peerCounted(ctx, pe, counts)
 		if err != nil {
 			p.fail(w, "reading offers and wants", err)
 			return
+		}
+		j.NotMoved, j.MoveLate = s.NotMoved(pe)
+		if j.NotMoved {
+			notMoved++
+		}
+		if pe.State != store.PeerGone {
+			others++
+		}
+		if m := pe.Move; m != nil {
+			j.Moving = &movingJSON{Address: m.Address, Warn: m.Warn(now)}
+			if !m.Failing.IsZero() {
+				j.Moving.Failing = m.Failing.Format(time.RFC3339)
+			}
 		}
 		outPeers = append(outPeers, j)
 	}
@@ -203,6 +233,12 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 	if _, since, ok := s.Keys.Old(); ok {
 		out["rotation"] = map[string]string{"since": since.Format(time.RFC3339),
 			"until": since.Add(federation.KeyOverlap).Format(time.RFC3339)}
+	}
+	// A change of this server's address under way: from which, since
+	// when, until when the former is accepted, and how many peers moved.
+	if former, since, ok := s.Moving(); ok {
+		out["move"] = map[string]any{"former": former, "since": since.Format(time.RFC3339),
+			"until": since.Add(msfp.AddressOverlap).Format(time.RFC3339), "moved": others - notMoved, "of": others}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -154,7 +154,7 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 	o, ok := pb.open(w, r, openArgs{req: startRequest{AudioTrack: req.AudioTrack, SubtitleTrack: req.SubtitleTrack,
 		StartPositionMs: req.StartPositionMs}, pr: pr, kbps: kbps, item: item, uid: uid, ja: ja,
 		wantAudio: req.AudioLanguage, wantSubtitles: req.SubtitleLanguage, lim: lim, device: peer.Name,
-		accountID: id, profileID: id, sessionID: id, urlBase: fed.Address, origin: origin(peer.Address), peerTracks: true,
+		accountID: id, profileID: id, sessionID: id, urlBase: fed.AddressFor(peer), origin: origin(peer.Address), peerTracks: true,
 		versionID: func(sourceID string) string { return "ver_" + fed.Keys.Opaque("version", peer.ID, sourceID) }})
 	if !ok {
 		return
@@ -170,7 +170,7 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 	}
 	// Its seek-bar previews, a bonus, by the same ticket (MSFP video, section 5.5).
 	out.Trickplay = pb.previews(ctx, s, ja, uid, func(n int) string {
-		return fed.Address + "/api/v1/stream/" + s.Ticket + "/trickplay/" + strconv.Itoa(n)
+		return fed.AddressFor(peer) + "/api/v1/stream/" + s.Ticket + "/trickplay/" + strconv.Itoa(n)
 	})
 	if out.Trickplay != nil && !peerLayoutOK(out.Trickplay) {
 		out.Trickplay, s.Trickplay = nil, nil // outside what MSFP allows: none

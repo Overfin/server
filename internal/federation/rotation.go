@@ -581,8 +581,9 @@ func (s *Service) DeleteNextKey(ctx context.Context) error {
 // (MSFP core section 12.4).
 const rotateDaily = 24 * time.Hour
 
-// Maintain does what time brings to keys, run every hour or so (MSFP
-// core section 12): our old key deleted 30 days after the change began;
+// Maintain does what time brings to keys and addresses, run every hour
+// or so (MSFP core sections 12 and 13; maintainAddresses for addresses):
+// our old key deleted 30 days after the change began;
 // a peer on it told again daily; a peer suspended 30 days without a
 // valid rotation becomes gone; and a peer that holds no commitment of
 // ours, from a pairing made before commitments, sent a hello carrying it
@@ -602,6 +603,7 @@ func (s *Service) Maintain(ctx context.Context) {
 		s.Logger.Error("federation: listing peers", "error", err)
 		return
 	}
+	s.maintainAddresses(ctx, peers)
 	for _, p := range peers {
 		switch {
 		case p.Suspended != nil && p.State != store.PeerGone && now.Sub(*p.Suspended) >= KeyOverlap:

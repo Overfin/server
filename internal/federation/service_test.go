@@ -30,7 +30,17 @@ type server struct {
 	url string
 	// db is its database's file, for tests that set what no call can.
 	db string
+	// routes is what its test server serves: a move (moveTo) gives it
+	// the federation built anew.
+	routes *routes
 }
+
+// routes is a test server's handler, which a move replaces.
+type routes struct{ h atomic.Pointer[http.Handler] }
+
+func (r *routes) set(h http.Handler) { r.h.Store(&h) }
+
+func (r *routes) ServeHTTP(w http.ResponseWriter, req *http.Request) { (*r.h.Load()).ServeHTTP(w, req) }
 
 // newServer is one over HTTPS, as MSFP is (core section 3).
 func newServer(t *testing.T, name string) *server {
@@ -55,7 +65,9 @@ func newServerOn(t *testing.T, name string, withTLS bool) *server {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	ts := httptest.NewUnstartedServer(mux)
+	rt := &routes{}
+	rt.set(mux)
+	ts := httptest.NewUnstartedServer(rt)
 	if withTLS {
 		ts.StartTLS()
 	} else {
@@ -72,7 +84,7 @@ func newServerOn(t *testing.T, name string, withTLS bool) *server {
 	if err := reg.Load(Plugin{S: s}); err != nil {
 		t.Fatal(err)
 	}
-	return &server{s: s, url: ts.URL, db: db}
+	return &server{s: s, url: ts.URL, db: db, routes: rt}
 }
 
 // allParts is a peer's versions when it speaks all that this server does.

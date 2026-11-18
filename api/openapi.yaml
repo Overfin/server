@@ -4031,10 +4031,13 @@ paths:
         where it stands (`paired`: its operator accepted; `waiting`;
         `ended`: it has just ended the pairing, which ends it here too), and
         the answer says where this server stands. Both say which versions
-        of MSFP's core and parts they speak (`core`, `parts`), and name the
-        certificates their address serves; the parts both speak are the
-        ones used between them. A key this server doesn't know gets the
-        same plain 404 as a missing route.
+        of MSFP's core and parts they speak (`core`, `parts`; a part this
+        server doesn't know is ignored, whatever its value), name the
+        certificates their address serves, and give their address; the
+        parts both speak are the ones used between them. A key this server
+        doesn't know gets the same plain 404 as a missing route. After this
+        server's address changed, requests signed for its former host are
+        accepted too, for 30 days or until every peer moved.
       tags: [federation]
       security: []
       requestBody:
@@ -4416,7 +4419,9 @@ components:
           type: array
           items: {type: string}
           description: "Pins of the certificates the sender's address serves"
-        address: {type: string, description: "The sender's address, https://host"}
+        address:
+          type: string
+          description: "The sender's address now, https://host[:port]. One that differs from the address stored for it is a change of address (MSFP core section 13): it is stored only once a hello there, signed for its host, is answered under the sender's key; until then, and if that fails, the stored address stays."
         nextCommitment:
           type: string
           description: "The sender's next key commitment (SHA-256 of its next key, URL-safe base64, no padding), sent while the pairing has none from pair or a rotation. Kept only by a peer that never had one (trust on first use); ignored otherwise."

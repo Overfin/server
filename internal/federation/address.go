@@ -1,0 +1,336 @@
+package federation
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/overfin/server/internal/msfp"
+	"github.com/overfin/server/internal/store"
+)
+
+// Changes of address (MSFP core section 13), this server's and its
+// peers'.
+//
+// This server's address is its site's (Service.Address). When the
+// configured one changes, the next start notes it (NoteAddress): the one
+// before becomes the former address, still accepted, for requests signed
+// for its host, 30 days or until every peer signs for the new one; every
+// peer is told at once in a hello, and again at each contact while it
+// hasn't moved.
+//
+// A peer whose signed hello names another address than the one stored
+// keeps being called at the stored one until a hello at the new address,
+// signed for its host, is answered under the peer's key: then the new
+// address is stored, with the pins that answer names. Failing, the old
+// one stays; it's tried again at most once an hour, and the operator is
+// warned after a day.
+//
+// A peer that can't be called (MSFP core section 7.5) moves otherwise; it
+// isn't handled yet, as such peers aren't.
+
+// moveLate is when the panel warns that a peer hasn't moved to this
+// server's new address (core section 13.1: "after some days").
+const moveLate = 3 * 24 * time.Hour
+
+// announceSpacing is the least time between two hellos sent a peer that
+// hasn't moved to our new address, at its contacts.
+const announceSpacing = time.Minute
+
+// NoteAddress notes the address this server federates under, once its
+// federation is built (the gateway's rebuilds): when it changed since the
+// last, a move begins, and every peer is told at once, in the background.
+func (s *Service) NoteAddress(ctx context.Context) error {
+	moved, err := s.Store.NoteFederationAddress(ctx, s.Address, s.now())
+	if err != nil {
+		return err
+	}
+	a, err := s.Store.FederationAddress(ctx)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.former, s.movedAt = a.Former, a.MovedAt
+	s.mu.Unlock()
+	if !moved {
+		return nil
+	}
+	s.Logger.Info("federation: this server's address changed; paired servers are told", "from", a.Former, "to", s.Address)
+	go func() {
+		ctx, cancel := context.WithTimeout(Background(context.Background()), time.Minute)
+		defer cancel()
+		s.each(ctx, func(p *store.Peer) bool { return p.State != store.PeerGone }, func(ctx context.Context, p *store.Peer) {
+			s.announce(ctx, p)
+		})
+	}()
+	return nil
+}
+
+// Moving is this server's move of address under way: its former address,
+// and when the move began; ok is false when there's none, or it's over.
+func (s *Service) Moving() (former string, since time.Time, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.former == "" || s.now().Sub(s.movedAt) >= msfp.AddressOverlap {
+		return "", time.Time{}, false
+	}
+	return s.former, s.movedAt, true
+}
+
+// formerHost is the host of this server's former address while a move is
+// under way, "" otherwise: what Verifier.Former accepts.
+func (s *Service) formerHost() string {
+	if former, _, ok := s.Moving(); ok {
+		return msfp.Host(former)
+	}
+	return ""
+}
+
+// AddressFor is this server's address as p knows it: the former one
+// while p's requests are still signed for it, the current one otherwise.
+// A play answer's URLs are on it, so that p, still calling the former,
+// accepts them.
+func (s *Service) AddressFor(p *store.Peer) string {
+	if former, _, ok := s.Moving(); ok && p.OurAddress == former {
+		return former
+	}
+	return s.Address
+}
+
+// NotMoved says whether p still signs its requests for our former
+// address, and late, whether it has for moveLate.
+func (s *Service) NotMoved(p *store.Peer) (notMoved, late bool) {
+	former, since, ok := s.Moving()
+	if !ok || p.OurAddress != former || p.State == store.PeerGone {
+		return false, false
+	}
+	return true, s.now().Sub(since) >= moveLate
+}
+
+// heardAt notes which of our addresses a known peer's request was signed
+// for (former: the former one). One on the former is told of the new one
+// again; the last to move ends the move.
+func (s *Service) heardAt(ctx context.Context, p *store.Peer, former bool) {
+	ours := s.Address
+	if former {
+		old, _, ok := s.Moving()
+		if !ok {
+			return
+		}
+		ours = old
+		s.announceSoon(p)
+	}
+	if p.OurAddress == ours {
+		return
+	}
+	if err := s.Store.SetPeerOurAddress(ctx, p.ID, ours); err != nil {
+		s.Logger.Error("federation: which address a peer calls couldn't be kept", "error", err)
+		return
+	}
+	p.OurAddress = ours
+	if former {
+		return
+	}
+	old, _, ok := s.Moving()
+	if !ok {
+		return
+	}
+	s.Logger.Info("federation: a peer moved to this server's new address", "name", p.Name)
+	if n, err := s.Store.PeersOnAddress(ctx, old); err == nil && n == 0 {
+		s.endMove(ctx, "every peer moved to this server's new address")
+	}
+}
+
+// endMove ends our move: the former address no longer accepted.
+func (s *Service) endMove(ctx context.Context, why string) {
+	if err := s.Store.EndFederationMove(ctx); err != nil {
+		s.Logger.Error("federation: the end of a change of address couldn't be kept", "error", err)
+		return
+	}
+	s.mu.Lock()
+	former := s.former
+	s.former, s.movedAt = "", time.Time{}
+	s.mu.Unlock()
+	s.Logger.Info("federation: "+why+"; the former address is no longer accepted", "former", former)
+}
+
+// announceSoon tells p, in the background, of our new address in a
+// hello, unless one went within announceSpacing.
+func (s *Service) announceSoon(p *store.Peer) {
+	if !s.announceDue(p.ID) {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(Background(context.Background()), 20*time.Second)
+		defer cancel()
+		s.Check(ctx, p)
+	}()
+}
+
+// announce tells p of our new address in a hello now (Check), unless one
+// went within announceSpacing.
+func (s *Service) announce(ctx context.Context, p *store.Peer) {
+	if s.announceDue(p.ID) {
+		s.Check(ctx, p)
+	}
+}
+
+// announceDue says whether a hello telling a peer our address may go now,
+// and notes it goes.
+func (s *Service) announceDue(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	if last, ok := s.announced[id]; ok && now.Sub(last) < announceSpacing {
+		return false
+	}
+	if s.announced == nil {
+		s.announced = map[string]time.Time{}
+	}
+	s.announced[id] = now
+	return true
+}
+
+// A peer's change of address, here.
+
+// announced handles the address a peer's signed hello, request or answer,
+// names (MSFP core section 13.2): another than the one stored is to be
+// confirmed, in the background; the stored one again drops a move not
+// confirmed. An address that isn't one is ignored, the stored one kept.
+func (s *Service) announcedAddress(ctx context.Context, p *store.Peer, address string) error {
+	next, err := msfp.Announced(p.Address, address)
+	if err != nil {
+		s.Logger.Info("federation: a peer named an address that isn't one; its stored address stays", "name", p.Name)
+		return nil
+	}
+	if next == "" {
+		if address == p.Address && p.Move != nil {
+			p.Move = nil
+			return s.Store.SetPeerMove(ctx, p.ID, nil)
+		}
+		return nil
+	}
+	if p.Move == nil || p.Move.Address != next {
+		p.Move = &msfp.Move{Address: next}
+		if err := s.Store.SetPeerMove(ctx, p.ID, p.Move); err != nil {
+			return err
+		}
+		s.Logger.Info("federation: a peer says it moved; its new address is checked", "name", p.Name, "from", p.Address, "to", next)
+	}
+	if !p.Move.Due(s.now()) || !s.startConfirming(p.ID) {
+		return nil
+	}
+	q, m := *p, *p.Move
+	go func() {
+		defer s.doneConfirming(q.ID)
+		ctx, cancel := context.WithTimeout(Background(context.Background()), 30*time.Second)
+		defer cancel()
+		s.confirmMove(ctx, &q, m)
+	}()
+	return nil
+}
+
+// startConfirming says whether a confirmation of p's new address may
+// start: one at a time per peer.
+func (s *Service) startConfirming(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.confirming[id] {
+		return false
+	}
+	if s.confirming == nil {
+		s.confirming = map[string]bool{}
+	}
+	s.confirming[id] = true
+	return true
+}
+
+func (s *Service) doneConfirming(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.confirming, id)
+}
+
+// ErrMoveFailed: the hello at a peer's new address got no answer signed
+// by its key.
+var ErrMoveFailed = fmt.Errorf("%w at its new address", ErrUnreachable)
+
+// confirmMove calls hello at p's new address, signed for its host (MSFP
+// core section 13.2, step 2), as any connection to a peer: refused
+// destinations refused, any certificate accepted (hello). Answered under
+// p's key, the new address is stored, with the pins that answer names,
+// those of the old address dropped; otherwise the old one stays, and the
+// failure is noted for the next try, an hour later at least.
+func (s *Service) confirmMove(ctx context.Context, p *store.Peer, m msfp.Move) error {
+	now := s.now()
+	m.Tried = now
+	there := *p
+	there.Address, there.Certificates = m.Address, nil
+	var raw json.RawMessage
+	r, err := s.callOnce(ctx, &there, helloPath, s.ourHello(ctx, p, viewOf(p), false), &raw, s.signer(p))
+	var answer msfp.Hello
+	switch {
+	case err != nil:
+	case r.Status != http.StatusOK:
+		err = fmt.Errorf("%w: it answered %d", ErrMoveFailed, r.Status)
+	default:
+		if answer, err = msfp.ReadHello(raw, true); err != nil {
+			err = fmt.Errorf("%w: %v", ErrMoveFailed, err)
+		}
+	}
+	if err != nil {
+		if m.Failing.IsZero() {
+			m.Failing = now
+		}
+		if e := s.Store.SetPeerMove(ctx, p.ID, &m); e != nil {
+			return e
+		}
+		log := s.Logger.Info
+		if m.Warn(now) {
+			log = s.Logger.Warn
+		}
+		log("federation: a peer's new address doesn't answer as it; its old address stays", "name", p.Name,
+			"address", m.Address, "since", m.Failing, "error", err)
+		return err
+	}
+	moved, err := s.Store.MovePeer(ctx, p.ID, p.Address, m.Address, msfp.CleanPins(answer.Certificates))
+	if err != nil || !moved {
+		return err
+	}
+	s.Logger.Info("federation: a peer moved, its new address confirmed", "name", p.Name, "from", p.Address, "to", m.Address)
+	q, err := s.Store.PeerByID(ctx, p.ID)
+	if err != nil {
+		return err
+	}
+	// The rest of what it says, as for any hello; an address it names
+	// there is for its next one.
+	answer.Address = ""
+	if err := s.Store.PeerSeen(ctx, q.ID); err != nil {
+		return err
+	}
+	return s.keepHello(ctx, q, answer)
+}
+
+// maintainAddresses is what time brings to addresses, from Maintain: our
+// move over after 30 days; a peer that hasn't moved told again; a peer's
+// new address that failed tried again.
+func (s *Service) maintainAddresses(ctx context.Context, peers []*store.Peer) {
+	s.mu.Lock()
+	over := s.former != "" && s.now().Sub(s.movedAt) >= msfp.AddressOverlap
+	s.mu.Unlock()
+	if over {
+		s.endMove(ctx, "30 days since this server's address changed")
+	}
+	now := s.now()
+	for _, p := range peers {
+		if notMoved, _ := s.NotMoved(p); notMoved {
+			s.announce(ctx, p)
+		}
+		if p.Move != nil && p.Move.Due(now) && s.startConfirming(p.ID) {
+			s.confirmMove(ctx, p, *p.Move)
+			s.doneConfirming(p.ID)
+		}
+	}
+}

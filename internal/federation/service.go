@@ -103,6 +103,15 @@ type Service struct {
 	rechecked map[string]time.Time
 	// told are the peers Maintain sent our commitment in a hello, by ID.
 	told map[string]bool
+	// former is this server's address before it moved, and movedAt when,
+	// while the move lasts (NoteAddress); "" for none.
+	former  string
+	movedAt time.Time
+	// announced is when each peer was last sent a hello for our new
+	// address, at its contacts, by ID.
+	announced map[string]time.Time
+	// confirming are the peers whose new address is being checked, by ID.
+	confirming map[string]bool
 }
 
 // NewHTTPClient is the client for talking to peers: short timeouts, and
@@ -145,7 +154,7 @@ func (p Plugin) Name() string { return "federation" }
 // Register declares the routes other servers call. They're public: the
 // caller is a server, proven by its signature, never a person.
 func (p Plugin) Register(r *plugin.Registrar) error {
-	p.S.verifier = &msfp.Verifier{Host: p.S.host(), Seen: p.S.Seen, Admit: p.S.admit, Forgotten: p.S.forgotten}
+	p.S.verifier = &msfp.Verifier{Host: p.S.host(), Former: p.S.formerHost, Seen: p.S.Seen, Admit: p.S.admit, Forgotten: p.S.forgotten}
 	if err := r.HandlePublic("POST /api/v1/federation/pair", SignRefusals(http.HandlerFunc(p.S.pair))); err != nil {
 		return err
 	}
@@ -412,6 +421,10 @@ func (s *Service) verified(w http.ResponseWriter, r *http.Request) (msfp.Verifie
 		if p.OurKey == store.OurKeyOld {
 			s.rotateSoon(p)
 		}
+		// Which of our addresses it signed for: one still on our former
+		// address told of the new one again, at each contact (section
+		// 13.1).
+		s.heardAt(r.Context(), p, v.Former)
 		key = msfp.Encode64(v.Key)
 		if no := lim.call(key, r.URL.Path == playPath, lim.now()); no != nil {
 			sendRefusal(w, no)
@@ -554,12 +567,15 @@ func (s *Service) hello(w http.ResponseWriter, r *http.Request) {
 }
 
 // keepHello keeps what a peer's signed hello, request or answer, says of
-// it: its versions (MSFP core section 10.3), its pins (section 3.2), and
-// its next key commitment if it never had one (section 12.5). Its address
-// is read, not acted on: this server doesn't follow a peer's change of
-// address yet.
+// it: its versions (MSFP core section 10.3), its pins (section 3.2), its
+// next key commitment if it never had one (section 12.5), and, for
+// another address than the one stored, the check of that address
+// (section 13.2).
 func (s *Service) keepHello(ctx context.Context, p *store.Peer, h msfp.Hello) error {
 	if err := s.keepCertificates(ctx, p, h.Certificates); err != nil {
+		return err
+	}
+	if err := s.announcedAddress(ctx, p, h.Address); err != nil {
 		return err
 	}
 	if h.NextCommitment != nil && p.CommitmentFrom == "" {
