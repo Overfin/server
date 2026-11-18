@@ -966,11 +966,13 @@ func (e *Engine) StopPlayback(id string) error {
 
 // PlaybackView is a peer's playback here, for the host's live view: the
 // peer (never a person), the title played, how, since when, and whether
-// it was used since it started ("started" or "active").
+// it was used since it started ("started" or "active"). Handle is the
+// host's own (Started.Handle), for a host that ends a playback from its
+// side (StopPlayback with ID).
 type PlaybackView struct {
-	ID, Peer, PeerName, Title, Method string
-	Since                             time.Time
-	State                             string
+	ID, Peer, PeerName, Title, Method, Handle string
+	Since                                     time.Time
+	State                                     string
 }
 
 // Playbacks lists the peers' playbacks here, live, oldest first.
@@ -981,7 +983,7 @@ func (e *Engine) Playbacks() []PlaybackView {
 	out := make([]PlaybackView, 0, len(ps.byID))
 	for _, pb := range ps.byID {
 		v := PlaybackView{ID: pb.id, Peer: pb.peer, PeerName: pb.peerName, Title: pb.title, Method: pb.method,
-			Since: pb.started, State: "started"}
+			Handle: pb.handle, Since: pb.started, State: "started"}
 		if pb.active {
 			v.State = "active"
 		}
