@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
+	"net/http"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
@@ -124,6 +126,27 @@ func FuzzPrimeOrderPoint(f *testing.F) {
 		}
 		if len(b) == 32 && verify(b, msg, sig) && !ed25519.Verify(b, msg, sig) {
 			t.Fatalf("verify accepted what crypto/ed25519 refuses")
+		}
+	})
+}
+
+// An answer's media type (core section 6.3) is "-", or type/subtype in
+// lower case, without white space or parameters; and the signature line
+// built from it is the same as MediaType makes of the header.
+func FuzzAnswerMediaType(f *testing.F) {
+	for _, s := range []string{"", "application/json", "Application/JSON; charset=utf-8", "a/b/c", ";", " /x", "text/plain, a/b"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, value string) {
+		got, err := AnswerMediaType(http.Header{"Content-Type": {value}})
+		if err != nil {
+			return
+		}
+		if got != "-" && (strings.ToLower(got) != got || strings.Count(got, "/") != 1 || strings.ContainsAny(got, " \t;,")) {
+			t.Fatalf("%q read as %q", value, got)
+		}
+		if MediaType(value) != got {
+			t.Fatalf("%q: %q, but the signature line %q", value, got, MediaType(value))
 		}
 	})
 }
