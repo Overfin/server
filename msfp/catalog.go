@@ -153,6 +153,7 @@ func (e *Engine) SetOffers(ctx context.Context, peer string, libraries []string)
 	if err != nil || !changed {
 		return err
 	}
+	e.bumpLog(ctx)
 	e.endPlaybacks(func(pb *playback) bool { return pb.peer == peer && !slices.Contains(keep, pb.library) }, EndNotOffered)
 	return nil
 }
@@ -165,13 +166,16 @@ func (e *Engine) LibraryRemoved(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	removed := false
 	err = e.cfg.Store.Update(ctx, func(tx Tx) error {
+		removed = false
 		peers, err := tx.Peers()
 		if err != nil {
 			return err
 		}
 		for _, p := range peers {
 			if i := slices.Index(p.Offers, id); i >= 0 {
+				removed = true
 				if p.OffersSeq, err = e.offersSeq(tx, mark); err != nil {
 					return err
 				}
@@ -183,6 +187,9 @@ func (e *Engine) LibraryRemoved(ctx context.Context, id string) error {
 		}
 		return nil
 	})
+	if err == nil && removed {
+		e.bumpLog(ctx)
+	}
 	e.endPlaybacks(func(pb *playback) bool { return pb.library == id }, EndNotOffered)
 	return err
 }
@@ -275,6 +282,22 @@ func (e *Engine) offersSeq(tx Tx, mark int64) (int64, error) {
 		return log.BumpOwnSeq()
 	}
 	return mark + 1, nil
+}
+
+// bumpLog moves the host's change log past the change numbers noted for
+// a change of what peers see, when it can (SeqBumper): their readings are
+// of changes again after one whole reading.
+func (e *Engine) bumpLog(ctx context.Context) {
+	b, ok := e.changeLog().(SeqBumper)
+	if !ok {
+		return
+	}
+	seq, err := b.BumpSeq(ctx)
+	if err != nil {
+		e.log.Warn("msfp: the catalog's change log couldn't take a number", "error", err)
+		return
+	}
+	e.sawSeq(seq)
 }
 
 // seqMark is the highest change number given out, at least the host's

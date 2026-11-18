@@ -156,6 +156,19 @@ type ChangeLog interface {
 	Changes(ctx context.Context, libraries []string, since int64, after string, limit int) (ChangePage, error)
 }
 
+// SeqBumper is what a ChangeLog implements, besides ChangeLog, when it can
+// take a change number with no change of a title. After a change of what
+// a peer sees (its offers, the parts on), the peer's readings are whole
+// until the log moves past the number noted then (PeerRecord.OffersSeq,
+// one above the log's): the engine takes one at once, so that the reading
+// after the next whole one is of changes again, without waiting for a
+// title to change. Without it, readings stay whole until one does.
+type SeqBumper interface {
+	// BumpSeq takes a new change number, above every one before, and
+	// gives it; Changes never lists anything under it.
+	BumpSeq(ctx context.Context) (int64, error)
+}
+
 // ErrTooOld is a ChangeLog's answer for a change number it no longer
 // keeps: the engine then sends the whole list.
 var ErrTooOld = &Error{Code: "TooOld"}

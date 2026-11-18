@@ -281,6 +281,9 @@ func (e *Engine) react(ev Event) {
 					return tx.PutPeer(*p)
 				})
 			}
+			if err == nil {
+				e.bumpLog(ctx)
+			}
 			if err != nil && !errors.Is(err, ErrNotFound) {
 				e.log.Warn("msfp: a peer's change of versions couldn't be noted", "peer", id, "error", err)
 			}

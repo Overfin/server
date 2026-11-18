@@ -189,6 +189,46 @@ func TestHostChangeLog(t *testing.T) {
 	}
 }
 
+// bumpingHost is a ChangeLog that takes change numbers itself
+// (SeqBumper).
+type bumpingHost struct{ *loggingHost }
+
+func (b *bumpingHost) BumpSeq(context.Context) (int64, error) {
+	b.seq++
+	return b.seq, nil
+}
+
+// A host whose log takes a number after a change of offers: the reading
+// after the next whole one is of changes, with no title changed between.
+func TestHostChangeLogBumped(t *testing.T) {
+	ctx := context.Background()
+	h := newFakeHost()
+	h.film("films", "movie/tmdb/5", "en")
+	l := &bumpingHost{&loggingHost{fakeHost: h, seq: 6}}
+	h.libs = []msfp.Library{{ID: "films", Name: "Films", Kind: "movies"}}
+	a := newServer(t, msfp.Config{Catalog: l, Playback: h, Media: h})
+	b := newServer(t, msfp.Config{})
+	onA, onB := pair(t, a, b)
+	a.eng.Check(ctx, onA.ID)
+	b.eng.Check(ctx, onB.ID)
+	before := l.seq
+	a.eng.SetOffers(ctx, onA.ID, []string{"films"})
+	after := l.seq
+	if after != before+1 {
+		t.Fatalf("the log after the offers: %d, was %d", after, before)
+	}
+	libs, _ := b.eng.TheirLibraries(ctx, onB.ID)
+	b.eng.SetWants(ctx, onB.ID, []string{libs[0].ID})
+	for range 2 {
+		if _, err := b.eng.ReadNow(ctx, onB.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !slices.Equal(l.since, []int64{after}) {
+		t.Errorf("changes asked since %v, the offers at %d", l.since, after)
+	}
+}
+
 // Keys MSFP doesn't take never leave: leading zeros, another kind, an
 // unknown scheme; members are cleaned before they go.
 func TestOwnTitlesChecked(t *testing.T) {
