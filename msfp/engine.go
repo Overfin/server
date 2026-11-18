@@ -210,6 +210,9 @@ func (e *Engine) loadKeys(ctx context.Context) error {
 			}
 			*r = *made
 		}
+		if err := e.resealRevoked(r); err != nil {
+			return err
+		}
 		if !r.Uncallable && r.Address != e.cfg.Address {
 			from := r.Address
 			if err := e.startMove(tx, r, e.cfg.Address); err != nil {
@@ -322,7 +325,7 @@ func (e *Engine) openKeys(r ServerRecord) error {
 		k.old = &old
 	}
 	if r.Revoked != nil {
-		revoked, err := e.openKey(r.Revoked, sealOld)
+		revoked, err := e.openKey(r.Revoked, sealRevoked)
 		if err != nil {
 			return err
 		}
@@ -334,6 +337,28 @@ func (e *Engine) openKeys(r ServerRecord) error {
 		uncallable: r.Uncallable, uncallableAddress: r.UncallableAddress}
 	e.keysMu.Unlock()
 	e.newVerifier()
+	return nil
+}
+
+// resealRevoked seals again, under its own context ("msfp revoked key"),
+// a revoked key that an earlier release sealed under the old key's
+// ("msfp old key"). Kept for one release; a store that converts its
+// records itself (Overfin's migration 132) never needs it.
+func (e *Engine) resealRevoked(r *ServerRecord) error {
+	if r.Revoked == nil {
+		return nil
+	}
+	if _, err := e.cfg.Sealer.Open(r.Revoked, sealRevoked); err == nil {
+		return nil
+	}
+	seed, err := e.cfg.Sealer.Open(r.Revoked, sealOld)
+	if err != nil {
+		return ErrSealed.with(err)
+	}
+	if r.Revoked, err = e.cfg.Sealer.Seal(seed, sealRevoked); err != nil {
+		return err
+	}
+	e.log.Info("msfp: the revoked key is sealed again under its own context")
 	return nil
 }
 

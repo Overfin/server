@@ -464,7 +464,8 @@ func TestRotateWithExportedKey(t *testing.T) {
 // then, learns it from the revocation-only answer to its hello; D, whose
 // pairing A's operator ended before, gets the 404 of a forgotten key,
 // signed with A's new key, which D can't check. After 30 days, B's A is
-// gone, still suspended, and E, back only then, gets that 404 too.
+// gone, still suspended, and E, back only then, gets the plain unsigned
+// 404 of an unknown key (section 12.7, case 2).
 func TestKeyStolenWithoutNext(t *testing.T) {
 	ctx := context.Background()
 	clock := newClock(1800000000)
@@ -724,6 +725,50 @@ func TestRotationJSONRestart(t *testing.T) {
 		t.Errorf("A on C: %+v", v)
 	}
 	if sv := serverView(t, a); !sv.RotationSince.IsZero() {
+		t.Errorf("A: %+v", sv)
+	}
+}
+
+// The revoked key of a key replaced is sealed under its own context; one
+// an earlier release sealed under the old key's is sealed again at Open.
+func TestRevokedKeySealedApart(t *testing.T) {
+	ctx := context.Background()
+	clock := newClock(1800000000)
+	a := newServer(t, msfp.Config{Clock: clock})
+	if _, err := a.eng.KeyStolen(ctx, "", true); err != nil {
+		t.Fatal(err)
+	}
+	revoked := func() []byte {
+		var sealed []byte
+		a.store.Read(ctx, func(tx msfp.Tx) error {
+			r, err := tx.Server()
+			if r != nil {
+				sealed = r.Revoked
+			}
+			return err
+		})
+		return sealed
+	}
+	seed, err := msfp.PlainSealer{}.Open(revoked(), "msfp revoked key")
+	if err != nil {
+		t.Fatalf("the revoked key under its own context: %v", err)
+	}
+	// As an earlier release kept it.
+	if err := a.store.Update(ctx, func(tx msfp.Tx) error {
+		r, err := tx.Server()
+		if err != nil {
+			return err
+		}
+		r.Revoked, _ = msfp.PlainSealer{}.Seal(seed, "msfp old key")
+		return tx.PutServer(*r)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a.reopen(t, msfp.Config{Store: a.store, Clock: clock})
+	if again, err := (msfp.PlainSealer{}).Open(revoked(), "msfp revoked key"); err != nil || !bytes.Equal(again, seed) {
+		t.Errorf("not sealed again: %v", err)
+	}
+	if sv := serverView(t, a); sv.RevokedAt.IsZero() {
 		t.Errorf("A: %+v", sv)
 	}
 }

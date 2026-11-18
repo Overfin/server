@@ -200,9 +200,10 @@ type Media interface {
 
 // Sealer seals the seeds and secrets the engine stores, each under a
 // context ("msfp current key", "msfp next key", "msfp old key", "msfp
-// ids secret", "msfp code secret"): a value sealed under one context
-// never opens under another. Open fails with ErrSealed when the box is
-// tampered with, of another context, or of another key.
+// revoked key", "msfp ids secret", "msfp code secret"): a value sealed
+// under one context never opens under another. Open fails with
+// ErrSealed when the box is tampered with, of another context, or of
+// another key.
 //
 // The host chooses how: a key in its configuration (KeySealer), a key
 // file apart from its data (KeyFileSealer), a secret store. PlainSealer

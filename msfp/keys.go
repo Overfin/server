@@ -353,7 +353,7 @@ func (e *Engine) replaceKey(ctx context.Context, stolen wire.Key) error {
 			}
 			ended = append(ended, p)
 		}
-		if r.Revoked, err = e.cfg.Sealer.Seal(stolen.Seed(), sealOld); err != nil {
+		if r.Revoked, err = e.cfg.Sealer.Seal(stolen.Seed(), sealRevoked); err != nil {
 			return err
 		}
 		if r.Current, err = e.cfg.Sealer.Seal(fresh, sealCurrent); err != nil {

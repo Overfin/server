@@ -253,3 +253,44 @@ func TestFederationNothingToConvert(t *testing.T) {
 		t.Fatalf("%+v %v", sv, err)
 	}
 }
+
+// A revoked key an engine before 2026-11-18 sealed under the old key's
+// context is sealed again under its own at migration 132.
+func TestRevokedKeyResealed(t *testing.T) {
+	ctx := context.Background()
+	box, _ := seal.New(bytes.Repeat([]byte{9}, 32))
+	path := filepath.Join(t.TempDir(), "old.db")
+	openPathAt(t, path, box, 131)
+	seed := bytes.Repeat([]byte{8}, 32)
+	r := msfp.ServerRecord{Current: box.Seal(bytes.Repeat([]byte{1}, 32), "msfp current key"),
+		Revoked: box.Seal(seed, "msfp old key"), RevokedAt: time.Unix(1_790_000_000, 0).UTC()}
+	b, _ := json.Marshal(r)
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO msfp_server (id, record) VALUES (1, ?)`, string(b)); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := Open(ctx, path, box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var rec *msfp.ServerRecord
+	if err := s.MSFP().Read(ctx, func(tx msfp.Tx) error {
+		var err error
+		rec, err = tx.Server()
+		return err
+	}); err != nil || rec == nil {
+		t.Fatalf("the record: %v %v", rec, err)
+	}
+	if got, err := box.Open(rec.Revoked, "msfp revoked key"); err != nil || !bytes.Equal(got, seed) {
+		t.Errorf("not sealed again: %v", err)
+	}
+	if !rec.RevokedAt.Equal(r.RevokedAt) {
+		t.Errorf("revoked at %v", rec.RevokedAt)
+	}
+}

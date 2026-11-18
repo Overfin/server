@@ -15,6 +15,7 @@ const (
 	sealCurrent = "msfp current key"
 	sealNext    = "msfp next key"
 	sealOld     = "msfp old key"
+	sealRevoked = "msfp revoked key"
 	sealIDs     = "msfp ids secret"
 	sealCode    = "msfp code secret"
 )

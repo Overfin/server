@@ -28,7 +28,8 @@ type ServerRecord struct {
 	OldSince   time.Time `json:"oldSince,omitzero"`
 	OldRevoked bool      `json:"oldRevoked,omitempty"`
 	// Revoked is a key revoked with no next key, replaced by Current,
-	// sealed ("msfp old key"), since RevokedAt: kept 30 days for the
+	// sealed ("msfp revoked key"; "msfp old key" before 2026-11-18, sealed
+	// again at Open), since RevokedAt: kept 30 days for the
 	// answers to the hellos of the peers whose pairing ended then (MSFP
 	// core section 12.7, case 2): those whose ForgottenKey is Revoked,
 	// At RevokedAt.

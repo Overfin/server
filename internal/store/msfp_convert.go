@@ -65,6 +65,7 @@ const (
 	msfpCurrent = "msfp current key"
 	msfpNext    = "msfp next key"
 	msfpOld     = "msfp old key"
+	msfpRevoked = "msfp revoked key"
 	msfpIDs     = "msfp ids secret"
 	msfpCode    = "msfp code secret"
 )
@@ -73,6 +74,43 @@ const (
 // their number, after its SQL: what needs this server's box.
 var goMigrations = map[int]func(ctx context.Context, tx *sql.Tx, s *Store) error{
 	129: convertFederation,
+	132: resealRevoked,
+}
+
+// resealRevoked seals this server's revoked key (msfp.ServerRecord's
+// Revoked, kept 30 days after its key was replaced) again, under the
+// engine's context of its own ("msfp revoked key") rather than the old
+// key's, which migration 129 and engines before 2026-11-18 used.
+func resealRevoked(ctx context.Context, tx *sql.Tx, s *Store) error {
+	var raw string
+	err := tx.QueryRowContext(ctx, `SELECT record FROM msfp_server WHERE id = 1`).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var r msfp.ServerRecord
+	if err := json.Unmarshal([]byte(raw), &r); err != nil {
+		return fmt.Errorf("store: this server's federation record: %w", err)
+	}
+	if r.Revoked == nil {
+		return nil
+	}
+	if _, err := s.box.Open(r.Revoked, msfpRevoked); err == nil {
+		return nil
+	}
+	plain, err := s.box.Open(r.Revoked, msfpOld)
+	if err != nil {
+		return fmt.Errorf("store: the revoked federation key doesn't open with this server's key: %w", err)
+	}
+	r.Revoked = s.box.Seal(plain, msfpRevoked)
+	b, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE msfp_server SET record = ? WHERE id = 1`, string(b))
+	return err
 }
 
 // convertFederation turns what Overfin's own federation kept into the
