@@ -3,6 +3,7 @@ package msfp_test
 import (
 	"context"
 	"errors"
+	"net"
 	"slices"
 	"strings"
 	"testing"
@@ -342,5 +343,81 @@ func TestCallsFailed(t *testing.T) {
 	}
 	if p, _ := b.eng.Peer(ctx, aOnB.ID); p.CallsFailed {
 		t.Errorf("A on B: %+v", p)
+	}
+}
+
+// gateDialer holds the connections to one address until opened, and
+// sends those to another to an address nothing listens at.
+type gateDialer struct {
+	held, closed string
+	to           string
+	waiting      chan struct{}
+	open         chan struct{}
+}
+
+func (d *gateDialer) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
+	switch addr {
+	case d.held:
+		select {
+		case d.waiting <- struct{}{}:
+		default:
+		}
+		select {
+		case <-d.open:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	case d.closed:
+		addr = d.to
+	}
+	return (&net.Dialer{}).DialContext(ctx, network, addr)
+}
+
+// A peer that names a second new address while its first is checked:
+// the first, once it answers under its key, is stored all the same, and
+// the second is checked next (MSFP core section 13.2); it failing, the
+// first stays.
+func TestMoveNamedAgainWhileChecked(t *testing.T) {
+	ctx := context.Background()
+	b := newServer(t, msfp.Config{})
+	b2, b3 := b.alias(t, true, nil), b.alias(t, true, nil)
+	dial := &gateDialer{held: hostOf(b2.srv), closed: hostOf(b3.srv), to: closedAddr(t),
+		waiting: make(chan struct{}, 1), open: make(chan struct{})}
+	a := newServer(t, msfp.Config{Dialer: dial})
+	bOnA, _ := pair(t, a, b)
+	if err := b.eng.SetAddress(ctx, b2.srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-dial.waiting:
+	case <-time.After(10 * time.Second):
+		t.Fatal("A never checked B2")
+	}
+	if err := b.eng.SetAddress(ctx, b3.srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		p, _ := a.eng.Peer(ctx, bOnA.ID)
+		if p.Moving != nil && p.Moving.Address == b3.srv.URL {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("B3 never named to A: %+v", p.Moving)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(dial.open)
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		waitAll(a, b)
+		p, _ := a.eng.Peer(ctx, bOnA.ID)
+		if p.Address == b2.srv.URL && p.Moving != nil && p.Moving.Address == b3.srv.URL && !p.Moving.FailingSince.IsZero() {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("B on A: %s, moving %+v", p.Address, p.Moving)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

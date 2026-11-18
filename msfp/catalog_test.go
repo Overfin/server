@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/overfin/server/msfp"
@@ -191,11 +192,24 @@ func TestHostChangeLog(t *testing.T) {
 
 // bumpingHost is a ChangeLog that takes change numbers itself
 // (SeqBumper).
-type bumpingHost struct{ *loggingHost }
+type bumpingHost struct {
+	*loggingHost
+	mu sync.Mutex
+}
+
+func (b *bumpingHost) Seq(context.Context) (int64, error) { return b.now(), nil }
 
 func (b *bumpingHost) BumpSeq(context.Context) (int64, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.seq++
 	return b.seq, nil
+}
+
+func (b *bumpingHost) now() int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.seq
 }
 
 // A host whose log takes a number after a change of offers: the reading
@@ -204,16 +218,17 @@ func TestHostChangeLogBumped(t *testing.T) {
 	ctx := context.Background()
 	h := newFakeHost()
 	h.film("films", "movie/tmdb/5", "en")
-	l := &bumpingHost{&loggingHost{fakeHost: h, seq: 6}}
+	l := &bumpingHost{loggingHost: &loggingHost{fakeHost: h, seq: 6}}
 	h.libs = []msfp.Library{{ID: "films", Name: "Films", Kind: "movies"}}
 	a := newServer(t, msfp.Config{Catalog: l, Playback: h, Media: h})
 	b := newServer(t, msfp.Config{})
 	onA, onB := pair(t, a, b)
 	a.eng.Check(ctx, onA.ID)
 	b.eng.Check(ctx, onB.ID)
-	before := l.seq
+	waitAll(a, b)
+	before := l.now()
 	a.eng.SetOffers(ctx, onA.ID, []string{"films"})
-	after := l.seq
+	after := l.now()
 	if after != before+1 {
 		t.Fatalf("the log after the offers: %d, was %d", after, before)
 	}

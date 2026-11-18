@@ -535,7 +535,15 @@ func (e *Engine) confirmMove(ctx context.Context, id string) {
 	if !e.startConfirming(id) {
 		return
 	}
-	defer e.doneConfirming(id)
+	// again: it named another address while this one was checked, which
+	// waited for this check to end.
+	again := false
+	defer func() {
+		e.doneConfirming(id)
+		if again {
+			e.confirmSoon(id)
+		}
+	}()
 	p, err := e.peerRecord(ctx, id)
 	if err != nil || p.Move == nil || !p.Suspended.IsZero() || !moveDue(p.Move, e.now()) {
 		return
@@ -559,8 +567,9 @@ func (e *Engine) confirmMove(ctx context.Context, id string) {
 	if err != nil {
 		var events []Event
 		uerr := e.updatePeer(ctx, id, func(q *PeerRecord) {
-			events = nil
+			events, again = nil, false
 			if q.Move == nil || q.Move.Address != m.Address {
+				again = q.Move != nil
 				return
 			}
 			q.Move.Tried = now
@@ -592,14 +601,21 @@ func (e *Engine) confirmMove(ctx context.Context, id string) {
 		return
 	}
 	var events []Event
-	callable := false
+	callable, superseded := false, false
 	err = e.updatePeer(ctx, id, func(q *PeerRecord) {
-		events, callable = nil, false
-		if q.Move == nil || q.Move.Address != m.Address || !wire.SameKey(q.Key, p.Key) {
-			return // another move, or another key, meanwhile
+		events, callable, superseded = nil, false, false
+		if q.Move == nil || !wire.SameKey(q.Key, p.Key) {
+			return // its stored address named again, or another key, meanwhile
 		}
+		// It named yet another address while this one was checked: this
+		// one answered under its key, so it is stored all the same (MSFP
+		// core section 13.2, step 4), and the newer one is checked next.
+		superseded = q.Move.Address != m.Address
 		from := q.Address
-		q.Address, q.Base, q.Pins, q.Move = m.Address, there.Base, wire.CleanPins(ans.Certificates), nil
+		q.Address, q.Base, q.Pins = m.Address, there.Base, wire.CleanPins(ans.Certificates)
+		if !superseded {
+			q.Move = nil
+		}
 		if from != q.Address {
 			events = append(events, PeerMoved{Peer: q.ID, Name: q.Name, From: from, To: q.Address})
 		}
@@ -636,6 +652,7 @@ func (e *Engine) confirmMove(ctx context.Context, id string) {
 		// read again now, not at the next reading.
 		e.readCatalogSoon(id)
 	}
+	again = superseded
 }
 
 // readCatalogSoon reads a peer's catalog at once (MSFP catalog section
