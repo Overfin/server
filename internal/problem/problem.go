@@ -56,8 +56,11 @@ const (
 	PlaybackEndedByAdmin Type = "playback-ended-by-admin"
 	UnsupportedMediaType Type = "unsupported-media-type"
 	InvalidRequest       Type = "invalid-request"
-	InvalidCursor        Type = "invalid-cursor"
-	RateLimited          Type = "rate-limited"
+	// RotationRefused: a federation peer's change of key refused (MSFP
+	// core section 9.3).
+	RotationRefused Type = "rotation-refused"
+	InvalidCursor   Type = "invalid-cursor"
+	RateLimited     Type = "rate-limited"
 	// AlreadyRequested: a wish for what a library has whole already.
 	AlreadyRequested Type = "already-requested"
 	// Wishes: the profile's owner switched its wishing off; its wishlist
@@ -111,6 +114,7 @@ var registry = map[Type]info{
 	PlaybackEndedByAdmin: {http.StatusGone, "Playback was stopped by an administrator"},
 	UnsupportedMediaType: {http.StatusUnsupportedMediaType, "Requests must be JSON"},
 	InvalidRequest:       {http.StatusBadRequest, "Invalid request"},
+	RotationRefused:      {http.StatusConflict, "Change of key refused"},
 	InvalidCursor:        {http.StatusBadRequest, "Invalid cursor"},
 	RateLimited:          {http.StatusTooManyRequests, "Too many requests"},
 	AlreadyRequested:     {http.StatusConflict, "This is here already"},
