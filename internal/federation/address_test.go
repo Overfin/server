@@ -159,7 +159,8 @@ func TestAddressChangeRefusedDestination(t *testing.T) {
 // B announces an address where another server answers (C, under its own
 // key): the hello there isn't answered under B's key, so A keeps B's old
 // address; and once B names its stored address again, the move is
-// dropped.
+// dropped, and B, whose peers all call that address, has no move to wait
+// for.
 func TestAddressChangeNotConfirmed(t *testing.T) {
 	ctx := context.Background()
 	a, b, bOnA, _ := pairedPair(t)
@@ -180,6 +181,10 @@ func TestAddressChangeNotConfirmed(t *testing.T) {
 	// B goes back to its address before the move was confirmed: its
 	// hello names the stored one, and the move is dropped.
 	b3 := moveTo(t, b2, b.url, false)
+	// A still calls that address: B's move back is over at once.
+	if _, _, ok := b3.s.Moving(); ok {
+		t.Fatal("a move back to the address every peer calls is under way")
+	}
 	if _, err := b3.s.Check(ctx, peerOn(t, b3, onlyPeer(t, b3).ID)); err != nil {
 		t.Fatal(err)
 	}

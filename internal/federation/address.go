@@ -39,9 +39,16 @@ const moveLate = 3 * 24 * time.Hour
 // hasn't moved to our new address, at its contacts.
 const announceSpacing = time.Minute
 
+// announceAfter is how long after a move is noted every peer is told:
+// the federation is noted as it's built, before this server answers at
+// its new address, and a peer that called back too soon would wait an hour
+// to try again. A peer that calls before then is told at once.
+var announceAfter = 15 * time.Second
+
 // NoteAddress notes the address this server federates under, once its
 // federation is built (the gateway's rebuilds): when it changed since the
-// last, a move begins, and every peer is told at once, in the background.
+// last, a move begins, and every peer is told, in the background, once
+// this server answers at its new address (announceAfter).
 func (s *Service) NoteAddress(ctx context.Context) error {
 	moved, err := s.Store.NoteFederationAddress(ctx, s.Address, s.now())
 	if err != nil {
@@ -58,7 +65,14 @@ func (s *Service) NoteAddress(ctx context.Context) error {
 		return nil
 	}
 	s.Logger.Info("federation: this server's address changed; paired servers are told", "from", a.Former, "to", s.Address)
+	if s.allMoved(ctx) {
+		// Back to an address every peer still calls (a move undone
+		// before any followed it): nothing to wait for.
+		s.endMove(ctx, "every peer calls this server's address already")
+		return nil
+	}
 	go func() {
+		time.Sleep(announceAfter)
 		ctx, cancel := context.WithTimeout(Background(context.Background()), time.Minute)
 		defer cancel()
 		s.each(ctx, func(p *store.Peer) bool { return p.State != store.PeerGone }, func(ctx context.Context, p *store.Peer) {
@@ -133,14 +147,24 @@ func (s *Service) heardAt(ctx context.Context, p *store.Peer, former bool) {
 	if former {
 		return
 	}
-	old, _, ok := s.Moving()
-	if !ok {
+	if _, _, ok := s.Moving(); !ok {
 		return
 	}
 	s.Logger.Info("federation: a peer moved to this server's new address", "name", p.Name)
-	if n, err := s.Store.PeersOnAddress(ctx, old); err == nil && n == 0 {
+	if s.allMoved(ctx) {
 		s.endMove(ctx, "every peer moved to this server's new address")
 	}
+}
+
+// allMoved says whether a move is under way that no peer still signs
+// for the former address of.
+func (s *Service) allMoved(ctx context.Context) bool {
+	former, _, ok := s.Moving()
+	if !ok {
+		return false
+	}
+	n, err := s.Store.PeersOnAddress(ctx, former)
+	return err == nil && n == 0
 }
 
 // endMove ends our move: the former address no longer accepted.
@@ -320,8 +344,11 @@ func (s *Service) maintainAddresses(ctx context.Context, peers []*store.Peer) {
 	s.mu.Lock()
 	over := s.former != "" && s.now().Sub(s.movedAt) >= msfp.AddressOverlap
 	s.mu.Unlock()
-	if over {
+	switch {
+	case over:
 		s.endMove(ctx, "30 days since this server's address changed")
+	case s.allMoved(ctx):
+		s.endMove(ctx, "every peer moved to this server's new address")
 	}
 	now := s.now()
 	for _, p := range peers {
