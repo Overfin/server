@@ -48,7 +48,9 @@ it), Intro Skipper (optional), Seerr (optional), a username and a password
 for the control panel, and your email and a password, for you, the site's
 first admin. The wizard and the control panel answer private addresses
 only (your LAN, a VPN): never the internet, whatever the network around
-them.
+them. The server's country comes from the default language (fr-CA gives
+Canada); change it, and the languages offered, in the control panel
+(Server, Languages).
 
 **3. Add your libraries** in the control panel (`http://<the machine>:8081`,
 Libraries), with folders under `/media`.

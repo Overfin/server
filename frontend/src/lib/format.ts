@@ -51,3 +51,10 @@ export function setLanguageNames(list: { tag: string; name: string }[]) {
 export function languageName(tag: string): string {
   return languageNames.get(tag) ?? languageNames.get(tag.split(/[-_]/)[0].toLowerCase()) ?? tag;
 }
+
+// Countries' names in English, as the panel is written: "Canada (CA)".
+let regions: Intl.DisplayNames | null = null;
+try { regions = new Intl.DisplayNames(['en'], { type: 'region' }); } catch { regions = null; }
+
+/** countryName names a country by its ISO 3166 code: "Canada (CA)". */
+export const countryName = (cc: string) => `${(regions && regions.of(cc)) || cc} (${cc})`;

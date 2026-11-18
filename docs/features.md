@@ -11,8 +11,7 @@
   sets: a title's age comes from TMDB's ratings, those of the ratings
   country first, else the middle of other countries'. The ratings country
   is the one you choose in the panel (Server, TMDB), else the server's
-  region, from its languages (fr-CA gives Canada, en-GB the United
-  Kingdom); when no language gives a region Overfin reads ratings in,
+  country (Server, Languages) when Overfin reads ratings there; otherwise
   there is none, and every title gets the middle of its countries'
   ratings. Everything else is
   hidden everywhere, not just greyed out, and can't be played. The owner
@@ -82,8 +81,10 @@
   their accounts, notices (an account made, access ending, by email or
   webhook), invitations, templates (how many streams and profiles an
   account gets, whether each profile keeps a stream of its own, and the
-  categories its profiles see), limits, languages,
-  libraries, the GPU that converts videos (tested on your own files),
+  categories its profiles see), limits, the server's country and its
+  languages (each country's official languages that TMDB has
+  translations in, from Unicode CLDR: Canada offers English and French;
+  those offered before stay until you turn them off), libraries, the GPU that converts videos (tested on your own files),
   seek-bar previews (off by default: they take time and disk space; Overfin makes them itself, kept by file, so a file moved keeps them), email, Seerr, each title's metadata (how it's matched, its texts and artwork), what each title is
   worth to your server (Valuation).
 - **Bringing people over** from another Jellyfin, their watch history

@@ -3,7 +3,7 @@
 <script lang="ts">
   import { Card, Badge, Setting, Status, Busy, ask, toast } from '@overfin/ui';
   import { api } from '../../lib/api';
-  import { message } from '../../lib/format';
+  import { countryName, message } from '../../lib/format';
   import { unsaved } from '../../lib/router.svelte';
   import type { Line, Ratings } from '../../lib/types-server';
 
@@ -34,16 +34,13 @@
     await setKey('');
   }
 
-  let names: Intl.DisplayNames | null = null;
-  try { names = new Intl.DisplayNames([navigator.language, 'en'], { type: 'region' }); } catch { names = null; }
-  const countryName = (cc: string) => `${(names && names.of(cc)) || cc} (${cc})`;
   // svelte-ignore state_referenced_locally
   const countries = (rt.countries.length ? rt.countries : rt.chosen ? [rt.chosen] : [])
     .map((cc) => [cc, countryName(cc)])
     .sort((a, b) => a[1].localeCompare(b[1]));
-  // '' follows the server's region, from its languages.
+  // '' follows the server's country (the Languages card's).
   // svelte-ignore state_referenced_locally
-  const follow = rt.region ? `The server's region: ${countryName(rt.region)}` : 'The server\'s region: none (the middle of countries\' ratings)';
+  const follow = rt.server ? `The server's country: ${countryName(rt.server)}` : 'The server\'s country: none yet';
   // svelte-ignore state_referenced_locally
   let saved = $state({ country: rt.chosen, shown: rt.shown });
   // svelte-ignore state_referenced_locally
@@ -52,11 +49,15 @@
   let shown = $state(rt.shown);
   // svelte-ignore state_referenced_locally
   let applied = $state({ country: rt.country, chosen: rt.chosen });
+  // svelte-ignore state_referenced_locally
+  const server = rt.server;
   const appliedText = $derived(applied.chosen
     ? `Now ${countryName(applied.country)}, chosen here.`
     : applied.country
-      ? `Now ${countryName(applied.country)}, from the server's region (its languages).`
-      : 'Now none: the middle of countries\' ratings. The server\'s languages give no region Overfin reads ratings in.');
+      ? `Now ${countryName(applied.country)}, the server's country.`
+      : server
+        ? `Now none: the middle of countries' ratings. Overfin doesn't read ratings for ${countryName(server)}.`
+        : 'Now none: the middle of countries\' ratings, until the server\'s country is chosen (Languages).');
 
   const describe = (r: Ratings): Line => {
     if (!r.source && !r.token.set) return { text: 'Without TMDB, no title can be rated, so kids profiles see nothing.', kind: 'error' };

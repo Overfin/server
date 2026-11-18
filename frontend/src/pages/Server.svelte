@@ -79,7 +79,7 @@
       {/if}
       {#if data.templates}<EmailsCard t={data.templates} m={data.mail} />{/if}
       {#if data.seerr}<SeerrCard sr={data.seerr} {reload} />{/if}
-      {#if data.languages}<LanguagesCard l={data.languages} />{/if}
+      {#if data.languages}<LanguagesCard l={data.languages} {reload} />{/if}
       {#if data.ratings}<TmdbCard rt={data.ratings} {reload} />{/if}
       {#if data.ratings?.source}<GenresCard />{/if}
       {#if data.skipper}<IntroSkipperCard sk={data.skipper} {reload} />{/if}

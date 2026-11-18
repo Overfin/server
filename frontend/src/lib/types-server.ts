@@ -69,9 +69,11 @@ export interface Ratings {
   token: { set: boolean; inEnv: boolean };
   source: boolean;
   // The ratings country that applies ('' none), the operator's choice ('':
-  // follow the server's region), and that region ('' none).
+  // follow the server's country), the server's country ('' none), and that
+  // country when Overfin reads its ratings ('' otherwise).
   country: string;
   chosen: string;
+  server: string;
   region: string;
   countries: string[];
   shown: string;
@@ -80,6 +82,10 @@ export interface Ratings {
 }
 
 export interface Languages {
+  // The server's country ('' none yet), each country's languages, and
+  // those offered, named.
+  country: string;
+  countries: Record<string, { tag: string; name: string }[]>;
   choices: { tag: string; name: string }[];
   offered: string[];
   default: string;
