@@ -580,9 +580,10 @@ anyone. Paired servers are not trusted at all (rule 94).
     only its gateway (rule 132).
 98. A server never acts for another beyond what was shared, and never
     hands one paired server's data to another.
-99. A pairing over plain `http://` is signed but not encrypted: titles and
-    tickets travel between the two servers in clear. The panel says so.
-    Over `https://`, a server accepts a peer's certificate when a public
+99. Servers pair over `https://` only; a plain `http://` address is
+    refused, but for the test setting `federation.test_plain_http`, off by
+    default and never for a server in use, which the panel shows. A
+    server accepts a peer's certificate when a public
     authority vouches for it, or when the peer named it, by its public
     key's SHA-256, in its latest signed hello. Before any is named, any
     certificate passes for pair and hello only: their answers are checked
