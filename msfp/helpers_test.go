@@ -11,12 +11,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/overfin/server/msfp"
 	"github.com/overfin/server/msfp/store/memory"
+	"github.com/overfin/server/msfp/wire"
 )
 
 // fakeClock is a clock a test moves by hand.
@@ -134,7 +136,11 @@ type server struct {
 	// last is the last request served and its answer, as they went;
 	// see, when set, is shown each request first.
 	last exchange
+	log  []exchange
 	see  func(*http.Request, []byte)
+	// h is the engine's handler (reopen swaps it); store its store.
+	h     http.Handler
+	store msfp.Store
 }
 
 func (s *server) onRequest(see func(*http.Request, []byte)) {
@@ -145,8 +151,21 @@ func (s *server) onRequest(see func(*http.Request, []byte)) {
 
 // exchange is a request and its answer, as they went on the wire.
 type exchange struct {
-	reqBody, reqSig, resBody, resSig string
-	status                           int
+	path, reqBody, reqSig, resBody, resSig string
+	status                                 int
+}
+
+// exchanges are the requests served whose path ends with call, in order.
+func (s *server) exchanges(call string) []exchange {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []exchange
+	for _, x := range s.log {
+		if strings.HasSuffix(x.path, "/"+call) {
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 func (s *server) lastExchange() exchange {
@@ -160,8 +179,7 @@ func (s *server) lastExchange() exchange {
 // here when left empty).
 func newServer(t *testing.T, cfg msfp.Config) *server {
 	t.Helper()
-	s := &server{events: &events{}}
-	var h http.Handler = http.NotFoundHandler()
+	s := &server{events: &events{}, h: http.NotFoundHandler()}
 	s.srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		down := s.down
@@ -173,7 +191,7 @@ func newServer(t *testing.T, cfg msfp.Config) *server {
 		body, _ := io.ReadAll(r.Body)
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		s.mu.Lock()
-		see := s.see
+		see, h := s.see, s.h
 		s.mu.Unlock()
 		if see != nil {
 			see(r.Clone(r.Context()), body)
@@ -181,8 +199,9 @@ func newServer(t *testing.T, cfg msfp.Config) *server {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, r)
 		s.mu.Lock()
-		s.last = exchange{reqBody: string(body), reqSig: r.Header.Get("MSFP-Signature"),
+		s.last = exchange{path: r.URL.Path, reqBody: string(body), reqSig: r.Header.Get("MSFP-Signature"),
 			resBody: rec.Body.String(), resSig: rec.Header().Get("MSFP-Signature"), status: rec.Code}
+		s.log = append(s.log, s.last)
 		s.mu.Unlock()
 		for k, v := range rec.Header() {
 			w.Header()[k] = v
@@ -194,9 +213,15 @@ func newServer(t *testing.T, cfg msfp.Config) *server {
 	if cfg.Address == "" {
 		cfg.Address = s.srv.URL
 	}
+	if cfg.Pins == nil {
+		// Its certificate's pin, named in its hellos, as a host with a
+		// certificate of its own does (MSFP core section 3.2).
+		cfg.Pins = []string{wire.Pin(s.srv.Certificate())}
+	}
 	if cfg.Store == nil {
 		cfg.Store = memory.New()
 	}
+	s.store = cfg.Store
 	if cfg.Notifier == nil {
 		cfg.Notifier = s.events
 	}
@@ -213,9 +238,36 @@ func newServer(t *testing.T, cfg msfp.Config) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.eng = eng
-	h = eng.FederationHandler()
+	s.mu.Lock()
+	s.eng, s.h = eng, eng.FederationHandler()
+	s.mu.Unlock()
 	return s
+}
+
+// reopen starts the engine again at the same address, as after a
+// restart, on cfg (Address, Notifier and Logger as newServer sets them).
+func (s *server) reopen(t *testing.T, cfg msfp.Config) {
+	t.Helper()
+	cfg.Address = s.srv.URL
+	if cfg.Pins == nil {
+		cfg.Pins = []string{wire.Pin(s.srv.Certificate())}
+	}
+	if cfg.Notifier == nil {
+		cfg.Notifier = s.events
+	}
+	if cfg.Dialer == nil {
+		cfg.AllowLoopback = true
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.New(slog.DiscardHandler)
+	}
+	eng, err := msfp.Open(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	s.eng, s.h, s.store = eng, eng.FederationHandler(), cfg.Store
+	s.mu.Unlock()
 }
 
 func (s *server) setDown(down bool) {

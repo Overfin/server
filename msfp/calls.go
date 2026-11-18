@@ -37,6 +37,10 @@ const (
 	callHello = "hello"
 )
 
+// errNotHeard is an unsigned refusal: the peer doesn't hear the key the
+// request was signed with (wrapped in ErrUnreachable).
+var errNotHeard = errors.New("an unsigned refusal")
+
 // reply is a peer's signed answer: its status, and for a refusal the
 // problem type its body gives ("" for none) and its retryAfter.
 type reply struct {
@@ -58,6 +62,10 @@ func (e *Engine) call(ctx context.Context, p *PeerRecord, call string, in, out a
 		return reply{}, ErrUncallable
 	case !p.Suspended.IsZero():
 		return reply{}, ErrSuspended
+	case p.OurKey == KeyLost && call != callPair:
+		// It never moved to our new key, and knows no key of ours now
+		// (MSFP core section 12.4).
+		return reply{}, ErrKeyLost
 	}
 	if core, _ := e.agreed(p); core == 0 && call != callHello && call != callPair {
 		return reply{}, ErrNotSupported
@@ -66,15 +74,30 @@ func (e *Engine) call(ctx context.Context, p *PeerRecord, call string, in, out a
 	if call != callPair && !e.limits.mayCall(key, background, e.now()) {
 		return reply{}, ErrBackingOff
 	}
-	r, err := e.exchange(ctx, p, call, in, out)
+	if p.OurKey == KeyOld && call != callRotate && call != callPair {
+		// Still on our old key: told of the new one first, at each contact
+		// (MSFP core section 12.4).
+		p = e.rotateAtContact(ctx, p, background)
+	}
+	r, err := e.exchange(ctx, p, call, in, out, e.signerFor(p))
+	if errors.Is(err, errNotHeard) && p.OurKey == KeyOld {
+		// Our old key no longer heard there: it may have moved without our
+		// seeing its answer. A hello under the new key tells; then the
+		// call again, under it. A rotate isn't sent again: under the new
+		// key its statement wouldn't verify, and moved is what it was for.
+		if q, moved := e.helloUnderNew(ctx, p); moved && call != callRotate {
+			p = q
+			r, err = e.exchange(ctx, p, call, in, out, e.current())
+		}
+	}
 	if call != callPair && ctx.Err() == nil {
 		e.limits.heard(key, err == nil, r.status, r.retryAfter, e.now())
 	}
 	return r, err
 }
 
-// exchange is one call, signed with the key this server uses toward p.
-func (e *Engine) exchange(ctx context.Context, p *PeerRecord, call string, in, out any) (reply, error) {
+// exchange is one call, signed with key.
+func (e *Engine) exchange(ctx context.Context, p *PeerRecord, call string, in, out any, key wire.Key) (reply, error) {
 	body, err := marshal(in)
 	if err != nil {
 		return reply{}, ErrInternal.with(err)
@@ -94,7 +117,7 @@ func (e *Engine) exchange(ctx context.Context, p *PeerRecord, call string, in, o
 		return reply{}, ErrInternal.with(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	nonce, err := wire.SignRequestFrom(req, body, e.signerFor(p), e.now(), e.cfg.Random)
+	nonce, err := wire.SignRequestFrom(req, body, key, e.now(), e.cfg.Random)
 	if err != nil {
 		return reply{}, ErrInternal.with(err)
 	}
@@ -131,7 +154,7 @@ func (e *Engine) exchange(ctx context.Context, p *PeerRecord, call string, in, o
 		// A refusal counts only signed by the peer's key; but pair's,
 		// whose maker doesn't know us yet (MSFP core section 6.6).
 		if !signed && call != callPair {
-			return reply{status: res.StatusCode}, ErrUnreachable.with(fmt.Errorf("an unsigned %d", res.StatusCode))
+			return reply{status: res.StatusCode}, ErrUnreachable.with(fmt.Errorf("%w: %d", errNotHeard, res.StatusCode))
 		}
 		r := reply{status: res.StatusCode}
 		if signed {

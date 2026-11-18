@@ -27,18 +27,43 @@ type PeerView struct {
 	// Inbound says whether it can be called.
 	Inbound Inbound
 	// CommitmentFrom is where its next key commitment came from: "pair",
-	// "rotation", or "" for none.
+	// "rotation", or "" for none (its last rotation committed to none:
+	// its next one waits for the operator).
 	CommitmentFrom string
+	// Pending is a new key of its waiting for the operator to confirm
+	// (ConfirmRotation), At the statement's date; Refused a rotation
+	// refused, at At (DismissRefused). nil for none.
+	Pending, Refused *KeyNotice
+	// OurKey is what it knows this server by: KeyCurrent, KeyOld (it
+	// hasn't moved to our new key yet) or KeyLost (it never did: pair
+	// again). RotationAnswer is its last answer to our rotate while on
+	// the old key: "pending", "refused", or "".
+	OurKey, RotationAnswer string
 	// Limits are what it may use here.
 	Limits Limits
+}
+
+// KeyNotice is a peer's key the operator is shown: its fingerprint, and
+// when.
+type KeyNotice struct {
+	Fingerprint string
+	At          time.Time
 }
 
 // view is the PeerView of a record.
 func (e *Engine) view(p *PeerRecord) PeerView {
 	core, parts := e.agreed(p)
-	return PeerView{ID: p.ID, Name: p.Name, Address: p.Address, Fingerprint: wire.Fingerprint(p.Key),
+	v := PeerView{ID: p.ID, Name: p.Name, Address: p.Address, Fingerprint: wire.Fingerprint(p.Key),
 		State: p.State, Created: p.Created, Paired: p.Paired, Seen: p.Seen, Suspended: p.Suspended,
-		Core: core, Parts: parts, Inbound: p.Inbound, CommitmentFrom: p.CommitmentFrom, Limits: p.Limits}
+		Core: core, Parts: parts, Inbound: p.Inbound, CommitmentFrom: p.CommitmentFrom,
+		OurKey: p.OurKey, RotationAnswer: p.RotationAnswer, Limits: p.Limits}
+	if p.Pending != nil {
+		v.Pending = &KeyNotice{Fingerprint: wire.Fingerprint(p.Pending.New), At: time.Unix(p.Pending.Date, 0).UTC()}
+	}
+	if p.Refused != nil {
+		v.Refused = &KeyNotice{Fingerprint: wire.Fingerprint(p.Refused.Key), At: p.Refused.At}
+	}
+	return v
 }
 
 // Peers lists every peer, in every state, by name.
@@ -69,10 +94,21 @@ type ServerView struct {
 	// Fingerprint is the current key's.
 	Fingerprint string
 	Address     string
-	// NextKey is the committed next key's fingerprint, and NextOnServer
-	// whether its seed is still here.
+	// NextKey is the committed next key's fingerprint (from its
+	// commitment, MSFP core section 4.2), and NextOnServer whether its
+	// seed is still here.
 	NextKey      string
 	NextOnServer bool
+	// RotationSince is when this server's change of key began, zero when
+	// none is under way; NotMoved, how many peers still know it by its
+	// old key then (they must pair again if they haven't moved after 30
+	// days).
+	RotationSince time.Time
+	NotMoved      int
+	// RevokedAt is when this server's key was revoked with no next key
+	// (KeyStolen withoutNext); for 30 days, former peers' hellos get the
+	// revocation. Zero for none.
+	RevokedAt time.Time
 	// Core is the core version spoken, Parts the parts served.
 	Core  []int
 	Parts map[string][]int
@@ -85,7 +121,20 @@ func (e *Engine) Server(ctx context.Context) (ServerView, error) {
 		return ServerView{}, err
 	}
 	v := e.versions()
-	return ServerView{Fingerprint: wire.Fingerprint(e.current().Public()), Address: r.Address,
+	sv := ServerView{Fingerprint: wire.Fingerprint(e.current().Public()), Address: r.Address,
 		NextKey: wire.CommitmentFingerprint(r.NextCommitment), NextOnServer: r.Next != nil,
-		Core: v.Core, Parts: v.Parts}, nil
+		RevokedAt: r.RevokedAt, Core: v.Core, Parts: v.Parts}
+	if r.Old != nil {
+		sv.RotationSince = r.OldSince
+		err = e.cfg.Store.Read(ctx, func(tx Tx) error {
+			peers, err := tx.Peers()
+			for _, p := range peers {
+				if p.OurKey == KeyOld {
+					sv.NotMoved++
+				}
+			}
+			return err
+		})
+	}
+	return sv, err
 }

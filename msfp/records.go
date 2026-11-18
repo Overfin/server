@@ -30,7 +30,8 @@ type ServerRecord struct {
 	// Revoked is a key revoked with no next key, replaced by Current,
 	// sealed ("msfp old key"), since RevokedAt: kept 30 days for the
 	// answers to the hellos of the peers whose pairing ended then (MSFP
-	// core section 12.7, case 2).
+	// core section 12.7, case 2): those whose ForgottenKey is Revoked,
+	// At RevokedAt.
 	Revoked   []byte    `json:"revoked,omitempty"`
 	RevokedAt time.Time `json:"revokedAt,omitzero"`
 	// IDsSecret is the secret of opaque IDs, sealed ("msfp ids secret").
@@ -132,8 +133,8 @@ type PeerRecord struct {
 
 	// Our keys toward it.
 	//
-	// OurKey is what it knows us by: "" (our current key), "old" (it
-	// hasn't moved to our new one yet) or "lost" (it never did).
+	// OurKey is what it knows us by: KeyCurrent (""), KeyOld ("old": it
+	// hasn't moved to our new one yet) or KeyLost ("lost": it never did).
 	// RotationAnswer is its last answer to our rotate ("pending",
 	// "refused" or ""); RotateSent when we last sent one; CommitmentTold,
 	// that it holds our next key's commitment.
@@ -191,7 +192,8 @@ type CodeRecord struct {
 // ForgottenKey is a key whose pairing ended (MSFP core section 7.4), by
 // its SHA-256: its requests get a signed 404. Revoked: the pairing ended
 // when this server's key was revoked with no next key (section 12.7,
-// case 2), so its hellos get the revocation.
+// case 2), at At, the ServerRecord's RevokedAt: for 30 days its hellos
+// get the revocation. An entry of an earlier replacement has another At.
 type ForgottenKey struct {
 	KeyHash []byte    `json:"keyHash"`
 	At      time.Time `json:"at"`

@@ -5,10 +5,11 @@ import (
 	"time"
 )
 
-// Background work (engine.md section 5). This step of the engine has
-// one: the hourly tidying of expired codes and old forgotten keys.
-// Scheduled hellos, catalog readings, playback expiry, rotations and
-// moves join it in later steps.
+// Background work (engine.md section 5), every hour: expired codes and
+// old forgotten keys tidied; keys' time (maintainKeys): the end of this
+// server's change of key after 30 days, rotate sent again daily, the 30
+// days of a revoked key, peers suspended 30 days gone. Scheduled hellos,
+// catalog readings, playback expiry and moves join it in later steps.
 
 // tidyEvery is how often Run tidies.
 const tidyEvery = time.Hour
@@ -40,7 +41,7 @@ func (e *Engine) Run(ctx context.Context) error {
 // fake clock, and for hosts that schedule work themselves.
 func (e *Engine) RunOnce(ctx context.Context) error {
 	now := e.now()
-	return e.cfg.Store.Update(ctx, func(tx Tx) error {
+	err := e.cfg.Store.Update(ctx, func(tx Tx) error {
 		codes, err := tx.Codes()
 		if err != nil {
 			return err
@@ -54,4 +55,8 @@ func (e *Engine) RunOnce(ctx context.Context) error {
 		}
 		return tx.TrimForgotten(now.Add(-forgetAfter))
 	})
+	if err != nil {
+		return err
+	}
+	return e.maintainKeys(ctx)
 }

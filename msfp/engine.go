@@ -24,9 +24,17 @@ type Engine struct {
 	log  *slog.Logger
 	host string // the host of cfg.Address, as requests are signed for
 
-	// keys are this server's keys, as the store holds them, opened.
-	keysMu sync.RWMutex
-	keys   serverKeys
+	// keys are this server's keys, as the store holds them, opened:
+	// read under keysMu. recordMu makes every write of the server record
+	// one at a time, from its Update to putting what it committed in
+	// effect (changeServer), so that keys always hold the record as last
+	// committed.
+	keysMu   sync.RWMutex
+	keys     serverKeys
+	recordMu sync.Mutex
+	// keyAction makes the operator's key actions (Rotate, KeyStolen) one
+	// at a time: a second one while one runs is ErrRotationUnderWay.
+	keyAction sync.Mutex
 
 	verifier *wire.Verifier
 	limits   *callLimits
@@ -49,6 +57,17 @@ type serverKeys struct {
 	current    wire.Key
 	commitment []byte // the next key's
 	ids        []byte // the secret of opaque IDs
+	// old is the key before current while peers move from it (nil: no
+	// change under way), since oldSince; oldRevoked: it was revoked
+	// first (MSFP core sections 12.4 and 12.7, case 1).
+	old        *wire.Key
+	oldSince   time.Time
+	oldRevoked bool
+	// revoked is a key revoked with no next key, replaced by current,
+	// since revokedAt (nil: none), kept for the answers of section 12.7,
+	// case 2.
+	revoked   *wire.Key
+	revokedAt time.Time
 }
 
 // Open starts the engine: on the very first start, it makes this
@@ -116,6 +135,37 @@ func (e *Engine) newID(prefix string) (string, error) {
 // loadKeys reads this server's keys, making them on the very first
 // start, and notes the configured address.
 func (e *Engine) loadKeys(ctx context.Context) error {
+	return e.changeServer(ctx, func(tx Tx, r *ServerRecord) error {
+		if r.Current == nil {
+			made, err := e.newServer()
+			if err != nil {
+				return err
+			}
+			*r = *made
+		}
+		// A different address: noted. Telling peers of a move (MSFP core
+		// section 13) comes with a later step of the engine.
+		r.Address = e.cfg.Address
+		return nil
+	})
+}
+
+// errUnchanged, from a changeServer's fn, leaves everything as it was;
+// changeServer then returns nil.
+var errUnchanged = errors.New("msfp: unchanged")
+
+// changeServer runs fn in one Update on the server record (an empty one
+// on the very first start), puts the record back, and puts the keys it
+// holds in effect. Every write of the server record goes through it:
+// recordMu makes them one at a time, from the Update to the keys in
+// effect, so a change committed first can't put its keys in effect
+// after one committed later. fn decides inside the transaction, from
+// the record as it is then: a change that depends on the keys (the end
+// of a rotation, a peer moving to our new key) checks there that they
+// are still the ones it was made for.
+func (e *Engine) changeServer(ctx context.Context, fn func(tx Tx, r *ServerRecord) error) error {
+	e.recordMu.Lock()
+	defer e.recordMu.Unlock()
 	var rec ServerRecord
 	err := e.cfg.Store.Update(ctx, func(tx Tx) error {
 		r, err := tx.Server()
@@ -123,18 +173,17 @@ func (e *Engine) loadKeys(ctx context.Context) error {
 			return err
 		}
 		if r == nil {
-			if r, err = e.newServer(); err != nil {
-				return err
-			}
+			r = &ServerRecord{}
 		}
-		// A different address: noted. Telling peers of a move (MSFP core
-		// section 13) comes with a later step of the engine.
-		if r.Address != e.cfg.Address {
-			r.Address = e.cfg.Address
+		if err := fn(tx, r); err != nil {
+			return err
 		}
 		rec = *r
 		return tx.PutServer(*r)
 	})
+	if errors.Is(err, errUnchanged) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -175,90 +224,71 @@ func (e *Engine) newServer() (*ServerRecord, error) {
 
 // openKeys opens the stored keys and puts them in effect.
 func (e *Engine) openKeys(r ServerRecord) error {
-	seed, err := e.cfg.Sealer.Open(r.Current, sealCurrent)
-	if err != nil {
+	k := serverKeys{commitment: slices.Clone(r.NextCommitment), oldSince: r.OldSince, oldRevoked: r.OldRevoked,
+		revokedAt: r.RevokedAt}
+	var err error
+	if k.current, err = e.openKey(r.Current, sealCurrent); err != nil {
+		return err
+	}
+	if k.ids, err = e.cfg.Sealer.Open(r.IDsSecret, sealIDs); err != nil {
 		return ErrSealed.with(err)
 	}
-	current, err := wire.KeyFromSeed(seed)
-	if err != nil {
-		return ErrSealed.with(err)
+	if r.Old != nil {
+		old, err := e.openKey(r.Old, sealOld)
+		if err != nil {
+			return err
+		}
+		k.old = &old
 	}
-	ids, err := e.cfg.Sealer.Open(r.IDsSecret, sealIDs)
-	if err != nil {
-		return ErrSealed.with(err)
+	if r.Revoked != nil {
+		revoked, err := e.openKey(r.Revoked, sealOld)
+		if err != nil {
+			return err
+		}
+		k.revoked = &revoked
 	}
 	e.keysMu.Lock()
-	e.keys = serverKeys{current: current, commitment: slices.Clone(r.NextCommitment), ids: ids}
+	e.keys = k
 	e.keysMu.Unlock()
 	return nil
 }
 
-// current is the key this server is known by.
-func (e *Engine) current() wire.Key {
+// openKey opens a sealed seed.
+func (e *Engine) openKey(sealed []byte, context string) (wire.Key, error) {
+	seed, err := e.cfg.Sealer.Open(sealed, context)
+	if err != nil {
+		return wire.Key{}, ErrSealed.with(err)
+	}
+	k, err := wire.KeyFromSeed(seed)
+	if err != nil {
+		return wire.Key{}, ErrSealed.with(err)
+	}
+	return k, nil
+}
+
+// ourKeys are this server's keys in effect now, as one copy: a statement
+// made from them names keys of the same change.
+func (e *Engine) ourKeys() serverKeys {
 	e.keysMu.RLock()
 	defer e.keysMu.RUnlock()
-	return e.keys.current
+	return e.keys
 }
+
+// current is the key this server is known by.
+func (e *Engine) current() wire.Key { return e.ourKeys().current }
 
 // commitment is the commitment to the next key.
-func (e *Engine) commitment() []byte {
-	e.keysMu.RLock()
-	defer e.keysMu.RUnlock()
-	return e.keys.commitment
-}
+func (e *Engine) commitment() []byte { return e.ourKeys().commitment }
 
-// signerFor is the key this server signs with toward p: its current
-// one. (The old key toward peers that haven't moved yet comes with key
-// rotation, a later step.)
-func (e *Engine) signerFor(*PeerRecord) wire.Key { return e.current() }
-
-// The next key (MSFP core section 12.5).
-
-// nextKeyPrefix starts an exported next key; MSFP's one form.
-const nextKeyPrefix = "msfp-next-key-1."
-
-// NextKey is the committed next key's fingerprint, and whether its seed
-// is still on this server.
-func (e *Engine) NextKey(ctx context.Context) (fingerprint string, onServer bool, err error) {
-	r, err := e.serverRecord(ctx)
-	if err != nil {
-		return "", false, err
+// signerFor is the key this server signs with toward p: the old one
+// while p hasn't moved from it (MSFP core section 12.4), the current one
+// otherwise.
+func (e *Engine) signerFor(p *PeerRecord) wire.Key {
+	k := e.ourKeys()
+	if p != nil && p.OurKey == KeyOld && k.old != nil {
+		return *k.old
 	}
-	return wire.CommitmentFingerprint(r.NextCommitment), r.Next != nil, nil
-}
-
-// ExportNextKey gives the next key's seed as text to keep offline
-// ("msfp-next-key-1." then the seed, base64url), and its fingerprint for
-// the operator to compare. Error: ErrNoNextKey.
-func (e *Engine) ExportNextKey(ctx context.Context) (text, fingerprint string, err error) {
-	r, err := e.serverRecord(ctx)
-	if err != nil {
-		return "", "", err
-	}
-	if r.Next == nil {
-		return "", "", ErrNoNextKey
-	}
-	seed, err := e.cfg.Sealer.Open(r.Next, sealNext)
-	if err != nil {
-		return "", "", ErrSealed.with(err)
-	}
-	return nextKeyPrefix + wire.Encode64(seed), wire.CommitmentFingerprint(r.NextCommitment), nil
-}
-
-// DeleteNextKey removes the next key's seed from this server, once the
-// operator exported it; its commitment stays. Error: ErrNoNextKey.
-func (e *Engine) DeleteNextKey(ctx context.Context) error {
-	return e.cfg.Store.Update(ctx, func(tx Tx) error {
-		r, err := tx.Server()
-		if err != nil {
-			return err
-		}
-		if r == nil || r.Next == nil {
-			return ErrNoNextKey
-		}
-		r.Next = nil
-		return tx.PutServer(*r)
-	})
+	return k.current
 }
 
 // serverRecord reads the server record.

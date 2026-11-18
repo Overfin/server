@@ -24,9 +24,11 @@
 // redeemed), pair and hello both ways, the states ours, theirs, paired
 // and gone, accepting and ending a pairing (its keys forgotten), the
 // versions and parts each peer speaks, its pins, nonces in memory, the
-// limits of MSFP core section 8.3, signed answers and refusals. Key
-// rotation, address changes, servers that can't be called, the catalog,
-// playback and media come next.
+// limits of MSFP core section 8.3, signed answers and refusals; and keys
+// that change (core section 12): Rotate, KeyStolen, a peer's rotate and
+// revoke, a pending key confirmed (ConfirmRotation), suspension, and
+// what 30 days do to each. Address changes, this server not being
+// callable, the catalog, playback and media come next.
 //
 // The protocol's pieces (keys, codes, signatures, strict JSON, pins,
 // statements) are package msfp/wire. Neither package imports anything

@@ -3,7 +3,6 @@ package msfp
 import (
 	"cmp"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -32,6 +31,13 @@ type helloMessage struct {
 	Parts        map[string][]int `json:"parts"`
 	Certificates []string         `json:"certificates,omitempty"`
 	Address      string           `json:"address,omitempty"`
+	// NextCommitment repeats the commitment the peer holds of us: sent
+	// only to a peer that knows our current key (MSFP core section 12.5).
+	NextCommitment string `json:"nextCommitment,omitempty"`
+	// In answers to a peer that can't be called, while it knows us by
+	// our old key (pullable).
+	Rotation   *wire.RotateBody `json:"rotation,omitempty"`
+	Revocation *wire.RevokeBody `json:"revocation,omitempty"`
 }
 
 // endedHello is the hello that ends a pairing, and its answer: state
@@ -40,14 +46,19 @@ type endedHello struct {
 	State string `json:"state"`
 }
 
-// ourHello is the hello this server sends or answers in state (paired
-// or waiting): its versions, pins and address. Core and parts are always
-// sent, parts {} when none is on (MSFP core section 10.2: a server that
-// speaks version 1 sends both in every hello).
-func (e *Engine) ourHello(state string) helloMessage {
+// ourHello is the hello this server sends or answers p in state (paired
+// or waiting): its versions, pins and address, and to a peer that knows
+// our current key, our commitment (nil p: none). Core and parts are
+// always sent, parts {} when none is on (MSFP core section 10.2: a
+// server that speaks version 1 sends both in every hello).
+func (e *Engine) ourHello(state string, p *PeerRecord) helloMessage {
 	v := e.versions()
-	return helloMessage{State: state, Core: v.Core, Parts: v.Parts, Certificates: wire.CleanPins(e.cfg.Pins),
+	h := helloMessage{State: state, Core: v.Core, Parts: v.Parts, Certificates: wire.CleanPins(e.cfg.Pins),
 		Address: e.cfg.Address}
+	if p != nil && p.OurKey == KeyCurrent {
+		h.NextCommitment = wire.Encode64(e.commitment())
+	}
+	return h
 }
 
 // viewOf is how this server describes a pairing to the peer.
@@ -104,7 +115,14 @@ func (e *Engine) hello(req *request) response {
 		return refuse(probInternal)
 	}
 	e.notify(events...)
-	return answer(e.ourHello(viewOf(&now)))
+	// From a peer that can't be called: which of our keys it knows us by
+	// (MSFP core section 12.4); then our rotation for it to pull.
+	if msg.Uncallable {
+		now = *e.knownKey(ctx, req, &now, msg)
+	}
+	h := e.ourHello(viewOf(&now), &now)
+	e.pullable(&now, &h)
+	return answer(h)
 }
 
 // theyPaired is a peer saying it has accepted (MSFP core sections 7.1
@@ -196,14 +214,7 @@ func (e *Engine) End(ctx context.Context, id string) error {
 			return ErrNotFound
 		}
 		p = *q
-		now := e.now().Truncate(time.Second)
-		for _, k := range historyKeys(q) {
-			hash := sha256.Sum256(k)
-			if err := tx.Forget(ForgottenKey{KeyHash: hash[:], At: now}); err != nil {
-				return err
-			}
-		}
-		return tx.DeletePeer(id)
+		return forgetPeer(tx, q, e.now().Truncate(time.Second), false)
 	})
 	if err != nil {
 		return err
@@ -241,9 +252,10 @@ func historyKeys(p *PeerRecord) [][]byte {
 }
 
 // Check sends a peer a hello now, telling it where the pairing stands
-// here, and applies its answer. Errors: ErrNotFound, ErrUncallable,
-// ErrSuspended, ErrUnreachable, ErrUnknown (its signed 404: it doesn't
-// know us, and is marked gone).
+// here, and applies its answer: an answer carrying a valid revocation
+// of the peer's key suspends it, and nothing else of it is kept. Errors:
+// ErrNotFound, ErrUncallable, ErrSuspended, ErrKeyLost, ErrUnreachable,
+// ErrUnknown (its signed 404: it doesn't know us, and is marked gone).
 func (e *Engine) Check(ctx context.Context, id string) (PeerView, error) {
 	return e.check1(ctx, id, false)
 }
@@ -255,7 +267,7 @@ func (e *Engine) check1(ctx context.Context, id string, background bool) (PeerVi
 		return PeerView{}, err
 	}
 	var raw json.RawMessage
-	r, err := e.call(ctx, rec, callHello, e.ourHello(viewOf(rec)), &raw, background)
+	r, err := e.call(ctx, rec, callHello, e.ourHello(viewOf(rec), rec), &raw, background)
 	if err != nil {
 		return PeerView{}, err
 	}
@@ -271,6 +283,17 @@ func (e *Engine) check1(ctx context.Context, id string, background bool) (PeerVi
 		}
 		if err != nil {
 			return PeerView{}, ErrUnreachable.with(err)
+		}
+		// A revocation, in an answer signed with the key it revokes:
+		// suspended, and nothing else of that answer kept (MSFP core
+		// sections 9.2, 12.6 and 12.7). Any server applies it.
+		if pulled := ans.Pull(rec.Key, e.now()); pulled.Revocation != nil {
+			ev, err := e.revoked(ctx, id, rec.Key)
+			if err != nil {
+				return PeerView{}, err
+			}
+			e.notify(ev...)
+			return e.Peer(ctx, id)
 		}
 		err = e.updatePeer(ctx, id, func(q *PeerRecord) {
 			events = e.keepHello(q, ans)

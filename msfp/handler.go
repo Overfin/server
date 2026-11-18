@@ -100,16 +100,16 @@ func (e *Engine) FederationHandler() http.Handler {
 // may come from a stranger (pair only) or a suspended key (rotate,
 // revoke).
 var calls = map[string]func(*Engine, *request) response{
-	callPair:  (*Engine).pair,
-	callHello: (*Engine).hello,
+	callPair:   (*Engine).pair,
+	callHello:  (*Engine).hello,
+	callRotate: (*Engine).rotate,
+	callRevoke: (*Engine).revoke,
 }
 
 // Calls known to MSFP version 1 that this engine doesn't serve yet: the
-// core's rotate and revoke (a signed 404 for now), and the parts', which
-// it doesn't list in its hellos (a signed 404 not-supported, as for a
-// part that is off: MSFP core section 10.4).
+// parts', which it doesn't list in its hellos (a signed 404
+// not-supported, as for a part that is off: MSFP core section 10.4).
 var laterCalls = map[string]bool{
-	"rotate": true, "revoke": true,
 	"libraries": true, "titles": true, "play": true, "progress": true, "stop": true,
 }
 
@@ -168,9 +168,6 @@ func (e *Engine) handle(req *request, call string) (res response) {
 	defer free()
 	h := calls[call]
 	if h == nil {
-		if call == "rotate" || call == "revoke" {
-			return refuse(probNotFound)
-		}
 		return refuse(probNotSupported)
 	}
 	return h(e, req)
@@ -200,6 +197,13 @@ func (e *Engine) check(req *request, call string) (free func(), res response, ok
 	v, err := e.verifier.Check(r, body, e.now())
 	req.v = v
 	if errors.Is(err, wire.ErrForgotten) {
+		// A server whose pairing ended when our key was stolen: its hello
+		// gets the revocation, for 30 days (MSFP core section 12.7).
+		if call == callHello {
+			if res, ok := e.revocationAnswer(req); ok {
+				return nil, res, false
+			}
+		}
 		// A server whose pairing ended: "unknown", signed.
 		k := e.current()
 		req.signer = &k
@@ -219,8 +223,14 @@ func (e *Engine) check(req *request, call string) (free func(), res response, ok
 		req.signer = &k
 		// A revoked key is heard for rotate and revoke only (MSFP core
 		// section 12.6).
-		if !p.Suspended.IsZero() && call != "rotate" && call != "revoke" {
+		if !p.Suspended.IsZero() && call != callRotate && call != callRevoke {
 			return nil, refuse(probNotFound), false
+		}
+		// A peer still on our old key: told of the new one again, at each
+		// contact (section 12.4); one that can't be called, in our answer
+		// to its hello.
+		if p.OurKey == KeyOld && p.Inbound == InboundYes && p.Suspended.IsZero() {
+			e.rotateSoon(p)
 		}
 		// No core in common: every call but hello is not-supported
 		// (sections 10.3, 10.4); pair from a known key gets its own 409.
