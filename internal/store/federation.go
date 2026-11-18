@@ -125,6 +125,9 @@ type Peer struct {
 	// its address serves (msfp.Pin): its own, not publicly trusted
 	// perhaps. Never sent to the panel.
 	Certificates []string `json:"-"`
+	// Versions is what its latest signed hello listed of MSFP's core and
+	// parts versions, as JSON; "" before its first.
+	Versions string `json:"-"`
 }
 
 // PeerLimits is what a pairing may use of a server at once: streams,
@@ -222,7 +225,7 @@ func (s *Store) AddPeer(ctx context.Context, publicKey []byte, address, name str
 }
 
 const peerSelect = `SELECT id, public_key, address, name, state, created_at, paired_at, seen_at,
-	max_streams, max_transcodes, max_bitrate_kbps, their_streams, their_transcodes, their_bitrate_kbps, certificates FROM peers`
+	max_streams, max_transcodes, max_bitrate_kbps, their_streams, their_transcodes, their_bitrate_kbps, certificates, versions FROM peers`
 
 func scanPeer(row interface{ Scan(...any) error }) (*Peer, error) {
 	var p Peer
@@ -230,7 +233,7 @@ func scanPeer(row interface{ Scan(...any) error }) (*Peer, error) {
 	var paired, seen, ts, tt, tb sql.NullInt64
 	var certificates string
 	if err := row.Scan(&p.ID, &p.PublicKey, &p.Address, &p.Name, &p.State, &created, &paired, &seen,
-		&p.Limits.Streams, &p.Limits.Transcodes, &p.Limits.BitrateKbps, &ts, &tt, &tb, &certificates); err != nil {
+		&p.Limits.Streams, &p.Limits.Transcodes, &p.Limits.BitrateKbps, &ts, &tt, &tb, &certificates, &p.Versions); err != nil {
 		return nil, err
 	}
 	p.Certificates = strings.Fields(certificates)
@@ -316,7 +319,7 @@ func (s *Store) DeletePeer(ctx context.Context, id string) error {
 
 // PeerEnded removes a peer that ended the pairing itself (its hello
 // "ended"), without remembering its key: the side that ends remembers,
-// the other just forgets it (MSFP section 7.4, step 3), so a new code
+// the other just forgets it (MSFP core section 7.4, step 3), so a new code
 // pairs the two again either way. ErrNotFound if there's none.
 func (s *Store) PeerEnded(ctx context.Context, id string) error {
 	return s.deletePeer(ctx, id, false)
@@ -833,6 +836,13 @@ type PeerCopy struct {
 	Audio []string
 }
 
+// SetPeerVersions keeps what a peer's signed hello listed of MSFP's
+// versions (Peer.Versions).
+func (s *Store) SetPeerVersions(ctx context.Context, peerID, versions string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE peers SET versions = ? WHERE id = ?`, versions, peerID)
+	return err
+}
+
 // PeerCopies lists our copies of a film or an episode in the libraries we
 // offer a peer; none when the title isn't offered it.
 func (s *Store) PeerCopies(ctx context.Context, peerID, key string) ([]PeerCopy, error) {
@@ -1113,7 +1123,7 @@ func (s *Store) ItemOfferedTo(ctx context.Context, peerID, itemID string) (bool,
 }
 
 // PublicLibraryIDs gives our libraries' IDs as paired servers know them
-// (MSFP version 0, section 9.3), by our own (Jellyfin's) IDs: random,
+// (MSFP catalog, section 2.1), by our own (Jellyfin's) IDs: random,
 // made the first time a library is asked for (first offered), then kept.
 func (s *Store) PublicLibraryIDs(ctx context.Context, libraryIDs []string) (map[string]string, error) {
 	out := map[string]string{}
