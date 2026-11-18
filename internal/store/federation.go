@@ -164,6 +164,17 @@ type Peer struct {
 	// CommitmentTold: it holds our next key commitment, from pair or a
 	// rotation; until then our hellos carry it.
 	CommitmentTold bool `json:"-"`
+
+	// Addresses (MSFP core section 13).
+	//
+	// OurAddress is this server's address its latest request was signed
+	// for ("" before its first since this was kept): it has moved to
+	// ours once that's the current one.
+	OurAddress string `json:"-"`
+	// Move is an address its signed hello named, not confirmed yet by a
+	// hello there answered under its key: Address stays until then. nil
+	// for none.
+	Move *msfp.Move `json:"-"`
 }
 
 // Usable says whether the pairing is on: paired, and its key not
@@ -295,7 +306,7 @@ func (s *Store) AddPeer(ctx context.Context, publicKey []byte, address, name str
 const peerSelect = `SELECT id, public_key, address, name, state, created_at, paired_at, seen_at,
 	max_streams, max_transcodes, max_bitrate_kbps, their_streams, their_transcodes, their_bitrate_kbps, certificates, versions,
 	next_commitment, commitment_from, previous_key, previous_until, pending_rotation, suspended_at, refused_key, refused_at,
-	our_key, rotation_answer, rotate_sent_at, commitment_told FROM peers`
+	our_key, rotation_answer, rotate_sent_at, commitment_told, our_address, new_address, new_address_tried, new_address_failing FROM peers`
 
 func scanPeer(row interface{ Scan(...any) error }) (*Peer, error) {
 	var p Peer
@@ -303,11 +314,22 @@ func scanPeer(row interface{ Scan(...any) error }) (*Peer, error) {
 	var paired, seen, ts, tt, tb sql.NullInt64
 	var certificates, pending string
 	var previousUntil, suspended, refused, rotateSent sql.NullInt64
+	var newAddress string
+	var newTried, newFailing sql.NullInt64
 	if err := row.Scan(&p.ID, &p.PublicKey, &p.Address, &p.Name, &p.State, &created, &paired, &seen,
 		&p.Limits.Streams, &p.Limits.Transcodes, &p.Limits.BitrateKbps, &ts, &tt, &tb, &certificates, &p.Versions,
 		&p.NextCommitment, &p.CommitmentFrom, &p.PreviousKey, &previousUntil, &pending, &suspended, &p.RefusedKey, &refused,
-		&p.OurKey, &p.RotationAnswer, &rotateSent, &p.CommitmentTold); err != nil {
+		&p.OurKey, &p.RotationAnswer, &rotateSent, &p.CommitmentTold, &p.OurAddress, &newAddress, &newTried, &newFailing); err != nil {
 		return nil, err
+	}
+	if newAddress != "" {
+		p.Move = &msfp.Move{Address: newAddress}
+		if t := unixTime(newTried); t != nil {
+			p.Move.Tried = *t
+		}
+		if t := unixTime(newFailing); t != nil {
+			p.Move.Failing = *t
+		}
 	}
 	if previousUntil.Valid {
 		p.PreviousUntil = time.Unix(previousUntil.Int64, 0).UTC()

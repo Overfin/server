@@ -509,3 +509,49 @@ func TestPeerWantsGone(t *testing.T) {
 		t.Fatalf("chosen again: %v", g)
 	}
 }
+
+// This server's address (MSFP core section 13.1): kept the first time; a
+// change is a move from the one kept, which peers not seen since are
+// taken as calling; a move back makes the address left the former.
+func TestFederationAddress(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	at := time.Unix(1_800_000_000, 0)
+	if moved, err := s.NoteFederationAddress(ctx, "https://a.example.org", at); err != nil || moved {
+		t.Fatalf("first: %v, %v", moved, err)
+	}
+	if moved, _ := s.NoteFederationAddress(ctx, "https://a.example.org", at); moved {
+		t.Fatal("the same address is a move")
+	}
+	p, err := s.AddPeer(ctx, bytes.Repeat([]byte{1}, 32), "https://p.example.org", "P", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved, err := s.NoteFederationAddress(ctx, "https://b.example.org", at); err != nil || !moved {
+		t.Fatalf("a move: %v, %v", moved, err)
+	}
+	a, err := s.FederationAddress(ctx)
+	if err != nil || a.Current != "https://b.example.org" || a.Former != "https://a.example.org" || !a.MovedAt.Equal(at) {
+		t.Fatalf("after the move: %+v, %v", a, err)
+	}
+	// P wasn't heard since: taken as calling the former address.
+	if n, _ := s.PeersOnAddress(ctx, "https://a.example.org"); n != 1 {
+		t.Fatalf("peers on the former address: %d", n)
+	}
+	s.SetPeerOurAddress(ctx, p.ID, "https://b.example.org")
+	if n, _ := s.PeersOnAddress(ctx, "https://a.example.org"); n != 0 {
+		t.Fatalf("peers on the former address, P moved: %d", n)
+	}
+	if moved, _ := s.NoteFederationAddress(ctx, "https://a.example.org", at.Add(time.Hour)); !moved {
+		t.Fatal("moving back isn't a move")
+	}
+	if a, _ := s.FederationAddress(ctx); a.Current != "https://a.example.org" || a.Former != "https://b.example.org" {
+		t.Fatalf("after moving back: %+v", a)
+	}
+	if err := s.EndFederationMove(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := s.FederationAddress(ctx); a.Former != "" || !a.MovedAt.IsZero() || a.Current != "https://a.example.org" {
+		t.Fatalf("after the move ended: %+v", a)
+	}
+}
