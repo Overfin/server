@@ -244,8 +244,8 @@ anyone. Paired servers are not trusted at all (rule 94).
     no rating, library or tag.
 40. A title's age is Overfin's own, from TMDB's ratings, never the media
     server's: its rating in the ratings country when it has one (the
-    operator's choice, else the region of the server's languages, else
-    none), else the middle of its ratings elsewhere, each turned into the
+    operator's choice, else the server's country when Overfin reads its
+    ratings, else none), else the middle of its ratings elsewhere, each turned into the
     youngest age it allows by a table Overfin ships (ratings that only
     advise parents count as 8). A title with no such age has none.
 41. A kids profile sees and wishes for only titles for its age, which the
