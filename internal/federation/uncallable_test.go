@@ -238,9 +238,12 @@ func TestHelloSchedule(t *testing.T) {
 	if _, err := a.s.Accept(ctx, onlyPeer(t, a).ID); err != nil {
 		t.Fatal(err)
 	}
-	after(30 * time.Second) // its next turn, as it was waiting
-	if got := peer(t, b, pending.ID); got.State != store.PeerPaired {
-		t.Fatalf("B's view of A: %+v", got)
+	// Its next turn, as it was waiting, tells it.
+	for i := 0; peer(t, b, pending.ID).State != store.PeerPaired; i++ {
+		if i == 30 {
+			t.Fatal("B never learnt A accepted")
+		}
+		after(time.Second)
 	}
 	if n := after(3*time.Minute + 50*time.Second); n != 0 {
 		t.Fatalf("paired, within 3 min 50 s: %d", n)
@@ -252,9 +255,11 @@ func TestHelloSchedule(t *testing.T) {
 	if err := a.s.End(ctx, onlyPeer(t, a).ID); err != nil {
 		t.Fatal(err)
 	}
-	after(7 * time.Minute)
-	if got := peer(t, b, pending.ID); got.State != store.PeerGone {
-		t.Fatalf("B's view of A once ended: %+v", got)
+	for i := 0; peer(t, b, pending.ID).State != store.PeerGone; i++ {
+		if i == 7*60 {
+			t.Fatal("B never learnt A ended it")
+		}
+		after(time.Second)
 	}
 	if n := after(47 * time.Minute); n != 0 {
 		t.Fatalf("gone, within 47 minutes: %d", n)
@@ -479,9 +484,11 @@ func TestUncallableOnOff(t *testing.T) {
 	if got := peer(t, a, bOnA.ID); got.Address != b.site || got.Move != nil {
 		t.Fatalf("A's view of B: %q, move %+v", got.Address, got.Move)
 	}
-	if n, err := a.s.SyncTitles(ctx, peer(t, a, bOnA.ID)); err != nil || n != 1 {
-		t.Fatalf("A reading B's titles again: %d, %v", n, err)
-	}
+	// Its titles read again at once, by themselves.
+	waitFor(t, "A reading B's titles again", func() bool {
+		n, _ := a.s.Store.PeerTitleCounts(ctx)
+		return n[bOnA.ID] == 1
+	})
 }
 
 // Until a hello at its address answers under its key, a peer that says it

@@ -80,8 +80,11 @@ func (s *Service) NoteAddress(ctx context.Context) error {
 	// by a hello to each, as for any move, even those whose requests were
 	// signed for this address before: they stored the other since.
 	fromUncallable := msfp.Uncallable(a.Former)
-	if s.Uncallable || fromUncallable {
-		s.endMove(ctx, "this server could not be called, or can't be")
+	switch {
+	case s.Uncallable:
+		s.endMove(ctx, "this server can't be called")
+	case fromUncallable:
+		s.endMove(ctx, "this server can be called again; nothing called its former address")
 	}
 	if s.Uncallable {
 		return nil
@@ -361,7 +364,8 @@ func (s *Service) confirmMove(ctx context.Context, p *store.Peer, m msfp.Move) e
 	if err != nil || !moved {
 		return err
 	}
-	if p.Inbound == store.InboundConfirming {
+	callableAgain := p.Inbound == store.InboundConfirming
+	if callableAgain {
 		// It answers there: called again from now on (MSFP core section
 		// 7.5).
 		if err := s.Store.SetPeerInbound(ctx, p.ID, store.InboundYes); err != nil {
@@ -380,7 +384,15 @@ func (s *Service) confirmMove(ctx context.Context, p *store.Peer, m msfp.Move) e
 	if err := s.Store.PeerSeen(ctx, q.ID); err != nil {
 		return err
 	}
-	return s.keepHello(ctx, q, answer)
+	if err := s.keepHello(ctx, q, answer); err != nil {
+		return err
+	}
+	if callableAgain && q.Usable() {
+		// What it holds for us was dropped while it couldn't be called:
+		// read again now, not at the next reading of every peer.
+		s.SyncSoon(q)
+	}
+	return nil
 }
 
 // maintainAddresses is what time brings to addresses, from Maintain: our
