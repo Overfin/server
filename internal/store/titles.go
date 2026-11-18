@@ -296,16 +296,30 @@ func (s *Store) Crossing(ctx context.Context, kind string, tmdbIDs, languages []
 	return kept, nil
 }
 
+// heldTitle is true for a list's title (t) that a library here has, or
+// that a paired server holds for us (ROADMAP.md milestone 6), as a
+// title's page counts them (TitleInfo's Items, Peers and Have): its own
+// entry, by its TMDB ID or its key (a file matched by another ID, or by
+// Overfin), or any of a series' seasons and episodes (keys under
+// "series/tmdb/1399/": from it to "series/tmdb/1399" + "0").
+const heldTitle = `(EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = t.kind AND i.tmdb = t.tmdb)
+	OR EXISTS (SELECT 1 FROM catalog_items i WHERE i.title_key = t.kind || '/tmdb/' || t.tmdb
+		OR (i.title_key >= t.kind || '/tmdb/' || t.tmdb || '/' AND i.title_key < t.kind || '/tmdb/' || t.tmdb || '0'))
+	OR EXISTS (SELECT 1 FROM peer_titles pt JOIN peers p ON p.id = pt.peer_id AND p.state = 'paired' AND p.suspended_at IS NULL
+		WHERE pt.title_key = t.kind || '/tmdb/' || t.tmdb
+			OR (pt.title_key >= t.kind || '/tmdb/' || t.tmdb || '/' AND pt.title_key < t.kind || '/tmdb/' || t.tmdb || '0')))`
+
 // ListTitles returns a page of a discovery list, in order, from offset:
-// all its titles, those the library has ("library") or those it doesn't
-// ("missing"); with a ceiling, only those it allows.
+// all its titles, those available ("library": a library here or a paired
+// server has them) or those that aren't yet ("missing"); with a ceiling,
+// only those it allows.
 func (s *Store) ListTitles(ctx context.Context, list, kind, availability string, ceiling *Ceiling, offset, limit int) ([]Title, error) {
 	filter := ""
 	switch availability {
 	case "library":
-		filter = ` AND EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = t.kind AND i.tmdb = t.tmdb)`
+		filter = ` AND ` + heldTitle
 	case "missing":
-		filter = ` AND NOT EXISTS (SELECT 1 FROM catalog_items i WHERE i.kind = t.kind AND i.tmdb = t.tmdb)`
+		filter = ` AND NOT ` + heldTitle
 	}
 	args := []any{list, kind}
 	if ceiling != nil {

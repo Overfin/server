@@ -563,6 +563,35 @@ func TestCatalogTitles(t *testing.T) {
 	if got := names("missing"); got != "Arrival,Old" {
 		t.Errorf("missing: %s", got)
 	}
+	// A paired server holding film 3 for us: available, so not missing;
+	// a peer not paired (yet), or suspended, holds nothing for us.
+	peer, _ := s.AddPeer(ctx, bytes.Repeat([]byte{5}, 32), "https://b.example.org", "B", nil)
+	if err := s.SetPeerTitles(ctx, peer.ID, []PeerTitle{{Key: "movie/tmdb/3", Kind: "movie", Library: "x"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := names("missing"); got != "Arrival,Old" {
+		t.Errorf("missing, a peer not paired: %s", got)
+	}
+	s.SetPeerState(ctx, peer.ID, PeerTheirs, PeerPaired)
+	if got := names("missing"); got != "Old" {
+		t.Errorf("missing, a paired server holding Arrival: %s", got)
+	}
+	if got := names("library"); got != "Arrival,Heat" {
+		t.Errorf("library, a paired server holding Arrival: %s", got)
+	}
+	// A series held only by its episodes there counts too; another
+	// series whose ID starts the same doesn't.
+	s.PutTitles(ctx, []Title{{Kind: "series", TMDB: "13", Name: "Dark"}, {Kind: "series", TMDB: "130", Name: "Lost"}}, now)
+	s.SetList(ctx, "trending", "series", []string{"13", "130"})
+	s.SetPeerTitles(ctx, peer.ID, []PeerTitle{{Key: "movie/tmdb/3", Kind: "movie", Library: "x"},
+		{Key: "series/tmdb/13/s1/e2", Kind: "episode", Library: "x"}})
+	if got, _ := s.ListTitles(ctx, "trending", "series", "missing", nil, 0, 10); len(got) != 1 || got[0].Name != "Lost" {
+		t.Errorf("series missing, a peer holding an episode of Dark: %+v", got)
+	}
+	s.DeletePeer(ctx, peer.ID)
+	if got := names("missing"); got != "Arrival,Old" {
+		t.Errorf("missing, the peer gone: %s", got)
+	}
 	if ti, _ := s.TitleByTMDB(ctx, "movie", "2"); ti == nil || ti.ItemID == "" || ti.Poster != "/abc12345.jpg" {
 		t.Errorf("title: %+v", ti)
 	}

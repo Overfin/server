@@ -299,8 +299,10 @@ export class Overfin {
   /**
    * A page of trending, popular or upcoming titles. list: 'trending',
    * 'popular' or 'upcoming'; mediaKind: 'movie' or 'series'; availability:
-   * 'all' (the default), 'library' or 'missing'. A filtered page may hold
-   * fewer titles than asked for; nextCursor says whether there are more.
+   * 'missing' (the default since 0.10: what neither this server nor a
+   * paired one has yet, Discovery's), 'library' (what they have) or 'all'.
+   * A page is filled as the list allows; nextCursor says whether there are
+   * more.
    */
   discover(list, mediaKind, { availability, limit, cursor } = {}) {
     return this.request('GET', `/discover${toQuery({ list, mediaKind, availability, limit, cursor })}`);

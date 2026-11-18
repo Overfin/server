@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -107,7 +109,7 @@ func TestDiscover(t *testing.T) {
 		Items      []title
 		NextCursor string
 	}
-	if code := get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie", &out); code != 200 {
+	if code := get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie&availability=all", &out); code != 200 {
 		t.Fatalf("discover: %d", code)
 	}
 	if len(out.Items) != 2 || out.NextCursor != "" {
@@ -121,8 +123,8 @@ func TestDiscover(t *testing.T) {
 		t.Errorf("missing (and its unsafe poster dropped): %+v", missing)
 	}
 
-	// Filters.
-	for avail, want := range map[string]string{"library": "title_movie_tmdb_949", "missing": "title_movie_tmdb_100"} {
+	// Filters; without one, Discovery's: only what isn't available yet.
+	for avail, want := range map[string]string{"library": "title_movie_tmdb_949", "missing": "title_movie_tmdb_100", "": "title_movie_tmdb_100"} {
 		out.Items = nil
 		get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie&availability="+avail, &out)
 		if len(out.Items) != 1 || out.Items[0].ID != want {
@@ -138,13 +140,13 @@ func TestDiscover(t *testing.T) {
 	}
 	st.SetGenresLeftOut(ctx, store.GenresLeftOut{Series: []int{80}}) // a series genre: films stay
 	out.Items = nil
-	get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie", &out)
+	get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie&availability=all", &out)
 	if len(out.Items) != 2 {
 		t.Errorf("a series genre left out: %+v", out.Items)
 	}
 	st.SetGenresLeftOut(ctx, store.GenresLeftOut{Movie: []int{80}})
 	out.Items = nil
-	get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie", &out)
+	get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie&availability=all", &out)
 	if len(out.Items) != 1 || out.Items[0].ID != "title_movie_tmdb_949" {
 		t.Errorf("crime left out: %+v", out.Items)
 	}
@@ -173,7 +175,7 @@ func TestDiscover(t *testing.T) {
 		t.Fatalf("activate kid: %d %s", code, body)
 	}
 	out.Items = nil
-	if code := get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie", &out); code != 200 || len(out.Items) != 0 {
+	if code := get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie&availability=all", &out); code != 200 || len(out.Items) != 0 {
 		t.Errorf("kids discover, nothing rated yet: %d %+v", code, out.Items)
 	}
 	keeper := ratings.NewKeeper(func() ratings.Source { return ratings.TMDB{Source: s} }, st,
@@ -182,7 +184,7 @@ func TestDiscover(t *testing.T) {
 		t.Fatal(err)
 	}
 	out.Items = nil
-	if code := get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie", &out); code != 200 ||
+	if code := get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie&availability=all", &out); code != 200 ||
 		len(out.Items) != 1 || out.Items[0].ID != "title_movie_tmdb_949" || out.Items[0].Availability != "available" {
 		t.Errorf("kids discover: %d %+v", code, out.Items)
 	}
@@ -267,7 +269,7 @@ func TestLibraryLimitedSeesNoMissingTitles(t *testing.T) {
 	discover := func() []string {
 		t.Helper()
 		var out struct{ Items []struct{ ID string } }
-		if code := get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie", &out); code != 200 {
+		if code := get(t, srv, "/api/v1/discover?list=trending&mediaKind=movie&availability=all", &out); code != 200 {
 			t.Fatalf("discover: %d", code)
 		}
 		var ids []string
@@ -301,5 +303,55 @@ func TestLibraryLimitedSeesNoMissingTitles(t *testing.T) {
 	}
 	if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_949", nil); code != 200 {
 		t.Errorf("limited, its library's film: %d", code)
+	}
+}
+
+// A page of Discovery is full when the list has enough titles the profile
+// may see: those left out (here, a genre the server leaves out) don't
+// make it short, and its cursor goes on after the last one looked at.
+func TestDiscoverFullPages(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{seerr: fakeSeerr(t), store: &st})
+	ctx := context.Background()
+	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
+	st.SetTitlesShown(ctx, "all")
+	var ids []string
+	for i := 1; i <= 7; i++ {
+		id := strconv.Itoa(i)
+		genres := []int{18}
+		if i == 2 || i == 3 || i == 5 {
+			genres = []int{80} // left out
+		}
+		if err := st.PutTitles(ctx, []store.Title{{Kind: "movie", TMDB: id, Name: "Film " + id, ListGenres: genres}}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if err := st.SetList(ctx, "popular", "movie", ids); err != nil {
+		t.Fatal(err)
+	}
+	st.SetGenresLeftOut(ctx, store.GenresLeftOut{Movie: []int{80}})
+	var pages []string
+	path := "/api/v1/discover?list=popular&mediaKind=movie&limit=2"
+	for range 4 {
+		var out struct {
+			Items      []struct{ ID string }
+			NextCursor string
+		}
+		if code := get(t, srv, path, &out); code != 200 {
+			t.Fatalf("%s: %d", path, code)
+		}
+		var page []string
+		for _, it := range out.Items {
+			page = append(page, strings.TrimPrefix(it.ID, "title_movie_tmdb_"))
+		}
+		pages = append(pages, strings.Join(page, ","))
+		if out.NextCursor == "" {
+			break
+		}
+		path = "/api/v1/discover?list=popular&mediaKind=movie&limit=2&cursor=" + url.QueryEscape(out.NextCursor)
+	}
+	if got := strings.Join(pages, " | "); got != "1,4 | 6,7" {
+		t.Errorf("pages: %s", got)
 	}
 }

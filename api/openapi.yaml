@@ -3760,13 +3760,16 @@ paths:
       operationId: discover
       summary: Trending, popular and upcoming titles from TMDB
       description: >-
-        Filter with `availability` to get, for example, "trending in our
-        library" (`library`) or "trending titles we don't have" (`missing`).
-        Titles, as everywhere, with their availability and what the
-        profile did with them. Kids profiles see those rated within their
-        limits. The `upcoming` list keeps the titles not out yet as the
-        server shows titles, marked `upcoming`; the other lists leave them
-        out. A filtered page may hold fewer titles than asked for;
+        Discovery is for what isn't available yet: by default (`missing`)
+        only the titles no library here has and no paired server holds for
+        us; a series with some of its episodes here or there is available.
+        `library` gives the available ones instead ("trending in our
+        library", as Home shows it) and `all` both. Titles, as everywhere,
+        with their availability and what the profile did with them. Kids
+        profiles see those rated within their limits. The `upcoming` list
+        keeps the titles not out yet as the server shows titles, marked
+        `upcoming`; the other lists leave them out. A page holds as many
+        titles as asked for while the list has enough the profile may see;
         `nextCursor` says whether there are more.
       tags: [catalog]
       parameters:
@@ -3788,7 +3791,8 @@ paths:
           schema:
             type: string
             enum: [all, library, missing]
-            default: all
+            default: missing
+            description: The default was `all` before 0.10.
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
       responses:
