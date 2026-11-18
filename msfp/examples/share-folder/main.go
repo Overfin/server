@@ -9,6 +9,9 @@
 //
 // Then type "code" in the first, "redeem <code>" in the second, and
 // "accept <id>" in the first. "peers" lists them, "end <id>" ends one.
+// "rotate" moves this server to its next key; "stolen" revokes its key
+// and rotates ("stolen none": without the next key, every pairing ends);
+// "confirm <id>" accepts a peer's new key after comparing fingerprints.
 package main
 
 import (
@@ -75,15 +78,27 @@ func main() {
 			show("paired with "+p.Name, err)
 		case "end":
 			show("ended", eng.End(ctx, arg))
+		case "rotate":
+			show("key changed; peers told", eng.Rotate(ctx, arg))
+		case "stolen":
+			rotated, err := eng.KeyStolen(ctx, strings.TrimPrefix(arg, "none"), arg == "none")
+			show(fmt.Sprintf("key revoked; rotated to the next key: %v", rotated), err)
+		case "confirm":
+			p, err := eng.ConfirmRotation(ctx, arg)
+			show("new key confirmed: "+p.Fingerprint, err)
 		case "peers":
 			eng.PanelOpen()
 			peers, err := eng.Peers(ctx)
 			for _, p := range peers {
-				fmt.Printf("%s  %-7s %s  %s  %s\n", p.ID, p.State, p.Fingerprint, p.Name, p.Address)
+				fmt.Printf("%s  %-7s %s  %s  %s", p.ID, p.State, p.Fingerprint, p.Name, p.Address)
+				if p.Pending != nil {
+					fmt.Print("  new key to confirm: ", p.Pending.Fingerprint)
+				}
+				fmt.Println()
 			}
 			show("", err)
 		default:
-			fmt.Println("code [note] | redeem <code> | accept <id> | end <id> | peers")
+			fmt.Println("code [note] | redeem <code> | accept <id> | end <id> | peers | rotate [key] | stolen [key|none] | confirm <id>")
 		}
 	}
 }
