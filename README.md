@@ -94,8 +94,8 @@ libraries both ways:
   one offers and the other wants is shared. Streams, transcodes and
   bitrate are limited per pairing, by the side that shares.
 - **Paired by hand**, with a one-time code and fingerprints compared
-  between operators. Every request between servers is signed; servers
-  that aren't paired get a 404. Ending a pairing ends it on both sides.
+  between operators. Servers talk over HTTPS only, every request between
+  them signed; servers that aren't paired get a 404. Ending a pairing ends it on both sides.
 
 How to pair, and what each side sees: [docs/federation.md](docs/federation.md).
 

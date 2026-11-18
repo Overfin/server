@@ -45,12 +45,15 @@ network, and nothing is shared until both of you say so.
 
 ## Pairing two servers
 
-You need your site's address set (`http(s)://host` in the configuration,
-or an HTTPS domain): it's how the other server reaches yours. In the
-control panel, under **Federation**:
+You need your site's address set, in HTTPS (`https://host` as `site.url`
+in the configuration, or an HTTPS domain): it's how the other server
+reaches yours. Servers pair over HTTPS only; a site on plain `http://`
+has no federation (the panel says so), and a code for an `http://`
+address is refused. In the control panel, under **Federation**:
 
 1. One of you clicks **New code** and sends it to the other however you
-   like. A code works once, within 24 hours.
+   like. A code starts with `msfp-pair-1.`, and works once, within 24
+   hours.
 2. The other pastes it under **Use a code**.
 3. The first server now lists the second. Before accepting, compare the
    **fingerprints** both panels show, by phone or a message you trust: if
@@ -60,10 +63,13 @@ control panel, under **Federation**:
    where one side offers nothing works too.
 
 Other servers know your libraries by IDs of their own, made when you
-first offer each one; never Jellyfin's. Overfin servers older than
-November 2026 used Jellyfin's: once both of you run a newer one, what you
-wanted of each other is marked **no longer offered**, and the peer's row
-says to choose again. Open **Sharing** and tick the libraries again.
+first offer each one; never Jellyfin's.
+
+**Pairings made before November 2026 are gone.** Overfin then spoke a
+first, test version of the protocol; it now speaks version 1 only, and
+the update removes the pairings made under the test version, with what
+was shared through them. Pair again with a new code: your own libraries,
+and the IDs other servers know them by, stay.
 
 Ending a pairing (**End**) is one click, and it ends on both servers at once.
 
@@ -100,16 +106,18 @@ answer, asks it less often by itself, up to once an hour.
 Servers never trust each other by default. Each proves who it is with the
 key exchanged when pairing, never with a web certificate, a name or an
 address alone. Every request and answer between them is signed (Ed25519,
-a nonce used once, within 5 minutes); a server that isn't paired gets a
-plain 404. Nonces are kept in memory, so a request signed before a server
-started is refused: a paired server whose clock runs behind is refused for
-that long after each start (keep both clocks set by the network). A compromised paired server can't reach your data or your
-people.
+a nonce used once, within 5 minutes), over HTTPS; a server that isn't
+paired gets a plain 404. Nonces are kept in memory, so a request signed
+before a server started is refused: a paired server whose clock runs
+behind is refused for that long after each start (keep both clocks set by
+the network). A compromised paired server can't reach your data or your
+people. The full rules are SECURITY.md's 94 to 100, and 136.
 
-Between servers on plain `http://`, requests are still signed, so neither
-can be impersonated, but what they say (titles, tickets) can be read on
-the way. The panel says so. The full rules are SECURITY.md's 94 to 100,
-and 136.
+Paired servers say, each time they check on each other, which versions of
+the protocol and of its parts (catalog, playback, media, video) they
+speak, and use those both speak. A server that speaks none of yours shows
+in the panel as speaking another version; it can't share with yours
+until one of you updates.
 
 ## Which addresses Overfin connects to
 
@@ -186,9 +194,27 @@ someone who could redirect your server's own connection to itself (by
 its DNS, say) could have their certificate named; naming it in the
 configuration avoids that.
 
+## Testing two servers on one machine
+
+Plain `http://` between servers is outside the protocol, but two servers
+tried on one machine may have no certificate. For that only, a test
+setting lets a server pair over plain http, its own address and those it
+is given; with it on, the panel says so. Never on a server in use:
+
+```toml
+[federation]
+test_plain_http = true
+allow_loopback = true   # both on this machine
+```
+
 Building your own server that pairs with Overfin? Servers speak MSFP, the
-Media Server Federation Protocol: its specification and test vectors are
-at [github.com/msfp-io/msfp-spec](https://github.com/msfp-io/msfp-spec).
+Media Server Federation Protocol, version 1 (its core, and the parts
+catalog, playback, media and video; Overfin has no music): its
+specification and test vectors are at
+[github.com/msfp-io/msfp-spec](https://github.com/msfp-io/msfp-spec).
+Overfin doesn't yet do key rotation and revocation, address changes,
+the discovery document, or servers that can't be called: it doesn't
+serve `rotate` and `revoke` (a path that doesn't exist, the plain 404).
 
 ## Where it stands
 

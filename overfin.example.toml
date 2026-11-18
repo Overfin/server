@@ -172,6 +172,11 @@ spa_fallback = false
 # true only to pair with a server on this same machine; link-local stays
 # refused. With a gateway, set it on the gateway: it makes the connections.
 allow_loopback = false
+# A test setting, outside the federation protocol, which is HTTPS only: lets
+# this server pair over plain http (its own address, and those of the codes
+# and pairing requests it takes), to try two servers on one machine. Never
+# on a server in use.
+test_plain_http = false
 
 # ---- Feature settings --------------------------------------------------------
 # Everything below is switched on and off in the control panel, and lives in

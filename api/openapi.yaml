@@ -3733,7 +3733,7 @@ paths:
       summary: One sheet of a playback's seek-bar previews, by its ticket
       description: >-
         For a paired server's viewer's server, which gets these URLs in the
-        `trickplay.sheets` of its play answer (MSFP section 10) and relays
+        `trickplay.sheets` of its play answer (MSFP video, section 5.5) and relays
         the sheets at its own playback route. A JPEG, re-encoded by
         Overfin; no query string.
       tags: [playback]
@@ -3975,11 +3975,13 @@ paths:
       summary: Another server uses this server's pairing code
       description: |
         Server to server, never for apps (ROADMAP.md milestone 6, SECURITY.md
-        rules 94 and 95). The caller signs the request with its federation key
-        (headers `Overfin-Key`, `Overfin-Date`, `Overfin-Nonce`,
-        `Overfin-Signature`, over the method, this server's host, the path,
+        rules 94 and 95), in MSFP version 1 (github.com/msfp-io/msfp-spec),
+        over HTTPS only. The caller signs the request with its federation
+        key (headers `MSFP-Key`, `MSFP-Date`, `MSFP-Nonce`,
+        `MSFP-Signature`, over the method, this server's host, the path,
         the date, the nonce and the body's SHA-256); the answer is signed by
-        this server's key, over the request's nonce, the status and the body.
+        this server's key (`MSFP-Signature`), over the request's nonce, the
+        status, the answer's media type and the body.
         A refusal to a server this one knows, or knew (its pairing ended),
         is signed the same way, on every federation route: the caller
         counts only a signed one, so nobody between two servers can fake
@@ -4000,10 +4002,12 @@ paths:
               type: object
               required: [address, name, secretHash, proof]
               properties:
-                address: {type: string, description: "The caller's site, http(s)://host"}
+                address: {type: string, description: "The caller's site, https://host"}
                 name: {type: string, description: What the caller calls itself}
                 secretHash: {type: string, description: URL-safe base64, no padding}
                 proof: {type: string, description: URL-safe base64, no padding}
+                nextCommitment: {type: string, description: "Read for its form only: this server doesn't rotate keys yet"}
+                inbound: {type: boolean, description: "Read for its form only"}
       responses:
         "200":
           description: Paired, waiting for this server's operator. Signed.
@@ -4025,8 +4029,11 @@ paths:
         Server to server, signed both ways as for pair. The caller says
         where it stands (`paired`: its operator accepted; `waiting`;
         `ended`: it has just ended the pairing, which ends it here too), and
-        the answer says where this server stands. A key this server doesn't
-        know gets the same plain 404 as a missing route.
+        the answer says where this server stands. Both say which versions
+        of MSFP's core and parts they speak (`core`, `parts`), and name the
+        certificates their address serves; the parts both speak are the
+        ones used between them. A key this server doesn't know gets the
+        same plain 404 as a missing route.
       tags: [federation]
       security: []
       requestBody:
@@ -4087,7 +4094,7 @@ paths:
                       streams: {type: integer}
                       transcodes: {type: integer}
                       bitrateKbps: {type: integer, description: "0: no cap"}
-        "404": {description: "Not signed, or not a paired server."}
+        "404": {description: "Not signed, or not a paired server; `not-supported` when catalog isn't on between the two (MSFP core section 10.4)."}
 
   /federation/titles:
     post:
@@ -4145,7 +4152,7 @@ paths:
                   changes: {type: boolean, description: "Only what changed since `since`"}
                   gone: {type: array, items: {type: string}, description: "With changes: keys no longer held"}
                   seq: {type: integer, format: int64, description: "This server's last change: the since to ask next"}
-        "404": {description: "Not signed, or not a paired server."}
+        "404": {description: "Not signed, or not a paired server; `not-supported` when catalog isn't on between the two."}
 
   /federation/play:
     post:
@@ -4182,7 +4189,7 @@ paths:
                 subtitleTrack: {type: string}
       responses:
         "200": {description: "The playback, as POST /playback answers it. Signed."}
-        "404": {description: "Not signed, not a paired server, or a title not offered it."}
+        "404": {description: "Not signed, not a paired server, or a title not offered it; `not-supported` when playback isn't on between the two."}
         "409": {description: "The pairing's limit, or every transcode it may take, is reached."}
 
   /federation/progress:
@@ -4306,6 +4313,19 @@ components:
         state:
           type: string
           enum: [paired, waiting, ended]
+        core:
+          type: array
+          items: {type: integer}
+          description: "The versions of MSFP's core the sender speaks: [1]"
+        parts:
+          type: object
+          additionalProperties: {type: array, items: {type: integer}}
+          description: "Each part's versions: catalog, playback, media and video, [1]"
+        certificates:
+          type: array
+          items: {type: string}
+          description: "Pins of the certificates the sender's address serves"
+        address: {type: string, description: "The sender's address, https://host"}
     Signin:
       description: What a step of the sign-in pages sends; each uses its own
         fields.
