@@ -11,11 +11,11 @@ import (
 func TestCountryLanguages(t *testing.T) {
 	for country, want := range map[string]string{
 		"CA": "en-CA,fr-CA",
-		// Swiss German, French and Italian are official, but TMDB has only
-		// de-CH.
-		"CH": "de-CH",
-		// Spanish is official only in some states: not the country's.
-		"US": "en-US",
+		// TMDB has only de-CH, but answers fr-CH and it-CH in its French
+		// and Italian: the language is what counts.
+		"CH": "de-CH,fr-CH,it-CH",
+		// Spanish is official in some states (CLDR: official_regional).
+		"US": "en-US,es-US",
 		"FR": "fr-FR",
 		"XX": "",
 	} {

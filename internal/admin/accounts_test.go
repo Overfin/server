@@ -286,7 +286,7 @@ func TestLanguagesRoutes(t *testing.T) {
 	p.OnLanguage = func() { changes++ }
 	// A fresh install: English (United States), no country yet.
 	if rec := b.do("GET", "/admin/api/languages", "", nil); !strings.Contains(rec.Body.String(), `"default":"en-US"`) ||
-		!strings.Contains(rec.Body.String(), `"country":""`) || !strings.Contains(rec.Body.String(), `"CH":[{"tag":"de-CH","name":"Deutsch (Schweiz)"}]`) {
+		!strings.Contains(rec.Body.String(), `"country":""`) || !strings.Contains(rec.Body.String(), `"CH":[{"tag":"de-CH","name":"Deutsch (Schweiz)"},{"tag":"fr-CH","name":"Français (Suisse)"},{"tag":"it-CH","name":"Italiano (Svizzera)"}]`) {
 		t.Errorf("languages: %s", rec.Body)
 	}
 	for body, want := range map[string]string{

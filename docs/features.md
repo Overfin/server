@@ -82,8 +82,9 @@
   webhook), invitations, templates (how many streams and profiles an
   account gets, whether each profile keeps a stream of its own, and the
   categories its profiles see), limits, the server's country and its
-  languages (each country's official languages that TMDB has
-  translations in, from Unicode CLDR: Canada offers English and French;
+  languages (each country's official languages, from Unicode CLDR, in
+  a language TMDB has: Canada offers English and French, Switzerland
+  German, French and Italian;
   those offered before stay until you turn them off), libraries, the GPU that converts videos (tested on your own files),
   seek-bar previews (off by default: they take time and disk space; Overfin makes them itself, kept by file, so a file moved keeps them), email, Seerr, each title's metadata (how it's matched, its texts and artwork), what each title is
   worth to your server (Valuation).

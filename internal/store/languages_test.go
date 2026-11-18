@@ -84,7 +84,7 @@ func TestServerCountry(t *testing.T) {
 		{[]string{"fr-CA", "en-CA"}, "fr-CA", "CA"},
 		// No region, or one Overfin has no languages for: the next.
 		{[]string{"fr", "en-GB"}, "fr", "GB"},
-		{[]string{"fr-LU", "de-CH"}, "fr-LU", "CH"},
+		{[]string{"fr-AQ", "de-CH"}, "fr-AQ", "CH"},
 		{[]string{"fr", "es-419"}, "fr", ""},
 	} {
 		if _, err := s.SetLanguages(ctx, tc.offered, tc.def); err != nil {
