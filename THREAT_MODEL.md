@@ -37,7 +37,7 @@ holds the data and the secrets, and checks everything itself [119, 123, 127].
 | Logged-in, malicious user | Other users' data, more access, exhausting the server | Ownership checks [8, 35, 36, 37, 39], owner-only account actions [38], signed cursors [56], limits [47, 48, 49] |
 | Script injected into the website (XSS) | Act as the user, take over the account, send users to a phishing page | No tokens in reach [9, 26], step-up for lasting damage [31], checked return addresses [29] |
 | A compromised sibling subdomain | Make requests in the user's name | Same-origin requests only [27], `__Host-` cookies over HTTPS [26] |
-| Another server, weak or compromised | Reach into servers that share with it | Peers untrusted, authenticated, limited to what was shared [94–100] |
+| Another server, weak or compromised | Reach into servers that share with it | Peers untrusted, authenticated, limited to what was shared [94–100]; a server that can't be called is never connected to, its address never resolving [140] |
 | Thief of a server's federation key | Act as that server toward its peers, move them to a key or an address of the thief's | Revocation suspends the key at every peer; peers follow only the key committed in advance, whose seed can be kept offline [137, 138]; a new address only once it answers under the key, which revocation ends [139] |
 | Attacker-controlled media or metadata | Run code in the browser, reach the internal network, exhaust memory | Untrusted-data rules [10–18] |
 | Network observer | See who watches what, catch passwords or links | TLS (a secure default: without HTTPS, everything travels in clear), nothing personal in URLs [71] |

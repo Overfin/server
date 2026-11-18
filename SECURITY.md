@@ -17,7 +17,7 @@ network security expert. So the rules come in two kinds:
 
 - **Hard rules** hold on every server, whatever its settings. No setting
   loosens them. Above all, between servers (rules 94 to 100, 136 to
-  139): one badly run server must never be a way into another.
+  140): one badly run server must never be a way into another.
 - **Settings** are where the operator's setup decides. Each is listed here
   with what it can be set to. Its default is the safest choice that works
   without extra setup, and changing it only ever affects that operator's
@@ -45,6 +45,10 @@ network security expert. So the rules come in two kinds:
   - **Paired servers on this machine** (rule 136): refused; the operator
     may allow loopback addresses (`federation.allow_loopback`), never
     link-local ones.
+  - **Whether this server can be called** by paired servers (rule 140):
+    it can, by default; its operator may say it can't (Federation, in the
+    control panel), when nothing can connect to it. It then shares
+    nothing, and only watches what its peers share with it.
 
 Every rule not named here is a hard rule.
 
@@ -825,9 +829,11 @@ anyone. Paired servers are not trusted at all (rule 94).
      it reaches; local-use NAT64 (64:ff9b:1::/48) is refused. Private
      ranges are allowed: paired servers may share a LAN. A name is looked up once per connection,
      every address it gives must pass, and the address dialed is the one
-     checked, never looked up again. Redirects are never followed. One
-     setting loosens this: `federation.allow_loopback`, for a peer on the
-     same machine; nothing else refused is ever allowed.
+     checked, never looked up again. Redirects are never followed. An
+     address of a server that can't be called (rule 140) is never
+     dialed at all. One setting loosens this: `federation.allow_loopback`,
+     for a peer on the same machine; nothing else refused is ever
+     allowed.
 
 ### Keys between servers
 
@@ -852,8 +858,9 @@ anyone. Paired servers are not trusted at all (rule 94).
      change of key.
 138. A key its server says was stolen (revoked) suspends the peer at
      once: its key is answered nothing but a change of key or another
-     revocation, no call is made to it, and its titles are shown to
-     nobody. Only a change to the key it had committed to lifts the
+     revocation, no call is made to it (but the scheduled hello of a
+     server that can't be called, of whose answer only a change of key is
+     read, rule 140), and its titles are shown to nobody. Only a change to the key it had committed to lifts the
      suspension; after 30 days without one, the peer is gone, and stays
      suspended. An operator whose key was stolen revokes it at every
      paired server, then moves to the next key in the same action when
@@ -864,7 +871,9 @@ anyone. Paired servers are not trusted at all (rule 94).
 
 139. A paired server's stored address changes only once a hello at the
      new address, signed for its host, is answered under the key the
-     peer is known by. The address its signed hello names must have the
+     peer is known by; but for a peer that can't be called (rule 140),
+     never connected to, whose address its signed hello names is stored
+     at once. The address its signed hello names must have the
      form of a code's (rule 99); one that is only in an unsigned message,
      or in an answer that doesn't verify, is never followed. The
      confirming connection is checked as rule 136 says, and accepts any
@@ -877,6 +886,30 @@ anyone. Paired servers are not trusted at all (rule 94).
      every peer signs for the new one; never a third host. A stolen key
      can move its server's peers this way, until it is revoked (rule
      138).
+
+### Servers that can't be called
+
+140. A server whose operator says it can't be called (off by default)
+     federates under an address that never resolves,
+     https://msfp-<26 characters>.invalid, made at random by the server
+     once and kept, never a LAN address; it makes no pairing codes (those
+     not used yet are withdrawn), names no certificate, and says so in
+     every pair and hello it sends or answers. A message saying so under
+     any other form of address is refused: a bad body, or an answer as if
+     unsigned. Its peers never connect to it, for any call or media; they
+     drop what it held for them and show nothing of it. One that says it
+     can be called again is connected to by a hello at its address only,
+     and called again only once that hello answers under its key (rule
+     139). It asks each peer on a schedule (every 20 seconds while that
+     operator hasn't accepted, for a day; every 5 minutes paired; every
+     hour gone; each give or take a fifth), within the peer's limits, and
+     holding off as any call does. Its peers' changes of key reach it in
+     their signed hello answers, checked as rules 137 and 138 say: a
+     revocation only in an answer signed by the key revoked, applied
+     before the change of key the same answer carries. The key it names as
+     the one it knows its peer by can only pick between that peer's own
+     two keys. A peer saying that its calls couldn't connect only puts a
+     message on the panel.
 
 ## Deployment
 
