@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"io"
 	"maps"
 	"net/http"
 	"regexp"
@@ -178,8 +179,18 @@ func isToken(s string) bool {
 // SignRequest signs req, whose body is body, with k. It returns the nonce,
 // which the answer's signature covers (CheckResponse).
 func SignRequest(req *http.Request, body []byte, k Key, now time.Time) string {
+	nonce, _ := SignRequestFrom(req, body, k, now, rand.Reader)
+	return nonce
+}
+
+// SignRequestFrom is SignRequest with the nonce's 16 bytes read from
+// random: a server's cryptographic source, or a test's fixed bytes. It
+// fails only when random does.
+func SignRequestFrom(req *http.Request, body []byte, k Key, now time.Time, random io.Reader) (string, error) {
 	n := make([]byte, 16)
-	rand.Read(n)
+	if _, err := io.ReadFull(random, n); err != nil {
+		return "", err
+	}
 	nonce := b64.EncodeToString(n)
 	date := strconv.FormatInt(now.Unix(), 10)
 	msg := requestMessage(req.Method, req.URL.Host, req.URL.RequestURI(), date, nonce, body)
@@ -187,7 +198,7 @@ func SignRequest(req *http.Request, body []byte, k Key, now time.Time) string {
 	req.Header.Set(HeaderDate, date)
 	req.Header.Set(HeaderNonce, nonce)
 	req.Header.Set(HeaderSignature, b64.EncodeToString(k.sign(msg)))
-	return nonce
+	return nonce, nil
 }
 
 // SignResponse is the signature to put in an answer's MSFP-Signature, for
