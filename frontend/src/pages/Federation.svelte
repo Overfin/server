@@ -29,7 +29,7 @@
     // a change of its key waiting for you; when it revoked its key; a
     // change refused. What it knows of ours: 'old' not moved yet, 'lost'
     // didn't move in time.
-    commitment: '' | 'pair' | 'rotation' | 'hello';
+    commitment: '' | 'pair' | 'rotation';
     pending?: { fingerprint: string; date: string };
     suspendedAt?: string;
     refused?: { fingerprint: string; at: string };
@@ -88,7 +88,7 @@
     peers?: Peer[];
     nextKey?: { fingerprint: string; onServer: boolean };
     rotation?: { since: string; until: string };
-    move?: { former: string; since: string; until: string; moved: number; of: number };
+    move?: { former: string; since: string; until: string; moved: number; of: number; waiting: boolean };
   }
   interface Preview {
     address: string;
@@ -378,7 +378,6 @@
     if (p.ourKey === 'old' && p.rotationAnswer === 'pending') return "Its operator has to confirm this server's new key.";
     if (p.ourKey === 'old' && p.rotationAnswer === 'refused') return "It refused this server's new key: pair again if it doesn't move.";
     if (p.ourKey === 'old') return "Not moved to this server's new key yet: it is told at each contact.";
-    if (p.commitment === 'hello') return 'Its next key is known from its first message, not from pairing.';
     if (!p.commitment && p.state === 'paired') return 'Its next key is unknown: a change of its key will wait for you to confirm it.';
     return '';
   }
@@ -463,7 +462,11 @@
       </Setting>
     {/if}
     {#if s.move}
-      <Notice>This server's address changed {day(s.move.since)}, from <code>{s.move.former}</code>. Paired servers are told, and move by themselves: {s.move.moved} of {s.move.of} {s.move.moved === 1 ? 'has' : 'have'}. The former address is still accepted for those that haven't, until {when(s.move.until)}, or until all have moved.</Notice>
+      {#if s.move.waiting}
+        <Notice warn>This server's address changed {day(s.move.since)}, from <code>{s.move.former}</code>, waiting for the new address to answer: paired servers are told only once this server reaches itself at <code>{s.address}</code>, tried again and again. Until then they keep calling the former address.</Notice>
+      {:else}
+        <Notice>This server's address changed {day(s.move.since)}, from <code>{s.move.former}</code>. Paired servers are told, and move by themselves: {s.move.moved} of {s.move.of} {s.move.moved === 1 ? 'has' : 'have'}. The former address is still accepted for those that haven't, until {when(s.move.until)}, or until all have moved.</Notice>
+      {/if}
     {/if}
     {#if s.rotation}
       <Notice>This server's key is changing since {day(s.rotation.since)}. Servers that haven't moved yet are told at each contact; the old key is kept for them until {when(s.rotation.until)}, then they must pair again.</Notice>
