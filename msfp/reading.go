@@ -575,15 +575,16 @@ func (e *Engine) dropCatalog(ctx context.Context, id string) {
 // Playable says whether this server's people may be offered a peer's
 // titles of a kind ("movie", "episode", "track"…) now: the peer is
 // paired, not suspended, can be called, and playback, media and the
-// title's content part are on with it (engine.md section 3.3).
-func (e *Engine) Playable(peer, kind string) bool {
-	p, err := e.peerRecord(context.Background(), peer)
+// title's content part are on with it (engine.md section 3.3). Errors:
+// ErrNotFound, and the store's: an error is never a plain false.
+func (e *Engine) Playable(ctx context.Context, peer, kind string) (bool, error) {
+	p, err := e.peerRecord(ctx, peer)
 	if err != nil {
-		return false
+		return false, err
 	}
 	part := wire.PartVideo
 	if kind == "artist" || kind == "album" || kind == "track" {
 		part = wire.PartMusic
 	}
-	return e.usablePeer(p, wire.PartPlayback) == nil && e.on(p, wire.PartMedia) && e.on(p, part)
+	return e.usablePeer(p, wire.PartPlayback) == nil && e.on(p, wire.PartMedia) && e.on(p, part), nil
 }

@@ -159,11 +159,12 @@ type ServerView struct {
 	NextKey      string
 	NextOnServer bool
 	// RotationSince is when this server's change of key began, zero when
-	// none is under way; NotMoved, how many peers still know it by its
-	// old key then (they must pair again if they haven't moved after 30
-	// days).
+	// none is under way; NotRotated, how many peers still know it by its
+	// old key then (they must pair again if they haven't moved to the new
+	// one after 30 days). PeerView.NotMoved is another matter: a peer
+	// still on this server's former address.
 	RotationSince time.Time
-	NotMoved      int
+	NotRotated    int
 	// RevokedAt is when this server's key was revoked with no next key
 	// (KeyStolen withoutNext); for 30 days, former peers' hellos get the
 	// revocation. Zero for none.
@@ -198,7 +199,7 @@ func (e *Engine) Server(ctx context.Context) (ServerView, error) {
 		peers, err := tx.Peers()
 		for i, p := range peers {
 			if p.OurKey == KeyOld {
-				sv.NotMoved++
+				sv.NotRotated++
 			}
 			if r.Former != "" && p.State != Gone {
 				sv.PeersToMove++

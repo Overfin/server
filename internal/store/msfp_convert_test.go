@@ -209,7 +209,7 @@ func TestFederationConverted(t *testing.T) {
 	}
 	sv, err := eng.Server(ctx)
 	if err != nil || sv.Fingerprint != wire.Fingerprint(current.Public()) || sv.NextKey != wire.CommitmentFingerprint(wire.Commitment(next.Public())) ||
-		!sv.NextOnServer || !sv.RotationSince.Equal(rotatedAt) || sv.Former != "https://old.example.org" || sv.NotMoved != 1 {
+		!sv.NextOnServer || !sv.RotationSince.Equal(rotatedAt) || sv.Former != "https://old.example.org" || sv.NotRotated != 1 {
 		t.Fatalf("the engine's view: %+v %v", sv, err)
 	}
 	pv, err := eng.Peer(ctx, "pb")

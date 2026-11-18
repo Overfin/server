@@ -398,8 +398,11 @@ func TestNoMediaFromUncallable(t *testing.T) {
 	if _, err := b.eng.ReadNow(ctx, onB.ID); !errors.Is(err, msfp.ErrUncallable) {
 		t.Errorf("a reading of a peer that can't be called: %v", err)
 	}
-	if b.eng.Playable(onB.ID, "movie") {
-		t.Error("its titles playable")
+	if ok, err := b.eng.Playable(ctx, onB.ID, "movie"); ok || err != nil {
+		t.Errorf("its titles playable: %v %v", ok, err)
+	}
+	if ok, err := b.eng.Playable(ctx, "nobody", "movie"); ok || !errors.Is(err, msfp.ErrNotFound) {
+		t.Errorf("an unknown peer's titles: %v %v", ok, err)
 	}
 	if n := conns.Load() - before; n != 0 {
 		t.Errorf("%d connections to a peer that can't be called", n)

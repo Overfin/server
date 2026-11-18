@@ -190,7 +190,7 @@ func TestRotation(t *testing.T) {
 	}
 	after := serverView(t, a)
 	if after.Fingerprint != before.NextKey || after.NextKey == before.NextKey || !after.NextOnServer ||
-		!after.RotationSince.IsZero() || after.NotMoved != 0 {
+		!after.RotationSince.IsZero() || after.NotRotated != 0 {
 		t.Errorf("A after: %+v", after)
 	}
 	if n := countEvents[msfp.RotationAnswered](a); n != 2 || countEvents[msfp.RotationEnded](a) != 1 {
@@ -269,7 +269,7 @@ func TestRotationRefusedAndPending(t *testing.T) {
 	if p := peerView(t, a, bOnA); p.OurKey != msfp.KeyOld || p.RotationAnswer != "pending" {
 		t.Errorf("B on A: %+v", p)
 	}
-	if sv := serverView(t, a); sv.RotationSince.IsZero() || sv.NotMoved != 1 {
+	if sv := serverView(t, a); sv.RotationSince.IsZero() || sv.NotRotated != 1 {
 		t.Errorf("A: %+v", sv)
 	}
 	v = peerView(t, b, aOnB)
@@ -389,7 +389,7 @@ func TestKeyStolenWithNext(t *testing.T) {
 	if w := rawCall(t, b, keyOf(t, seedA), "hello", paired, clock.Now()); w.Code != 404 || signed(w) {
 		t.Errorf("a, revoked, heard: %d", w.Code)
 	}
-	if sv := serverView(t, a); sv.RotationSince.IsZero() || sv.NotMoved != 1 {
+	if sv := serverView(t, a); sv.RotationSince.IsZero() || sv.NotRotated != 1 {
 		t.Errorf("A: %+v", sv)
 	}
 	if p := peerView(t, a, cOnA); p.OurKey != msfp.KeyOld {
@@ -586,7 +586,7 @@ func TestTwoChangesInARow(t *testing.T) {
 	if err := a.eng.Rotate(ctx, ""); err != nil {
 		t.Fatal(err)
 	}
-	if sv := serverView(t, a); sv.NotMoved != 1 {
+	if sv := serverView(t, a); sv.NotRotated != 1 {
 		t.Fatalf("A: %+v", sv)
 	}
 	// The second: C, still on a, is lost; B, down now, stays on a2.
@@ -596,7 +596,7 @@ func TestTwoChangesInARow(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := serverView(t, a)
-	if second.NotMoved != 1 || !second.RotationSince.Equal(clock.Now()) {
+	if second.NotRotated != 1 || !second.RotationSince.Equal(clock.Now()) {
 		t.Errorf("A: %+v", second)
 	}
 	if p := peerView(t, a, cOnA); p.OurKey != msfp.KeyLost || countEvents[msfp.OurKeyLost](a) != 1 {
@@ -613,7 +613,7 @@ func TestTwoChangesInARow(t *testing.T) {
 	if a.eng.PeerMovedForTest(ctx, bOnA, ka2.Public()) {
 		t.Error("B moved to the key that is old now")
 	}
-	if sv := serverView(t, a); sv.RotationSince != second.RotationSince || sv.NotMoved != 1 || sv.Fingerprint != second.Fingerprint {
+	if sv := serverView(t, a); sv.RotationSince != second.RotationSince || sv.NotRotated != 1 || sv.Fingerprint != second.Fingerprint {
 		t.Errorf("the second change touched: %+v", sv)
 	}
 	if p := peerView(t, a, bOnA); p.OurKey != msfp.KeyOld {
@@ -703,7 +703,7 @@ func TestRotationJSONRestart(t *testing.T) {
 	clock.Add(time.Hour)
 	a.reopen(t, msfp.Config{Clock: clock, Store: st})
 	sv := serverView(t, a)
-	if sv.Fingerprint != before.Fingerprint || !sv.RotationSince.Equal(before.RotationSince) || sv.NotMoved != 1 || sv.NextKey != before.NextKey {
+	if sv.Fingerprint != before.Fingerprint || !sv.RotationSince.Equal(before.RotationSince) || sv.NotRotated != 1 || sv.NextKey != before.NextKey {
 		t.Fatalf("after the restart: %+v, was %+v", sv, before)
 	}
 	if p := peerView(t, a, bOnA); p.OurKey != msfp.KeyCurrent {
