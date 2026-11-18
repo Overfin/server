@@ -61,6 +61,18 @@ func (pb Playback) record(ctx context.Context, s *playback.Stream, positionMs in
 	if s.Remote != nil {
 		// A paired server's copy: the title, without a copy here.
 		err = st.RecordPlay(ctx, s.ProfileID, s.Remote.Key, "", positionMs, finished, time.Now())
+		// A copy holding several episodes, as that server said (MSFP
+		// video, section 4.2: with): watched to the end, all of them are.
+		if err == nil && finished {
+			var with []string
+			if with, err = st.PeerWith(ctx, s.Remote.PeerID, s.Remote.Key); err == nil {
+				for _, key := range with {
+					if err = st.RecordPlay(ctx, s.ProfileID, key, "", 0, true, time.Now()); err != nil {
+						break
+					}
+				}
+			}
+		}
 	} else {
 		var keys map[string]string
 		keys, err = st.TitleKeys(ctx, []string{s.ItemID})
