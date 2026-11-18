@@ -158,6 +158,9 @@ func (s *Service) keepInbound(ctx context.Context, p *store.Peer, uncallable boo
 		}
 		p.Inbound, p.Move = store.InboundNo, nil
 		s.lim().setUnreached(msfp.Encode64(p.PublicKey), false)
+		// Its titles are dropped, and nothing of it plays here any more:
+		// our viewers' playbacks from it end (no media is fetched from it).
+		s.changed(p.ID)
 		s.Logger.Info("federation: a peer says it can't be called: it can watch what this server shares with it, and shares nothing",
 			"name", p.Name)
 	case !uncallable && p.Inbound == store.InboundNo:

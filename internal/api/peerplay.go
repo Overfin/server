@@ -970,7 +970,9 @@ func (pb Playback) PeerChanged(peerID string) {
 			pb.end(s, why, "")
 		}
 	}
-	if !paired {
+	// One that can't be called is connected to no more (MSFP core section
+	// 7.5): its media can't be fetched.
+	if !paired || !peer.Callable() {
 		for _, s := range pb.Tickets.Where(func(s *playback.Stream) bool { return s.Remote != nil && s.Remote.PeerID == peerID }) {
 			pb.end(s, "pairing ended", "")
 		}

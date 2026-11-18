@@ -624,3 +624,49 @@ func TestPeerPlayAnswerOfWrongTypes(t *testing.T) {
 		}
 	}
 }
+
+// B says, in a signed hello, that it can't be called (MSFP core section
+// 7.5): A connects to it no more, its viewers' playback from B among
+// them, which ends at once.
+func TestRemotePlaybackEndsWhenPeerUncallable(t *testing.T) {
+	x := pairForPlay(t, true)
+	status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
+	var s peerSession
+	json.Unmarshal([]byte(body), &s)
+	if status != 201 {
+		t.Fatalf("play: %d %s", status, body)
+	}
+	viewer := func() int {
+		req, _ := http.NewRequest("GET", x.srvA.URL+s.Stream.URL, nil)
+		req.Header.Set("Remote-User", subject)
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		res, err := client(x.srvA, subject).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	if code := viewer(); code != 200 {
+		t.Fatalf("the stream through A: %d", code)
+	}
+	hello := []byte(`{"state":"paired","core":[1],"parts":{"catalog":[1],"playback":[1],"media":[1],"video":[1]},` +
+		`"address":"` + msfp.NewUncallableAddress() + `","inbound":false}`)
+	req, _ := http.NewRequest("POST", x.srvA.URL+"/api/v1/federation/hello", bytes.NewReader(hello))
+	req.Header.Set("Content-Type", "application/json")
+	msfp.SignRequest(req, hello, x.b.Keys.Current(), time.Now())
+	res, err := x.srvA.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("B's hello: %d", res.StatusCode)
+	}
+	if p, _ := x.stA.PeerByID(context.Background(), x.bOnA.ID); p.Callable() {
+		t.Fatal("B still callable on A")
+	}
+	if code := viewer(); code != http.StatusNotFound {
+		t.Fatalf("A still relays B's stream, B saying it can't be called: %d", code)
+	}
+}

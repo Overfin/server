@@ -413,6 +413,11 @@ func (s Stream) relayGet(ctx context.Context, st *playback.Stream, path, rangeHe
 	if err != nil {
 		return nil, problem.NotFound, err
 	}
+	// Never to a server whose key is revoked, or that can't be called
+	// (MSFP core sections 12.6 and 7.5), whatever ends its playbacks.
+	if !peer.Usable() || !peer.Callable() {
+		return nil, problem.NotFound, errNoRelay
+	}
 	res, err := relayClient(fed, peer).Do(req)
 	if err != nil && ctx.Err() == nil {
 		// Its certificate renewed: what it names now, and once more.
