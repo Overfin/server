@@ -761,6 +761,7 @@ func run(logger *slog.Logger) error {
 	// Federation: each paired server's titles, read again regularly.
 	go syncPeers(ctx, func() *federation.Service { return gw.current.Load().fed })
 	go maintainKeys(ctx, func() *federation.Service { return gw.current.Load().fed })
+	go helloSchedule(ctx, func() *federation.Service { return gw.current.Load().fed })
 	// The catalog's index, read through Overfin's Jellyfin service account,
 	// as Jellyfin's socket says the library changed (polling only while
 	// it's out of reach), and whole once a day.
@@ -839,6 +840,7 @@ func run(logger *slog.Logger) error {
 		p := &admin.Panel{Version: Version, Features: gw, Modules: gw, Jellyfin: gw, Libraries: newLibraries(gw), Transcoding: gw, Seerr: gw, Catalog: cat, Group: a.Group, Logger: logger,
 			TMDB: func() bool { return gw.tmdbSource() != nil }, TMDBTokens: gw, IntroSkipper: skipper,
 			Federation: func() *federation.Service { return gw.current.Load().fed },
+			Uncallable: gw,
 			// A new language: artwork and discovery's lists, read again now.
 			OnLanguage: func() { sh.titles.Wake(); sh.lists.Wake() },
 			Store:      db, Provisioner: gw.Provisioner, Interests: gw.Interests, Playing: gw, Notices: sh.notices, IMDb: imdbData,
@@ -1072,6 +1074,22 @@ func maintainKeys(ctx context.Context, fed func() *federation.Service) {
 		wait = time.Hour
 		if s := fed(); s != nil {
 			s.Maintain(ctx)
+		}
+	}
+}
+
+// helloSchedule sends, every second, the scheduled hellos of a server
+// that can't be called, with the federation in effect then (nothing for
+// one that can be called).
+func helloSchedule(ctx context.Context, fed func() *federation.Service) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+		if s := fed(); s != nil {
+			s.Hellos(ctx)
 		}
 	}
 }

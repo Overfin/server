@@ -69,6 +69,14 @@ type TMDBTokens interface {
 	SetTMDBToken(ctx context.Context, token string) (string, error)
 }
 
+// Uncallable is where the panel reads and changes whether this server can
+// be called by other servers (Federation).
+type Uncallable interface {
+	FederationUncallable(ctx context.Context) (bool, error)
+	// SetFederationUncallable saves it, and applies it now.
+	SetFederationUncallable(ctx context.Context, on bool) error
+}
+
 // Jellyfin is where the panel reads and changes how Overfin reaches
 // Jellyfin.
 type Jellyfin interface {
@@ -138,6 +146,10 @@ type Panel struct {
 	TMDB func() bool
 	// Federation is federation now: nil without the site's address.
 	Federation func() *federation.Service
+	// Uncallable, when set, reads and changes whether this server can't
+	// be called (MSFP core section 7.5): its operator's setting, which
+	// needs no site address.
+	Uncallable Uncallable
 	// TMDBTokens, when set, shows and changes the operator's TMDB token.
 	TMDBTokens TMDBTokens
 	// IntroSkipper, when set, shows Intro Skipper's state on Overfin's
@@ -360,6 +372,7 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/apps", p.signedIn(p.createAppKey))
 	mux.HandleFunc("DELETE /admin/api/apps/{id}", p.signedIn(p.deleteAppKey))
 	mux.HandleFunc("GET /admin/api/federation", p.signedIn(p.federation))
+	mux.HandleFunc("PUT /admin/api/federation/uncallable", p.signedIn(p.setUncallable))
 	mux.HandleFunc("POST /admin/api/federation/codes", p.signedIn(p.createPairingCode))
 	mux.HandleFunc("DELETE /admin/api/federation/codes/{id}", p.signedIn(p.deletePairingCode))
 	mux.HandleFunc("POST /admin/api/federation/preview", p.signedIn(p.previewPairingCode))

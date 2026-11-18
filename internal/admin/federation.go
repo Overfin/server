@@ -70,6 +70,15 @@ type peerJSON struct {
 	NotMoved bool        `json:"notMoved,omitempty"`
 	MoveLate bool        `json:"moveLate,omitempty"`
 	Moving   *movingJSON `json:"moving,omitempty"`
+
+	// Servers that can't be called (MSFP core section 7.5). Inbound is
+	// "no" when it can't be (it can watch what this server shares with
+	// it, and shares nothing with it), "confirming" when it says it can
+	// again and its address is being checked; left out when it can be.
+	// CallsFailed: its last answer said this server's last calls to it
+	// couldn't connect.
+	Inbound     string `json:"inbound,omitempty"`
+	CallsFailed bool   `json:"callsFailed,omitempty"`
 }
 
 // movingJSON is a peer's new address, being checked: since when that
@@ -113,6 +122,10 @@ func peerOf(p *store.Peer) peerJSON {
 	if p.RefusedKey != nil && p.RefusedAt != nil {
 		j.Refused = &refusedJSON{Fingerprint: msfp.Fingerprint(p.RefusedKey), At: p.RefusedAt.Format(time.RFC3339)}
 	}
+	if !p.Callable() {
+		j.Inbound = p.Inbound
+	}
+	j.CallsFailed = p.CallsFailed
 	return j
 }
 
@@ -168,11 +181,22 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 	if p.Federation != nil {
 		s = p.Federation()
 	}
+	ctx := r.Context()
+	uncallable := false
+	if p.Uncallable != nil {
+		on, err := p.Uncallable.FederationUncallable(ctx)
+		if err != nil {
+			p.fail(w, "reading whether this server can be called", err)
+			return
+		}
+		uncallable = on
+	}
 	if s == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"available": false})
+		// The setting shows anyway: a server that can't be called needs
+		// no site address.
+		writeJSON(w, http.StatusOK, map[string]any{"available": false, "uncallable": uncallable, "canSet": p.Uncallable != nil})
 		return
 	}
-	ctx := r.Context()
 	codes, err := p.Store.PairingCodes(ctx)
 	if err != nil {
 		p.fail(w, "listing pairing codes", err)
@@ -223,7 +247,7 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 		p.fail(w, "reading the next key", err)
 		return
 	}
-	out := map[string]any{"available": true, "address": s.Address,
+	out := map[string]any{"available": true, "address": s.Address, "uncallable": s.Uncallable, "canSet": p.Uncallable != nil,
 		// The test setting federation.test_plain_http, on: said so.
 		"testPlainHTTP": strings.HasPrefix(s.Address, "http://"),
 		"fingerprint":   msfp.Fingerprint(s.Keys.Current().Public()), "codes": outCodes, "peers": outPeers,
@@ -256,6 +280,11 @@ func (p *Panel) createPairingCode(w http.ResponseWriter, r *http.Request, s *ses
 		return
 	}
 	text, c, err := fed.NewCode(r.Context(), req.Note)
+	if errors.Is(err, federation.ErrNoCodes) {
+		writeJSON(w, http.StatusConflict, map[string]string{"type": "no-codes",
+			"detail": "This server can't be called: it makes no codes. Ask the other server's operator for one, and use it here."})
+		return
+	}
 	if err != nil {
 		p.fail(w, "making a pairing code", err)
 		return
@@ -276,6 +305,31 @@ func (p *Panel) deletePairingCode(w http.ResponseWriter, r *http.Request, s *ses
 		return
 	}
 	p.Logger.Info("a pairing code was withdrawn in the control panel", "code", r.PathValue("id"), "by", s.logID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// setUncallable is the operator saying whether this server can't be
+// called (MSFP core section 7.5): it then federates under an address that
+// never resolves, makes no codes, and asks its paired servers on a
+// schedule; turned off, it moves back to its site's address, and they
+// call it again once they checked it answers there.
+func (p *Panel) setUncallable(w http.ResponseWriter, r *http.Request, s *session) {
+	if p.Uncallable == nil {
+		notFound(w, "Not available here")
+		return
+	}
+	var req struct {
+		On bool `json:"on"`
+	}
+	if json.NewDecoder(r.Body).Decode(&req) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request"})
+		return
+	}
+	if err := p.Uncallable.SetFederationUncallable(r.Context(), req.On); err != nil {
+		p.fail(w, "changing whether this server can be called", err)
+		return
+	}
+	p.Logger.Info("whether this server can be called was changed in the control panel", "uncallable", req.On, "by", s.logID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -474,6 +528,7 @@ func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
 	outTheirs := []lib{}
 	theirs, err := fed.TheirLibraries(ctx, peer)
 	reachable := err == nil
+	uncallable := errors.Is(err, federation.ErrUncallable)
 	if reachable {
 		// What it says we may use of it and what it calls itself, read
 		// again with its libraries.
@@ -502,7 +557,8 @@ func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ours": outOurs, "theirs": outTheirs, "reachable": reachable,
-		"notSupported": errors.Is(err, federation.ErrNotSupported), "limits": peer.Limits, "theirLimits": peer.Theirs})
+		"notSupported": errors.Is(err, federation.ErrNotSupported), "uncallable": uncallable,
+		"limits": peer.Limits, "theirLimits": peer.Theirs})
 }
 
 func (p *Panel) setSharing(w http.ResponseWriter, r *http.Request, s *session) {
@@ -567,6 +623,11 @@ func (p *Panel) setSharing(w http.ResponseWriter, r *http.Request, s *session) {
 			if errors.Is(err, federation.ErrUnreachable) || errors.Is(err, federation.ErrUnknown) {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
 					"detail": "What you offer is saved, but what you want couldn't be: the other server can't be reached now. Try again later."})
+				return
+			}
+			if errors.Is(err, federation.ErrUncallable) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
+					"detail": "What you offer is saved, but what you want couldn't be: the other server can't be called, so it shares nothing with this one."})
 				return
 			}
 			if errors.Is(err, federation.ErrNotSupported) {

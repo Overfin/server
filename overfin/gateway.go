@@ -2,6 +2,7 @@ package overfin
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -363,22 +364,40 @@ type fedShared struct {
 // return address), one with a path (peers reach a server at its site's
 // root), or one that is plain http: MSFP is HTTPS only, but for the test
 // setting federation.test_plain_http.
+//
+// When the operator says this server can't be called (MSFP core section
+// 7.5), it federates under its address of the form
+// https://msfp-<26 characters>.invalid instead, made once and kept, and
+// needs no site address.
 func federationService(cfg *config.Config, sh *shared) *federation.Service {
-	address := msfp.Origin(siteURL(cfg))
-	if address == "" || sh.fed.http == nil {
-		return nil
-	}
-	if _, err := msfp.NewCode(address, sh.fed.keys.Current().Public(), time.Now()); err != nil {
-		sh.logger.Info("federation: off, the site's address isn't https://host alone", "address", address, "error", err)
+	if sh.fed.http == nil {
 		return nil
 	}
 	db := sh.db
-	fed := &federation.Service{Store: db, Keys: sh.fed.keys, Address: address, HTTP: sh.fed.http, Seen: sh.fed.seen,
+	uncallable, address, err := db.FederationUncallable(context.Background(), msfp.NewUncallableAddress)
+	if err != nil {
+		sh.logger.Error("federation: off, whether this server can be called couldn't be read", "error", err)
+		return nil
+	}
+	if !uncallable {
+		address = msfp.Origin(siteURL(cfg))
+		if address == "" {
+			return nil
+		}
+		if _, err := msfp.NewCode(address, sh.fed.keys.Current().Public(), time.Now()); err != nil {
+			sh.logger.Info("federation: off, the site's address isn't https://host alone", "address", address, "error", err)
+			return nil
+		}
+	}
+	// Its name, without branding: its site's host, even when it can't be
+	// called and federates under another.
+	named := cmp.Or(msfp.Origin(siteURL(cfg)), address)
+	fed := &federation.Service{Store: db, Keys: sh.fed.keys, Address: address, Uncallable: uncallable, HTTP: sh.fed.http, Seen: sh.fed.seen,
 		Certificates: sh.fed.certs, Limits: sh.fed.limits, Logger: sh.logger, Name: func(ctx context.Context) string {
 			if b, err := db.Branding(ctx); err == nil && b.On && b.Name != "" {
 				return b.Name
 			}
-			u, _ := url.Parse(address)
+			u, _ := url.Parse(named)
 			return u.Host
 		}}
 	// A site address other than the last one federated under is a move
@@ -845,6 +864,31 @@ func (g *gateway) SetPreviews(ctx context.Context, on bool) error {
 		g.sh.previews.Wake() // Overfin's own: they start now, not at the next pass
 	}
 	return g.applySettings(ctx)
+}
+
+// FederationUncallable says whether this server's operator said it can't
+// be called (MSFP core section 7.5).
+func (g *gateway) FederationUncallable(ctx context.Context) (bool, error) {
+	on, _, err := g.sh.db.FederationUncallable(ctx, msfp.NewUncallableAddress)
+	return on, err
+}
+
+// SetFederationUncallable saves whether this server can't be called, and
+// builds federation anew with it: under its address of the form
+// https://msfp-<26 characters>.invalid, or its site's again. Paired
+// servers are told by the move of address (NoteAddress).
+func (g *gateway) SetFederationUncallable(ctx context.Context, on bool) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := g.sh.db.SetFederationUncallable(ctx, on); err != nil {
+		return err
+	}
+	b, err := build(g.cfg, g.sh)
+	if err != nil {
+		return err
+	}
+	g.current.Store(b)
+	return nil
 }
 
 // choices are the operator's, among the Jellyfin settings Overfin owns.

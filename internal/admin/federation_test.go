@@ -248,3 +248,66 @@ func TestFederationPanelWantsGone(t *testing.T) {
 		t.Fatalf("state: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// fakeUncallable is the gateway's setting, kept in the store as it does,
+// without building federation anew.
+type fakeUncallable struct{ db *store.Store }
+
+func (f fakeUncallable) FederationUncallable(ctx context.Context) (bool, error) {
+	on, _, err := f.db.FederationUncallable(ctx, msfp.NewUncallableAddress)
+	return on, err
+}
+
+func (f fakeUncallable) SetFederationUncallable(ctx context.Context, on bool) error {
+	return f.db.SetFederationUncallable(ctx, on)
+}
+
+// "This server can't be called" (MSFP core section 7.5): shown, and set,
+// even without the site's address, which it doesn't need; a server that
+// can't be called makes no code, and a peer that can't be called is
+// listed as such, with callsFailed.
+func TestFederationPanelUncallable(t *testing.T) {
+	p, b, db, _ := signedInPanel(t)
+	p.Uncallable = fakeUncallable{db}
+	read := func() map[string]any {
+		t.Helper()
+		rec := b.do("GET", "/admin/api/federation", "", nil)
+		var s map[string]any
+		if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &s) != nil {
+			t.Fatalf("state: %d %s", rec.Code, rec.Body)
+		}
+		return s
+	}
+	if s := read(); s["available"] != false || s["uncallable"] != false || s["canSet"] != true {
+		t.Fatalf("at first: %v", s)
+	}
+	if rec := b.do("PUT", "/admin/api/federation/uncallable", `{"on":true}`, nil); rec.Code != 204 {
+		t.Fatalf("turning it on: %d %s", rec.Code, rec.Body)
+	}
+	if s := read(); s["uncallable"] != true {
+		t.Fatalf("on: %v", s)
+	}
+
+	a, s := fedPanel(t, "A")
+	s.Uncallable = true
+	if rec := a.do("POST", "/admin/api/federation/codes", `{"note":""}`, nil); rec.Code != 409 || !strings.Contains(rec.Body.String(), "no-codes") {
+		t.Fatalf("a code from a server that can't be called: %d %s", rec.Code, rec.Body)
+	}
+	pe, err := s.Store.AddPeer(context.Background(), msfp.NewKey().Public(), msfp.NewUncallableAddress(), "P", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Store.SetPeerInbound(context.Background(), pe.ID, store.InboundNo)
+	s.Store.SetPeerCallsFailed(context.Background(), pe.ID, true)
+	rec := a.do("GET", "/admin/api/federation", "", nil)
+	var st struct {
+		Uncallable bool
+		Peers      []struct {
+			Inbound     string
+			CallsFailed bool
+		}
+	}
+	if json.Unmarshal(rec.Body.Bytes(), &st) != nil || !st.Uncallable || len(st.Peers) != 1 || st.Peers[0].Inbound != "no" || !st.Peers[0].CallsFailed {
+		t.Fatalf("the list: %s", rec.Body)
+	}
+}
