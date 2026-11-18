@@ -80,7 +80,7 @@ func (s *Store) SearchLibrary(ctx context.Context, query string, limit int) ([]s
 					coalesce(t.rating, i.community_rating, 0) AS rating
 				FROM (SELECT kind, tmdb, title_key, name, community_rating FROM catalog_items
 					UNION ALL SELECT x.kind, substr(x.title_key, length(x.kind) + 7), x.title_key, '', NULL FROM peer_titles x
-					JOIN peers p ON p.id = x.peer_id AND p.state = 'paired'
+					JOIN peers p ON p.id = x.peer_id AND p.state = 'paired' AND p.suspended_at IS NULL
 					WHERE x.kind IN ('movie', 'series') AND x.title_key LIKE x.kind || '/tmdb/%') i
 				LEFT JOIN catalog_titles t INDEXED BY catalog_titles_listing ON t.kind = i.kind AND t.tmdb = i.tmdb
 				WHERE i.kind IN ('movie', 'series') AND i.title_key IS NOT NULL)

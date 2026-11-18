@@ -535,11 +535,11 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 	srv := httptest.NewUnstartedServer(nil)
 	var fed *federation.Service
 	if o.federation != nil {
-		key, err := federation.LoadKey(context.Background(), st)
+		keys, err := federation.LoadKeys(context.Background(), st)
 		if err != nil {
 			t.Fatal(err)
 		}
-		fed = &federation.Service{Store: st, Key: key, Address: "https://" + srv.Listener.Addr().String(),
+		fed = &federation.Service{Store: st, Keys: keys, Address: "https://" + srv.Listener.Addr().String(),
 			HTTP: federation.NewHTTPClient(), Name: func(context.Context) string { return "B" }, Logger: logger}
 		*o.federation = fed
 		pb.Federation = func() *federation.Service { return fed }

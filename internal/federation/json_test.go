@@ -128,7 +128,7 @@ func rawCall(t *testing.T, s *server, p *store.Peer, path, body string) int {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	msfp.SignRequest(req, []byte(body), s.s.Key, s.s.now())
+	msfp.SignRequest(req, []byte(body), s.s.Keys.Current(), s.s.now())
 	res, err := s.s.conns(p, true).client.Do(req)
 	if err != nil {
 		t.Fatal(err)

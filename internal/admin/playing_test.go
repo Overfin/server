@@ -40,7 +40,7 @@ func TestNowPlaying(t *testing.T) {
 	ctx := context.Background()
 	p, b, db, _ := signedInPanel(t)
 	acct, owner, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", JellyfinUsername: "of-1", JellyfinToken: "t"})
-	peer, err := db.AddPeer(ctx, bytes.Repeat([]byte{7}, 32), "https://b.example.org", "Films de B")
+	peer, err := db.AddPeer(ctx, bytes.Repeat([]byte{7}, 32), "https://b.example.org", "Films de B", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

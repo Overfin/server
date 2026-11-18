@@ -333,7 +333,7 @@ func (s *Store) titleInfo(ctx context.Context, r TitleRef, today string, b *info
 	} else if t.Items, err = s.ids(ctx, `SELECT id FROM catalog_items WHERE title_key = ? ORDER BY id`, key); err != nil {
 		return nil, err
 	}
-	if t.Peers, err = s.ids(ctx, `SELECT t.peer_id FROM peer_titles t JOIN peers p ON p.id = t.peer_id AND p.state = 'paired'
+	if t.Peers, err = s.ids(ctx, `SELECT t.peer_id FROM peer_titles t JOIN peers p ON p.id = t.peer_id AND p.state = 'paired' AND p.suspended_at IS NULL
 		WHERE t.title_key = ? ORDER BY p.paired_at, p.id`, key); err != nil {
 		return nil, err
 	}
@@ -482,7 +482,7 @@ func (s *Store) countEpisodes(ctx context.Context, t *TitleInfo, today string) e
 			SELECT title_key AS k FROM catalog_items
 			WHERE kind = 'episode' AND title_key >= ? AND title_key < ? AND (coalesce(shown_season, season_number, 0) > 0 OR ?)
 				AND (? < 0 OR coalesce(shown_season, season_number) = ?)
-			UNION ALL SELECT t.title_key FROM peer_titles t JOIN peers p ON p.id = t.peer_id AND p.state = 'paired'
+			UNION ALL SELECT t.title_key FROM peer_titles t JOIN peers p ON p.id = t.peer_id AND p.state = 'paired' AND p.suspended_at IS NULL
 			WHERE t.kind = 'episode' AND t.title_key >= ? AND t.title_key < ?
 				AND (coalesce(`+peerSeason+`, 1) > 0 OR ?) AND (? < 0 OR `+peerSeason+` = ?))`,
 		lo, hi, specials, season, season,
@@ -558,7 +558,7 @@ func (s *Store) SeasonEpisodes(ctx context.Context, season TitleRef) ([]int, err
 	}
 	// Those paired servers hold for us, by the numbers their keys name.
 	plo, phi := keyRange(season.Key() + "/e")
-	if err := add(`SELECT CAST(substr(t.title_key, ?) AS INTEGER) FROM peer_titles t JOIN peers p ON p.id = t.peer_id AND p.state = 'paired'
+	if err := add(`SELECT CAST(substr(t.title_key, ?) AS INTEGER) FROM peer_titles t JOIN peers p ON p.id = t.peer_id AND p.state = 'paired' AND p.suspended_at IS NULL
 		WHERE t.kind = 'episode' AND t.title_key >= ? AND t.title_key < ? AND t.title_key GLOB '*/e[0-9]*'`, len(plo)+1, plo, phi); err != nil {
 		return nil, err
 	}
@@ -581,7 +581,7 @@ func (s *Store) SeriesSeasons(ctx context.Context, series TitleRef, listed []Sea
 	rows, err := s.read.QueryContext(ctx, `SELECT DISTINCT coalesce(shown_season, season_number) FROM catalog_items
 		WHERE (kind = 'episode' OR (kind = 'season' AND NOT EXISTS (SELECT 1 FROM series_orders o WHERE o.series = ?)))
 		AND title_key >= ? AND title_key < ? AND season_number IS NOT NULL
-		UNION SELECT CAST(substr(t.title_key, ?) AS INTEGER) FROM peer_titles t JOIN peers p ON p.id = t.peer_id AND p.state = 'paired'
+		UNION SELECT CAST(substr(t.title_key, ?) AS INTEGER) FROM peer_titles t JOIN peers p ON p.id = t.peer_id AND p.state = 'paired' AND p.suspended_at IS NULL
 		WHERE t.kind IN ('season', 'episode') AND t.title_key >= ? AND t.title_key < ? AND t.title_key GLOB '*/s[0-9]*'`,
 		series.ID, lo, hi, len(lo)+2, lo, hi)
 	if err != nil {

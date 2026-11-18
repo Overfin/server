@@ -120,7 +120,7 @@ func (s Stream) find(w http.ResponseWriter, r *http.Request) (*playback.Stream, 
 		}
 		st2 := s.Playback.Library.Provisioner.Store
 		peer, err := st2.PeerByID(r.Context(), strings.TrimPrefix(st.ProfileID, playback.PeerPrefix))
-		if err != nil || peer.State != store.PeerPaired {
+		if err != nil || !peer.Usable() {
 			if errors.Is(err, store.ErrNotFound) || err == nil {
 				s.Playback.end(st, "pairing ended", "")
 			}

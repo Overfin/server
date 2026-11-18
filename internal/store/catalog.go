@@ -617,7 +617,7 @@ func (s *Store) listedRows(ctx context.Context, q ListQuery) (string, error) {
 			FROM catalog_items
 		UNION ALL SELECT '` + PeerItemPrefix + `' || t.peer_id || ':' || t.title_key, t.kind, t.title_key, substr(t.title_key, length(t.kind) + 7),
 			w.menu_id, NULL, NULL, t.title_key, t.added_at, NULL, NULL, NULL
-		FROM peer_titles t JOIN peers p ON p.id = t.peer_id AND p.state = 'paired'
+		FROM peer_titles t JOIN peers p ON p.id = t.peer_id AND p.state = 'paired' AND p.suspended_at IS NULL
 		JOIN peer_wants w ON w.peer_id = t.peer_id AND w.library_id = t.library_id
 		WHERE t.kind IN ('movie', 'series') AND t.title_key LIKE t.kind || '/tmdb/%'
 			AND EXISTS (SELECT 1 FROM catalog_titles c WHERE c.kind = t.kind AND c.tmdb = substr(t.title_key, length(t.kind) + 7)

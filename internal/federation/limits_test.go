@@ -82,8 +82,8 @@ func drain(l *Limits, pick func(*Limits) *bucket) {
 func TestCallsOverTheLimits(t *testing.T) {
 	ctx := context.Background()
 	a, b, _, aOnB := pairedPair(t)
-	keyB := msfp.Encode64(b.s.Key.Public())
-	keyA := msfp.Encode64(a.s.Key.Public())
+	keyB := msfp.Encode64(b.s.Keys.Current().Public())
+	keyA := msfp.Encode64(a.s.Keys.Current().Public())
 	onA := stillClock(a)
 
 	drain(a.s.lim(), func(l *Limits) *bucket { return l.peers[keyB] })
@@ -118,7 +118,7 @@ func TestCallsOverTheLimits(t *testing.T) {
 func TestSyncTitlesWaitsItsTurn(t *testing.T) {
 	ctx := context.Background()
 	a, b, _, aOnB := pairedPair(t)
-	keyB := msfp.Encode64(b.s.Key.Public())
+	keyB := msfp.Encode64(b.s.Keys.Current().Public())
 	// One call left: libraries goes, titles waits about a second (A's
 	// clock moves on once B is waiting).
 	onA := stillClock(a)
@@ -175,7 +175,7 @@ func TestCallsAtOnce(t *testing.T) {
 	if n := l.allSlots.InUse(""); n != 0 {
 		t.Fatalf("slots still held: %d", n)
 	}
-	keyB := msfp.Encode64(b.s.Key.Public())
+	keyB := msfp.Encode64(b.s.Keys.Current().Public())
 	free, _ := l.peerSlots.Take(ctx, keyB)
 	if r, err := b.s.call(ctx, aOnB, "/api/v1/federation/libraries", struct{}{}, &answer); err != nil || r.Status != http.StatusTooManyRequests || r.RetryAfter < 1 {
 		t.Fatalf("its own at once: %+v %v", r, err)

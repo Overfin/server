@@ -45,19 +45,19 @@ func TestRedeemPairingCode(t *testing.T) {
 	key := bytes.Repeat([]byte{3}, 32)
 	hash := PairingSecretHash(secret)
 	refuse := func([]byte) bool { return false }
-	if _, err := s.RedeemPairingCode(ctx, hash, key, "https://b.example.org", "B", refuse); !errors.Is(err, ErrNotFound) {
+	if _, err := s.RedeemPairingCode(ctx, hash, key, "https://b.example.org", "B", nil, refuse); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a refused proof: %v", err)
 	}
-	if _, err := s.RedeemPairingCode(ctx, PairingSecretHash([]byte("other")), key, "https://b.example.org", "B",
+	if _, err := s.RedeemPairingCode(ctx, PairingSecretHash([]byte("other")), key, "https://b.example.org", "B", nil,
 		func([]byte) bool { return true }); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("another secret: %v", err)
 	}
 	var seen []byte
-	p, err := s.RedeemPairingCode(ctx, hash, key, "https://b.example.org", "B", func(got []byte) bool { seen = got; return true })
+	p, err := s.RedeemPairingCode(ctx, hash, key, "https://b.example.org", "B", nil, func(got []byte) bool { seen = got; return true })
 	if err != nil || p.State != PeerOurs || !bytes.Equal(seen, secret) {
 		t.Fatalf("redeemed: %+v, %v (secret %x)", p, err, seen)
 	}
-	if _, err := s.RedeemPairingCode(ctx, hash, bytes.Repeat([]byte{4}, 32), "https://c.example.org", "C",
+	if _, err := s.RedeemPairingCode(ctx, hash, bytes.Repeat([]byte{4}, 32), "https://c.example.org", "C", nil,
 		func([]byte) bool { return true }); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a code used twice: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestRedeemPairingCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	clock = clock.Add(2 * time.Hour)
-	if _, err := s.RedeemPairingCode(ctx, PairingSecretHash(secret2), bytes.Repeat([]byte{5}, 32), "https://d.example.org", "D",
+	if _, err := s.RedeemPairingCode(ctx, PairingSecretHash(secret2), bytes.Repeat([]byte{5}, 32), "https://d.example.org", "D", nil,
 		func([]byte) bool { return true }); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("an expired code: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestRedeemPairingCode(t *testing.T) {
 	if _, err := s.CreatePairingCode(ctx, secret3, "", clock.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RedeemPairingCode(ctx, PairingSecretHash(secret3), key, "https://b.example.org", "B",
+	if _, err := s.RedeemPairingCode(ctx, PairingSecretHash(secret3), key, "https://b.example.org", "B", nil,
 		func([]byte) bool { return true }); !errors.Is(err, ErrPeerExists) {
 		t.Fatalf("a known key: %v", err)
 	}
@@ -93,11 +93,11 @@ func TestRedeemPairingCode(t *testing.T) {
 func TestPeers(t *testing.T) {
 	s, ctx := openTest(t), context.Background()
 	key := bytes.Repeat([]byte{3}, 32)
-	p, err := s.AddPeer(ctx, key, "https://a.example.org", "A")
+	p, err := s.AddPeer(ctx, key, "https://a.example.org", "A", nil)
 	if err != nil || p.State != PeerTheirs {
 		t.Fatalf("added: %+v, %v", p, err)
 	}
-	if _, err := s.AddPeer(ctx, key, "https://a.example.org", "A"); !errors.Is(err, ErrPeerExists) {
+	if _, err := s.AddPeer(ctx, key, "https://a.example.org", "A", nil); !errors.Is(err, ErrPeerExists) {
 		t.Fatalf("added twice: %v", err)
 	}
 	if ok, _ := s.SetPeerState(ctx, p.ID, PeerOurs, PeerPaired); ok {
@@ -127,7 +127,7 @@ func TestPeers(t *testing.T) {
 // What we offer and want is per peer, replaced whole, and goes with it.
 func TestPeerSharing(t *testing.T) {
 	s, ctx := openTest(t), context.Background()
-	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A")
+	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A", nil)
 	if err := s.SetPeerOffers(ctx, p.ID, []string{"lib2", "lib1", "lib1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestPeerTitles(t *testing.T) {
 	if got, _ := s.TitlesInLibraries(ctx, nil, "", 10); len(got) != 0 {
 		t.Fatalf("no library: %+v", got)
 	}
-	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A")
+	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A", nil)
 	if err := s.SetPeerTitles(ctx, p.ID, []PeerTitle{{Key: "movie/tmdb/1", Kind: "movie", Library: "x", Audio: []string{"fr-CA"}}, {Key: "series/tmdb/2", Kind: "series", Library: "x"}, {Key: "series/tmdb/2/s1", Kind: "season", Library: "x"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestPeerTitles(t *testing.T) {
 // seasons they have; nothing of a server not paired.
 func TestHeldTitles(t *testing.T) {
 	s, ctx := openTest(t), context.Background()
-	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A")
+	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A", nil)
 	s.SetPeerTitles(ctx, p.ID, []PeerTitle{{Key: "series/tmdb/1399", Kind: "series", Library: "x"},
 		{Key: "series/tmdb/1399/s1", Kind: "season", Library: "x"}, {Key: "series/tmdb/1399/s3", Kind: "season", Library: "x"},
 		{Key: "movie/tmdb/949", Kind: "movie", Library: "x"}, {Key: "series/tvdb/5", Kind: "series", Library: "x"}})
@@ -299,7 +299,7 @@ func TestHeldByPeers(t *testing.T) {
 	if err := s.RefreshTitleKeys(ctx); err != nil {
 		t.Fatal(err)
 	}
-	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A")
+	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A", nil)
 	s.SetPeerTitles(ctx, p.ID, []PeerTitle{{Key: "movie/tmdb/1", Kind: "movie", Library: "x"},
 		{Key: "series/tmdb/2", Kind: "series", Library: "x"}, {Key: "series/tmdb/2/s1", Kind: "season", Library: "x"},
 		{Key: "series/tmdb/2/s1/e1", Kind: "episode", Library: "x"}, {Key: "series/tmdb/2/s1/e2", Kind: "episode", Library: "x"},
@@ -347,7 +347,7 @@ func TestPeerListing(t *testing.T) {
 	s, ctx := openTest(t), context.Background()
 	now := time.Unix(1_000_000, 0)
 	s.now = func() time.Time { return now }
-	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A")
+	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A", nil)
 	s.SetPeerState(ctx, p.ID, PeerTheirs, PeerPaired)
 	s.SetPeerWants(ctx, p.ID, []PeerLibrary{{ID: "x", Name: "Films", Kind: "movies"}})
 	menu, _ := s.MenuLibraries(ctx)
@@ -438,7 +438,7 @@ func TestPeerAddressesNormalized(t *testing.T) {
 	ctx := context.Background()
 	key := make([]byte, 32)
 	key[0] = 9
-	p, err := s.AddPeer(ctx, key, "https://Films.Example.org:443", "B")
+	p, err := s.AddPeer(ctx, key, "https://Films.Example.org:443", "B", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,7 +485,7 @@ func TestPublicLibraryIDs(t *testing.T) {
 // next reading of its libraries, and back once it offers it again.
 func TestPeerWantsGone(t *testing.T) {
 	s, ctx := openTest(t), context.Background()
-	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A")
+	p, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A", nil)
 	s.SetPeerWants(ctx, p.ID, []PeerLibrary{{ID: "x", Name: "Films", Kind: "movies"}, {ID: "y", Name: "Series", Kind: "tvshows"}})
 	gone := func() []string {
 		w, _ := s.PeerWants(ctx, p.ID)

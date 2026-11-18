@@ -348,7 +348,7 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 
 // fedShared is what federation keeps across rebuilds.
 type fedShared struct {
-	key   msfp.Key
+	keys  *federation.Keys
 	seen  *msfp.Nonces
 	http  *http.Client
 	certs *federation.Certificates
@@ -367,12 +367,12 @@ func federationService(cfg *config.Config, sh *shared) *federation.Service {
 	if address == "" || sh.fed.http == nil {
 		return nil
 	}
-	if _, err := msfp.NewCode(address, sh.fed.key.Public(), time.Now()); err != nil {
+	if _, err := msfp.NewCode(address, sh.fed.keys.Current().Public(), time.Now()); err != nil {
 		sh.logger.Info("federation: off, the site's address isn't https://host alone", "address", address, "error", err)
 		return nil
 	}
 	db := sh.db
-	return &federation.Service{Store: db, Key: sh.fed.key, Address: address, HTTP: sh.fed.http, Seen: sh.fed.seen,
+	return &federation.Service{Store: db, Keys: sh.fed.keys, Address: address, HTTP: sh.fed.http, Seen: sh.fed.seen,
 		Certificates: sh.fed.certs, Limits: sh.fed.limits, Logger: sh.logger, Name: func(ctx context.Context) string {
 			if b, err := db.Branding(ctx); err == nil && b.On && b.Name != "" {
 				return b.Name

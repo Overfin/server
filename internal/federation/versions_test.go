@@ -57,7 +57,7 @@ func TestCatalogOnly(t *testing.T) {
 	body := []byte(`{"title":"movie/tmdb/949"}`)
 	req := httptest.NewRequest("POST", a.url+playPath, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	nonce := msfp.SignRequest(req, body, b.s.Key, b.s.now())
+	nonce := msfp.SignRequest(req, body, b.s.Keys.Current(), b.s.now())
 	rec := httptest.NewRecorder()
 	SignRefusals(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, _, _, ok := a.s.PeerRequest(w, r); ok {
@@ -65,7 +65,7 @@ func TestCatalogOnly(t *testing.T) {
 		}
 	})).ServeHTTP(rec, req)
 	if rec.Code != 404 || !bytes.Contains(rec.Body.Bytes(), []byte(`"not-supported"`)) ||
-		msfp.CheckResponse(a.s.Key.Public(), nonce, 404, rec.Header().Get("Content-Type"), rec.Body.Bytes(), rec.Header().Get(msfp.HeaderSignature)) != nil {
+		msfp.CheckResponse(a.s.Keys.Current().Public(), nonce, 404, rec.Header().Get("Content-Type"), rec.Body.Bytes(), rec.Header().Get(msfp.HeaderSignature)) != nil {
 		t.Fatalf("play: %d %s, signed %q", rec.Code, rec.Body, rec.Header().Get(msfp.HeaderSignature))
 	}
 	// The caller, told so, makes no more calls of that part until the

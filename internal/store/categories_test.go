@@ -193,7 +193,7 @@ func TestReplaceLibraryID(t *testing.T) {
 	}
 	_, p, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
 	s.db.ExecContext(ctx, `UPDATE profiles SET libraries = ? WHERE id = ?`, `["`+oldID+`"]`, p.ID)
-	peer, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A")
+	peer, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://a.example.org", "A", nil)
 	s.SetPeerOffers(ctx, peer.ID, []string{oldID})
 	if err := s.ReplaceLibraryID(ctx, oldID, newID); err != nil {
 		t.Fatal(err)
@@ -219,8 +219,8 @@ func TestReplaceLibraryIDOverAGoneOne(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
 	renamed, newID := strings.Repeat("b", 32), strings.Repeat("a", 32)
-	peerX, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://x.example.org", "X")
-	peerY, _ := s.AddPeer(ctx, bytes.Repeat([]byte{4}, 32), "https://y.example.org", "Y")
+	peerX, _ := s.AddPeer(ctx, bytes.Repeat([]byte{3}, 32), "https://x.example.org", "X", nil)
+	peerY, _ := s.AddPeer(ctx, bytes.Repeat([]byte{4}, 32), "https://y.example.org", "Y", nil)
 	// "a…" was offered to X, then deleted; "b…" is offered to Y.
 	s.SetPeerOffers(ctx, peerX.ID, []string{newID})
 	s.SetPeerOffers(ctx, peerY.ID, []string{renamed})

@@ -32,7 +32,7 @@ func (s *Store) ArtworkToFetch(ctx context.Context, before time.Time, limit int)
 				AND o.kind = 'series' AND o.tmdb = t.tmdb
 				UNION SELECT CAST(substr(p.title_key, length('series/tmdb/' || t.tmdb || '/s') + 1) AS INTEGER) FROM peer_titles p
 				WHERE t.kind = 'series' AND p.kind = 'season' AND p.title_key LIKE 'series/tmdb/' || t.tmdb || '/s%'
-				AND EXISTS (SELECT 1 FROM peers e WHERE e.id = p.peer_id AND e.state = 'paired')))
+				AND EXISTS (SELECT 1 FROM peers e WHERE e.id = p.peer_id AND e.state = 'paired' AND e.suspended_at IS NULL)))
 		FROM (`+heldTitles+`) t
 		WHERE NOT EXISTS (SELECT 1 FROM artwork_fetched f WHERE f.key = t.kind || '/tmdb/' || t.tmdb AND f.fetched_at >= ?)
 		`+ownFirst+`

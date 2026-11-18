@@ -46,6 +46,33 @@ type peerJSON struct {
 	// OtherVersion: its latest hello lists no version of MSFP's core this
 	// server speaks: the two can't talk (MSFP core section 10.3).
 	OtherVersion bool `json:"otherVersion,omitempty"`
+
+	// Its keys (MSFP core section 12). Commitment is where its next key
+	// commitment came from ("pair", "rotation", "hello" for trust on
+	// first use), "" for none: a change of its key then waits for you.
+	Commitment string `json:"commitment"`
+	// Pending is a change of its key waiting for you to confirm: the new
+	// key's fingerprint, and the statement's date.
+	Pending *pendingJSON `json:"pending,omitempty"`
+	// SuspendedAt is when it revoked its key.
+	SuspendedAt string `json:"suspendedAt,omitempty"`
+	// Refused is a change of its key to a key it hadn't committed to.
+	Refused *refusedJSON `json:"refused,omitempty"`
+	// OurKey is what it knows of ours: "" our current key, "old" not
+	// moved yet, "lost" didn't move in time; RotationAnswer, its answer
+	// to our rotate ("pending", "refused").
+	OurKey         string `json:"ourKey,omitempty"`
+	RotationAnswer string `json:"rotationAnswer,omitempty"`
+}
+
+type pendingJSON struct {
+	Fingerprint string `json:"fingerprint"`
+	Date        string `json:"date"`
+}
+
+type refusedJSON struct {
+	Fingerprint string `json:"fingerprint"`
+	At          string `json:"at"`
 }
 
 func peerOf(p *store.Peer) peerJSON {
@@ -57,6 +84,19 @@ func peerOf(p *store.Peer) peerJSON {
 	}
 	if p.Seen != nil {
 		j.SeenAt = p.Seen.Format(time.RFC3339)
+	}
+	j.Commitment, j.OurKey, j.RotationAnswer = p.CommitmentFrom, p.OurKey, p.RotationAnswer
+	if p.NextCommitment == nil {
+		j.Commitment = ""
+	}
+	if p.Pending != nil {
+		j.Pending = &pendingJSON{Fingerprint: msfp.Fingerprint(p.Pending.New), Date: time.Unix(p.Pending.Date, 0).UTC().Format(time.RFC3339)}
+	}
+	if p.Suspended != nil {
+		j.SuspendedAt = p.Suspended.Format(time.RFC3339)
+	}
+	if p.RefusedKey != nil && p.RefusedAt != nil {
+		j.Refused = &refusedJSON{Fingerprint: msfp.Fingerprint(p.RefusedKey), At: p.RefusedAt.Format(time.RFC3339)}
 	}
 	return j
 }
@@ -148,10 +188,23 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 		}
 		outPeers = append(outPeers, j)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"available": true, "address": s.Address,
+	nextFingerprint, nextOnServer, err := s.NextKey(ctx)
+	if err != nil {
+		p.fail(w, "reading the next key", err)
+		return
+	}
+	out := map[string]any{"available": true, "address": s.Address,
 		// The test setting federation.test_plain_http, on: said so.
 		"testPlainHTTP": strings.HasPrefix(s.Address, "http://"),
-		"fingerprint":   msfp.Fingerprint(s.Key.Public()), "codes": outCodes, "peers": outPeers})
+		"fingerprint":   msfp.Fingerprint(s.Keys.Current().Public()), "codes": outCodes, "peers": outPeers,
+		"nextKey": map[string]any{"fingerprint": nextFingerprint, "onServer": nextOnServer}}
+	// A change of this server's key under way: since when, until when the
+	// old key is kept.
+	if _, since, ok := s.Keys.Old(); ok {
+		out["rotation"] = map[string]string{"since": since.Format(time.RFC3339),
+			"until": since.Add(federation.KeyOverlap).Format(time.RFC3339)}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (p *Panel) createPairingCode(w http.ResponseWriter, r *http.Request, s *session) {
@@ -209,7 +262,7 @@ func (p *Panel) previewPairingCode(w http.ResponseWriter, r *http.Request, _ *se
 		p.pairingProblem(w, err)
 		return
 	}
-	if msfp.SameKey(c.Key, fed.Key.Public()) {
+	if msfp.SameKey(c.Key, fed.Keys.Current().Public()) {
 		p.pairingProblem(w, federation.ErrOwnCode)
 		return
 	}

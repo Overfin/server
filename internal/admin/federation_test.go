@@ -21,7 +21,7 @@ import (
 func fedPanel(t *testing.T, name string) (*browser, *federation.Service) {
 	t.Helper()
 	p, b, db, _ := signedInPanel(t)
-	key, err := federation.LoadKey(context.Background(), db)
+	keys, err := federation.LoadKeys(context.Background(), db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func fedPanel(t *testing.T, name string) (*browser, *federation.Service) {
 	// the server names to its peers.
 	ts := httptest.NewTLSServer(mux)
 	t.Cleanup(ts.Close)
-	s := &federation.Service{Store: db, Key: key, Address: ts.URL, HTTP: federation.NewHTTPClient(),
+	s := &federation.Service{Store: db, Keys: keys, Address: ts.URL, HTTP: federation.NewHTTPClient(),
 		Certificates: &federation.Certificates{},
 		Name:         func(context.Context) string { return name }, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	if err := plugin.NewRegistrar(mux, func(h http.Handler) http.Handler { return h }).Load(federation.Plugin{S: s}); err != nil {
@@ -206,10 +206,10 @@ func TestFederationPanelUnusableKey(t *testing.T) {
 	ctx := context.Background()
 	identity := make([]byte, 32)
 	identity[0] = 1
-	if _, err := s.Store.AddPeer(ctx, identity, "https://b.example.org", "B"); err != nil {
+	if _, err := s.Store.AddPeer(ctx, identity, "https://b.example.org", "B", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Store.AddPeer(ctx, msfp.NewKey().Public(), "https://c.example.org", "C"); err != nil {
+	if _, err := s.Store.AddPeer(ctx, msfp.NewKey().Public(), "https://c.example.org", "C", nil); err != nil {
 		t.Fatal(err)
 	}
 	var st struct {
@@ -234,7 +234,7 @@ func TestFederationPanelUnusableKey(t *testing.T) {
 func TestFederationPanelWantsGone(t *testing.T) {
 	a, s := fedPanel(t, "A")
 	ctx := context.Background()
-	p, err := s.Store.AddPeer(ctx, msfp.NewKey().Public(), "https://b.example.org", "B")
+	p, err := s.Store.AddPeer(ctx, msfp.NewKey().Public(), "https://b.example.org", "B", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

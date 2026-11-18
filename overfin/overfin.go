@@ -760,6 +760,7 @@ func run(logger *slog.Logger) error {
 	go purgeExpired(ctx, db, logger)
 	// Federation: each paired server's titles, read again regularly.
 	go syncPeers(ctx, func() *federation.Service { return gw.current.Load().fed })
+	go maintainKeys(ctx, func() *federation.Service { return gw.current.Load().fed })
 	// The catalog's index, read through Overfin's Jellyfin service account,
 	// as Jellyfin's socket says the library changed (polling only while
 	// it's out of reach), and whole once a day.
@@ -953,14 +954,15 @@ func newShared(cfg *config.Config, db *store.Store, moduleDBs map[string]*sql.DB
 		// Emails, with the operator's own templates next to the database.
 		emails: &emails.Writer{Dir: filepath.Join(filepath.Dir(cfg.Storage.Path), "mail-templates"), Store: db, Logger: logger},
 		proof:  &proof.Checker{Key: k.Proof}}
-	// This server's federation key, made on the first start.
-	fedKey, err := federation.LoadKey(context.Background(), db)
+	// This server's federation keys: its key, made on the first start,
+	// and the next one, made in advance.
+	fedKeys, err := federation.LoadKeys(context.Background(), db)
 	if err != nil {
 		return nil, err
 	}
 	// The nonces' memory begins now: a request signed before this start
 	// is refused, its nonce perhaps seen by the last one.
-	sh.fed = fedShared{key: fedKey, seen: msfp.NewNonces(time.Now()), http: federation.NewHTTPClient(),
+	sh.fed = fedShared{keys: fedKeys, seen: msfp.NewNonces(time.Now()), http: federation.NewHTTPClient(),
 		certs: &federation.Certificates{Pins: cfg.Site.Certificates}, limits: &federation.Limits{}}
 	// Notices: account events, by email and webhook, as the panel sets.
 	sh.notices = &notices.Notifier{Store: db, Emails: sh.emails, Managed: cfg.Identity.Mode == "managed",
@@ -1052,6 +1054,24 @@ func syncPeers(ctx context.Context, fed func() *federation.Service) {
 		wait = federation.SyncEvery()
 		if s := fed(); s != nil {
 			s.SyncAll(ctx)
+		}
+	}
+}
+
+// maintainKeys does what time brings to federation keys (a change of key
+// ending after 30 days, peers told of it again daily, a revoked peer gone
+// after 30 days), a minute after starting, then every hour.
+func maintainKeys(ctx context.Context, fed func() *federation.Service) {
+	wait := time.Minute
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		wait = time.Hour
+		if s := fed(); s != nil {
+			s.Maintain(ctx)
 		}
 	}
 }

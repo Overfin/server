@@ -28,6 +28,8 @@ import (
 type server struct {
 	s   *Service
 	url string
+	// db is its database's file, for tests that set what no call can.
+	db string
 }
 
 // newServer is one over HTTPS, as MSFP is (core section 3).
@@ -42,12 +44,13 @@ func newServer(t *testing.T, name string) *server {
 func newServerOn(t *testing.T, name string, withTLS bool) *server {
 	t.Helper()
 	box, _ := seal.New(bytes.Repeat([]byte{9}, 32))
-	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"), box)
+	db := filepath.Join(t.TempDir(), "test.db")
+	st, err := store.Open(context.Background(), db, box)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	key, err := LoadKey(context.Background(), st)
+	keys, err := LoadKeys(context.Background(), st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +62,7 @@ func newServerOn(t *testing.T, name string, withTLS bool) *server {
 		ts.Start()
 	}
 	t.Cleanup(ts.Close)
-	s := &Service{Store: st, Key: key, Address: ts.URL, HTTP: NewHTTPClient(),
+	s := &Service{Store: st, Keys: keys, Address: ts.URL, HTTP: NewHTTPClient(),
 		Name:   func(context.Context) string { return name },
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	if withTLS {
@@ -69,7 +72,7 @@ func newServerOn(t *testing.T, name string, withTLS bool) *server {
 	if err := reg.Load(Plugin{S: s}); err != nil {
 		t.Fatal(err)
 	}
-	return &server{s: s, url: ts.URL}
+	return &server{s: s, url: ts.URL, db: db}
 }
 
 // allParts is a peer's versions when it speaks all that this server does.
@@ -114,7 +117,7 @@ func TestPairing(t *testing.T) {
 		t.Fatalf("B's view of A: %+v", pa)
 	}
 	pb := onlyPeer(t, a)
-	if pb.State != store.PeerOurs || pb.Name != "B" || !msfp.SameKey(pb.PublicKey, b.s.Key.Public()) {
+	if pb.State != store.PeerOurs || pb.Name != "B" || !msfp.SameKey(pb.PublicKey, b.s.Keys.Current().Public()) {
 		t.Fatalf("A's view of B: %+v", pb)
 	}
 	// The code is used up: a third server can't use it.
@@ -159,7 +162,7 @@ func TestRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	noPeers(t, a)
-	again, _ := b.s.Store.AddPeer(ctx, pa.PublicKey, pa.Address, pa.Name)
+	again, _ := b.s.Store.AddPeer(ctx, pa.PublicKey, pa.Address, pa.Name, nil)
 	if got, err := b.s.Check(ctx, again); err != nil || got.State != store.PeerGone {
 		t.Fatalf("B's check after A refused: %+v, %v", got, err)
 	}
@@ -276,7 +279,7 @@ func TestSharing(t *testing.T) {
 
 	// A stranger, signing with its own key, gets the plain 404, unsigned:
 	// to it, as good as no answer.
-	stranger := &store.Peer{State: store.PeerPaired, Address: a.url, PublicKey: a.s.Key.Public(), Versions: allParts}
+	stranger := &store.Peer{State: store.PeerPaired, Address: a.url, PublicKey: a.s.Keys.Current().Public(), Versions: allParts}
 	if _, err := c.s.TheirLibraries(ctx, stranger); !errors.Is(err, ErrUnreachable) {
 		t.Fatalf("a stranger: %v", err)
 	}

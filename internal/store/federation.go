@@ -128,7 +128,63 @@ type Peer struct {
 	// Versions is what its latest signed hello listed of MSFP's core and
 	// parts versions, as JSON; "" before its first.
 	Versions string `json:"-"`
+
+	// What this server knows of its keys (MSFP core section 12).
+	//
+	// NextCommitment is its next key commitment (nil for none), and
+	// CommitmentFrom where it came from: CommitmentPair, …Rotation,
+	// …Hello, or "" for none ever.
+	NextCommitment []byte `json:"-"`
+	CommitmentFrom string `json:"-"`
+	// PreviousKey is its key before its latest rotation, still heard
+	// until PreviousUntil.
+	PreviousKey   []byte    `json:"-"`
+	PreviousUntil time.Time `json:"-"`
+	// Pending is a rotation to a key it has no commitment to, waiting for
+	// our operator to confirm the key's fingerprint; nil for none.
+	Pending *msfp.Rotation `json:"-"`
+	// Suspended is when it revoked its key (nil: it didn't).
+	Suspended *time.Time `json:"-"`
+	// RefusedKey is a key it tried to rotate to that didn't match its
+	// commitment, at RefusedAt: for our operator to see.
+	RefusedKey []byte     `json:"-"`
+	RefusedAt  *time.Time `json:"-"`
+
+	// What it knows of ours.
+	//
+	// OurKey is OurKeyCurrent, OurKeyOld (our key is changing and it
+	// hasn't moved yet) or OurKeyLost (it didn't move before the old key
+	// was dropped).
+	OurKey string `json:"-"`
+	// RotationAnswer is its latest answer to our rotate: "pending",
+	// "refused", or "".
+	RotationAnswer string `json:"-"`
+	// RotateSent is when we last sent it a rotate.
+	RotateSent *time.Time `json:"-"`
+	// CommitmentTold: it holds our next key commitment, from pair or a
+	// rotation; until then our hellos carry it.
+	CommitmentTold bool `json:"-"`
 }
+
+// Usable says whether the pairing is on: paired, and its key not
+// revoked.
+func (p *Peer) Usable() bool { return p.State == PeerPaired && p.Suspended == nil }
+
+// Where a peer's next key commitment came from (MSFP core section 12.5).
+const (
+	CommitmentPair     = "pair"
+	CommitmentRotation = "rotation"
+	// CommitmentHello: from its first hello that carried one, for a
+	// pairing that had none: trust on first use.
+	CommitmentHello = "hello"
+)
+
+// What a peer knows of this server's key.
+const (
+	OurKeyCurrent = ""
+	OurKeyOld     = "old"
+	OurKeyLost    = "lost"
+)
 
 // PeerLimits is what a pairing may use of a server at once: streams,
 // transcodes among them, and a bitrate cap (0: none).
@@ -156,7 +212,10 @@ var ErrPeerExists = errors.New("store: that server is already in the list")
 // for our operator ("ours"). ErrNotFound for no such live code, or one
 // check refuses; ErrPeerExists if that key is known already (the code
 // stays).
-func (s *Store) RedeemPairingCode(ctx context.Context, secretHash, publicKey []byte, address, name string,
+//
+// commitment is the server's next key commitment, from its request (nil
+// for none); ours goes in the answer, so it holds it.
+func (s *Store) RedeemPairingCode(ctx context.Context, secretHash, publicKey []byte, address, name string, commitment []byte,
 	check func(secret []byte) bool) (*Peer, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -187,24 +246,33 @@ func (s *Store) RedeemPairingCode(ctx context.Context, secretHash, publicKey []b
 	if _, err := tx.ExecContext(ctx, `DELETE FROM pairing_codes WHERE id = ?`, id); err != nil {
 		return nil, err
 	}
-	p, err := insertPeer(ctx, tx, s.now(), publicKey, address, name, PeerOurs)
+	p, err := insertPeer(ctx, tx, s.now(), publicKey, address, name, PeerOurs, commitment)
 	if err != nil {
 		return nil, err
 	}
 	return p, tx.Commit()
 }
 
-func insertPeer(ctx context.Context, tx *sql.Tx, now time.Time, publicKey []byte, address, name, state string) (*Peer, error) {
+// insertPeer adds a peer, made by pair: it holds our commitment, which
+// pair carries both ways, and commitment is its own (nil for none).
+func insertPeer(ctx context.Context, tx *sql.Tx, now time.Time, publicKey []byte, address, name, state string, commitment []byte) (*Peer, error) {
 	now = now.UTC().Truncate(time.Second)
-	p := &Peer{ID: ids.New("peer"), PublicKey: publicKey, Address: address, Name: name, State: state, Created: now, Seen: &now}
-	_, err := tx.ExecContext(ctx, `INSERT INTO peers (id, public_key, address, name, state, created_at, seen_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`, p.ID, publicKey, address, name, state, now.Unix(), now.Unix())
+	p := &Peer{ID: ids.New("peer"), PublicKey: publicKey, Address: address, Name: name, State: state, Created: now, Seen: &now,
+		CommitmentTold: true}
+	if commitment != nil {
+		p.NextCommitment, p.CommitmentFrom = commitment, CommitmentPair
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO peers (id, public_key, address, name, state, created_at, seen_at,
+		next_commitment, commitment_from, commitment_told)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`, p.ID, publicKey, address, name, state, now.Unix(), now.Unix(),
+		commitment, p.CommitmentFrom)
 	return p, err
 }
 
 // AddPeer adds a server whose code we used, waiting for its operator
-// ("theirs"). ErrPeerExists if that key is known already.
-func (s *Store) AddPeer(ctx context.Context, publicKey []byte, address, name string) (*Peer, error) {
+// ("theirs"), with the next key commitment its pair answer gave (nil for
+// none). ErrPeerExists if that key is known already.
+func (s *Store) AddPeer(ctx context.Context, publicKey []byte, address, name string, commitment []byte) (*Peer, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -217,7 +285,7 @@ func (s *Store) AddPeer(ctx context.Context, publicKey []byte, address, name str
 	if known > 0 {
 		return nil, ErrPeerExists
 	}
-	p, err := insertPeer(ctx, tx, s.now(), publicKey, address, name, PeerTheirs)
+	p, err := insertPeer(ctx, tx, s.now(), publicKey, address, name, PeerTheirs, commitment)
 	if err != nil {
 		return nil, err
 	}
@@ -225,17 +293,33 @@ func (s *Store) AddPeer(ctx context.Context, publicKey []byte, address, name str
 }
 
 const peerSelect = `SELECT id, public_key, address, name, state, created_at, paired_at, seen_at,
-	max_streams, max_transcodes, max_bitrate_kbps, their_streams, their_transcodes, their_bitrate_kbps, certificates, versions FROM peers`
+	max_streams, max_transcodes, max_bitrate_kbps, their_streams, their_transcodes, their_bitrate_kbps, certificates, versions,
+	next_commitment, commitment_from, previous_key, previous_until, pending_rotation, suspended_at, refused_key, refused_at,
+	our_key, rotation_answer, rotate_sent_at, commitment_told FROM peers`
 
 func scanPeer(row interface{ Scan(...any) error }) (*Peer, error) {
 	var p Peer
 	var created int64
 	var paired, seen, ts, tt, tb sql.NullInt64
-	var certificates string
+	var certificates, pending string
+	var previousUntil, suspended, refused, rotateSent sql.NullInt64
 	if err := row.Scan(&p.ID, &p.PublicKey, &p.Address, &p.Name, &p.State, &created, &paired, &seen,
-		&p.Limits.Streams, &p.Limits.Transcodes, &p.Limits.BitrateKbps, &ts, &tt, &tb, &certificates, &p.Versions); err != nil {
+		&p.Limits.Streams, &p.Limits.Transcodes, &p.Limits.BitrateKbps, &ts, &tt, &tb, &certificates, &p.Versions,
+		&p.NextCommitment, &p.CommitmentFrom, &p.PreviousKey, &previousUntil, &pending, &suspended, &p.RefusedKey, &refused,
+		&p.OurKey, &p.RotationAnswer, &rotateSent, &p.CommitmentTold); err != nil {
 		return nil, err
 	}
+	if previousUntil.Valid {
+		p.PreviousUntil = time.Unix(previousUntil.Int64, 0).UTC()
+	}
+	if pending != "" {
+		var r msfp.Rotation
+		if err := json.Unmarshal([]byte(pending), &r); err != nil {
+			return nil, fmt.Errorf("store: a peer's pending rotation: %w", err)
+		}
+		p.Pending = &r
+	}
+	p.Suspended, p.RefusedAt, p.RotateSent = unixTime(suspended), unixTime(refused), unixTime(rotateSent)
 	p.Certificates = strings.Fields(certificates)
 	if ts.Valid {
 		p.Theirs = &PeerLimits{Streams: int(ts.Int64), Transcodes: int(tt.Int64), BitrateKbps: int(tb.Int64)}
@@ -279,9 +363,12 @@ func (s *Store) PeerByID(ctx context.Context, id string) (*Peer, error) {
 	return p, err
 }
 
-// PeerByKey finds a peer by its public key; ErrNotFound if there's none.
+// PeerByKey finds a peer by its public key, or by its previous one
+// (Peer.PreviousKey: whether that is still heard is the caller's to
+// say); ErrNotFound if there's none.
 func (s *Store) PeerByKey(ctx context.Context, publicKey []byte) (*Peer, error) {
-	p, err := scanPeer(s.read.QueryRowContext(ctx, peerSelect+` WHERE public_key = ?`, publicKey))
+	p, err := scanPeer(s.read.QueryRowContext(ctx, peerSelect+` WHERE public_key = ?1 OR previous_key = ?1
+		ORDER BY public_key = ?1 DESC LIMIT 1`, publicKey))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -331,18 +418,42 @@ func (s *Store) deletePeer(ctx context.Context, id string, remember bool) error 
 		return err
 	}
 	defer tx.Rollback()
-	var key []byte
-	switch err := tx.QueryRowContext(ctx, `SELECT public_key FROM peers WHERE id = ?`, id).Scan(&key); {
+	var key, previous []byte
+	switch err := tx.QueryRowContext(ctx, `SELECT public_key, previous_key FROM peers WHERE id = ?`, id).Scan(&key, &previous); {
 	case errors.Is(err, sql.ErrNoRows):
 		return ErrNotFound
 	case err != nil:
 		return err
 	}
-	hash := sha256.Sum256(key)
 	if remember {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO forgotten_peers (key_hash, forgotten_at) VALUES (?, ?)
-			ON CONFLICT (key_hash) DO UPDATE SET forgotten_at = excluded.forgotten_at`, hash[:], s.now().Unix()); err != nil {
+		// Every key of its history (MSFP core section 7.4): its current
+		// one, its previous one, and those of its rotations.
+		keys := [][]byte{key}
+		if previous != nil {
+			keys = append(keys, previous)
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT old_key, new_key FROM peer_rotations WHERE peer_id = ?`, id)
+		if err != nil {
 			return err
+		}
+		for rows.Next() {
+			var o, n []byte
+			if err := rows.Scan(&o, &n); err != nil {
+				rows.Close()
+				return err
+			}
+			keys = append(keys, o, n)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, k := range keys {
+			hash := sha256.Sum256(k)
+			if _, err := tx.ExecContext(ctx, `INSERT INTO forgotten_peers (key_hash, forgotten_at) VALUES (?, ?)
+				ON CONFLICT (key_hash) DO UPDATE SET forgotten_at = excluded.forgotten_at`, hash[:], s.now().Unix()); err != nil {
+				return err
+			}
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM peers WHERE id = ?`, id); err != nil {
@@ -381,7 +492,7 @@ const ownFirst = `ORDER BY NOT EXISTS (SELECT 1 FROM catalog_items i WHERE i.kin
 const heldTitles = `SELECT kind, tmdb FROM catalog_items WHERE kind IN ('movie', 'series') AND tmdb IS NOT NULL
 	UNION SELECT p.kind, substr(p.title_key, length(p.kind) + 7) FROM peer_titles p
 		WHERE p.kind IN ('movie', 'series') AND p.title_key LIKE p.kind || '/tmdb/%'
-		AND EXISTS (SELECT 1 FROM peers e WHERE e.id = p.peer_id AND e.state = 'paired')`
+		AND EXISTS (SELECT 1 FROM peers e WHERE e.id = p.peer_id AND e.state = 'paired' AND e.suspended_at IS NULL)`
 
 // PeerOffers lists our libraries offered to a peer, by ID.
 func (s *Store) PeerOffers(ctx context.Context, peerID string) ([]string, error) {
@@ -564,7 +675,7 @@ type MenuLibrary struct {
 // something for us, in the order they were paired, then by name.
 func (s *Store) MenuLibraries(ctx context.Context) ([]MenuLibrary, error) {
 	rows, err := s.read.QueryContext(ctx, `SELECT w.menu_id, coalesce(w.label, w.name || ' (' || p.name || ')'), w.kind
-		FROM peer_wants w JOIN peers p ON p.id = w.peer_id AND p.state = 'paired'
+		FROM peer_wants w JOIN peers p ON p.id = w.peer_id AND p.state = 'paired' AND p.suspended_at IS NULL
 		WHERE w.menu_id IS NOT NULL
 			AND EXISTS (SELECT 1 FROM peer_titles t WHERE t.peer_id = w.peer_id AND t.library_id = w.library_id)
 		ORDER BY p.paired_at, p.id, w.name, w.library_id`)
@@ -878,7 +989,7 @@ type PeerSource struct {
 // us, in the order they were paired.
 func (s *Store) PeerSources(ctx context.Context, key string) ([]PeerSource, error) {
 	rows, err := s.read.QueryContext(ctx, `SELECT t.peer_id, t.audio, t.subtitles FROM peer_titles t
-		JOIN peers p ON p.id = t.peer_id AND p.state = 'paired'
+		JOIN peers p ON p.id = t.peer_id AND p.state = 'paired' AND p.suspended_at IS NULL
 		WHERE t.title_key = ? AND t.kind IN ('movie', 'episode') ORDER BY p.paired_at, p.id`, key)
 	if err != nil {
 		return nil, err
@@ -933,7 +1044,7 @@ func (s *Store) TitlePeers(ctx context.Context, keys []string) (map[string][]str
 	}
 	rows, err := s.read.QueryContext(ctx, `SELECT t.title_key, t.peer_id FROM peer_titles t
 		JOIN (SELECT DISTINCT value FROM json_each(?)) j ON j.value = t.title_key
-		JOIN peers p ON p.id = t.peer_id AND p.state = 'paired' ORDER BY t.title_key, p.paired_at, p.id`, jsonList(keys))
+		JOIN peers p ON p.id = t.peer_id AND p.state = 'paired' AND p.suspended_at IS NULL ORDER BY t.title_key, p.paired_at, p.id`, jsonList(keys))
 	if err != nil {
 		return nil, err
 	}

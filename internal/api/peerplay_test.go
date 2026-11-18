@@ -33,8 +33,8 @@ func viewer(t *testing.T, b *federation.Service, client *http.Client) (*federati
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	key, _ := federation.LoadKey(ctx, st)
-	a := &federation.Service{Store: st, Key: key, Address: "https://a.example.org", HTTP: client,
+	keys, _ := federation.LoadKeys(ctx, st)
+	a := &federation.Service{Store: st, Keys: keys, Address: "https://a.example.org", HTTP: client,
 		Name: func(context.Context) string { return "A" }, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	code, _, err := b.NewCode(ctx, "")
 	if err != nil {

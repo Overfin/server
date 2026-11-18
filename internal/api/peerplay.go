@@ -155,7 +155,7 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 		StartPositionMs: req.StartPositionMs}, pr: pr, kbps: kbps, item: item, uid: uid, ja: ja,
 		wantAudio: req.AudioLanguage, wantSubtitles: req.SubtitleLanguage, lim: lim, device: peer.Name,
 		accountID: id, profileID: id, sessionID: id, urlBase: fed.Address, origin: origin(peer.Address), peerTracks: true,
-		versionID: func(sourceID string) string { return "ver_" + fed.Key.OpaqueID("version", peer.ID, sourceID) }})
+		versionID: func(sourceID string) string { return "ver_" + fed.Keys.Opaque("version", peer.ID, sourceID) }})
 	if !ok {
 		return
 	}
@@ -796,7 +796,7 @@ func (pb Playback) StopLeftovers(ctx context.Context) {
 	}
 	for _, rp := range left {
 		peer, err := st.PeerByID(ctx, rp.PeerID)
-		if err != nil || peer.State != store.PeerPaired {
+		if err != nil || !peer.Usable() {
 			continue
 		}
 		pb.stopRemote(peer, rp.RemoteID, 0)
@@ -911,7 +911,7 @@ func roundKbps(kbps int) int {
 func peerMayPlay(ctx context.Context, st *store.Store, peerID, itemID string) string {
 	peer, err := st.PeerByID(ctx, peerID)
 	switch {
-	case errors.Is(err, store.ErrNotFound), err == nil && peer.State != store.PeerPaired:
+	case errors.Is(err, store.ErrNotFound), err == nil && !peer.Usable():
 		return "pairing ended"
 	case err != nil:
 		return ""
@@ -937,7 +937,7 @@ func (pb Playback) PeerChanged(peerID string) {
 		pb.Logger.Warn("a paired server's playbacks couldn't be checked", "err", err)
 		return
 	}
-	paired := err == nil && peer.State == store.PeerPaired
+	paired := err == nil && peer.Usable()
 	for _, s := range pb.Tickets.Where(func(s *playback.Stream) bool { return s.ProfileID == playback.PeerPrefix+peerID }) {
 		if why := peerMayPlay(ctx, st, peerID, s.ItemID); why != "" {
 			pb.end(s, why, "")
