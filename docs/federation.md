@@ -98,11 +98,11 @@ theirs. Changing the key later asks for the copy you kept.
 
 **Changing the key.** **Change this server's key** moves your server to
 its next key, and makes a new next key. Paired servers are told at once,
-and move by themselves: they know it as the next one. Servers paired
-before this existed learn the next key in the first exchange after the
-update, so they move by themselves too; the panel notes that they learnt
-it then rather than when pairing. A server that knows no next key of
-yours asks its operator to confirm the new fingerprint with you first.
+and move by themselves: they know it as the next one, from pairing or
+your last change. A server that knows no next key of yours (one paired
+before Overfin required it in pairing, which once learnt it from a later
+exchange instead) asks its operator to confirm the new fingerprint with
+you first. A paired server never moves back to a key it moved from.
 Until a server moved, yours keeps the old key for it, and tells it again
 at each contact and at least daily; after 30 days the old key is deleted,
 and a server still on it shows **Pair again**: remove it and pair again.
@@ -115,20 +115,24 @@ and the paired servers follow by themselves: the thief can't do the same,
 not holding the next key. Without it (or if you tick **Don't move to the
 next key**, because the thief may hold it too), your server gets a new
 key, and every pairing ends: pair again with each server, with new codes
-and comparing fingerprints.
+and comparing fingerprints. For 30 days, a server it was paired with that
+calls yours is answered, under the stolen key, only that the key is
+revoked: one your first warning didn't reach (it was away, or can't be
+called) learns it so, and stops hearing the thief.
 
 **When a paired server changes its key**, the list shows it:
 
-- **Current**: nothing to do. Its next key is known (from pairing, its
-  last change, or its first exchange after the update).
+- **Current**: nothing to do. Its next key is known (from pairing, or its
+  last change).
 - **To confirm**: it moved to a key it hadn't announced. Call its operator
   and compare the new fingerprint, then **Confirm key**; if they differ,
   end the pairing.
 - A warning says when someone tried to move it to another key than the
   one it announced: refused, and its own operator should hear of it.
 - **Suspended**: it said its key was stolen. Nothing is shared with it
-  until it moves to the key it announced; after 30 days without that, it
-  is gone, and you remove it.
+  until it moves to the key it announced, and the stolen key is never
+  heard again; after 30 days without that, it is gone, and you remove
+  it.
 - **Changing**: it hasn't moved to your server's new key yet.
 
 ## Changing your server's address
@@ -156,6 +160,8 @@ servers follow by themselves, without pairing again.
   too: it's refused, and the old one stays.
 - **Playback** goes on through the move: a playback started before keeps
   its old address until it ends.
+- **Certificates.** During the move, your server names to paired servers
+  the certificates of both addresses, until the move ends.
 
 Moving back works the same way. Someone holding your server's key could
 move your paired servers to an address of theirs: that's one more reason
@@ -247,7 +253,7 @@ Paired servers say, each time they check on each other, which versions of
 the protocol and of its parts (catalog, playback, media, video) they
 speak, and use those both speak. A server that speaks none of yours shows
 in the panel as speaking another version; it can't share with yours
-until one of you updates.
+until one of you updates: until then, the two only check on each other.
 
 ## Which addresses Overfin connects to
 
@@ -342,14 +348,21 @@ Media Server Federation Protocol, version 1 (its core, and the parts
 catalog, playback, media and video; Overfin has no music): its
 specification and test vectors are at
 [github.com/msfp-io/msfp-spec](https://github.com/msfp-io/msfp-spec).
-Overfin does key rotation and revocation (`rotate`, `revoke`, the next key
-commitment in `pair` and `hello`), address changes (core section 13) and
+Overfin follows version 1 as its owner decided on 2026-11-18 (core
+section 18, items 37 to 40). It does key rotation and revocation
+(`rotate`, `revoke`, the next key commitment required in `pair` both
+ways; a `hello`'s is checked and ignored; the 30 days of revocation-only
+answers after a stolen key with no next key), address changes (core
+section 13) and
 servers that can't be called (core section 7.5: `inbound`, the scheduled
 `hello`s, `knownKey`, the rotations and revocations pulled in `hello`
 answers, `callsFailed`), and of the shared parts: episodes by TMDB's
 own IDs, `with` and `ids` sent and read (a paired server's `with` marks a
 file's episodes watched together; its `ids` aren't kept), `versionId` in
-`play`, WebVTT rebuilt and PGS checked both ways. Not the discovery
+`play`, track IDs without leading zeros, WebVTT rebuilt and PGS checked
+both ways (an empty part, for a stretch with no pictures, served and
+relayed as such), any change of what a title carries, `ids` and `with`
+included, sent again in changes readings. Not the discovery
 document (core section 11, optional): its federation calls are always at
 `/api/v1/federation/`, so a new address is confirmed there, without
 fetching one, and a server under a path can't pair with it yet.

@@ -122,8 +122,9 @@ anyone. Paired servers are not trusted at all (rule 94).
     over 4,096 pixels a side, is dropped.
 17. Subtitles are served only as sanitized WebVTT, or, for subtitles that
     are pictures (PGS), as each stretch of the track read whole and
-    refused unless every part of it is well-formed and within its limits.
-    A paired server's are checked again here. Fonts and other attached
+    refused unless every part of it is well-formed and within its limits
+    (a stretch with no pictures is an empty one, served empty). A paired
+    server's are checked again here. Fonts and other attached
     files are never served on their own. Overfin asks Jellyfin for no
     subtitle track inside remuxed and transcoded streams, and drops
     subtitle entries from playlists.
@@ -601,7 +602,8 @@ anyone. Paired servers are not trusted at all (rule 94).
     by key and carry nothing secret. Every other call, and the media with
     its ticket, wants a trusted or named one, never just any. A server
     names the certificate its own address serves, read by connecting to
-    it, or the ones its operator set. Naming only adds to public trust,
+    it, and while it moves its former address's too, until the move ends
+    (rule 139); or the ones its operator set. Naming only adds to public trust,
     never removes it; a newer hello replaces what was named.
 100. A compromised paired server can't reach the other's data or people.
      It can still make the other store its title list, however long, and
@@ -845,19 +847,22 @@ anyone. Paired servers are not trusted at all (rule 94).
 
 137. A server's federation key changes only by its operator's action,
      to the next key it made in advance and committed to: only the
-     commitment (the next key's SHA-256) travels, in pair, in a change of
-     key, or, for a pairing that has none, in its first hello (trust on
-     first use, which the panel says). A hello never replaces a
-     commitment. The next key's seed is sealed with the secret key like
+     commitment (the next key's SHA-256) travels, in pair, both ways and
+     required (a pair request or answer without it is refused, and
+     nothing is kept), and in a change of key. A hello never sets nor
+     replaces a commitment: there is no trust on first use. The next key's seed is sealed with the secret key like
      the current one, under a context of its own; it leaves the server
      only when the operator exports it from the control panel, and can
      then be deleted from it. Seeds, current, next or old, are never
      logged, nor shown in the panel but on that export. A paired server
      moves to a new key at once only when it matches the commitment it
      holds; without a commitment, only once its operator confirmed the
-     new key's fingerprint; any other new key, another server's, or a
-     forgotten one, is refused, and its operator warned. Both keys sign
-     the change. The key moved from is still heard 10 minutes. The
+     new key's fingerprint; any other new key, another server's, a
+     forgotten one, or one the peer was known by before, is refused, and
+     its operator warned: a retired key never becomes current again. Both
+     keys sign the change. The key moved from is still heard 10 minutes,
+     unless it was revoked (rule 138). Ending a pairing forgets every key
+     the peer had, a change of key waiting for the operator included. The
      server that changed keeps its old key for peers that haven't moved,
      30 days at most, then deletes it: a peer still on it must pair
      again. The IDs peers know a server's things by stay through a
@@ -867,11 +872,19 @@ anyone. Paired servers are not trusted at all (rule 94).
      revocation, no call is made to it (but the scheduled hello of a
      server that can't be called, of whose answer only a change of key is
      read, rule 140), and its titles are shown to nobody. Only a change to the key it had committed to lifts the
-     suspension; after 30 days without one, the peer is gone, and stays
-     suspended. An operator whose key was stolen revokes it at every
-     paired server, then moves to the next key in the same action when
-     it is safe; otherwise the server gets a new key and every pairing
-     ends, to be made again with new codes.
+     suspension, and the key revoked is never heard again, not even the
+     10 minutes of rule 137; after 30 days without one, the peer is gone,
+     and stays suspended. A revocation of a peer's previous key, in those
+     10 minutes, stops that key at once and leaves the peer on its
+     current one. A revocation is read in a signed request, or in a hello
+     answer signed by the key revoked, by any server; it can only stop a
+     pairing. An operator whose key was stolen revokes it at every paired
+     server, then moves to the next key in the same action when it is
+     safe; otherwise the server gets a new key and every pairing ends, to
+     be made again with new codes, and for 30 days the key revoked
+     answers only the hellos of those servers, with the revocation alone.
+     With a peer that speaks no version of MSFP's core this server does,
+     only hellos pass, either way.
 
 ### Addresses between servers
 
@@ -889,7 +902,9 @@ anyone. Paired servers are not trusted at all (rule 94).
      again at most once an hour, and the operator is warned after a day.
      When this server's own address changes, requests signed for its
      former host are accepted too, 30 days at most, and no longer once
-     every peer signs for the new one; never a third host. A stolen key
+     every peer signs for the new one; never a third host. A move to or
+     from an address of a server that can't be called (rule 140) keeps
+     no former address, on either side. A stolen key
      can move its server's peers this way, until it is revoked (rule
      138).
 
@@ -907,8 +922,9 @@ anyone. Paired servers are not trusted at all (rule 94).
      can be called again is connected to by a hello at its address only,
      and called again only once that hello answers under its key (rule
      139). It asks each peer on a schedule (every 20 seconds while that
-     operator hasn't accepted, for a day; every 5 minutes paired; every
-     hour gone; each give or take a fifth), within the peer's limits, and
+     operator hasn't accepted, for a day; every 5 minutes paired or
+     waiting for its own operator; every hour gone; each give or take a
+     fifth), within the peer's limits, and
      holding off as any call does. Its peers' changes of key reach it in
      their signed hello answers, checked as rules 137 and 138 say: a
      revocation only in an answer signed by the key revoked, applied

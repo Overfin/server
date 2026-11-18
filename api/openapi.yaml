@@ -4000,13 +4000,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [address, name, secretHash, proof]
+              required: [address, name, secretHash, proof, nextCommitment]
               properties:
                 address: {type: string, description: "The caller's site, https://host"}
                 name: {type: string, description: What the caller calls itself}
                 secretHash: {type: string, description: URL-safe base64, no padding}
                 proof: {type: string, description: URL-safe base64, no padding}
-                nextCommitment: {type: string, description: "The caller's next key commitment, SHA-256 of its next key, URL-safe base64, no padding: a later change of the caller's key to that key is followed at once"}
+                nextCommitment: {type: string, description: "Required. The caller's next key commitment, SHA-256 of its next key, URL-safe base64, no padding: a later change of the caller's key to that key is followed at once. Without it, the request gets the plain 404"}
                 inbound: {type: boolean, description: "false when the caller can't be called (MSFP core section 7.5), its address then of the form https://msfp-<26 characters>.invalid, or the request gets the plain 404; it is never connected to, and this server's operator accepting it sends it nothing: it learns at its next hello"}
       responses:
         "200":
@@ -4015,10 +4015,10 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [name]
+                required: [name, nextCommitment]
                 properties:
                   name: {type: string, description: What this server calls itself}
-                  nextCommitment: {type: string, description: "This server's next key commitment"}
+                  nextCommitment: {type: string, description: "This server's next key commitment, always given (MSFP core section 9.1)"}
         "404": {description: "Not signed, no such live code, or a wrong proof."}
         "409": {description: "The caller's key is known here already."}
 
@@ -4445,7 +4445,7 @@ components:
           description: "The sender's address now, https://host[:port]. One that differs from the address stored for it is a change of address (MSFP core section 13): it is stored only once a hello there, signed for its host, is answered under the sender's key; until then, and if that fails, the stored address stays."
         nextCommitment:
           type: string
-          description: "The sender's next key commitment (SHA-256 of its next key, URL-safe base64, no padding), sent while the pairing has none from pair or a rotation. Kept only by a peer that never had one (trust on first use); ignored otherwise."
+          description: "The sender's next key commitment (SHA-256 of its next key, URL-safe base64, no padding). It only repeats the one the receiver stores (from pair or a rotation): its form is checked (32 bytes, or a bad body), then it is ignored. This server doesn't send it."
         inbound:
           type: boolean
           description: "false when the sender can't be called (MSFP core section 7.5): its address (the one given, or the one stored) is then of the form https://msfp-<26 characters>.invalid, or the request is a bad body (a signed 404) and the answer as if unsigned. Left out, or true, it can be: a peer that couldn't be is called again once a hello at its address answers under its key."
@@ -4456,7 +4456,7 @@ components:
           description: "In requests from a server that can't be called, a string, pending or refused: it hasn't moved to this server's new key (other strings ignored; from any other caller ignored whatever its value). In answers to one, an object, the rotation statement with the members of rotate's body (newKey, nextCommitment, date, oldSignature, newSignature), newly dated, signed with the old key."
         revocation:
           type: object
-          description: "In answers to a server that can't be called only, while this server moves from a key it revoked: the revocation statement (date, signature), newly dated, signed with the revoked key. The caller suspends the pairing, then reads the rotation."
+          description: "In answers to a server that can't be called, while this server moves from a key it revoked; and, for 30 days after a key revoked with no next key, alone in the answer to any server whose pairing ended then (MSFP core section 12.7, case 2): the revocation statement (date, signature), newly dated, signed with the revoked key. The caller suspends the pairing, then reads the rotation."
           properties:
             date: {type: integer}
             signature: {type: string}
