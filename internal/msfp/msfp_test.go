@@ -461,6 +461,30 @@ func TestCheckRefusesQueries(t *testing.T) {
 	}
 }
 
+// A request marked with a content coding is refused like a bad
+// signature, even when its body isn't coded at all (MSFP core section 3);
+// identity is no coding.
+func TestCheckRefusesCodings(t *testing.T) {
+	k := NewKey()
+	v := &Verifier{Host: "films.example.org"}
+	for _, codings := range [][]string{{"gzip"}, {"br"}, {"identity, gzip"}, {"identity", "deflate"}, {""}} {
+		req, _ := request(k, "POST", "/api/v1/federation/hello", []byte(`{}`), now)
+		req.Header["Content-Encoding"] = codings
+		if _, err := v.Check(req, []byte(`{}`), now); err == nil {
+			t.Errorf("Content-Encoding %q accepted", codings)
+		}
+	}
+	for _, codings := range [][]string{nil, {"identity"}, {"Identity"}} {
+		req, _ := request(k, "POST", "/api/v1/federation/hello", []byte(`{}`), now)
+		if codings != nil {
+			req.Header["Content-Encoding"] = codings
+		}
+		if _, err := v.Check(req, []byte(`{}`), now); err != nil {
+			t.Errorf("Content-Encoding %q: %v", codings, err)
+		}
+	}
+}
+
 // An answer's Content-Type (core section 6.3): one or none; doubled or
 // unreadable fails like a bad signature; an empty one counts as none.
 func TestAnswerMediaType(t *testing.T) {

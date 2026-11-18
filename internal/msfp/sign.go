@@ -261,6 +261,11 @@ func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified,
 	if r.URL.RawQuery != "" || r.URL.ForceQuery {
 		return Verified{}, ErrSignature
 	}
+	// No content coding (section 3): a coded request is never decoded,
+	// and one marked coded is refused at once, whatever its body holds.
+	if !uncoded(r.Header) {
+		return Verified{}, ErrSignature
+	}
 	// Never beside the first test version's headers (section 6.1).
 	for _, h := range oldHeaders {
 		if _, ok := r.Header[http.CanonicalHeaderKey(h)]; ok {
@@ -471,3 +476,16 @@ func SecretHash(secret []byte) []byte {
 
 // SameKey reports whether two public keys are the same.
 func SameKey(a, b ed25519.PublicKey) bool { return bytes.Equal(a, b) }
+
+// uncoded says whether h names no content coding other than identity
+// (MSFP core section 3).
+func uncoded(h http.Header) bool {
+	for _, v := range h.Values("Content-Encoding") {
+		for c := range strings.SplitSeq(v, ",") {
+			if !strings.EqualFold(strings.TrimSpace(c), "identity") {
+				return false
+			}
+		}
+	}
+	return true
+}
