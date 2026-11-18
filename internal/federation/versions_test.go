@@ -102,14 +102,15 @@ func TestNoPartsBeforeHello(t *testing.T) {
 
 // A signed 200 whose media type isn't application/json is refused, as a
 // badly signed one (core section 6.3), and so is one whose Content-Type
-// changed on the way.
+// changed on the way, was sent twice, or doesn't read as type/subtype.
 func TestAnswerMediaType(t *testing.T) {
 	_, b, _, aOnB := pairedPair(t)
 	k := msfp.NewKey()
-	served, signed := "", ""
+	var served []string
+	signed := ""
 	fake := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := []byte(`{"state":"paired","core":[1]}`)
-		w.Header().Set("Content-Type", served)
+		w.Header()["Content-Type"] = served
 		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, signed, body))
 		_, _ = w.Write(body)
 	}))
@@ -117,13 +118,23 @@ func TestAnswerMediaType(t *testing.T) {
 	peer := *aOnB
 	peer.Address, peer.PublicKey = fake.URL, k.Public()
 	for _, c := range []struct {
-		served, signed string
-		ok             bool
+		served []string
+		signed string
+		ok     bool
 	}{
-		{"application/json", "application/json", true},
-		{"application/json; charset=utf-8", "application/json", true},
-		{"text/plain", "text/plain", false},
-		{"text/plain", "application/json", false},
+		{[]string{"application/json"}, "application/json", true},
+		{[]string{"application/json; charset=utf-8"}, "application/json", true},
+		{[]string{"Application/JSON"}, "application/json", true},
+		{[]string{"text/plain"}, "text/plain", false},
+		{[]string{"text/plain"}, "application/json", false},
+		// Twice, even the same: fails, whatever was signed.
+		{[]string{"application/json", "application/json"}, "application/json", false},
+		// Not type/subtype.
+		{[]string{"application/json, text/plain"}, "application/json, text/plain", false},
+		{[]string{"application/json, text/plain"}, "application/json", false},
+		{[]string{"json"}, "json", false},
+		{[]string{"application/"}, "application/", false},
+		{[]string{"application json"}, "application json", false},
 	} {
 		served, signed = c.served, c.signed
 		var out json.RawMessage

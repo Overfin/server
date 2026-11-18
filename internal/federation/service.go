@@ -866,15 +866,17 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 	if err != nil {
 		return Reply{}, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
-	// The answer's media type is signed (MSFP core section 6.3).
-	contentType := res.Header.Get("Content-Type")
+	// The answer's media type is signed (MSFP core section 6.3): a
+	// Content-Type sent twice, or that doesn't read as one, fails the
+	// answer like a bad signature.
+	contentType, ctErr := msfp.AnswerMediaType(res.Header)
 	if res.StatusCode != http.StatusOK {
 		// A refusal counts only signed by its key: a server we're paired
 		// with, or were, signs its own; anything else may come from
 		// someone between the two. A code's server doesn't know us yet:
 		// its refusal is a stranger's, plain, and costs only that pairing.
 		sigText, _ := msfp.OneHeader(res.Header, msfp.HeaderSignature)
-		signed := msfp.CheckResponse(p.PublicKey, nonce, res.StatusCode, contentType, answer, sigText) == nil
+		signed := ctErr == nil && msfp.CheckResponse(p.PublicKey, nonce, res.StatusCode, contentType, answer, sigText) == nil
 		if !signed && path != pairPath {
 			if res.StatusCode == http.StatusNotFound {
 				return Reply{}, fmt.Errorf("%w: %w", ErrUnreachable, errNotHeard)
@@ -897,10 +899,11 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 		}
 		return r, nil
 	}
-	if sigText, _ := msfp.OneHeader(res.Header, msfp.HeaderSignature); msfp.CheckResponse(p.PublicKey, nonce, res.StatusCode, contentType, answer, sigText) != nil {
+	if sigText, _ := msfp.OneHeader(res.Header, msfp.HeaderSignature); ctErr != nil ||
+		msfp.CheckResponse(p.PublicKey, nonce, res.StatusCode, contentType, answer, sigText) != nil {
 		return Reply{}, fmt.Errorf("%w: its answer isn't signed by its key", ErrUnreachable)
 	}
-	if msfp.MediaType(contentType) != "application/json" {
+	if contentType != "application/json" {
 		return Reply{}, fmt.Errorf("%w: an answer that isn't JSON", ErrUnreachable)
 	}
 	if err := msfp.DecodeAnswer(answer, out); err != nil {

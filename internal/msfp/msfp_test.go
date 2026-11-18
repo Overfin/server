@@ -460,3 +460,43 @@ func TestCheckRefusesQueries(t *testing.T) {
 		t.Errorf("without a query: %v", err)
 	}
 }
+
+// An answer's Content-Type (core section 6.3): one or none; doubled or
+// unreadable fails like a bad signature; an empty one counts as none.
+func TestAnswerMediaType(t *testing.T) {
+	for _, c := range []struct {
+		values []string
+		want   string // "" for refused
+	}{
+		{nil, "-"},
+		{[]string{""}, "-"},
+		{[]string{"  "}, "-"},
+		{[]string{"application/json"}, "application/json"},
+		{[]string{"Application/JSON ; charset=utf-8"}, "application/json"},
+		{[]string{"application/problem+json"}, "application/problem+json"},
+		{[]string{"application/json", "application/json"}, ""},
+		{[]string{"application/json", ""}, ""},
+		{[]string{"application/json, text/html"}, ""},
+		{[]string{"application"}, ""},
+		{[]string{"/json"}, ""},
+		{[]string{"application/json/x"}, ""},
+		{[]string{"; charset=utf-8"}, ""},
+		{[]string{"application/js on"}, ""},
+		{[]string{"appl\u00e9cation/json"}, ""},
+	} {
+		h := http.Header{}
+		if c.values != nil {
+			h["Content-Type"] = c.values
+		}
+		got, err := AnswerMediaType(h)
+		if c.want == "" {
+			if !errors.Is(err, ErrSignature) {
+				t.Errorf("%q: %q, %v; want refused", c.values, got, err)
+			}
+			continue
+		}
+		if err != nil || got != c.want {
+			t.Errorf("%q: %q, %v; want %q", c.values, got, err, c.want)
+		}
+	}
+}

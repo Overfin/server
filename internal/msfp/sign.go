@@ -132,6 +132,49 @@ func MediaType(contentType string) string {
 	return mt
 }
 
+// AnswerMediaType reads an answer's Content-Type, as its signature names
+// it (core section 6.3): one header or none. None, or an empty one, is
+// "-". One sent more than once, or whose value doesn't read as
+// type/subtype (each a token of RFC 9110, parameters after a ";" not
+// read), is ErrSignature: the answer fails like a badly signed one, so two
+// implementations never read different media types from one answer.
+func AnswerMediaType(h http.Header) (string, error) {
+	values := h.Values("Content-Type")
+	switch {
+	case len(values) == 0:
+		return "-", nil
+	case len(values) > 1:
+		return "", ErrSignature
+	}
+	value := strings.Trim(values[0], " \t")
+	if value == "" {
+		return "-", nil
+	}
+	mt, _, _ := strings.Cut(value, ";")
+	typ, sub, ok := strings.Cut(strings.TrimRight(mt, " \t"), "/")
+	if !ok || !isToken(typ) || !isToken(sub) {
+		return "", ErrSignature
+	}
+	return strings.ToLower(typ + "/" + sub), nil
+}
+
+// isToken says whether s is a token of RFC 9110 (section 5.6.2): one or
+// more of its tchar.
+func isToken(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range []byte(s) {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // SignRequest signs req, whose body is body, with k. It returns the nonce,
 // which the answer's signature covers (CheckResponse).
 func SignRequest(req *http.Request, body []byte, k Key, now time.Time) string {
