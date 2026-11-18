@@ -317,11 +317,7 @@ func (s *Sessions) me(r *http.Request, acct *store.Account, prof *store.Profile)
 		}
 		out.Tastes.Answered = t != nil
 	}
-	for _, c := range lang.Choices {
-		if slices.Contains(offered, c.Tag) {
-			out.Languages = append(out.Languages, c)
-		}
-	}
+	out.Languages = append(out.Languages, lang.Named(offered)...)
 	if prof != nil {
 		pj := toProfileJSON(prof)
 		out.ActiveProfile = &pj

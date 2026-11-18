@@ -32,7 +32,8 @@ func (s *Store) Languages(ctx context.Context) (offered []string, def string, se
 	if err != nil {
 		return nil, "", false, err
 	}
-	// The chosen one only: the server's region comes from these languages.
+	// The chosen one only: the server's country may come from these
+	// languages (ServerCountry).
 	country, _, err := s.ChosenRatingsCountry(ctx)
 	if err != nil {
 		return nil, "", false, err
@@ -45,11 +46,18 @@ func (s *Store) Languages(ctx context.Context) (offered []string, def string, se
 }
 
 // SetLanguages saves the languages offered and the default, which must be
-// one of them. TMDB is asked in the default (its regional tag); when that
-// changes, its data is fetched again (SetTMDBLanguage), and changed
-// reports it. When the ratings country follows the server's region and
-// that moves with them, titles' ages are worked out again.
+// one of them, the server's country left as it is. TMDB is asked in the
+// default (its regional tag); when that changes, its data is fetched again
+// (SetTMDBLanguage), and changed reports it. When the ratings country
+// follows the server's country and that moves with them, titles' ages are
+// worked out again.
 func (s *Store) SetLanguages(ctx context.Context, offered []string, def string) (changed bool, err error) {
+	return s.SetCountryLanguages(ctx, "", offered, def)
+}
+
+// SetCountryLanguages is SetLanguages, with the server's country saved too
+// (ServerCountry); "" leaves it as it is.
+func (s *Store) SetCountryLanguages(ctx context.Context, country string, offered []string, def string) (changed bool, err error) {
 	old, err := s.TMDBLanguage(ctx)
 	if err != nil {
 		return false, err
@@ -58,7 +66,11 @@ func (s *Store) SetLanguages(ctx context.Context, offered []string, def string) 
 	if err != nil {
 		return false, err
 	}
-	for name, value := range map[string]string{"languages": strings.Join(offered, ","), "default-language": def} {
+	values := map[string]string{"languages": strings.Join(offered, ","), "default-language": def}
+	if country != "" {
+		values["server-country"] = country
+	}
+	for name, value := range values {
 		if _, err := s.db.ExecContext(ctx, `INSERT INTO meta (name, value) VALUES (?, ?)
 			ON CONFLICT (name) DO UPDATE SET value = excluded.value`, name, []byte(value)); err != nil {
 			return false, err
@@ -71,6 +83,34 @@ func (s *Store) SetLanguages(ctx context.Context, offered []string, def string) 
 		return true, s.SetTMDBLanguage(ctx, def)
 	}
 	return false, nil
+}
+
+// ServerCountry is the server's country (ISO 3166, such as "CA"), whose
+// languages the control panel offers: the one the operator picked, else,
+// on an install from before it was asked, the region of the default
+// language ("fr-CA" gives "CA") when Overfin has languages for it
+// (lang.CountryLanguages), else the first of the other languages' that
+// has; "" when none does, or the languages aren't set yet.
+func (s *Store) ServerCountry(ctx context.Context) (string, error) {
+	var v []byte
+	err := s.read.QueryRowContext(ctx, `SELECT value FROM meta WHERE name = 'server-country'`).Scan(&v)
+	if err == nil {
+		return string(v), nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	offered, def, set, err := s.Languages(ctx)
+	if err != nil || !set {
+		return "", err
+	}
+	for _, tag := range append([]string{def}, offered...) {
+		_, region, _ := strings.Cut(tag, "-")
+		if len(lang.CountryLanguages(region)) > 0 {
+			return region, nil
+		}
+	}
+	return "", nil
 }
 
 // SyncTMDBLanguage asks TMDB in the default language when it was asked in

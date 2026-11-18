@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -214,11 +213,7 @@ func (s *Sessions) setupRequired(w http.ResponseWriter, r *http.Request) {
 	p.Offers = s.SetupOffers
 	if offered, def, _, err := s.Store.Languages(r.Context()); err == nil {
 		p.Language = pickLanguage(r.Header.Get("Accept-Language"), offered, def)
-		for _, c := range lang.Choices {
-			if slices.Contains(offered, c.Tag) {
-				p.Languages = append(p.Languages, c)
-			}
-		}
+		p.Languages = append(p.Languages, lang.Named(offered)...)
 	}
 	problem.Write(w, p)
 }

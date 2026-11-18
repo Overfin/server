@@ -56,3 +56,52 @@ func TestLanguages(t *testing.T) {
 		t.Error("synced twice")
 	}
 }
+
+// An install from before the server's country was asked: its default
+// language's region, else the first other language's Overfin has
+// languages for, else none; once saved, the one saved.
+func TestServerCountry(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	country := func() string {
+		t.Helper()
+		c, err := s.ServerCountry(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	// Languages not set yet: none, the panel asks.
+	if c := country(); c != "" {
+		t.Errorf("fresh: %q", c)
+	}
+	for _, tc := range []struct {
+		offered []string
+		def     string
+		want    string
+	}{
+		{[]string{"en-US", "fr-FR"}, "fr-FR", "FR"},
+		{[]string{"fr-CA", "en-CA"}, "fr-CA", "CA"},
+		// No region, or one Overfin has no languages for: the next.
+		{[]string{"fr", "en-GB"}, "fr", "GB"},
+		{[]string{"fr-LU", "de-CH"}, "fr-LU", "CH"},
+		{[]string{"fr", "es-419"}, "fr", ""},
+	} {
+		if _, err := s.SetLanguages(ctx, tc.offered, tc.def); err != nil {
+			t.Fatal(err)
+		}
+		if c := country(); c != tc.want {
+			t.Errorf("%v, %s: %q, want %q", tc.offered, tc.def, c, tc.want)
+		}
+	}
+	// Saved: it stays, whatever the languages.
+	if _, err := s.SetCountryLanguages(ctx, "CH", []string{"de-CH", "fr-FR"}, "fr-FR"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetLanguages(ctx, []string{"en-US"}, "en-US"); err != nil {
+		t.Fatal(err)
+	}
+	if c := country(); c != "CH" {
+		t.Errorf("saved: %q", c)
+	}
+}

@@ -124,11 +124,11 @@ func TestRatings(t *testing.T) {
 	}
 }
 
-// With no country chosen, the ratings country is the server's region:
-// the first of its languages with a region Overfin reads ratings in;
-// none otherwise, never the US. A choice wins over it, and titles' ages
-// follow whichever applies.
-func TestRatingsCountryFromRegion(t *testing.T) {
+// With no country chosen, the ratings country is the server's country
+// (here, from its languages: none was saved), when Overfin reads ratings
+// in it; none otherwise, never the US. A choice wins over it, and titles'
+// ages follow whichever applies.
+func TestRatingsCountryFromServerCountry(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
 	country := func() string {
@@ -165,10 +165,12 @@ func TestRatingsCountryFromRegion(t *testing.T) {
 		{[]string{"pt-BR"}, "pt-BR", "BR"},
 		// No region.
 		{[]string{"fr"}, "fr", ""},
-		// A region Overfin has no ages for.
+		// A country Overfin has no ages for: none, whatever the other
+		// languages.
 		{[]string{"pl-PL"}, "pl-PL", ""},
-		// The first with one, the default first.
-		{[]string{"pl-PL", "de-DE"}, "pl-PL", "DE"},
+		{[]string{"pl-PL", "de-DE"}, "pl-PL", ""},
+		// The default's country, the others' after it.
+		{[]string{"en-US", "de-DE"}, "de-DE", "DE"},
 	} {
 		if _, err := s.SetLanguages(ctx, tc.offered, tc.def); err != nil {
 			t.Fatal(err)
@@ -213,5 +215,32 @@ func TestRatingsCountryFromRegion(t *testing.T) {
 	}
 	if _, ok, _ := s.ChosenRatingsCountry(ctx); ok || country() != "CA" || age() != 14 {
 		t.Errorf("following again: %v %q, age %d", ok, country(), age())
+	}
+
+	// The server's country saved: the ratings country follows it, ages
+	// too, whatever the languages; a choice still wins.
+	if _, err := s.SetCountryLanguages(ctx, "FR", []string{"en-CA"}, "en-CA"); err != nil {
+		t.Fatal(err)
+	}
+	if c := country(); c != "FR" || age() != 0 {
+		t.Errorf("the server's country: %q, age %d", c, age())
+	}
+	if err := s.SetRatingsCountry(ctx, "DE"); err != nil {
+		t.Fatal(err)
+	}
+	if c := country(); c != "DE" || age() != 18 {
+		t.Errorf("chosen over the server's country: %q, age %d", c, age())
+	}
+	if _, err := s.SetCountryLanguages(ctx, "US", []string{"en-US"}, "en-US"); err != nil {
+		t.Fatal(err)
+	}
+	if c := country(); c != "DE" {
+		t.Errorf("chosen, the server's country changed: %q", c)
+	}
+	if err := s.SetRatingsCountry(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	if c := country(); c != "US" || age() != 13 {
+		t.Errorf("following the server's country: %q, age %d", c, age())
 	}
 }

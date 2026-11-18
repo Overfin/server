@@ -26,15 +26,15 @@ type RatingLevel struct {
 const NotRated = "NR"
 
 // RatingsCountry is the country whose certifications apply: the
-// operator's choice (ChosenRatingsCountry), else the server's region
-// (RegionRatingsCountry); "" when neither gives one, and every title then
+// operator's choice (ChosenRatingsCountry), else the server's country
+// (CountryRatingsCountry); "" when neither gives one, and every title then
 // gets the middle of its countries' ratings (TitleAge).
 func (s *Store) RatingsCountry(ctx context.Context) (string, error) {
 	chosen, ok, err := s.ChosenRatingsCountry(ctx)
 	if err != nil || ok {
 		return chosen, err
 	}
-	return s.RegionRatingsCountry(ctx)
+	return s.CountryRatingsCountry(ctx)
 }
 
 // ChosenRatingsCountry is the ratings country the operator picked; ok is
@@ -48,40 +48,19 @@ func (s *Store) ChosenRatingsCountry(ctx context.Context) (country string, ok bo
 	return string(v), err == nil, err
 }
 
-// RegionRatingsCountry is the server's region, from the languages the
-// operator set: the region of the first one that has one, the default
-// first, then the others in their order ("fr-CA" gives "CA"), provided
+// CountryRatingsCountry is the server's country (ServerCountry), provided
 // Overfin reads that country's ratings of films and series (RatingAge);
-// "" when none does, or the languages aren't set yet.
-func (s *Store) RegionRatingsCountry(ctx context.Context) (string, error) {
-	offered, def, set, err := s.Languages(ctx)
-	if err != nil || !set {
+// "" when it doesn't, or there's no country.
+func (s *Store) CountryRatingsCountry(ctx context.Context) (string, error) {
+	country, err := s.ServerCountry(ctx)
+	if err != nil || filmAges[country] == nil || tvAges[country] == nil {
 		return "", err
 	}
-	for _, tag := range append([]string{def}, offered...) {
-		if c := tagRegion(tag); c != "" {
-			return c, nil
-		}
-	}
-	return "", nil
-}
-
-// tagRegion is a language tag's region ("pt-BR" gives "BR"), when Overfin
-// has ages for its films' and series' ratings; "" otherwise.
-func tagRegion(tag string) string {
-	_, region, ok := strings.Cut(tag, "-")
-	if !ok {
-		return ""
-	}
-	region = strings.ToUpper(region)
-	if filmAges[region] == nil || tvAges[region] == nil {
-		return ""
-	}
-	return region
+	return country, nil
 }
 
 // SetRatingsCountry changes the operator's choice of ratings country, ""
-// to follow the server's region, and works titles' ages out again when
+// to follow the server's country, and works titles' ages out again when
 // the country that applies changes: they go by its ratings first.
 func (s *Store) SetRatingsCountry(ctx context.Context, country string) error {
 	old, err := s.RatingsCountry(ctx)

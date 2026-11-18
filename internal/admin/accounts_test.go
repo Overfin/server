@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -283,27 +284,79 @@ func TestLanguagesRoutes(t *testing.T) {
 	p, b, _, _ := signedInPanel(t)
 	changes := 0
 	p.OnLanguage = func() { changes++ }
+	// A fresh install: English (United States), no country yet.
 	if rec := b.do("GET", "/admin/api/languages", "", nil); !strings.Contains(rec.Body.String(), `"default":"en-US"`) ||
-		!strings.Contains(rec.Body.String(), `"tag":"fr-CA"`) {
+		!strings.Contains(rec.Body.String(), `"country":""`) || !strings.Contains(rec.Body.String(), `"CH":[{"tag":"de-CH","name":"Deutsch (Schweiz)"}]`) {
 		t.Errorf("languages: %s", rec.Body)
 	}
 	for body, want := range map[string]string{
-		`{"offered":[],"default":"en-US"}`:                "at least one",
-		`{"offered":["fr-CA","xx-YY"],"default":"fr-CA"}`: "each once",
-		`{"offered":["fr-CA","fr-CA"],"default":"fr-CA"}`: "each once",
-		`{"offered":["fr-CA","en-US"],"default":"de-DE"}`: "one of those offered",
+		`{"country":"CA","offered":[],"default":"en-US"}`:                "at least one",
+		`{"country":"CA","offered":["fr-CA","xx-YY"],"default":"fr-CA"}`: "each once",
+		`{"country":"CA","offered":["fr-CA","fr-CA"],"default":"fr-CA"}`: "each once",
+		`{"country":"CA","offered":["fr-CA","en-CA"],"default":"de-DE"}`: "one of those offered",
+		`{"country":"XX","offered":["en-US"],"default":"en-US"}`:         "no languages for that country",
+		// Not Canada's, and not offered before.
+		`{"country":"CA","offered":["fr-CA","fr-FR"],"default":"fr-CA"}`: "each once",
 	} {
 		if rec := b.do("PUT", "/admin/api/languages", body, nil); rec.Code != 400 || !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("%s: %d %s", body, rec.Code, rec.Body)
 		}
 	}
-	rec := b.do("PUT", "/admin/api/languages", `{"offered":["fr-CA","en-US"],"default":"fr-CA"}`, nil)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"offered":["fr-CA","en-US"]`) || changes != 1 {
+	// English (United States) was offered: it can stay.
+	rec := b.do("PUT", "/admin/api/languages", `{"country":"CA","offered":["fr-CA","en-CA","en-US"],"default":"fr-CA"}`, nil)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"offered":["fr-CA","en-CA","en-US"]`) ||
+		!strings.Contains(rec.Body.String(), `"country":"CA"`) || changes != 1 {
 		t.Errorf("saved: %d %s, changes %d", rec.Code, rec.Body, changes)
 	}
-	// Adding a language isn't a new default: nothing is fetched again.
-	if b.do("PUT", "/admin/api/languages", `{"offered":["fr-CA","en-US","es-ES"],"default":"fr-CA"}`, nil); changes != 1 {
-		t.Errorf("changes %d", changes)
+	// Another country: Canada's languages stay as long as they're kept.
+	rec = b.do("PUT", "/admin/api/languages", `{"country":"FR","offered":["fr-CA","fr-FR"],"default":"fr-CA"}`, nil)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"country":"FR"`) || changes != 1 {
+		t.Errorf("another country: %d %s, changes %d", rec.Code, rec.Body, changes)
+	}
+	// Dropped, they're gone: English (Canada) can't come back from France.
+	if rec := b.do("PUT", "/admin/api/languages", `{"country":"FR","offered":["fr-CA","fr-FR","en-CA"],"default":"fr-CA"}`, nil); rec.Code != 400 {
+		t.Errorf("back from before: %d %s", rec.Code, rec.Body)
+	}
+	// No country sent: the one saved.
+	if rec := b.do("PUT", "/admin/api/languages", `{"offered":["fr-FR"],"default":"fr-CA"}`, nil); rec.Code != 400 {
+		t.Errorf("default dropped: %d %s", rec.Code, rec.Body)
+	}
+	if rec := b.do("PUT", "/admin/api/languages", `{"offered":["fr-FR","fr-CA"],"default":"fr-CA"}`, nil); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"country":"FR"`) {
+		t.Errorf("no country: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// The ratings country follows the server's country, unless the operator
+// chose one in the TMDB card.
+func TestLanguagesMoveTheRatingsCountry(t *testing.T) {
+	_, b, db, _ := signedInPanel(t)
+	ratings := func() string {
+		t.Helper()
+		rec := b.do("GET", "/admin/api/ratings", "", nil)
+		var out struct{ Country, Chosen, Server, Region string }
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("%d %s", rec.Code, rec.Body)
+		}
+		return out.Country + " " + out.Chosen + " " + out.Server + " " + out.Region
+	}
+	if got := ratings(); got != "   " {
+		t.Errorf("fresh: %q", got)
+	}
+	b.do("PUT", "/admin/api/languages", `{"country":"CA","offered":["fr-CA"],"default":"fr-CA"}`, nil)
+	if got := ratings(); got != "CA  CA CA" {
+		t.Errorf("Canada: %q", got)
+	}
+	// Poland: Overfin doesn't read its ratings.
+	b.do("PUT", "/admin/api/languages", `{"country":"PL","offered":["fr-CA","pl-PL"],"default":"fr-CA"}`, nil)
+	if got := ratings(); got != "  PL " {
+		t.Errorf("Poland: %q", got)
+	}
+	if err := db.SetRatingsCountry(context.Background(), "US"); err != nil {
+		t.Fatal(err)
+	}
+	b.do("PUT", "/admin/api/languages", `{"country":"CA","offered":["fr-CA"],"default":"fr-CA"}`, nil)
+	if got := ratings(); got != "US US CA CA" {
+		t.Errorf("chosen: %q", got)
 	}
 }
 

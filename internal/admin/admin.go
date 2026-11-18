@@ -1016,10 +1016,12 @@ func (p *Panel) setSeerr(w http.ResponseWriter, r *http.Request, s *session) {
 // profiles see nothing.
 type ratingsJSON struct {
 	// Country is the ratings country that applies, "" none; Chosen is the
-	// operator's choice, "" to follow the server's region (Region, ""
-	// when the languages give none).
+	// operator's choice, "" to follow the server's country (Server, ""
+	// when there's none): Region is that country when Overfin reads its
+	// ratings, else "".
 	Country   string   `json:"country"`
 	Chosen    string   `json:"chosen"`
+	Server    string   `json:"server"`
 	Region    string   `json:"region"`
 	Countries []string `json:"countries"`
 	// Shown is which titles no library has are shown: all, released,
@@ -1048,7 +1050,10 @@ func (p *Panel) ratingsState(ctx context.Context) (ratingsJSON, error) {
 	if out.Chosen, _, err = p.Store.ChosenRatingsCountry(ctx); err != nil {
 		return out, err
 	}
-	if out.Region, err = p.Store.RegionRatingsCountry(ctx); err != nil {
+	if out.Server, err = p.Store.ServerCountry(ctx); err != nil {
+		return out, err
+	}
+	if out.Region, err = p.Store.CountryRatingsCountry(ctx); err != nil {
 		return out, err
 	}
 	if out.Countries, err = p.Store.RatingCountries(ctx); err != nil {
