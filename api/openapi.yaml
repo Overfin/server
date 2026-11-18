@@ -4007,7 +4007,7 @@ paths:
                 secretHash: {type: string, description: URL-safe base64, no padding}
                 proof: {type: string, description: URL-safe base64, no padding}
                 nextCommitment: {type: string, description: "The caller's next key commitment, SHA-256 of its next key, URL-safe base64, no padding: a later change of the caller's key to that key is followed at once"}
-                inbound: {type: boolean, description: "Read for its form only"}
+                inbound: {type: boolean, description: "false when the caller can't be called (MSFP core section 7.5), its address then of the form https://msfp-<26 characters>.invalid, or the request gets the plain 404; it is never connected to, and this server's operator accepting it sends it nothing: it learns at its next hello"}
       responses:
         "200":
           description: Paired, waiting for this server's operator. Signed.
@@ -4038,6 +4038,15 @@ paths:
         doesn't know gets the same plain 404 as a missing route. After this
         server's address changed, requests signed for its former host are
         accepted too, for 30 days or until every peer moved.
+        A server that can't be called (MSFP core section 7.5) says so with
+        `inbound` false, under an address of the form
+        https://msfp-<26 characters>.invalid (otherwise a signed 404), and
+        asks on a schedule: every 20 seconds while this server's operator
+        hasn't accepted it, every 5 minutes once paired, every hour once
+        gone. This server never connects to it; its answers carry what it
+        would otherwise send: its rotation statement while the caller still
+        knows it by its old key, the revocation of that key when it was
+        revoked, both signed with that key.
       tags: [federation]
       security: []
       requestBody:
@@ -4425,6 +4434,23 @@ components:
         nextCommitment:
           type: string
           description: "The sender's next key commitment (SHA-256 of its next key, URL-safe base64, no padding), sent while the pairing has none from pair or a rotation. Kept only by a peer that never had one (trust on first use); ignored otherwise."
+        inbound:
+          type: boolean
+          description: "false when the sender can't be called (MSFP core section 7.5): its address (the one given, or the one stored) is then of the form https://msfp-<26 characters>.invalid, or the request is a bad body (a signed 404) and the answer as if unsigned. Left out, or true, it can be: a peer that couldn't be is called again once a hello at its address answers under its key."
+        knownKey:
+          type: string
+          description: "In requests from a server that can't be called only: the key it checks the answers against now, URL-safe base64. While this server's key changes, the new one means the caller moved to it, and this answer is signed with it. Ignored from any other caller, whatever its value."
+        rotation:
+          description: "In requests from a server that can't be called, a string, pending or refused: it hasn't moved to this server's new key (other strings ignored; from any other caller ignored whatever its value). In answers to one, an object, the rotation statement with the members of rotate's body (newKey, nextCommitment, date, oldSignature, newSignature), newly dated, signed with the old key."
+        revocation:
+          type: object
+          description: "In answers to a server that can't be called only, while this server moves from a key it revoked: the revocation statement (date, signature), newly dated, signed with the revoked key. The caller suspends the pairing, then reads the rotation."
+          properties:
+            date: {type: integer}
+            signature: {type: string}
+        callsFailed:
+          type: boolean
+          description: "In answers only: true when this server's last calls to the caller couldn't connect. Shown on the caller's panel, with the suggestion to turn on \"this server can't be called\"; nothing else changes."
     Signin:
       description: What a step of the sign-in pages sends; each uses its own
         fields.

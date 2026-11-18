@@ -49,7 +49,10 @@ You need your site's address set, in HTTPS (`https://host` as `site.url`
 in the configuration, or an HTTPS domain): it's how the other server
 reaches yours. Servers pair over HTTPS only; a site on plain `http://`
 has no federation (the panel says so), and a code for an `http://`
-address is refused. In the control panel, under **Federation**:
+address is refused. A server nothing can reach needs no address, and
+pairs too, to watch only (see [A server that can't be
+called](#a-server-that-cant-be-called)). In the control panel, under
+**Federation**:
 
 1. One of you clicks **New code** and sends it to the other however you
    like. A code starts with `msfp-pair-1.`, and works once, within 24
@@ -154,6 +157,47 @@ Moving back works the same way. Someone holding your server's key could
 move your paired servers to an address of theirs: that's one more reason
 to revoke a stolen key at once (above).
 
+## A server that can't be called
+
+Some servers can reach out, but nothing can reach them: at home behind a
+router, without a forwarded port, or behind your internet provider's
+shared address. Such a server can still pair, to **watch** what other
+servers share with it; it **shares nothing**.
+
+Under **Federation**, turn on **This server can't be called**. It works
+without a site address, too. Then:
+
+- **Pairing.** Your server makes no codes: ask the other operator for one,
+  and paste it under **Use a code**. Their server lists yours as one that
+  can't be called.
+- **Your server asks, they never call.** Paired servers never connect to
+  yours, for anything. Yours asks each of them by itself: every 20 seconds
+  while their operator hasn't accepted yet, every 5 minutes once paired,
+  every hour once a server says it no longer knows yours. That's how it
+  learns it was accepted, that their key changed (it follows by itself,
+  as above, within 5 minutes or so) or was stolen, and where they moved.
+- **What you watch.** Their titles show on your site and play as from any
+  paired server. Of yours, they get nothing: what you offer in **Sharing**
+  is kept for when your server can be called again.
+- **Its address** becomes one that leads nowhere,
+  `https://msfp-` and 26 letters and digits, then `.invalid`, made once
+  for your server. Other servers know it by its key, as always; nothing
+  ever connects to that address, and it never points into their network.
+- **A hint.** When a paired server says its calls to yours couldn't
+  connect, its row says so, and suggests this setting. Nothing changes by
+  itself: it's your choice.
+
+Turn it off once your server can be reached (a port forwarded, a domain
+pointed at it): paired servers are told its site address at once, check
+that your server answers there under its key, and only then call it
+again, as for a change of address (above). Until they can reach it, they
+go on as before.
+
+**On the other side**, a server that can't be called shows as such in
+your list: "it can watch what you share with it, and can share nothing
+with you". Its libraries can't be picked in **Sharing**, and **Check**
+isn't offered: it asks yours.
+
 ## Limits
 
 Each pairing has its own limits, set by the server that shares:
@@ -193,7 +237,7 @@ before a server started is refused: a paired server whose clock runs
 behind is refused for that long after each start (keep both clocks set by
 the network). A compromised paired server can't reach your data or your
 people. The full rules are SECURITY.md's 94 to 100, 136, for keys, 137
-and 138, and for addresses, 139.
+and 138, for addresses, 139, and for servers that can't be called, 140.
 
 Paired servers say, each time they check on each other, which versions of
 the protocol and of its parts (catalog, playback, media, video) they
@@ -295,11 +339,12 @@ catalog, playback, media and video; Overfin has no music): its
 specification and test vectors are at
 [github.com/msfp-io/msfp-spec](https://github.com/msfp-io/msfp-spec).
 Overfin does key rotation and revocation (`rotate`, `revoke`, the next key
-commitment in `pair` and `hello`) and address changes (core section 13),
-but not yet the discovery document (its federation calls are always at
-`/api/v1/federation/`, so a new address is confirmed there, without
-fetching one), or servers that can't be called (`inbound`, and the
-rotations and revocations they pull in `hello` answers, and their moves).
+commitment in `pair` and `hello`), address changes (core section 13) and
+servers that can't be called (core section 7.5: `inbound`, the scheduled
+`hello`s, `knownKey`, the rotations and revocations pulled in `hello`
+answers, `callsFailed`), but not yet the discovery document (its
+federation calls are always at `/api/v1/federation/`, so a new address is
+confirmed there, without fetching one).
 
 ## Where it stands
 
