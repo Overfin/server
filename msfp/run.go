@@ -17,7 +17,8 @@ import (
 // the host's catalog refreshed. Every second too: peers' catalogs read
 // when due (a minute after the start, then every SyncEvery, at once when
 // what is wanted changes), peers' playbacks here expired (looked at
-// every 30 seconds).
+// every 30 seconds), and peers told where this server's viewers are in
+// their playbacks there, when 45 seconds have passed (Progress).
 
 // tidyEvery is how often Run does the hourly work; tickEvery, the rest.
 const (
@@ -99,10 +100,12 @@ func (e *Engine) RunOnce(ctx context.Context) error {
 }
 
 // tick is the work of each second: this server's new address tried, its
-// scheduled hellos sent, catalogs due read, playbacks expired.
+// scheduled hellos sent, catalogs due read, playbacks expired, progress
+// due sent.
 func (e *Engine) tick(ctx context.Context) {
 	e.reachAndAnnounce(ctx)
 	e.scheduledHellos(ctx)
 	e.readDue(ctx, false)
 	e.expirePlaybacks(false)
+	e.tellWatched()
 }

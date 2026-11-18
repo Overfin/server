@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -544,5 +545,63 @@ func TestStatesAndCuts(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the relay wasn't cut")
+	}
+}
+
+// The viewer's side tells the owning server where its viewer is at the
+// first report, at once on a pause or a resume, and every 45 seconds
+// while the host reports, never more often (MSFP playback section 3);
+// nothing once the host stops reporting.
+func TestProgressPace(t *testing.T) {
+	ctx := context.Background()
+	clock := newClock(time.Now().Unix())
+	h := filmHost()
+	s := newSharing(t, h, msfp.Config{Clock: clock}, msfp.Config{Clock: clock})
+	pb, err := s.b.eng.Play(ctx, s.onB.ID, msfp.PlayRequest{Title: "movie/tmdb/949"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent := func() []int64 {
+		t.Helper()
+		waitAll(s.b, s.a)
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return slices.Clone(h.progress)
+	}
+	report := func(after time.Duration, positionMs int64, paused bool) {
+		clock.Add(after)
+		s.b.eng.Progress(pb.ID, positionMs, paused)
+		s.b.eng.RunOnce(ctx)
+	}
+	report(10*time.Second, 10_000, false)
+	if got := sent(); !slices.Equal(got, []int64{10_000}) {
+		t.Fatalf("the first report, soon after the start: %v", got)
+	}
+	report(10*time.Second, 20_000, false)
+	report(10*time.Second, 30_000, false)
+	report(10*time.Second, 40_000, false)
+	report(10*time.Second, 50_000, false)
+	if got := sent(); !slices.Equal(got, []int64{10_000}) {
+		t.Fatalf("reports within 45 seconds: %v", got)
+	}
+	// 45 seconds after the first, with no report at that time: sent by
+	// the work of each second, with the latest position.
+	clock.Add(5 * time.Second)
+	s.b.eng.RunOnce(ctx)
+	if got := sent(); !slices.Equal(got, []int64{10_000, 50_000}) {
+		t.Fatalf("45 seconds on: %v", got)
+	}
+	// A pause and a resume, each at once.
+	report(time.Second, 51_000, true)
+	report(time.Second, 51_000, false)
+	if got := sent(); !slices.Equal(got, []int64{10_000, 50_000, 51_000, 51_000}) {
+		t.Fatalf("a pause and a resume: %v", got)
+	}
+	// The host reports no more (the viewer's browser gone): nothing is
+	// sent for it.
+	clock.Add(2 * time.Minute)
+	s.b.eng.RunOnce(ctx)
+	if got := sent(); len(got) != 4 {
+		t.Fatalf("without reports: %v", got)
 	}
 }

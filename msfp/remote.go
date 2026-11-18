@@ -23,8 +23,9 @@ import (
 
 // Times of the viewer's side.
 const (
-	// tellEvery is the most often progress is sent while the viewer
-	// watches (MSFP playback section 3).
+	// tellEvery is how often progress is sent while the viewer watches
+	// (MSFP playback section 3): never more often, but on a pause or a
+	// resume, and every tellEvery while the host reports.
 	tellEvery = 45 * time.Second
 	// replaceWait is how long a play waits for the stop of the playback
 	// it replaces (MSFP playback section 2.3).
@@ -100,11 +101,13 @@ type remote struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 
-	// Under remotes.mu.
+	// Under remotes.mu. told is when the peer was last sent progress
+	// (zero: never), fresh says the host reported since.
 	position   int64
 	paused     bool
 	told       time.Time
 	toldPaused bool
+	fresh      bool
 	playlists  map[string]bool // names a master playlist named
 }
 
@@ -323,7 +326,7 @@ func (e *Engine) Play(ctx context.Context, peer string, req PlayRequest) (Remote
 	}
 	rm.view.ID = "r" + lowerBase32.EncodeToString(idBytes)
 	rm.ctx, rm.cancel = context.WithCancel(context.Background())
-	rm.told, rm.position = e.now(), rm.view.PositionMs
+	rm.position = rm.view.PositionMs
 	// Kept until stopped, so that after a restart the peer is told it's
 	// over (MSFP playback section 6.3).
 	if err := e.cfg.Store.Update(ctx, func(tx Tx) error {
@@ -460,10 +463,12 @@ func (e *Engine) liveRemote(id string) *remote {
 	return rs.byID[id]
 }
 
-// Progress notes where a viewer is in a playback on a peer: the peer is
-// told at most every 45 seconds, and at once on a pause or a resume
-// (MSFP playback section 3). It returns at once. A 410 from the peer
-// ends the playback (RemotePlaybackEnded).
+// Progress notes where a viewer is in a playback on a peer (MSFP
+// playback section 3): the peer is told at the first report, at once on
+// a pause or a resume, and otherwise every 45 seconds at most while the
+// host reports, by Run's work of each second when no report comes at the
+// time. It returns at once. A 410 from the peer ends the playback
+// (RemotePlaybackEnded).
 func (e *Engine) Progress(id string, positionMs int64, paused bool) {
 	rs := &e.remotes
 	rs.mu.Lock()
@@ -473,20 +478,59 @@ func (e *Engine) Progress(id string, positionMs int64, paused bool) {
 		return
 	}
 	now := e.now()
-	rm.position, rm.paused = min(max(positionMs, 0), maxPositionMs), paused
-	due := paused != rm.toldPaused || now.Sub(rm.told) >= tellEvery
+	rm.position, rm.paused, rm.fresh = min(max(positionMs, 0), maxPositionMs), paused, true
+	due := rm.told.IsZero() || paused != rm.toldPaused || now.Sub(rm.told) >= tellEvery
+	var in progressCall
 	if due {
-		rm.told, rm.toldPaused = now, paused
+		in = rm.tell(now)
 	}
-	in := struct {
-		ID         string `json:"id"`
-		PositionMs int64  `json:"positionMs"`
-		Paused     bool   `json:"paused,omitempty"`
-	}{rm.theirID, rm.position, paused}
 	rs.mu.Unlock()
-	if !due {
-		return
+	if due {
+		e.sendProgress(rm, in)
 	}
+}
+
+// progressCall is progress's request.
+type progressCall struct {
+	ID         string `json:"id"`
+	PositionMs int64  `json:"positionMs"`
+	Paused     bool   `json:"paused,omitempty"`
+}
+
+// tell notes that the peer is told now where the viewer is, and gives
+// what it is sent. Under remotes.mu.
+func (rm *remote) tell(now time.Time) progressCall {
+	rm.told, rm.toldPaused, rm.fresh = now, rm.paused, false
+	return progressCall{ID: rm.theirID, PositionMs: rm.position, Paused: rm.paused}
+}
+
+// tellWatched sends progress for the playbacks on peers the host
+// reported since they were last sent it, 45 seconds ago or more: a host
+// whose reports don't fall on the time still keeps its playbacks there
+// told every 45 seconds.
+func (e *Engine) tellWatched() {
+	now := e.now()
+	rs := &e.remotes
+	rs.mu.Lock()
+	type due struct {
+		rm *remote
+		in progressCall
+	}
+	var send []due
+	for _, rm := range rs.byID {
+		if rm.fresh && now.Sub(rm.told) >= tellEvery {
+			send = append(send, due{rm, rm.tell(now)})
+		}
+	}
+	rs.mu.Unlock()
+	for _, d := range send {
+		e.sendProgress(d.rm, d.in)
+	}
+}
+
+// sendProgress sends progress in the background; a 410 ends the
+// playback.
+func (e *Engine) sendProgress(rm *remote, in progressCall) {
 	e.background(func(ctx context.Context) {
 		p, err := e.peerRecord(ctx, rm.peer)
 		if err != nil {
@@ -656,7 +700,16 @@ func (e *Engine) stopLeftovers(ctx context.Context) {
 			e.log.Warn("msfp: the playbacks left on peers couldn't be read", "error", err)
 			return
 		}
+		live := map[Leftover]bool{}
+		e.remotes.mu.Lock()
+		for _, rm := range e.remotes.byID {
+			live[Leftover{Peer: rm.peer, PlaybackID: rm.theirID}] = true
+		}
+		e.remotes.mu.Unlock()
 		for _, l := range left {
+			if live[l] {
+				continue // started since this run began: not left over
+			}
 			e.stopOnPeer(ctx, l.Peer, l.PlaybackID, -1)
 			if err := e.cfg.Store.Update(ctx, func(tx Tx) error { return tx.DeleteLeftover(l) }); err != nil {
 				e.log.Warn("msfp: a playback left on a peer couldn't be forgotten", "error", err)
