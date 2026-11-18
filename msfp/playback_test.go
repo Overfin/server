@@ -503,8 +503,10 @@ func TestStatesAndCuts(t *testing.T) {
 	if !strings.HasPrefix(theirs.ID, "play_") || len(theirs.ID) != 31 {
 		t.Errorf("a playback ID: %q", theirs.ID)
 	}
-	if call("stop", `{"id":"`+theirs.ID+`"}`) != 200 || call("stop", `{"id":"`+theirs.ID+`"}`) != 200 ||
-		call("progress", `{"id":"`+theirs.ID+`"}`) != 410 {
+	// A second stop of the same playback is answered 200 too.
+	stopped := call("stop", `{"id":"`+theirs.ID+`"}`)
+	again := call("stop", `{"id":"`+theirs.ID+`"}`)
+	if stopped != 200 || again != 200 || call("progress", `{"id":"`+theirs.ID+`"}`) != 410 {
 		t.Error("a stopped playback's calls")
 	}
 	s.b.eng.Stop(ctx, pb.ID, -1)

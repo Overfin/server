@@ -175,7 +175,7 @@ func (e *Engine) admitStream(peer string, l Limits, audio bool, method string) (
 	switch method {
 	case "direct", "remux", "transcode":
 	default:
-		return nil, ErrInternal.with(errors.New("Admit of a method MSFP doesn't have"))
+		return nil, ErrInternal.with(errors.New("admit of a method MSFP doesn't have"))
 	}
 	s := &countSlot{e: e, peer: peer, audio: audio && l.Audio, limits: l}
 	most, mostTranscodes := s.caps()
@@ -585,7 +585,7 @@ func (e *Engine) play(req *request) response {
 		AudioTrack: audio, SubtitleTrack: shown, StartMs: start, Capabilities: caps, MaxBitrateKbps: kbps,
 		Admit: func(method string) (Slot, error) {
 			if slot != nil {
-				return nil, ErrInternal.with(errors.New("Admit called twice"))
+				return nil, ErrInternal.with(errors.New("admit called twice"))
 			}
 			s, err := e.admitStream(p.ID, p.Limits, audioOnly, method)
 			if err != nil {

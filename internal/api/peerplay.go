@@ -369,6 +369,3 @@ func (pb Playback) chooseRemoteTracks(w http.ResponseWriter, r *http.Request, s 
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
-
-// segmentKinds are the skip markers there are (Jellyfin's, in lower case).
-var segmentKinds = []string{"intro", "outro", "recap", "preview", "commercial"}

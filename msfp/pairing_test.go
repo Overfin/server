@@ -15,7 +15,7 @@ import (
 func TestPairing(t *testing.T) {
 	ctx := context.Background()
 	a := newServer(t, msfp.Config{Name: func() string { return "Server A" }})
-	b := newServer(t, msfp.Config{Name: func() string { return "  Server\tB​ " }})
+	b := newServer(t, msfp.Config{Name: func() string { return "  Server\tB\u200b " }})
 
 	code, view, err := a.eng.MakeCode(ctx, "for B")
 	if err != nil {

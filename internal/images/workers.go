@@ -44,7 +44,7 @@ func RunWorker() bool {
 		return false
 	}
 	capMemory()
-	if err := serveWorker(os.Stdin, os.Stdout); err != nil && !errors.Is(err, io.EOF) {
+	if err := serveWorker(os.Stdin, os.Stdout); !errors.Is(err, io.EOF) {
 		fmt.Fprintln(os.Stderr, "image worker:", err)
 		os.Exit(1)
 	}

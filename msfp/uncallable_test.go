@@ -30,8 +30,7 @@ func TestUncallableServer(t *testing.T) {
 	ctx := context.Background()
 	clock := newClock(1800000000)
 	var open atomic.Bool
-	var u *server
-	u = newServerWith(t, msfp.Config{Clock: clock}, serverOpts{conn: func() {
+	u := newServerWith(t, msfp.Config{Clock: clock}, serverOpts{conn: func() {
 		if !open.Load() {
 			t.Error("a connection reached the server that can't be called")
 		}

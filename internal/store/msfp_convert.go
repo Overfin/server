@@ -190,8 +190,7 @@ func convertServer(ctx context.Context, tx *sql.Tx, s *Store, r *msfp.ServerReco
 	meta func(string) ([]byte, error), reseal func(name, from, to string) ([]byte, []byte, error),
 	unix func(string) (time.Time, error)) error {
 	var err error
-	var next []byte
-	if r.Next, next, err = reseal("federation-next-key", federationNextContext, msfpNext); err != nil {
+	if r.Next, _, err = reseal("federation-next-key", federationNextContext, msfpNext); err != nil {
 		return err
 	}
 	if r.NextCommitment, err = meta("federation-next-commitment"); err != nil {
@@ -200,7 +199,7 @@ func convertServer(ctx context.Context, tx *sql.Tx, s *Store, r *msfp.ServerReco
 	if r.NextCommitment == nil {
 		// A next key Overfin never made (it makes one at each start: none
 		// on a server that started once only, before it did): one now.
-		next = make([]byte, 32)
+		next := make([]byte, 32)
 		if _, err := rand.Read(next); err != nil {
 			return err
 		}
