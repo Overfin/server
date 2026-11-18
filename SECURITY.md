@@ -17,7 +17,7 @@ network security expert. So the rules come in two kinds:
 
 - **Hard rules** hold on every server, whatever its settings. No setting
   loosens them. Above all, between servers (rules 94 to 100, 136 to
-  138): one badly run server must never be a way into another.
+  139): one badly run server must never be a way into another.
 - **Settings** are where the operator's setup decides. Each is listed here
   with what it can be set to. Its default is the safest choice that works
   without extra setup, and changing it only ever affects that operator's
@@ -568,7 +568,7 @@ anyone. Paired servers are not trusted at all (rule 94).
     allowance for the other's clock. Refusals to servers known
     now or before are signed too, and unsigned ones count as no answer. A
     stranger gets a plain 404. A server's key changes only as rules 137
-    and 138 say.
+    and 138 say; its address, as rule 139 says.
 96. Each side shares only libraries it offers and the other wants: titles
     by key, with their languages, never files, paths or people. Playing
     stays within the pairing's limits (2 streams and 1 transcode at first,
@@ -859,6 +859,24 @@ anyone. Paired servers are not trusted at all (rule 94).
      paired server, then moves to the next key in the same action when
      it is safe; otherwise the server gets a new key and every pairing
      ends, to be made again with new codes.
+
+### Addresses between servers
+
+139. A paired server's stored address changes only once a hello at the
+     new address, signed for its host, is answered under the key the
+     peer is known by. The address its signed hello names must have the
+     form of a code's (rule 99); one that is only in an unsigned message,
+     or in an answer that doesn't verify, is never followed. The
+     confirming connection is checked as rule 136 says, and accepts any
+     certificate, as hello does (rule 99): the pins named for the old
+     address are dropped then, for those the confirming answer names.
+     Until then, and when it fails, the old address stays; it is tried
+     again at most once an hour, and the operator is warned after a day.
+     When this server's own address changes, requests signed for its
+     former host are accepted too, 30 days at most, and no longer once
+     every peer signs for the new one; never a third host. A stolen key
+     can move its server's peers this way, until it is revoked (rule
+     138).
 
 ## Deployment
 
