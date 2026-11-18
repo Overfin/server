@@ -17,7 +17,10 @@ import (
 type Type string
 
 const (
-	NotFound         Type = "not-found"
+	NotFound Type = "not-found"
+	// NotSupported: a federation call of an MSFP part this server doesn't
+	// speak with the caller (MSFP core section 10.4).
+	NotSupported     Type = "not-supported"
 	NotAuthenticated Type = "not-authenticated"
 	OwnerOnly        Type = "owner-only"
 	// AccountNotAllowed: the identity may not use this instance (not in
@@ -85,6 +88,7 @@ type info struct {
 // for every occurrence of a type.
 var registry = map[Type]info{
 	NotFound:             {http.StatusNotFound, "Not found"},
+	NotSupported:         {http.StatusNotFound, "Not supported"},
 	NotAuthenticated:     {http.StatusUnauthorized, "Not logged in"},
 	OwnerOnly:            {http.StatusForbidden, "Only the account owner can do this"},
 	AccountNotAllowed:    {http.StatusForbidden, "This account may not use this service"},
