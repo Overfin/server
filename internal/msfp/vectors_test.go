@@ -209,7 +209,7 @@ func TestVectorHello(t *testing.T) {
 	x := v.Exchanges[i]
 	a, err := ReadHello([]byte(x.Body), false)
 	if err != nil || a.State != "paired" || a.Address != "https://a.example.org" ||
-		!slices.Equal(a.Versions.Core, []int{0, 1}) || len(a.Versions.Parts) != 4 || len(a.Certificates) != 1 {
+		!slices.Equal(a.Versions.Core, []int{1}) || len(a.Versions.Parts) != 4 || len(a.Certificates) != 1 {
 		t.Fatalf("A's hello reads as %+v, %v", a, err)
 	}
 	b, err := ReadHello([]byte(x.AnswerBody), true)
