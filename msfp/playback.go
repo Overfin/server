@@ -614,9 +614,15 @@ func (e *Engine) play(req *request) response {
 		return res.response
 	}
 	// The pairing ended, or the library is no longer offered, while it
-	// started: it ends at once.
-	if q, err := e.peerRecord(ctx, p.ID); err != nil || q.State != Paired || !q.Suspended.IsZero() ||
-		chosen.Library != "" && !slices.Contains(q.Offers, chosen.Library) {
+	// started: it ends at once, saying which.
+	switch q, err := e.peerRecord(ctx, p.ID); {
+	case errors.Is(err, ErrNotFound) || err == nil && (q.State != Paired || !q.Suspended.IsZero()):
+		e.endPlayback(pb, EndPairingEnded)
+		return refuse(probNotFound)
+	case err != nil:
+		e.endPlayback(pb, EndStopped)
+		return refuse(probInternal)
+	case chosen.Library != "" && !slices.Contains(q.Offers, chosen.Library):
 		e.endPlayback(pb, EndNotOffered)
 		return refuse(probNotFound)
 	}

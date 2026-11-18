@@ -38,8 +38,9 @@ type fakeHost struct {
 	files  map[string][]byte
 	serve  func(ctx context.Context, path msfp.MediaPath, rng *msfp.Range, out msfp.ResponseSink) error
 	served []msfp.MediaPath
-	// hold makes Start wait until it is closed, so that plays cross.
-	hold chan struct{}
+	// hold makes Start wait until it is closed, so that plays cross;
+	// entered, when set, is told each Start that waits.
+	hold, entered chan struct{}
 }
 
 func newFakeHost() *fakeHost {
@@ -124,9 +125,12 @@ func (h *fakeHost) Describe(_ context.Context, copy string) (msfp.CopyInfo, erro
 
 func (h *fakeHost) Start(_ context.Context, req msfp.StartRequest) (msfp.Started, error) {
 	h.mu.Lock()
-	method, protocol, err, noAdmit, hold := h.method, h.protocol, h.startErr, h.noAdmit, h.hold
+	method, protocol, err, noAdmit, hold, entered := h.method, h.protocol, h.startErr, h.noAdmit, h.hold, h.entered
 	h.mu.Unlock()
 	if hold != nil {
+		if entered != nil {
+			entered <- struct{}{}
+		}
 		<-hold
 	}
 	if err != nil {

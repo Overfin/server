@@ -633,3 +633,63 @@ func TestStopPlaybackReason(t *testing.T) {
 		t.Errorf("again: %v", err)
 	}
 }
+
+// Play's errors: what lasts says itself (here, B's key lost toward A,
+// which never moved to it); only no answer, or none signed, is busy now
+// (MSFP playback section 2.5).
+func TestPlayErrorsToldApart(t *testing.T) {
+	ctx := context.Background()
+	clock := newClock(1800000000)
+	s := newSharing(t, filmHost(), msfp.Config{Clock: clock}, msfp.Config{Clock: clock})
+	play := func() error {
+		_, err := s.b.eng.Play(ctx, s.onB.ID, msfp.PlayRequest{Title: "movie/tmdb/949"})
+		return err
+	}
+	s.a.setDown(true)
+	if err := play(); !errors.Is(err, msfp.ErrServerBusy) {
+		t.Errorf("A down: %v", err)
+	}
+	// B rotates twice while A is down: A never knew B's new keys.
+	for range 2 {
+		if err := s.b.eng.Rotate(ctx, ""); err != nil {
+			t.Fatal(err)
+		}
+		clock.Add(time.Hour)
+	}
+	s.a.setDown(false)
+	if v := peerView(t, s.b, s.onB.ID); v.OurKey != msfp.KeyLost {
+		t.Fatalf("A on B: %+v", v)
+	}
+	if err := play(); !errors.Is(err, msfp.ErrKeyLost) || errors.Is(err, msfp.ErrServerBusy) {
+		t.Errorf("B's key lost toward A: %v", err)
+	}
+}
+
+// The pairing ending while a playback starts ends it as the pairing's
+// end, not as a copy no longer shared (MSFP playback section 6.3).
+func TestPairingEndsWhilePlayStarts(t *testing.T) {
+	ctx := context.Background()
+	h := filmHost()
+	s := newSharing(t, h, msfp.Config{}, msfp.Config{})
+	h.mu.Lock()
+	h.hold, h.entered = make(chan struct{}), make(chan struct{}, 1)
+	h.mu.Unlock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.b.eng.Play(ctx, s.onB.ID, msfp.PlayRequest{Title: "movie/tmdb/949"})
+		done <- err
+	}()
+	<-h.entered
+	if err := s.a.eng.End(ctx, s.onA.ID); err != nil {
+		t.Fatal(err)
+	}
+	close(h.hold)
+	if err := <-done; err == nil {
+		t.Error("played after the pairing ended")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if got := h.stopped["h1"]; got != msfp.EndPairingEnded {
+		t.Errorf("the host's playback ended as %q", got)
+	}
+}

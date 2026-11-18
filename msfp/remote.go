@@ -229,11 +229,13 @@ type playReading struct {
 // Play starts a playback of a peer's title for one of this server's
 // viewers. The host has decided the viewer may; the engine refuses
 // before calling when the peer can't be used, or its last limits say no
-// stream. StreamLimitReached, ServerBusy and BackingOff mean busy now;
+// stream. StreamLimitReached, ServerBusy (no answer, none signed, or a
+// 503) and BackingOff (a 429, or calls unanswered lately) mean busy now;
 // NotPlayable and the others, not playable (MSFP playback section 2.5).
 // Errors: ErrNotFound, ErrNotPaired, ErrUncallable, ErrSuspended,
-// ErrNotSupported, ErrStreamLimitReached, ErrServerBusy, ErrBackingOff,
-// ErrNotPlayable.
+// ErrKeyLost, ErrNotSupported, ErrRefusedDestination,
+// ErrCertificateRefused, ErrStreamLimitReached, ErrServerBusy,
+// ErrBackingOff, ErrNotPlayable.
 func (e *Engine) Play(ctx context.Context, peer string, req PlayRequest) (RemotePlayback, error) {
 	p, err := e.peerRecord(ctx, peer)
 	if err != nil {
@@ -287,11 +289,14 @@ func (e *Engine) Play(ctx context.Context, peer string, req PlayRequest) (Remote
 	var raw json.RawMessage
 	r, err := e.call(ctx, p, callPlay, in, &raw, false)
 	switch {
-	case errors.Is(err, ErrBackingOff), errors.Is(err, ErrNotSupported):
-		return RemotePlayback{}, err
-	case err != nil:
+	case errors.Is(err, ErrUnreachable):
 		// No answer, or none signed: busy now (MSFP playback section 2.5).
 		return RemotePlayback{}, ErrServerBusy.with(err)
+	case err != nil:
+		// What lasts says itself (ErrKeyLost, ErrSuspended, ErrUncallable,
+		// ErrNotSupported, a destination or certificate refused…), as
+		// does ErrBackingOff, busy now.
+		return RemotePlayback{}, err
 	case r.status == http.StatusConflict && r.problem == string(probNotPlayable):
 		return RemotePlayback{}, ErrNotPlayable
 	case r.status == http.StatusConflict:
