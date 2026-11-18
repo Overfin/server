@@ -272,9 +272,15 @@
     },
     {
       "name": "numbers at their bounds",
-      "text": "{\"key\":\"track/mb/0c000000-0000-4000-8000-000000000003\",\"kind\":\"track\",\"library\":\"m1\",\"name\":\"x\",\"disc\":999,\"number\":1,\"year\":1000,\"durationMs\":0}",
+      "text": "{\"key\":\"track/mb/0c000000-0000-4000-8000-000000000003\",\"kind\":\"track\",\"library\":\"m1\",\"name\":\"x\",\"disc\":999,\"number\":1,\"year\":1000,\"durationMs\":1}",
       "valid": true,
-      "output": "{\"key\":\"track/mb/0c000000-0000-4000-8000-000000000003\",\"kind\":\"track\",\"library\":\"m1\",\"name\":\"x\",\"disc\":999,\"number\":1,\"year\":1000,\"durationMs\":0}"
+      "output": "{\"key\":\"track/mb/0c000000-0000-4000-8000-000000000003\",\"kind\":\"track\",\"library\":\"m1\",\"name\":\"x\",\"disc\":999,\"number\":1,\"year\":1000,\"durationMs\":1}"
+    },
+    {
+      "name": "a durationMs of 0: absent",
+      "text": "{\"key\":\"track/mb/0c000000-0000-4000-8000-000000000003\",\"kind\":\"track\",\"library\":\"m1\",\"name\":\"x\",\"durationMs\":0}",
+      "valid": true,
+      "output": "{\"key\":\"track/mb/0c000000-0000-4000-8000-000000000003\",\"kind\":\"track\",\"library\":\"m1\",\"name\":\"x\"}"
     },
     {
       "name": "numbers at their other bounds",

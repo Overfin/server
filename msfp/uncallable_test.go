@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -299,4 +300,86 @@ func peerFingerprint(t *testing.T, s *server, id string) string {
 		t.Fatal(err)
 	}
 	return p.Fingerprint
+}
+
+// Turning "can't be called" off: until this server reaches its real
+// address, it still says it can't be called, with its .invalid address,
+// and keeps its scheduled hellos; its move doesn't end meanwhile (MSFP
+// core section 7.5, "Turning it off"). Then its peer confirms its
+// address; an answer there that says inbound false after all puts it
+// back as one that can't be called (back).
+func TestUncallableOffWaitsForItsAddress(t *testing.T) {
+	for _, back := range []bool{false, true} {
+		t.Run(fmt.Sprint("back=", back), func(t *testing.T) { uncallableOff(t, back) })
+	}
+}
+
+func uncallableOff(t *testing.T, back bool) {
+	ctx := context.Background()
+	clock := newClock(1800000000)
+	u := newServer(t, msfp.Config{Clock: clock})
+	a := newServer(t, msfp.Config{Clock: clock})
+	if err := u.eng.SetUncallable(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	invalid := serverView(t, u).Address
+	code, _, _ := a.eng.MakeCode(ctx, "")
+	if _, err := u.eng.RedeemCode(ctx, code); err != nil {
+		t.Fatal(err)
+	}
+	uOnA := onlyPeer(t, a.eng)
+	if _, err := a.eng.Accept(ctx, uOnA.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	u.setDown(true)
+	if err := u.eng.SetUncallable(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	waitAll(u)
+	before := len(a.exchanges("hello"))
+	for range 2 {
+		clock.Add(10 * time.Minute)
+		if err := u.eng.RunOnce(ctx); err != nil {
+			t.Fatal(err)
+		}
+		waitAll(a, u)
+		if sv := serverView(t, u); sv.Named != invalid {
+			t.Fatalf("U before its address answers: %+v", sv)
+		}
+	}
+	if p := peerView(t, a, uOnA.ID); p.Inbound != msfp.InboundNo || p.Address != invalid {
+		t.Errorf("U on A before: %+v", p)
+	}
+	if len(a.exchanges("hello")) < before+2 {
+		t.Errorf("U's scheduled hellos stopped: %d then %d", before, len(a.exchanges("hello")))
+	}
+
+	if back {
+		u.setRewrite(func(path string, _ http.Header, body []byte) ([]byte, bool) {
+			var m map[string]any
+			if !strings.HasSuffix(path, "/hello") || json.Unmarshal(body, &m) != nil || m["state"] == nil {
+				return nil, false
+			}
+			m["inbound"], m["address"] = false, invalid
+			b, _ := json.Marshal(m)
+			return b, true
+		})
+	}
+	u.setDown(false)
+	clock.Add(10 * time.Minute)
+	if err := u.eng.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitAll(a, u)
+	if sv := serverView(t, u); sv.Named != u.srv.URL {
+		t.Errorf("U once its address answers: %+v", sv)
+	}
+	want, address := msfp.InboundYes, u.srv.URL
+	if back {
+		want, address = msfp.InboundNo, invalid
+	}
+	if p := peerView(t, a, uOnA.ID); p.Inbound != want || p.Address != address || p.Moving != nil {
+		t.Errorf("U on A after: %+v", p)
+	}
 }

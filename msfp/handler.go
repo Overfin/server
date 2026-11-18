@@ -204,10 +204,14 @@ func (e *Engine) check(req *request, call string) (free func(), res response, ok
 	if errors.Is(err, wire.ErrForgotten) {
 		// A server whose pairing ended when our key was stolen: its hello
 		// gets the revocation, for 30 days (MSFP core section 12.7).
-		if call == callHello {
-			if res, ok := e.revocationAnswer(req); ok {
-				return nil, res, false
-			}
+		res, replaced := e.revocationAnswer(req, call)
+		if res != nil {
+			return nil, *res, false
+		}
+		// One whose pairing ended in a replacement, after those 30 days:
+		// it can't know our new key, so "unknown" unsigned (section 12.7).
+		if replaced {
+			return nil, plain404, false
 		}
 		// A server whose pairing ended: "unknown", signed.
 		k := e.current()

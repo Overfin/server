@@ -63,6 +63,50 @@ func TestLibrariesAndPaging(t *testing.T) {
 	}
 }
 
+// A whole reading that fails halfway keeps the previous complete list:
+// nothing of the pages it read (MSFP catalog section 3.2).
+func TestWholeReadingFailsHalfway(t *testing.T) {
+	ctx := context.Background()
+	h := newFakeHost()
+	h.libs = []msfp.Library{{ID: "films", Name: "Films", Kind: "movies"}, {ID: "more", Name: "More", Kind: "movies"}}
+	for i := 1; i <= 6_000; i++ {
+		h.film("films", fmt.Sprintf("movie/tmdb/%d", i), "en")
+	}
+	h.film("more", "movie/tmdb/9999999", "en")
+	s := newSharing(t, h, msfp.Config{}, msfp.Config{})
+	before := keysOf(s.peerTitles(t))
+	if len(before) != 6_001 {
+		t.Fatalf("B kept %d titles", len(before))
+	}
+	// A's next list, whole since its offers changed: one title less, one
+	// more, on its first page; its second page is broken.
+	h.remove("movie/tmdb/1")
+	h.film("films", "movie/tmdb/10000", "en")
+	s.a.eng.CatalogChanged()
+	if err := s.a.eng.SetOffers(ctx, s.onA.ID, []string{"films"}); err != nil {
+		t.Fatal(err)
+	}
+	pages := 0
+	s.a.setRewrite(func(path string, _ http.Header, body []byte) ([]byte, bool) {
+		if !strings.HasSuffix(path, "/titles") {
+			return nil, false
+		}
+		if pages++; pages == 2 {
+			return []byte(`{"titles":`), true
+		}
+		return nil, false
+	})
+	if _, err := s.b.eng.ReadNow(ctx, s.onB.ID); err == nil {
+		t.Fatal("a broken page read")
+	}
+	if pages != 2 {
+		t.Fatalf("%d pages", pages)
+	}
+	if got := keysOf(s.peerTitles(t)); !slices.Equal(got, before) {
+		t.Errorf("B keeps %d titles, not the previous list of %d", len(got), len(before))
+	}
+}
+
 func TestCatalogChanges(t *testing.T) {
 	ctx := context.Background()
 	h := newFakeHost()

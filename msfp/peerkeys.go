@@ -261,22 +261,29 @@ func (e *Engine) DismissRefused(ctx context.Context, id string) error {
 // revoked with no next key (MSFP core section 12.7, case 2), the answer
 // to a hello from a peer whose pairing ended in that replacement: a 200
 // signed with the key revoked, carrying only the revocation, newly
-// dated. ok is false for anyone else.
-func (e *Engine) revocationAnswer(req *request) (response, bool) {
-	k := e.ourKeys()
-	if k.revoked == nil || e.now().Sub(k.revokedAt) >= keyOverlap {
-		return response{}, false
-	}
+// dated; nil for any other call or caller. replaced says the caller's
+// pairing ended in a replacement whose 30 days are over (or an earlier
+// replacement): it gets the plain unsigned 404, since it can't know the
+// key that replaced the one it knew.
+func (e *Engine) revocationAnswer(req *request, call string) (res *response, replaced bool) {
 	var f *ForgottenKey
 	if err := e.cfg.Store.Read(req.r.Context(), func(tx Tx) error {
 		var err error
 		f, err = tx.Forgotten(sha256Of(req.v.Key))
 		return err
-	}); err != nil || f == nil || !f.Revoked || !f.At.Equal(k.revokedAt) {
-		return response{}, false
+	}); err != nil || f == nil || !f.Revoked {
+		return nil, false
+	}
+	k := e.ourKeys()
+	if k.revoked == nil || !f.At.Equal(k.revokedAt) || e.now().Sub(k.revokedAt) >= keyOverlap {
+		return nil, true
+	}
+	if call != callHello {
+		return nil, false
 	}
 	req.signer = k.revoked
-	return answer(revocationOnly{Revocation: wire.SignRevocation(*k.revoked, e.now()).Body()}), true
+	a := answer(revocationOnly{Revocation: wire.SignRevocation(*k.revoked, e.now()).Body()})
+	return &a, true
 }
 
 // revocationOnly is the answer of revocationAnswer.

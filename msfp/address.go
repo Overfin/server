@@ -177,10 +177,19 @@ func (e *Engine) startMove(tx Tx, r *ServerRecord, to string) error {
 	if err != nil {
 		return err
 	}
-	if notMovedCount(peers, wire.Host(to)) > 0 {
+	// From the .invalid form, the move lasts until the real address is
+	// reached, whoever has moved: until then this server still says it
+	// can't be called (MSFP core section 7.5, "Turning it off").
+	if notMovedCount(peers, wire.Host(to)) > 0 || wire.Uncallable(from) {
 		r.Former, r.MovedAt = from, e.now().Truncate(time.Second)
 	}
 	return nil
+}
+
+// moveOver says whether r's move ends now that n peers haven't moved:
+// none left, and, from the .invalid form, the real address reached.
+func moveOver(r *ServerRecord, n int) bool {
+	return n == 0 && (r.Reached || !wire.Uncallable(r.Former))
 }
 
 // notMoved says whether p counts among the peers that must move to our
@@ -251,7 +260,9 @@ func (e *Engine) reachAndAnnounce(ctx context.Context) {
 		if r.Address != a.address || r.Former == "" || r.Reached {
 			return errUnchanged
 		}
-		r.Reached, reached = true, true
+		// The 30 days of the former address run from now (MSFP core
+		// section 13.1, step 1).
+		r.Reached, r.MovedAt, reached = true, e.now().Truncate(time.Second), true
 		return nil
 	})
 	if err != nil {
@@ -368,7 +379,7 @@ func (e *Engine) heardAt(ctx context.Context, p *PeerRecord, former bool) {
 		if err != nil {
 			return err
 		}
-		if notMovedCount(peers, host) == 0 {
+		if moveOver(r, notMovedCount(peers, host)) {
 			events = endMove(r, 0)
 		}
 		return nil
@@ -403,7 +414,7 @@ func (e *Engine) maintainAddresses(ctx context.Context) error {
 			}
 			n := notMovedCount(peers, wire.Host(r.Address))
 			switch {
-			case n == 0:
+			case moveOver(r, n):
 				events = endMove(r, 0)
 			case r.Reached && now.Sub(r.MovedAt) >= wire.AddressOverlap:
 				e.log.Warn("msfp: 30 days since this server's address changed; peers that didn't follow can't reach it", "peers", n)
@@ -527,7 +538,9 @@ func (e *Engine) confirmSoon(id string) {
 // peer (refused destinations refused, any certificate accepted). Answered
 // under its key, the new address and base are stored, with the pins that
 // answer names, the old address's dropped; a peer that said it can be
-// called again is called from then on, its catalog read at once. Failing,
+// called again is called from then on, its catalog read at once; one
+// whose answer says inbound false is back to "can't be called". Only a
+// 200 confirms (a signed 404 there doesn't). Failing,
 // the old address stays, and the failure is noted for the next try, an
 // hour later at least; after a day of failures the operator is warned.
 // A suspended peer's move waits: nothing is asked of a revoked key.
@@ -606,6 +619,18 @@ func (e *Engine) confirmMove(ctx context.Context, id string) {
 		events, callable, superseded = nil, false, false
 		if q.Move == nil || !wire.SameKey(q.Key, p.Key) {
 			return // its stored address named again, or another key, meanwhile
+		}
+		// It says it can't be called after all: back to that, its move
+		// dropped, the address it names (of the .invalid form) stored
+		// at once, as any hello of such a peer (MSFP core section 7.5).
+		if ans.Uncallable {
+			q.Move = nil
+			events, _ = e.keepHello(q, ans)
+			if ans.State == helloPaired {
+				events = append(events, e.theyPaired(q)...)
+			}
+			q.Seen = now
+			return
 		}
 		// It named yet another address while this one was checked: this
 		// one answered under its key, so it is stored all the same (MSFP

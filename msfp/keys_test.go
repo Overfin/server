@@ -563,7 +563,9 @@ func TestKeyStolenWithoutNext(t *testing.T) {
 	if _, err := e.eng.Check(ctx, aOnE); !errors.Is(err, msfp.ErrUnreachable) || !peerView(t, e, aOnE).Suspended.IsZero() {
 		t.Errorf("E's hello after 30 days: %v", err)
 	}
-	if x := a.exchanges("hello"); x[len(x)-1].status != 404 {
+	// E, after the 30 days: the plain 404 of an unknown key, not one
+	// signed with a key it can't know (section 12.7, case 2).
+	if x := a.exchanges("hello"); x[len(x)-1].status != 404 || x[len(x)-1].resSig != "" {
 		t.Errorf("A's answer to E: %+v", x[len(x)-1])
 	}
 }

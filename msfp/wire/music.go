@@ -124,8 +124,7 @@ type MusicTitle struct {
 	Disc        int
 	Number      int
 	Year        int
-	DurationMs  int64
-	HasDuration bool // a durationMs of 0 is a length too
+	DurationMs  int64 // 0: none (a durationMs of 0 counts as absent)
 	IDs         map[string]string
 }
 
@@ -192,9 +191,7 @@ func ReadMusicTitle(raw json.RawMessage) (MusicTitle, bool) {
 		}
 		out.Disc = int(integerIn(t.Disc, 1, 999))
 		out.Number = int(integerIn(t.Number, 1, 999))
-		if d := integerIn(t.DurationMs, 0, 86_400_000); d >= 0 {
-			out.DurationMs, out.HasDuration = d, true
-		}
+		out.DurationMs = max(integerIn(t.DurationMs, 0, 86_400_000), 0)
 	}
 	var ids map[string]any // not an object: none
 	if json.Unmarshal(t.IDs, &ids) == nil {

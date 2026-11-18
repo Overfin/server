@@ -144,6 +144,9 @@ func TestAnnounceWaitsForReach(t *testing.T) {
 	a := newServer(t, msfp.Config{Clock: clock})
 	b := newServer(t, msfp.Config{Clock: clock})
 	_, bOnB := pair(t, a, b)
+	c := newServer(t, msfp.Config{Clock: clock})
+	pair(t, a, c)
+	c.setDown(true)              // C doesn't move: the move lasts
 	a2 := a.alias(t, false, nil) // another server answers there, for now
 	a1 := a.srv.URL
 	if err := a.eng.SetAddress(ctx, a2.srv.URL); err != nil {
@@ -178,6 +181,11 @@ func TestAnnounceWaitsForReach(t *testing.T) {
 	waitAll(a, b)
 	if p, _ := b.eng.Peer(ctx, bOnB.ID); p.Address != a2.srv.URL {
 		t.Errorf("A on B: %+v", p)
+	}
+	// The 30 days of A1 run from when A2 was reached (MSFP core section
+	// 13.1, step 1).
+	if sv, _ := a.eng.Server(ctx); !sv.MovedAt.Equal(clock.Now()) {
+		t.Errorf("A's move since %v, reached at %v", sv.MovedAt, clock.Now())
 	}
 }
 

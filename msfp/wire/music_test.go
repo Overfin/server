@@ -77,7 +77,7 @@ func musicMap(m MusicTitle) map[string]any {
 	set("disc", float64(m.Disc), m.Disc != 0)
 	set("number", float64(m.Number), m.Number != 0)
 	set("year", float64(m.Year), m.Year != 0)
-	set("durationMs", float64(m.DurationMs), m.HasDuration)
+	set("durationMs", float64(m.DurationMs), m.DurationMs != 0)
 	if len(m.IDs) > 0 {
 		ids := map[string]any{}
 		for k, v := range m.IDs {

@@ -349,7 +349,8 @@ type titlesReading struct {
 // keeps them (MSFP catalog section 3.2): only what changed since the
 // last reading, when the peer gives changes and the libraries are the
 // same; the whole list otherwise, after which titles not seen are
-// dropped. A reading that fails keeps what was kept before it.
+// dropped. A reading that fails keeps what was kept before it: a whole
+// list is held in memory until its last page, then kept in one Update.
 func (e *Engine) readCatalog(ctx context.Context, id string, background bool) (kept int, err error) {
 	l := e.reading.peerLock(id)
 	l.Lock()
@@ -408,6 +409,7 @@ func (e *Engine) readCatalog(ctx context.Context, id string, background bool) (k
 		since = p.CatalogRead.Seq
 	}
 	var seq int64
+	var whole []Title // a whole list's titles, kept once read to its end
 	first := true
 	for after := ""; ; {
 		var ans titlesReading
@@ -449,7 +451,12 @@ func (e *Engine) readCatalog(ctx context.Context, id string, background bool) (k
 		if kept += len(page); kept > maxPeerTitles {
 			return kept, ErrUnreachable.with(fmt.Errorf("more than %d titles", maxPeerTitles))
 		}
-		err = e.cfg.Store.Update(ctx, func(tx Tx) error {
+		if !changes {
+			// A whole list is kept only once read to its end: until then
+			// the previous one stays, and a reading that fails halfway
+			// leaves nothing of its pages (MSFP catalog section 3.2).
+			whole = append(whole, page...)
+		} else if err := e.cfg.Store.Update(ctx, func(tx Tx) error {
 			if len(page) > 0 {
 				if err := tx.PutPeerTitles(id, reading, page); err != nil {
 					return err
@@ -459,8 +466,7 @@ func (e *Engine) readCatalog(ctx context.Context, id string, background bool) (k
 				return tx.DropPeerTitles(id, gone)
 			}
 			return nil
-		})
-		if err != nil {
+		}); err != nil {
 			return kept, err
 		}
 		if ans.Next == nil || *ans.Next == "" || *ans.Next <= after {
@@ -474,6 +480,11 @@ func (e *Engine) readCatalog(ctx context.Context, id string, background bool) (k
 			return cmp.Or[error](err, ErrNotFound)
 		}
 		if !changes {
+			for page := range slices.Chunk(whole, titlesPage) {
+				if err := tx.PutPeerTitles(id, reading, page); err != nil {
+					return err
+				}
+			}
 			if err := tx.EndReading(id, reading); err != nil {
 				return err
 			}
