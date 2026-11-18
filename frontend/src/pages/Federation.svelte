@@ -1,9 +1,10 @@
 <!-- Federation: pairing this server with other Overfin servers, by a
-     one-time code one operator sends the other. Pairing only, so far:
-     nothing is shared yet (ROADMAP.md milestone 6). -->
+     one-time code one operator sends the other, then sharing library by
+     library (ROADMAP.md milestone 6); and the servers' keys: this one's
+     next key, changing it, revoking it when stolen, and the peers'. -->
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { PageHead, Card, Field, FormModal, Modal, Secret, Setting, Empty, Loading, Notice, ask, toast } from '@overfin/ui';
+  import { PageHead, Card, Field, FormModal, Modal, Secret, Setting, Badge, Busy, Empty, Loading, Notice, ask, toast } from '@overfin/ui';
   import { api } from '../lib/api';
   import { ago, day, when, message, plural } from '../lib/format';
 
@@ -22,6 +23,16 @@
     unusable?: boolean;
     otherVersion?: boolean;
     wantsGone?: number;
+    // Its keys: where its next key's commitment came from ('' for none);
+    // a change of its key waiting for you; when it revoked its key; a
+    // change refused. What it knows of ours: 'old' not moved yet, 'lost'
+    // didn't move in time.
+    commitment: '' | 'pair' | 'rotation' | 'hello';
+    pending?: { fingerprint: string; date: string };
+    suspendedAt?: string;
+    refused?: { fingerprint: string; at: string };
+    ourKey?: 'old' | 'lost';
+    rotationAnswer?: 'pending' | 'refused';
   }
   interface Lib {
     id: string;
@@ -58,6 +69,8 @@
     fingerprint?: string;
     codes?: Code[];
     peers?: Peer[];
+    nextKey?: { fingerprint: string; onServer: boolean };
+    rotation?: { since: string; until: string };
   }
   interface Preview {
     address: string;
@@ -85,6 +98,13 @@
   // Your names for the wanted libraries' entries on the site, by ID.
   let labels = $state<Record<string, string>>({});
   let limits = $state<Limits>({ streams: 2, transcodes: 1, bitrateKbps: 0 });
+  // This server's keys: the next key shown once exported; changing the
+  // key, or revoking it, in a window, with the next key pasted back when
+  // it isn't on the server.
+  let exported = $state<{ text: string; fingerprint: string } | null>(null);
+  let changing = $state<'rotate' | 'revoke' | null>(null);
+  let nextKeyText = $state('');
+  let withoutNext = $state(false);
 
   // One load at a time: a slow answer doesn't pile up the next ones. Asked
   // during one (an action just done while the timer's was on its way), it
@@ -238,6 +258,92 @@
     await load();
   }
 
+  async function exportNextKey() {
+    const e = await api<{ text: string; fingerprint: string }>('POST', '/admin/api/federation/next-key/export', {});
+    exported = e;
+  }
+
+  async function deleteNextKey() {
+    const yes = await ask(
+      "Delete the next key from this server? Keep the copy you made somewhere safe, away from the server: changing this server's key, or recovering from a stolen one, will need it. Someone who copies the server's storage then can't change its key.",
+      { yes: 'Delete it from the server', danger: true },
+    );
+    if (!yes) return;
+    try {
+      await api('DELETE', '/admin/api/federation/next-key');
+      exported = null;
+      toast('The next key is no longer on this server.');
+    } catch (err) {
+      toast(message(err), true);
+    }
+    await load();
+  }
+
+  function change(what: 'rotate' | 'revoke') {
+    nextKeyText = '';
+    withoutNext = false;
+    changing = what;
+  }
+
+  async function saveChange() {
+    if (changing === 'rotate') {
+      await api('POST', '/admin/api/federation/key/rotate', { nextKey: nextKeyText.trim() });
+      toast("This server's key changed. Paired servers are told.");
+    } else {
+      const r = await api<{ rotated: boolean }>('POST', '/admin/api/federation/key/revoke', { nextKey: nextKeyText.trim(), withoutNextKey: withoutNext });
+      toast(r.rotated ? "The stolen key is revoked, and this server moved to its next key." : 'The stolen key is revoked. Every pairing ended: pair again with new codes.');
+    }
+    await load();
+  }
+
+  async function confirmKey(p: Peer) {
+    if (!p.pending) return;
+    const yes = await ask(
+      `${p.name} changed its key. Confirm the new key's fingerprint with its operator first, by phone or a message you trust: ${p.pending.fingerprint}. If they differ, don't confirm: end the pairing instead.`,
+      { yes: 'Confirm the new key' },
+    );
+    if (!yes) return;
+    try {
+      await api('POST', `/admin/api/federation/peers/${p.id}/confirm-key`, {});
+      toast(`${p.name}'s new key confirmed.`);
+    } catch (err) {
+      toast(message(err), true);
+    }
+    await load();
+  }
+
+  async function dismiss(p: Peer) {
+    await api('DELETE', `/admin/api/federation/peers/${p.id}/refused`);
+    await load();
+  }
+
+  // A peer's key, in a word: what the Key column shows.
+  function keyState(p: Peer): { text: string; kind: '' | 'ok' | 'warn' | 'err' | 'info' } {
+    if (p.suspendedAt) return { text: 'Suspended', kind: 'err' };
+    if (p.pending) return { text: 'To confirm', kind: 'warn' };
+    if (p.ourKey === 'lost') return { text: 'Pair again', kind: 'err' };
+    if (p.ourKey === 'old') return { text: 'Changing', kind: 'info' };
+    return { text: 'Current', kind: 'ok' };
+  }
+
+  // What its keys need said: a warning first.
+  function keyText(p: Peer): string {
+    if (p.suspendedAt && p.state === 'gone')
+      return `Its key was revoked ${day(p.suspendedAt)}, and no new key followed within 30 days. Remove it, and pair again if you wish.`;
+    if (p.suspendedAt)
+      return `Its key was revoked ${day(p.suspendedAt)}, perhaps stolen: nothing is shared with it until it moves to the next key it committed to, or within 30 days it's gone.`;
+    if (p.pending) return `It changed its key: confirm the new fingerprint with its operator (${p.pending.fingerprint}).`;
+    if (p.ourKey === 'lost') return "It didn't move to this server's new key within 30 days: remove it, and pair again.";
+    if (p.ourKey === 'old' && p.rotationAnswer === 'pending') return "Its operator has to confirm this server's new key.";
+    if (p.ourKey === 'old' && p.rotationAnswer === 'refused') return "It refused this server's new key: pair again if it doesn't move.";
+    if (p.ourKey === 'old') return "Not moved to this server's new key yet: it is told at each contact.";
+    if (p.commitment === 'hello') return 'Its next key is known from its first message, not from pairing.';
+    if (!p.commitment && p.state === 'paired') return 'Its next key is unknown: a change of its key will wait for you to confirm it.';
+    return '';
+  }
+
+  const attention = $derived((s?.peers ?? []).filter((p) => p.suspendedAt || p.pending || p.refused || p.ourKey === 'lost'));
+
   const kinds: Record<string, string> = { movies: 'Films', tvshows: 'Series', music: 'Music', musicvideos: 'Music videos', homevideos: 'Home videos', boxsets: 'Collections', books: 'Books', photos: 'Photos', mixed: 'Mixed' };
 
   const limitsText = (l: Limits) =>
@@ -290,29 +396,59 @@
     <Setting stack label="Fingerprint" hint="What the other operator compares, to be sure the code is really this server's.">
       {#snippet children()}<code class="fingerprint">{s?.fingerprint}</code>{/snippet}
     </Setting>
+    {#if s.nextKey}
+      <Setting stack label="Next key" hint={s.nextKey.onServer ? "Made in advance, for changing this server's key; paired servers know it is the next one. Export it to keep offline, then delete it from the server: someone who copies the server's storage then can't change its key." : "Kept offline: it's no longer on this server. Changing the key, or recovering from a stolen one, needs the copy you exported."}>
+        {#snippet children()}<code class="fingerprint">{s?.nextKey?.fingerprint}</code> <Badge kind={s?.nextKey?.onServer ? 'plain' : 'ok'}>{s?.nextKey?.onServer ? 'On this server' : 'Kept offline'}</Badge>{/snippet}
+      </Setting>
+    {/if}
+    {#if s.rotation}
+      <Notice>This server's key is changing since {day(s.rotation.since)}. Servers that haven't moved yet are told at each contact; the old key is kept for them until {when(s.rotation.until)}, then they must pair again.</Notice>
+    {/if}
     {#if s.testPlainHTTP}
       <Notice warn>The address is plain http, accepted only because the test setting <code>federation.test_plain_http</code> is on: what servers say can be read on the way. Never on a server in use.</Notice>
     {/if}
+    {#snippet foot()}
+      <span class="grow"></span>
+      {#if s?.nextKey?.onServer}<Busy action={exportNextKey}>Export the next key</Busy>{/if}
+      <button type="button" onclick={() => change('rotate')}>Change this server's key</button>
+      <button type="button" class="danger" onclick={() => change('revoke')}>This server's key was stolen</button>
+    {/snippet}
   </Card>
+
+  {#if attention.length}
+    <Notice warn>
+      {#each attention as p (p.id)}
+        <div><strong>{p.name}</strong>: {p.refused && !p.suspendedAt && !p.pending ? `someone holding its key tried, ${ago(p.refused.at)}, to move the pairing to another key (${p.refused.fingerprint}). It was refused. Its operator may have lost control of its key: ask them.` : keyText(p)}</div>
+      {/each}
+    </Notice>
+  {/if}
 
   <Card title="Servers">
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Server</th><th class="hide-narrow">Status</th><th class="hide-narrow">Fingerprint</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+        <thead><tr><th>Server</th><th class="hide-narrow">Status</th><th class="hide-narrow">Key</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {#each s.peers ?? [] as p (p.id)}
             <tr>
               <td><div class="name">{p.name}</div><div class="hint">{p.address}{#if p.address.startsWith('http://')}{' · plain http (test setting)'}{/if}</div><div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
               <td class="hide-narrow"><div>{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint">{shareText(p)}</div>{/if}{#if p.seenAt}<div class="hint">heard from {ago(p.seenAt)}</div>{/if}</td>
-              <td class="hide-narrow"><code class="fingerprint">{p.fingerprint}</code></td>
+              <td class="hide-narrow"><div><Badge kind={keyState(p).kind}>{keyState(p).text}</Badge></div><div><code class="fingerprint">{p.fingerprint}</code></div>{#if keyText(p)}<div class="hint key-text">{keyText(p)}</div>{/if}</td>
               <td class="row-actions">
+                {#if p.pending && !p.suspendedAt}
+                  <button type="button" class="small primary" onclick={() => confirmKey(p)}>Confirm key</button>
+                {/if}
+                {#if p.refused}
+                  <button type="button" class="small" onclick={() => dismiss(p)}>Dismiss</button>
+                {/if}
                 {#if p.state === 'ours'}
                   <button type="button" class="small primary" onclick={() => accept(p)}>Accept</button>
                   <button type="button" class="small danger" onclick={() => end(p)}>Refuse</button>
-                {:else if p.state === 'paired'}
+                {:else if p.state === 'paired' && !p.suspendedAt && p.ourKey !== 'lost'}
                   <button type="button" class="small primary" onclick={() => openSharing(p)}>Sharing</button>
                   <button type="button" class="small" onclick={() => check(p)}>Check</button>
                   <button type="button" class="small danger" onclick={() => end(p)}>End</button>
+                {:else if p.suspendedAt || p.ourKey === 'lost'}
+                  <button type="button" class="small danger" onclick={() => end(p)}>Remove</button>
                 {:else}
                   <button type="button" class="small" onclick={() => check(p)}>Check</button>
                   <button type="button" class="small danger" onclick={() => end(p)}>Remove</button>
@@ -345,6 +481,40 @@
       </div>
     </Card>
   {/if}
+{/if}
+
+{#if exported}
+  <Modal title="Next key" close={() => (exported = null)}>
+    <Secret value={exported.text} after="Keep it offline, somewhere safe: a password manager, or on paper. Then delete it from this server.">Copy it now: whoever holds it, with this server's current key, can change this server's key.</Secret>
+    <Setting stack label="Its fingerprint" hint="The fingerprint of the key paired servers expect next: the same as on this page.">
+      {#snippet children()}<code class="fingerprint">{exported?.fingerprint}</code>{/snippet}
+    </Setting>
+    {#snippet foot()}
+      <button type="button" class="danger" onclick={deleteNextKey}>Delete it from this server</button>
+      <span class="grow"></span>
+      <button type="button" class="primary" onclick={() => (exported = null)}>Done</button>
+    {/snippet}
+  </Modal>
+{/if}
+
+{#if changing === 'rotate'}
+  <FormModal title="Change this server's key" description={`This server moves to its next key (${s?.nextKey?.fingerprint ?? ''}), and makes a new next key. Paired servers that know it as the next one follow at once; the others' operators confirm its fingerprint. The old key is kept 30 days at most for servers that haven't moved yet.`} saveLabel="Change the key" save={saveChange} close={() => (changing = null)}>
+    {#if s?.rotation}<Notice warn>A change of key is still under way: servers that haven't moved from the key before will have to pair again.</Notice>{/if}
+    {#if !s?.nextKey?.onServer}
+      <Field label="Next key" wide hint="The next key isn't on this server any more: paste the copy you exported, starting with overfin-next-key-1."><textarea bind:value={nextKeyText} rows="2" spellcheck="false" autocomplete="off" required></textarea></Field>
+    {/if}
+  </FormModal>
+{/if}
+
+{#if changing === 'revoke'}
+  <FormModal danger title="This server's key was stolen" description="Paired servers are told at once that this server's key is revoked: they stop hearing it. With the next key, this server then moves to it, and servers that know it as the next one follow by themselves. Without it, this server gets a new key, and every pairing ends: pair again with new codes, comparing fingerprints." saveLabel="Revoke the key" save={saveChange} close={() => (changing = null)}>
+    {#if s?.nextKey?.onServer}
+      <label class="inline"><input type="checkbox" bind:checked={withoutNext} /> Don't move to the next key</label>
+      <div class="hint">The next key is on this server: if the server's storage was copied, the thief may hold it too. Then tick this: every pairing ends, to make again.</div>
+    {:else}
+      <Field label="Next key, if you kept it" wide hint="The copy you exported, starting with overfin-next-key-1. Leave it empty if you don't have it: every pairing then ends."><textarea bind:value={nextKeyText} rows="2" spellcheck="false" autocomplete="off"></textarea></Field>
+    {/if}
+  </FormModal>
 {/if}
 
 {#if making}
@@ -437,6 +607,9 @@
   }
   .only-narrow {
     display: none;
+  }
+  .key-text {
+    max-width: 28em;
   }
   @media (max-width: 860px) {
     .only-narrow {
