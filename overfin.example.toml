@@ -177,6 +177,10 @@ allow_loopback = false
 # and pairing requests it takes), to try two servers on one machine. Never
 # on a server in use.
 test_plain_http = false
+# Serve MSFP's discovery document at /.well-known/msfp: where this server's
+# federation calls are, for servers that look there. Off by default: a
+# server that serves it tells anyone it federates.
+discovery = false
 
 # ---- Feature settings --------------------------------------------------------
 # Everything below is switched on and off in the control panel, and lives in

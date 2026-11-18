@@ -443,3 +443,22 @@ func TestPeerWith(t *testing.T) {
 		t.Errorf("%+v", got)
 	}
 }
+
+// A change number with no title changed: above every one before, and
+// never listed.
+func TestCatalogBumpSeq(t *testing.T) {
+	s, ctx := openTest(t), context.Background()
+	cat := MSFPCatalog{S: s}
+	before, _ := cat.Seq(ctx)
+	seq, err := cat.BumpSeq(ctx)
+	if err != nil || seq != before+1 {
+		t.Fatalf("bumped to %d from %d: %v", seq, before, err)
+	}
+	if now, _ := cat.Seq(ctx); now != seq {
+		t.Fatalf("seq %d after a bump to %d", now, seq)
+	}
+	page, err := cat.Changes(ctx, []string{"lib"}, before, "", 10)
+	if err != nil || len(page.Present)+len(page.Gone) != 0 {
+		t.Fatalf("a bump listed: %+v %v", page, err)
+	}
+}

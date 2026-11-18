@@ -23,6 +23,12 @@ import (
 // MSFPCatalog is the catalog on this database.
 type MSFPCatalog struct{ S *Store }
 
+var (
+	_ msfp.Catalog   = MSFPCatalog{}
+	_ msfp.ChangeLog = MSFPCatalog{}
+	_ msfp.SeqBumper = MSFPCatalog{}
+)
+
 // The library kinds of video: those this server's catalog lists to
 // paired servers. A library of music, books or photos holds nothing
 // that is shared.
@@ -87,6 +93,15 @@ func (c MSFPCatalog) Copies(ctx context.Context, key string, libraries []string)
 func (c MSFPCatalog) Seq(ctx context.Context) (int64, error) {
 	head, _, err := c.S.TitleChanges(ctx)
 	return head, err
+}
+
+// BumpSeq takes a change number with no title changed (a key no reading
+// lists, item/offers), after a change of what a paired server sees: its
+// readings are of changes again after one whole reading.
+func (c MSFPCatalog) BumpSeq(ctx context.Context) (int64, error) {
+	var seq int64
+	err := c.S.db.QueryRowContext(ctx, `INSERT INTO title_changes (title_key, at) VALUES ('item/offers', unixepoch()) RETURNING seq`).Scan(&seq)
+	return seq, err
 }
 
 // Changes gives what changed in the libraries after since, in key order
