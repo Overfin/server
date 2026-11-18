@@ -1024,6 +1024,10 @@ func TestStreamingThroughRewrittenPlaylists(t *testing.T) {
 	if code, body := getAs(t, srv, subject, base+"pictures/s4/3"); code != 200 || body != "" {
 		t.Errorf("picture subtitles, a stretch without any: %d, %d bytes", code, len(body))
 	}
+	// A track ID with a leading zero isn't one (MSFP playback section 2.1).
+	if code, _ := getAs(t, srv, subject, base+"pictures/s04/3"); code != http.StatusNotFound {
+		t.Errorf("picture subtitles as s04: status %d, want 404", code)
+	}
 	fake.mu.Lock()
 	fake.pgs = append(pgsTrack(), "PX"...)
 	fake.mu.Unlock()

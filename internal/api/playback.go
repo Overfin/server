@@ -474,7 +474,9 @@ type sessionJSON struct {
 }
 
 var (
-	trackID  = regexp.MustCompile(`^[as]([0-9]{1,3})$`)
+	// A track ID: a or s, and a number from 0 to 999 without leading
+	// zeros (MSFP playback section 2.1).
+	trackID  = regexp.MustCompile(`^[as](0|[1-9][0-9]{0,2})$`)
 	deviceRe = regexp.MustCompile(`^[\x20-\x7e]{1,64}$`)
 )
 

@@ -719,10 +719,13 @@ func cleanPeerText(out *sessionJSON) bool {
 	default:
 		out.Stream.MimeType = ""
 	}
-	clean := func(list []trackJSON) []trackJSON {
+	// A track's ID is a<n> for audio, s<n> for subtitles, n without
+	// leading zeros (MSFP playback section 2.3): one of another form
+	// couldn't be asked for again, nor fetched.
+	clean := func(list []trackJSON, kind byte) []trackJSON {
 		kept := list[:0]
 		for _, t := range list {
-			if !msfp.ID(t.ID) {
+			if _, ok := msfp.TrackID(t.ID, kind); !ok {
 				continue
 			}
 			t.Label = peerLabel(t.Label)
@@ -736,7 +739,7 @@ func cleanPeerText(out *sessionJSON) bool {
 		}
 		return kept
 	}
-	out.AudioTracks, out.SubtitleTracks, out.ForcedTracks = clean(out.AudioTracks), clean(out.SubtitleTracks), clean(out.ForcedTracks)
+	out.AudioTracks, out.SubtitleTracks, out.ForcedTracks = clean(out.AudioTracks, 'a'), clean(out.SubtitleTracks, 's'), clean(out.ForcedTracks, 's')
 	// Its subtitles go in stretches of this server's length: both run the
 	// same version.
 	out.SubtitleStretchSeconds = 0

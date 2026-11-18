@@ -3,12 +3,12 @@ package msfp
 import "testing"
 
 func TestTrackID(t *testing.T) {
-	for id, want := range map[string]int{"a0": 0, "a1": 1, "a999": 999, "a01": 1} {
+	for id, want := range map[string]int{"a0": 0, "a1": 1, "a10": 10, "a999": 999} {
 		if n, ok := TrackID(id, 'a'); !ok || n != want {
 			t.Errorf("%s: %d %v", id, n, ok)
 		}
 	}
-	for _, id := range []string{"", "a", "a1000", "a+1", "s1", "A1", "a-1", "a1 "} {
+	for _, id := range []string{"", "a", "a1000", "a+1", "s1", "A1", "a-1", "a1 ", "a01", "a00", "a007"} {
 		if _, ok := TrackID(id, 'a'); ok {
 			t.Errorf("%q accepted", id)
 		}
