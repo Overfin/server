@@ -1,7 +1,9 @@
 <!-- Federation: pairing this server with other Overfin servers, by a
      one-time code one operator sends the other, then sharing library by
      library (ROADMAP.md milestone 6); and the servers' keys: this one's
-     next key, changing it, revoking it when stolen, and the peers'. -->
+     next key, changing it, revoking it when stolen, and the peers'; and
+     whether this server can be called (a server that can't be watches,
+     and shares nothing). -->
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { PageHead, Card, Field, FormModal, Modal, Secret, Setting, Badge, Busy, Empty, Loading, Notice, ask, toast } from '@overfin/ui';
@@ -38,6 +40,11 @@
     notMoved?: boolean;
     moveLate?: boolean;
     moving?: { address: string; failing?: string; warn?: boolean };
+    // It can't be called ('no'), or says it can again and its address is
+    // being checked ('confirming'). callsFailed: its last answer said
+    // this server's last calls to it couldn't connect.
+    inbound?: 'no' | 'confirming';
+    callsFailed?: boolean;
   }
   interface Lib {
     id: string;
@@ -58,6 +65,7 @@
     theirs: Lib[];
     reachable: boolean;
     notSupported?: boolean;
+    uncallable?: boolean;
     limits: Limits;
     theirLimits?: Limits;
   }
@@ -69,6 +77,10 @@
   }
   interface State {
     available: boolean;
+    // This server can't be called (its operator's setting), and whether
+    // the panel can change it.
+    uncallable?: boolean;
+    canSet?: boolean;
     address?: string;
     testPlainHTTP?: boolean;
     fingerprint?: string;
@@ -302,6 +314,29 @@
     await load();
   }
 
+  async function setUncallable(e: Event) {
+    const box = e.currentTarget as HTMLInputElement;
+    const on = box.checked;
+    const yes = await ask(
+      on
+        ? "Turn on \"This server can't be called\"? Paired servers then never connect to this one: it can watch what they share with it, and shares nothing with them. It asks each of them every few minutes instead. It makes no codes: ask the other server's operator for one."
+        : "Turn off \"This server can't be called\"? Paired servers are told this server's address, check that it answers there, then call it again: only if they can reach it.",
+      { yes: on ? 'Turn on' : 'Turn off' },
+    );
+    if (!yes) {
+      box.checked = !on;
+      return;
+    }
+    try {
+      await api('PUT', '/admin/api/federation/uncallable', { on });
+      toast(on ? "This server can't be called now. Paired servers are told at its next message to each." : 'This server can be called again. Paired servers are told now.');
+    } catch (err) {
+      box.checked = !on;
+      toast(message(err), true);
+    }
+    await load();
+  }
+
   async function confirmKey(p: Peer) {
     if (!p.pending) return;
     const yes = await ask(
@@ -350,6 +385,10 @@
 
   // What its address needs said, "" for nothing.
   function addressText(p: Peer): string {
+    if (p.inbound === 'no') return "This server can't be called: it can watch what you share with it, and can share nothing with you.";
+    if (p.inbound === 'confirming') return 'It says it can be called again: checking it answers at its address first.';
+    if (p.callsFailed && !s?.uncallable)
+      return "It says this server's last calls to it couldn't connect. If other servers can't reach yours (at home behind a router, say), turn on \"This server can't be called\" above.";
     if (p.moving?.failing)
       return `It says it moved to ${p.moving.address}, which hasn't answered as it since ${day(p.moving.failing)}: it's still reached at its old address, and tried again every hour.`;
     if (p.moving) return `It says it moved to ${p.moving.address}: checking it answers there.`;
@@ -358,7 +397,7 @@
     return '';
   }
 
-  const attention = $derived((s?.peers ?? []).filter((p) => p.suspendedAt || p.pending || p.refused || p.ourKey === 'lost' || p.moving?.warn || p.moveLate));
+  const attention = $derived((s?.peers ?? []).filter((p) => p.suspendedAt || p.pending || p.refused || p.ourKey === 'lost' || p.moving?.warn || p.moveLate || (p.callsFailed && !s?.uncallable)));
 
   const kinds: Record<string, string> = { movies: 'Films', tvshows: 'Series', music: 'Music', musicvideos: 'Music videos', homevideos: 'Home videos', boxsets: 'Collections', books: 'Books', photos: 'Photos', mixed: 'Mixed' };
 
@@ -392,8 +431,8 @@
 <PageHead title="Federation" description="Pair this server with other Overfin servers. One operator makes a code and sends it to the other, who pastes it here; the first then accepts, after you both compared fingerprints. Then each picks, library by library, what it offers the other and what it wants: only what one offers and the other wants is shared. Its titles then show on your site beside yours, and play straight from it.">
   {#snippet actions()}
     {#if s?.available}
-      <button type="button" onclick={useCode}>Use a code</button>
-      <button type="button" class="primary" onclick={newCode}>New code</button>
+      <button type="button" class={s.uncallable ? 'primary' : ''} onclick={useCode}>Use a code</button>
+      {#if !s.uncallable}<button type="button" class="primary" onclick={newCode}>New code</button>{/if}
     {/if}
   {/snippet}
 </PageHead>
@@ -403,10 +442,16 @@
 {:else if !s}
   <Loading />
 {:else if !s.available}
-  <Notice warn>Federation needs the site's https address, which codes give to other servers: set <code>site.url</code> in the configuration (or an HTTPS domain), as https://host with nothing after it. Servers pair over HTTPS only.</Notice>
+  <Notice warn>Federation needs the site's https address, which codes give to other servers: set <code>site.url</code> in the configuration (or an HTTPS domain), as https://host with nothing after it. Servers pair over HTTPS only. A server other servers can't reach needs none: turn on "This server can't be called".</Notice>
+  {#if s.canSet}
+    <Card title="This server">
+      {@render uncallableSetting()}
+    </Card>
+  {/if}
 {:else}
   <Card title="This server">
-    <Setting label="Address" hint="Where other servers reach this one, as codes give it.">
+    {#if s.canSet}{@render uncallableSetting()}{/if}
+    <Setting label="Address" hint={s.uncallable ? "One that leads nowhere, made for this server: nothing connects to it. Other servers know this server by its key." : 'Where other servers reach this one, as codes give it.'}>
       {#snippet children()}<code>{s?.address}</code>{/snippet}
     </Setting>
     <Setting stack label="Fingerprint" hint="What the other operator compares, to be sure the code is really this server's.">
@@ -422,6 +467,9 @@
     {/if}
     {#if s.rotation}
       <Notice>This server's key is changing since {day(s.rotation.since)}. Servers that haven't moved yet are told at each contact; the old key is kept for them until {when(s.rotation.until)}, then they must pair again.</Notice>
+    {/if}
+    {#if s.uncallable}
+      <Notice>This server can't be called: it can watch what paired servers share with it, and shares nothing. It makes no codes: ask the other server's operator for one, and use it here.</Notice>
     {/if}
     {#if s.testPlainHTTP}
       <Notice warn>The address is plain http, accepted only because the test setting <code>federation.test_plain_http</code> is on: what servers say can be read on the way. Never on a server in use.</Notice>
@@ -449,9 +497,9 @@
         <tbody>
           {#each s.peers ?? [] as p (p.id)}
             <tr>
-              <td><div class="name">{p.name}</div><div class="hint">{p.address}{#if p.address.startsWith('http://')}{' · plain http (test setting)'}{/if}</div>{#if addressText(p)}<div class="hint">{addressText(p)}</div>{/if}<div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
+              <td><div class="name">{p.name}</div><div class="hint address">{p.address}{#if p.address.startsWith('http://')}{' · plain http (test setting)'}{/if}</div>{#if addressText(p)}<div class="hint">{addressText(p)}</div>{/if}<div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
               <td class="hide-narrow"><div>{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint">{shareText(p)}</div>{/if}{#if p.seenAt}<div class="hint">heard from {ago(p.seenAt)}</div>{/if}</td>
-              <td class="hide-narrow"><div><Badge kind={keyState(p).kind}>{keyState(p).text}</Badge></div><div><code class="fingerprint">{p.fingerprint}</code></div>{#if keyText(p)}<div class="hint key-text">{keyText(p)}</div>{/if}</td>
+              <td class="hide-narrow">{#if p.inbound === 'no'}<div><Badge kind="info">Can't be called</Badge></div>{/if}<div><Badge kind={keyState(p).kind}>{keyState(p).text}</Badge></div><div><code class="fingerprint">{p.fingerprint}</code></div>{#if keyText(p)}<div class="hint key-text">{keyText(p)}</div>{/if}</td>
               <td class="row-actions">
                 {#if p.pending && !p.suspendedAt}
                   <button type="button" class="small primary" onclick={() => confirmKey(p)}>Confirm key</button>
@@ -464,18 +512,18 @@
                   <button type="button" class="small danger" onclick={() => end(p)}>Refuse</button>
                 {:else if p.state === 'paired' && !p.suspendedAt && p.ourKey !== 'lost'}
                   <button type="button" class="small primary" onclick={() => openSharing(p)}>Sharing</button>
-                  <button type="button" class="small" onclick={() => check(p)}>Check</button>
+                  {#if !p.inbound}<button type="button" class="small" onclick={() => check(p)}>Check</button>{/if}
                   <button type="button" class="small danger" onclick={() => end(p)}>End</button>
                 {:else if p.suspendedAt || p.ourKey === 'lost'}
                   <button type="button" class="small danger" onclick={() => end(p)}>Remove</button>
                 {:else}
-                  <button type="button" class="small" onclick={() => check(p)}>Check</button>
+                  {#if !p.inbound}<button type="button" class="small" onclick={() => check(p)}>Check</button>{/if}
                   <button type="button" class="small danger" onclick={() => end(p)}>Remove</button>
                 {/if}
               </td>
             </tr>
           {:else}
-            <tr><td colspan="4"><Empty>No server yet: make a code, or use another server's.</Empty></td></tr>
+            <tr><td colspan="4"><Empty>{s.uncallable ? "No server yet: use another server's code." : "No server yet: make a code, or use another server's."}</Empty></td></tr>
           {/each}
         </tbody>
       </table>
@@ -560,6 +608,7 @@
 
 {#if sharingWith && sharing}
   <FormModal title={`Sharing with ${sharingWith.name}`} description="Only what one server offers and the other wants is shared." saveLabel="Save" save={saveSharing} close={() => { sharingWith = null; sharing = null; }}>
+    {#if s?.uncallable}<Notice>This server can't be called: it shares nothing. What you pick here is kept for when it can be called again.</Notice>{/if}
     <div class="setting stack">
       <div><div class="label">You offer</div><div class="hint">Your libraries {sharingWith.name} may take. You only ever offer your own.</div></div>
       <div class="checks all">
@@ -569,7 +618,8 @@
     </div>
     <div class="setting stack">
       <div><div class="label">You want</div><div class="hint">Out of what {sharingWith.name} offers you.</div></div>
-      {#if sharing.notSupported}<Notice warn>{sharingWith.name} doesn't share libraries with this server: it speaks another version of the federation protocol, or hasn't said which yet (Check asks it). What you want can't be changed until it does.</Notice>
+      {#if sharing.uncallable}<Notice>{sharingWith.name} can't be called: it can watch what you share with it, and can share nothing with you.</Notice>
+      {:else if sharing.notSupported}<Notice warn>{sharingWith.name} doesn't share libraries with this server: it speaks another version of the federation protocol, or hasn't said which yet (Check asks it). What you want can't be changed until it does.</Notice>
       {:else if !sharing.reachable}<Notice warn>{sharingWith.name} can't be reached now: what you want can't be changed until it can.</Notice>{/if}
       <div class="checks all">
         {#each sharing.theirs as l (l.id)}<label class="inline"><input type="checkbox" value={l.id} bind:group={want} disabled={!sharing.reachable} /> {l.name}{#if kindOf(l)} <span class="hint">({kindOf(l)})</span>{/if}{#if l.gone} <span class="hint">· no longer offered</span>{/if}</label>
@@ -619,6 +669,12 @@
   </Modal>
 {/if}
 
+{#snippet uncallableSetting()}
+  <Setting label="This server can't be called" hint="Turn on when other servers can't connect to this one: at home behind a router, without a forwarded port, say. This server can then watch what paired servers share with it, and share nothing: they never call it, and it asks each of them every few minutes instead.">
+    {#snippet children(ids)}<input type="checkbox" checked={s?.uncallable ?? false} onchange={setUncallable} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+  </Setting>
+{/snippet}
+
 <style>
   .fingerprint {
     white-space: nowrap;
@@ -629,6 +685,11 @@
   }
   .key-text {
     max-width: 28em;
+  }
+  /* A server that can't be called has a long address in one piece: it
+     wraps anywhere, so that a phone still shows the row's buttons. */
+  .address {
+    overflow-wrap: anywhere;
   }
   @media (max-width: 860px) {
     .only-narrow {
