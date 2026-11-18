@@ -90,7 +90,9 @@ the key). Under **Federation**, **This server** shows that next key's
 fingerprint.
 
 **Keep the next key offline.** **Export the next key** shows it once, as
-text starting with `overfin-next-key-1.`, with its fingerprint. Keep it
+text starting with `msfp-next-key-1.`, with its fingerprint (a copy
+exported by an older Overfin, starting with `overfin-next-key-1.`, works
+the same). Keep it
 somewhere safe away from the server (a password manager, or on paper),
 then **Delete it from this server**. Someone who copies your server's
 storage then gets its key, but can't move your paired servers to a key of
@@ -371,10 +373,25 @@ file's episodes watched together; its `ids` aren't kept), `versionId` in
 `play`, track IDs without leading zeros, WebVTT rebuilt and PGS checked
 both ways (an empty part, for a stretch with no pictures, served and
 relayed as such), any change of what a title carries, `ids` and `with`
-included, sent again in changes readings. Not the discovery
-document (core section 11, optional): its federation calls are always at
-`/api/v1/federation/`, so a new address is confirmed there, without
-fetching one, and a server under a path can't pair with it yet.
+included, sent again in changes readings. A paired server's discovery
+document (core section 11) is read when it pairs or moves, so a server
+under a path pairs with it; Overfin's own calls are always at
+`/api/v1/federation/`, and it serves its own document at
+`/.well-known/msfp` only when its operator turns it on (off by default:
+a server that serves it tells anyone it federates):
+
+```toml
+[federation]
+discovery = true
+```
+
+Overfin's federation is the MSFP engine for Go, package `msfp` of
+Overfin's repository (with `msfp/wire`, the protocol's toolkit): Overfin
+hosts it, with its records in Overfin's database, its own libraries and
+titles, its playback and media, and its connections to other servers
+(through the gateway when it runs split). Each copy of a title is one of
+its versions to a paired server's viewer, named by its video ("2160p HDR
+· HEVC").
 
 ## Where it stands
 

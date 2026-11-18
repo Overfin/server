@@ -499,7 +499,7 @@ a release, and the fuzzers too, each a while (`go test -run '^$' -fuzz
 '^FuzzPreamble$' -fuzztime 2m ./internal/link`; `FuzzCode` there,
 `FuzzProxyHeader` and `FuzzEvents` in `./internal/gateway`). Their seeds
 run with every `go test`; an input that fails is kept as one. The race detector finds nothing in `internal/link`,
-`internal/gateway`, `internal/edge` and `internal/federation`.
+`internal/gateway`, `internal/edge` and `msfp` (federation).
 
 **The gateway stopped during real playback** (Firefox, the test install
 split into a gateway and a backend, 2026-11-13):

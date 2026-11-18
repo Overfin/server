@@ -276,9 +276,10 @@ anyone. Paired servers are not trusted at all (rule 94).
 46. A ticket given to a paired server, for its viewer, belongs to no
     account here. It works only for that server, never for a browser (any
     request saying where it comes from is refused), only while the pairing
-    lasts, and lasts like any other. Every ticket is 192 random bits, never
-    reused, looked up by its hash (so how long a lookup takes says nothing
-    of it), and never written to a log.
+    lasts, and lasts like any other. Every ticket is 192 random bits (a
+    paired server's, 256: the MSFP engine's), never reused, looked up by
+    its hash (so how long a lookup takes says nothing of it), and never
+    written to a log.
 
 ### Limits
 

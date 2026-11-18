@@ -3976,7 +3976,9 @@ paths:
       description: |
         Server to server, never for apps (ROADMAP.md milestone 6, SECURITY.md
         rules 94 and 95), in MSFP version 1 (github.com/msfp-io/msfp-spec),
-        over HTTPS only. The caller signs the request with its federation
+        over HTTPS only. Every federation route is the MSFP engine's (package
+        msfp), Overfin its host; Overfin speaks the core, catalog, playback,
+        media and video, never music. The caller signs the request with its federation
         key (headers `MSFP-Key`, `MSFP-Date`, `MSFP-Nonce`,
         `MSFP-Signature`, over the method, this server's host, the path,
         the date, the nonce and the body's SHA-256); the answer is signed by
@@ -4275,7 +4277,8 @@ paths:
         only. The title (a film's or an episode's TMDB key, in its one
         form) must be in a library this server offers the caller. This
         server picks its copy (the version asked for, else one with the
-        viewer's audio language when it has one) and the tracks, within
+        viewer's audio language when it has one; each copy is a version,
+        named by its video) and the tracks, within
         the pairing's limits (streams, transcodes, bitrate) and the
         transcodes it keeps for its own people, and answers with the
         playback as POST /playback does, its stream's URLs on this server:
