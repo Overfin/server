@@ -18,8 +18,8 @@ import (
 // MSFP's version 1 test vectors (https://github.com/msfp-io/msfp-spec,
 // vectors/v1/), copied as they are in testdata/v1/: recomputed here with
 // the code, so the code keeps speaking the protocol they describe. The
-// exchanges' members of servers that can't be called are for what
-// Overfin doesn't do yet.
+// exchanges of a server that can't be called are read in
+// uncallable_test.go.
 
 type vectorKey struct {
 	Seed        string `json:"seed"` // hex

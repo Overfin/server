@@ -5,7 +5,9 @@
 // (HTTPS only), certificate pins, hello and the versions of the core and
 // its parts, key rotation and revocation (their statements, the next key
 // commitment), changes of address (the former host accepted, the
-// announced address checked); of its media and video parts, the checks of the playlists and
+// announced address checked), servers that can't be called (their
+// address, their hello schedule, the statements their peers' answers
+// carry); of its media and video parts, the checks of the playlists and
 // PGS pictures a server relays from another.
 //
 // A server proves who it is with its key only, never with a web
