@@ -795,6 +795,11 @@ func (s *Service) call(ctx context.Context, p *store.Peer, path string, in, out 
 		// contact (section 12.4).
 		p = s.rotateAtContact(ctx, p)
 	}
+	// Still calling our former address: told the new one, at each
+	// contact (section 13.1); a hello carries it anyway.
+	if notMoved, _ := s.NotMoved(p); notMoved && path != helloPath && path != pairPath {
+		s.announceSoon(p)
+	}
 	// A part that is off with it: not called (MSFP core section 10.4).
 	part := partOf[path]
 	if part != "" && !s.Speaks(p, part) {
