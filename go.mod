@@ -5,7 +5,7 @@ go 1.26.11
 require (
 	filippo.io/edwards25519 v1.1.1
 	github.com/BurntSushi/toml v1.6.0
-	github.com/overfin/web v0.99.18
+	github.com/overfin/web v0.99.19
 	golang.org/x/crypto v0.59.0
 	modernc.org/sqlite v1.62.0
 )
