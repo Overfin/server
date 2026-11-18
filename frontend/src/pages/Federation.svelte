@@ -569,7 +569,7 @@
   <FormModal title="Change this server's key" description={`This server moves to its next key (${s?.nextKey?.fingerprint ?? ''}), and makes a new next key. Paired servers that know it as the next one follow at once; the others' operators confirm its fingerprint. The old key is kept 30 days at most for servers that haven't moved yet.`} saveLabel="Change the key" save={saveChange} close={() => (changing = null)}>
     {#if s?.rotation}<Notice warn>A change of key is still under way: servers that haven't moved from the key before will have to pair again.</Notice>{/if}
     {#if !s?.nextKey?.onServer}
-      <Field label="Next key" wide hint="The next key isn't on this server any more: paste the copy you exported, starting with msfp-next-key-1. (or overfin-next-key-1., for a copy exported before)."><textarea bind:value={nextKeyText} rows="2" spellcheck="false" autocomplete="off" required></textarea></Field>
+      <Field label="Next key" wide hint="The next key isn't on this server any more: paste the copy you exported, starting with msfp-next-key-1.."><textarea bind:value={nextKeyText} rows="2" spellcheck="false" autocomplete="off" required></textarea></Field>
     {/if}
   </FormModal>
 {/if}
@@ -580,7 +580,7 @@
       <label class="inline"><input type="checkbox" bind:checked={withoutNext} /> Don't move to the next key</label>
       <div class="hint">The next key is on this server: if the server's storage was copied, the thief may hold it too. Then turn this on: every pairing ends, to make again.</div>
     {:else}
-      <Field label="Next key, if you kept it" wide hint="The copy you exported, starting with msfp-next-key-1. (or overfin-next-key-1., for a copy exported before). Leave it empty if you don't have it: every pairing then ends."><textarea bind:value={nextKeyText} rows="2" spellcheck="false" autocomplete="off"></textarea></Field>
+      <Field label="Next key, if you kept it" wide hint="The copy you exported, starting with msfp-next-key-1.. Leave it empty if you don't have it: every pairing then ends."><textarea bind:value={nextKeyText} rows="2" spellcheck="false" autocomplete="off"></textarea></Field>
     {/if}
   </FormModal>
 {/if}

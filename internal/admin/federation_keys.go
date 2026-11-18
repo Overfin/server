@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/overfin/server/msfp"
 )
@@ -49,18 +48,6 @@ func (p *Panel) deleteNextKey(w http.ResponseWriter, r *http.Request, s *session
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// engineNextKey is an exported next key as the engine reads it: one an
-// Overfin before the engine exported ("overfin-next-key-1.", then the
-// same seed in the same base64url) is the engine's form
-// ("msfp-next-key-1."), so a copy kept offline then still changes this
-// server's key.
-func engineNextKey(text string) string {
-	if rest, ok := strings.CutPrefix(strings.TrimSpace(text), "overfin-next-key-1."); ok {
-		return "msfp-next-key-1." + rest
-	}
-	return text
-}
-
 // nextKeyRequest is the next key given back, as exported, when it isn't
 // on the server any more; empty otherwise. WithoutNextKey, for a
 // revocation: don't move to the next key (it may be stolen too).
@@ -79,7 +66,7 @@ func (p *Panel) rotateKey(w http.ResponseWriter, r *http.Request, s *session) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request"})
 		return
 	}
-	if err := fed.Rotate(r.Context(), engineNextKey(req.NextKey)); err != nil {
+	if err := fed.Rotate(r.Context(), req.NextKey); err != nil {
 		p.nextKeyProblem(w, "changing the federation key", err)
 		return
 	}
@@ -97,7 +84,7 @@ func (p *Panel) revokeKey(w http.ResponseWriter, r *http.Request, s *session) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request"})
 		return
 	}
-	rotated, err := fed.KeyStolen(r.Context(), engineNextKey(req.NextKey), req.WithoutNextKey)
+	rotated, err := fed.KeyStolen(r.Context(), req.NextKey, req.WithoutNextKey)
 	if errors.Is(err, msfp.ErrNoNextKey) && !req.WithoutNextKey {
 		// No next key here, none given: revoked anyway, and every pairing
 		// ends (the panel says so; nothing was revoked yet).
@@ -119,7 +106,7 @@ func (p *Panel) nextKeyProblem(w http.ResponseWriter, what string, err error) {
 			"detail": "The next key isn't on this server any more: paste the copy you exported."})
 	case errors.Is(err, msfp.ErrNotNextKey):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
-			"detail": "That isn't this server's next key: paste the whole text you exported, starting with msfp-next-key-1. (or overfin-next-key-1., for a copy exported before)."})
+			"detail": "That isn't this server's next key: paste the whole text you exported, starting with msfp-next-key-1.."})
 	case errors.Is(err, msfp.ErrRotationUnderWay):
 		writeJSON(w, http.StatusConflict, map[string]string{"type": "key-busy",
 			"detail": "Another change of this server's key is running now: try again once it's over."})

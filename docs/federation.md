@@ -90,9 +90,7 @@ the key). Under **Federation**, **This server** shows that next key's
 fingerprint.
 
 **Keep the next key offline.** **Export the next key** shows it once, as
-text starting with `msfp-next-key-1.`, with its fingerprint (a copy
-exported by an older Overfin, starting with `overfin-next-key-1.`, works
-the same). Keep it
+text starting with `msfp-next-key-1.`, with its fingerprint. Keep it
 somewhere safe away from the server (a password manager, or on paper),
 then **Delete it from this server**. Someone who copies your server's
 storage then gets its key, but can't move your paired servers to a key of
