@@ -275,7 +275,9 @@ anyone. Paired servers are not trusted at all (rule 94).
 46. A ticket given to a paired server, for its viewer, belongs to no
     account here. It works only for that server, never for a browser (any
     request saying where it comes from is refused), only while the pairing
-    lasts, and lasts like any other.
+    lasts, and lasts like any other. Every ticket is 192 random bits, never
+    reused, looked up by its hash (so how long a lookup takes says nothing
+    of it), and never written to a log.
 
 ### Limits
 
@@ -574,7 +576,11 @@ anyone. Paired servers are not trusted at all (rule 94).
     stranger gets a plain 404. A server's key changes only as rules 137
     and 138 say; its address, as rule 139 says.
 96. Each side shares only libraries it offers and the other wants: titles
-    by key, with their languages, never files, paths or people. Playing
+    by their TMDB keys, with their languages, the other episodes a file
+    holds and the IDs TMDB gives them, never files, paths or people. Every
+    ID a server gives a peer (a library's, a version's, a playback's, a
+    ticket) is its own, random or a keyed MAC, never Jellyfin's or one a
+    peer could work out from Jellyfin's, a file or a name. Playing
     stays within the pairing's limits (2 streams and 1 transcode at first,
     the owner's to change). What a paired server sends is cleaned like any
     upstream data (rules 14, 15, 16, 17).
