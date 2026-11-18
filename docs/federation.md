@@ -124,6 +124,36 @@ and comparing fingerprints.
   is gone, and you remove it.
 - **Changing**: it hasn't moved to your server's new key yet.
 
+## Changing your server's address
+
+Your server's address is your site's (`site.url`, or its HTTPS domain).
+Change it in the configuration and restart, as for any setting: paired
+servers follow by themselves, without pairing again.
+
+- **Keep the old address working for a while.** Paired servers keep
+  calling it until they've checked the new one, so serve both (two names
+  on your reverse proxy, or the old port still open) until the panel
+  says every server moved. Overfin accepts calls made for either address
+  for 30 days, or until every paired server has moved, whichever comes
+  first; after that, the old one only.
+- **What the panel shows.** Under **Federation**, **This server** says
+  the address changed, and how many paired servers moved. A server that
+  still uses the old one says so in the list, and a warning shows after
+  3 days: ask its operator whether it can reach the new address.
+- **On the other side**, nothing to do. A paired server that says it
+  moved isn't believed on its word: yours calls it at its new address,
+  and moves to it only once the server there answers with the key it
+  knows. Until then, and if that fails, yours keeps using the old
+  address, tries again every hour, and warns you after a day. The
+  addresses Overfin never connects to (below) apply to a new address
+  too: it's refused, and the old one stays.
+- **Playback** goes on through the move: a playback started before keeps
+  its old address until it ends.
+
+Moving back works the same way. Someone holding your server's key could
+move your paired servers to an address of theirs: that's one more reason
+to revoke a stolen key at once (above).
+
 ## Limits
 
 Each pairing has its own limits, set by the server that shares:
@@ -162,8 +192,8 @@ paired gets a plain 404. Nonces are kept in memory, so a request signed
 before a server started is refused: a paired server whose clock runs
 behind is refused for that long after each start (keep both clocks set by
 the network). A compromised paired server can't reach your data or your
-people. The full rules are SECURITY.md's 94 to 100, 136, and, for
-keys, 137 and 138.
+people. The full rules are SECURITY.md's 94 to 100, 136, for keys, 137
+and 138, and for addresses, 139.
 
 Paired servers say, each time they check on each other, which versions of
 the protocol and of its parts (catalog, playback, media, video) they
@@ -265,9 +295,11 @@ catalog, playback, media and video; Overfin has no music): its
 specification and test vectors are at
 [github.com/msfp-io/msfp-spec](https://github.com/msfp-io/msfp-spec).
 Overfin does key rotation and revocation (`rotate`, `revoke`, the next key
-commitment in `pair` and `hello`), but not yet address changes, the
-discovery document, or servers that can't be called (`inbound`, and the
-rotations and revocations they pull in `hello` answers).
+commitment in `pair` and `hello`) and address changes (core section 13),
+but not yet the discovery document (its federation calls are always at
+`/api/v1/federation/`, so a new address is confirmed there, without
+fetching one), or servers that can't be called (`inbound`, and the
+rotations and revocations they pull in `hello` answers, and their moves).
 
 ## Where it stands
 
