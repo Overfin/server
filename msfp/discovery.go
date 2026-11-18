@@ -55,40 +55,50 @@ func (e *Engine) SetDiscovery(on bool) { e.discovery.Store(on) }
 // redirects followed, 16 KiB read at most; nothing is fetched at an
 // address of the .invalid form.
 func (e *Engine) fetchBase(ctx context.Context, address string) string {
+	base, _ := e.readBase(ctx, address)
+	return base
+}
+
+// readBase is fetchBase, and whether address answered at all.
+func (e *Engine) readBase(ctx context.Context, address string) (base string, answered bool) {
 	if wire.Uncallable(address) || wire.CheckAddress(address) != nil {
-		return ""
+		return "", false
 	}
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address+wire.DiscoveryPath, nil)
 	if err != nil {
-		return ""
+		return "", false
 	}
 	res, err := e.conns.client(nil, true).Do(req)
 	if err != nil {
-		return ""
+		return "", false
 	}
 	defer res.Body.Close()
 	ce := res.Header.Get("Content-Encoding")
 	if res.StatusCode != http.StatusOK || res.Uncompressed || ce != "" && !strings.EqualFold(ce, "identity") ||
 		wire.MediaType(res.Header.Get("Content-Type")) != "application/json" {
-		return ""
+		return "", true
 	}
 	body, err := io.ReadAll(io.LimitReader(res.Body, wire.MaxDiscovery+1))
 	if err != nil || len(body) > wire.MaxDiscovery {
-		return ""
+		return "", true
 	}
 	d, err := wire.ReadDiscovery(body)
 	if err != nil || d.Base == defaultBase {
-		return ""
+		return "", true
 	}
-	return d.Base
+	return d.Base, true
 }
 
 // keepBase fetches peer id's discovery document at address and keeps the
-// base it says, if address is still the peer's then.
+// base it says, if address is still the peer's then. No answer at all
+// keeps the base stored: a moment's outage doesn't undo it.
 func (e *Engine) keepBase(ctx context.Context, id, address string) {
-	base := e.fetchBase(ctx, address)
+	base, answered := e.readBase(ctx, address)
+	if !answered {
+		return
+	}
 	err := e.updatePeer(ctx, id, func(p *PeerRecord) {
 		if p.Address == address && p.Inbound != InboundNo {
 			p.Base = base
