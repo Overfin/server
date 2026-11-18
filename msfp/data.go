@@ -6,9 +6,7 @@ import (
 	"time"
 )
 
-// The data objects of the host interfaces (engine.md section 7). Those of
-// the catalog, playback and media are defined now and used from later
-// steps of the engine on.
+// The data objects of the host interfaces (engine.md section 7).
 
 // Library is one of the host's libraries: its own ID, its name and its
 // kind ("movies", "tvshows", "music", "mixed"…, MSFP catalog section 2).
@@ -56,12 +54,18 @@ type VideoTitle struct {
 	IDs       map[string]string `json:"ids,omitempty"`
 }
 
-// MusicTitle is a track (MSFP music section 3).
+// MusicTitle is an artist, an album or a track, with its description
+// (MSFP music section 3): its name; for albums and tracks, the artist
+// keys credited and their names as written, and the year; for tracks,
+// the album key, the disc and number on it, and the length (0: unknown);
+// other identifiers by scheme (mbrelease, mbtrack, isrc). A peer's are
+// cleaned as music section 3.2 says; the host's own are checked the same
+// way before they leave.
 type MusicTitle struct {
 	TitleCommon
 	Name        string            `json:"name"`
 	Artists     []string          `json:"artists,omitempty"`
-	ArtistNames []string          `json:"artistNames,omitempty"`
+	ArtistNames string            `json:"artistNames,omitempty"`
 	Album       string            `json:"album,omitempty"`
 	Disc        int               `json:"disc,omitempty"`
 	Number      int               `json:"number,omitempty"`
@@ -127,25 +131,33 @@ type ChangePage struct {
 }
 
 // Copy is one of the host's copies of a title: its handle (opaque to the
-// engine, never sent), its name (for versions), its audio languages.
+// engine, never sent: the version ID a peer sees is a keyed MAC of it),
+// its name (for versions), its audio languages as tags (for choosing the
+// copy), and the host library holding it (one of those Copies was asked
+// for: a playback ends when that library is no longer offered).
 type Copy struct {
-	Handle string
-	Name   string
-	Audio  []string
+	Handle  string
+	Name    string
+	Audio   []string
+	Library string
 }
 
-// Track is an audio or subtitle track of a copy: id is "a<n>" or "s<n>".
+// Track is an audio or subtitle track of a copy: ID is its position,
+// "a<n>" or "s<n>" (n from 0 to 999, no leading zeros). Label is its
+// language's name in itself ("Français (Canada)"); Language a tag; Role
+// "commentary" or "description" for audio beside the title's own sound;
+// Pictures marks a PGS subtitle track (other picture formats are left
+// out of the list).
 type Track struct {
-	ID              string
-	Label           string
-	Language        string
-	Channels        int
-	Role            string
-	Default         bool
-	Forced          bool
-	HearingImpaired bool
-	// Pictures: a picture (PGS) subtitle track.
-	Pictures bool
+	ID              string `json:"id"`
+	Label           string `json:"label"`
+	Language        string `json:"language,omitempty"`
+	Channels        int    `json:"channels,omitempty"`
+	Role            string `json:"role,omitempty"`
+	Default         bool   `json:"default,omitempty"`
+	Forced          bool   `json:"forced,omitempty"`
+	HearingImpaired bool   `json:"hearingImpaired,omitempty"`
+	Pictures        bool   `json:"pictures,omitempty"`
 }
 
 // CopyInfo is what Playback.Describe tells of a copy.
@@ -153,21 +165,68 @@ type CopyInfo struct {
 	AudioTracks    []Track
 	SubtitleTracks []Track
 	DurationMs     int64
-	// EpisodeStartMs is the episode's start inside a copy holding
-	// several, when known (-1: unknown).
+	// EpisodeStartMs is where the episode played starts inside a copy
+	// holding several (MSFP video section 5.2); 0 when unknown.
 	EpisodeStartMs int64
 	// Trickplay is the copy's previews, nil for none.
 	Trickplay *Trickplay
 }
 
-// Trickplay is a copy's seek-bar previews: tile layout and sheet count
-// (MSFP video section 5.5).
+// Trickplay is a copy's seek-bar previews (MSFP video section 5.5): the
+// tiles' size, the grid of a sheet, the time between tiles, the tiles in
+// all, and (in a RemotePlayback) the sheets listed.
 type Trickplay struct {
 	TileWidth, TileHeight int
 	Columns, Rows         int
 	IntervalMs            int
 	TileCount             int
 	Sheets                int
+}
+
+// Version is one of a title's copies as a peer sees it: an opaque ID and
+// a name (MSFP playback section 2.3).
+type Version struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// PlaybackInfo is how a playback is served, for the viewer's player
+// information: why it is converted (none when played as it is), the
+// container, the bitrate, the video and the audio.
+type PlaybackInfo struct {
+	Reasons     []string    `json:"reasons,omitempty"`
+	Container   string      `json:"container,omitempty"`
+	BitrateKbps int         `json:"bitrateKbps,omitempty"`
+	Video       *StreamInfo `json:"video,omitempty"`
+	Audio       *StreamInfo `json:"audio,omitempty"`
+}
+
+// StreamInfo describes the video or the audio of a playback.
+type StreamInfo struct {
+	Codec       string `json:"codec,omitempty"`
+	Profile     string `json:"profile,omitempty"`
+	Width       int    `json:"width,omitempty"`
+	Height      int    `json:"height,omitempty"`
+	BitDepth    int    `json:"bitDepth,omitempty"`
+	Range       string `json:"range,omitempty"`
+	BitrateKbps int    `json:"bitrateKbps,omitempty"`
+	Channels    int    `json:"channels,omitempty"`
+	Language    string `json:"language,omitempty"`
+}
+
+// Capabilities are what a viewer's device plays (MSFP playback section
+// 2.1, video section 5.1). Toward a peer, only the values MSFP lists are
+// sent, coarsened; toward the host, only those values, exactly as MSFP
+// writes them. An empty list, or 0, says nothing.
+type Capabilities struct {
+	Containers       []string
+	AudioCodecs      []string
+	VideoCodecs      []string
+	HDR              []string
+	Subtitles        []string
+	MaxAudioChannels int
+	MaxHeight        int
+	MaxBitrateKbps   int
 }
 
 // PeerRef names a peer for the host's live view: its ID and name, never
@@ -179,18 +238,29 @@ type PeerRef struct {
 
 // StartRequest is what the engine asks Playback.Start to serve.
 type StartRequest struct {
-	Copy          string
-	Peer          PeerRef
+	// Copy is the handle of the copy chosen; Title the key played (an
+	// episode's, for a copy holding several); AudioOnly, that it is a
+	// track (MSFP music section 5): no video is served.
+	Copy      string
+	Title     string
+	AudioOnly bool
+	Peer      PeerRef
+	// AudioTrack and SubtitleTrack are the engine's choice ("": none
+	// shown); subtitles never make a playback transcode.
 	AudioTrack    string
-	SubtitleTrack string // "": none shown
+	SubtitleTrack string
 	StartMs       int64
-	// Capabilities are what the viewer's device plays, coarsened: only
-	// values MSFP lists.
-	Capabilities map[string][]string
-	// MaxBitrateKbps is the cap in effect.
+	// Capabilities are what the viewer's device plays, as the peer said,
+	// only values MSFP lists. Nothing said about containers or video
+	// codecs: no direct play (H.264 and AAC in HLS; AAC in HLS for a
+	// track); about audio codecs: AAC only; about hdr: standard range.
+	Capabilities Capabilities
+	// MaxBitrateKbps is the cap in effect: 120,000 when none was set.
 	MaxBitrateKbps int
 	// Admit counts the pairing's streams (and, for "transcode", its
-	// transcodes) before the host starts any work.
+	// transcodes) in one step: the host calls it once it knows the
+	// method, before starting any work (MSFP playback section 6.2).
+	// Errors: ErrStreamLimitReached, ErrServerBusy.
 	Admit func(method string) (Slot, error)
 }
 
@@ -205,20 +275,26 @@ type Slot interface {
 
 // Started is what Playback.Start answers.
 type Started struct {
-	Handle     string
-	Method     string // "direct", "remux", "transcode"
-	Protocol   string // "hls" or "file"
-	MimeType   string // for "file"
+	// Handle is the host's for this playback (not the copy's): Progress,
+	// Stop and Media.Serve are given it.
+	Handle   string
+	Method   string // "direct", "remux", "transcode", as admitted
+	Protocol string // "hls" or "file"
+	// MimeType is the file's type, for "file" (a video/ or audio/ type).
+	MimeType string
+	// PositionMs is where it starts, in the copy.
 	PositionMs int64
-	Info       map[string]any
-	Segments   []Segment
+	Info       *PlaybackInfo
+	// Segments are skip markers, when the host has them.
+	Segments []Segment
 }
 
-// Segment is a skip marker (intro, credits…).
+// Segment is a skip marker: Kind is intro, outro, recap, preview or
+// commercial (MSFP video section 5.3).
 type Segment struct {
-	Type    string
-	StartMs int64
-	EndMs   int64
+	Kind    string `json:"kind"`
+	StartMs int64  `json:"startMs"`
+	EndMs   int64  `json:"endMs"`
 }
 
 // EndReason is why a playback ended (MSFP playback section 6.3).
@@ -266,14 +342,18 @@ type Range struct {
 	First, Last, Suffix int64
 }
 
-// Limits are what a pairing may use of a server at once: streams (0 to
-// 50), transcodes among them, a bitrate cap (0: none), and music's own.
+// Limits are what a pairing may use of a server at once (MSFP playback
+// section 5): streams (0 to 50), transcodes among them, a bitrate cap
+// (0: none). With Audio, audio playbacks (tracks) are counted apart,
+// within AudioStreams and AudioTranscodes (music section 5.1); without,
+// they count in Streams and Transcodes.
 type Limits struct {
-	Streams         int `json:"streams"`
-	Transcodes      int `json:"transcodes"`
-	BitrateKbps     int `json:"bitrateKbps,omitempty"`
-	AudioStreams    int `json:"audioStreams,omitempty"`
-	AudioTranscodes int `json:"audioTranscodes,omitempty"`
+	Streams         int  `json:"streams"`
+	Transcodes      int  `json:"transcodes"`
+	BitrateKbps     int  `json:"bitrateKbps,omitempty"`
+	Audio           bool `json:"audio,omitempty"`
+	AudioStreams    int  `json:"audioStreams,omitempty"`
+	AudioTranscodes int  `json:"audioTranscodes,omitempty"`
 }
 
 // Check returns ErrInvalidLimits when l is out of range.

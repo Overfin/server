@@ -47,4 +47,9 @@
 // The protocol's pieces (keys, codes, signatures, strict JSON, pins,
 // statements) are package msfp/wire. Neither package imports anything
 // but the standard library and filippo.io/edwards25519.
+//
+// A host shares by giving Config a Catalog, a Playback and a Media
+// (host.go); its viewers play peers' titles through Play, Progress, Stop
+// and Fetch, at a route of its own. examples/share-folder is a whole host
+// in a few hundred lines.
 package msfp

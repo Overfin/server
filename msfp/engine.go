@@ -22,6 +22,10 @@ import (
 type Engine struct {
 	cfg Config
 	log *slog.Logger
+	// parts are the parts this server speaks (Config.Parts); started is
+	// when it opened.
+	parts   map[string][]int
+	started time.Time
 
 	// configured is the address the host gives (Config.Address, then
 	// SetAddress): this server's address whenever it can be called.
@@ -65,6 +69,18 @@ type Engine struct {
 	// because the panel was open (PanelOpen), by ID.
 	askedMu sync.Mutex
 	asked   map[string]time.Time
+
+	// The catalog, playbacks and media: the own change log, the readings
+	// of peers' catalogs, peers' playbacks here, this server's on peers,
+	// and the bounds of fetches at once (MSFP media section 2.4).
+	own                        ownLog
+	logKept                    bool
+	reading                    readings
+	plays                      plays
+	remotes                    remotes
+	fetchSlots, peerFetchSlots *slots
+	relaySlots, peerRelaySlots *slots
+	smallGate, sheetGate       chan struct{}
 
 	// events waiting to be told, and whether someone is telling them
 	// (notify).
@@ -119,7 +135,7 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 	if err := wire.CheckBase(cfg.Prefix + defaultBase); err != nil {
 		return nil, ErrInvalidAddress.with(fmt.Errorf("Config.Prefix %q: %w", cfg.Prefix, err))
 	}
-	e := &Engine{cfg: cfg, log: cfg.Logger, configured: cfg.Address}
+	e := &Engine{cfg: cfg, log: cfg.Logger, configured: cfg.Address, parts: servedParts(cfg.Parts), started: cfg.Clock.Now().UTC()}
 	if e.cfg.Name == nil {
 		e.cfg.Name = func() string { return wire.Host(e.named(e.address())) }
 	}
@@ -129,8 +145,22 @@ func Open(ctx context.Context, cfg Config) (*Engine, error) {
 	e.nonces = wire.NewNonces(e.now())
 	e.limits = newCallLimits(cfg.Limits)
 	e.conns = &peerClients{e: e}
+	e.fetchSlots = &slots{size: fetchesPerPlayback, queue: fetchesPerPlayback, wait: fetchWait}
+	e.peerFetchSlots = &slots{size: fetchesPerPeer, queue: fetchesPerPeer, wait: fetchWait}
+	e.relaySlots = &slots{size: fetchesPerPlayback, queue: fetchesPerPlayback, wait: fetchWait}
+	e.peerRelaySlots = &slots{size: fetchesPerPeer, queue: fetchesPerPeer, wait: fetchWait}
+	e.smallGate, e.sheetGate = make(chan struct{}, smallReads), make(chan struct{}, sheetReads)
 	if err := e.loadKeys(ctx); err != nil {
 		return nil, err
+	}
+	if cfg.Catalog != nil && e.changeLog() == nil {
+		_ = cfg.Store.Read(ctx, func(tx Tx) error {
+			_, e.logKept = tx.(OwnLogTx)
+			return nil
+		})
+		if !e.logKept {
+			e.log.Warn("msfp: the catalog keeps no change log, and the store can't: peers read the whole list each time")
+		}
 	}
 	return e, nil
 }
@@ -354,14 +384,6 @@ func (e *Engine) serverRecord(ctx context.Context) (ServerRecord, error) {
 		return nil
 	})
 	return rec, err
-}
-
-// The versions this engine speaks (MSFP core section 10): core 1. The
-// parts come with the later steps of the engine (catalog, playback,
-// media, video, music); until then it lists none, and answers their
-// calls not-supported.
-func (e *Engine) versions() wire.Versions {
-	return wire.Versions{Core: []int{1}, Parts: map[string][]int{}}
 }
 
 // agreed is what this server and a peer use between them: the core

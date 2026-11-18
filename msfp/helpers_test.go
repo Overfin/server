@@ -146,6 +146,37 @@ type server struct {
 	// h is the engine's handler (reopen swaps it); store its store.
 	h     http.Handler
 	store msfp.Store
+	// rewrite, when set, changes the answers it says (ok) before they go.
+	rewrite func(path string, h http.Header, body []byte) ([]byte, bool)
+}
+
+// setRewrite makes s a hostile peer: rewrite changes its answers.
+func (s *server) setRewrite(rewrite func(path string, h http.Header, body []byte) ([]byte, bool)) {
+	s.mu.Lock()
+	s.rewrite = rewrite
+	s.mu.Unlock()
+}
+
+// key is s's current key, read from its store (the memory store seals
+// nothing).
+func (s *server) key(t *testing.T) wire.Key {
+	var seed []byte
+	s.store.Read(context.Background(), func(tx msfp.Tx) error {
+		r, err := tx.Server()
+		if r != nil {
+			seed = r.Current
+		}
+		return err
+	})
+	seed, err := msfp.PlainSealer{}.Open(seed, "msfp current key")
+	if err != nil {
+		t.Error(err)
+	}
+	k, err := wire.KeyFromSeed(seed)
+	if err != nil {
+		t.Error(err)
+	}
+	return k
 }
 
 func (s *server) onRequest(see func(*http.Request, []byte)) {
@@ -183,13 +214,16 @@ func (s *server) lastExchange() exchange {
 // discovery document at /.well-known/msfp, the federation calls under
 // the prefix.
 func handlerOf(e *msfp.Engine) http.Handler {
-	fed, disc := e.FederationHandler(), e.DiscoveryHandler()
+	fed, disc, stream := e.FederationHandler(), e.DiscoveryHandler(), e.StreamHandler(nil)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/.well-known/msfp" {
+		switch {
+		case r.URL.Path == "/.well-known/msfp":
 			disc.ServeHTTP(w, r)
-			return
+		case strings.HasPrefix(r.URL.Path, "/api/v1/stream/"):
+			stream.ServeHTTP(w, r)
+		default:
+			fed.ServeHTTP(w, r)
 		}
-		fed.ServeHTTP(w, r)
 	})
 }
 
@@ -232,6 +266,24 @@ func newServerWith(t *testing.T, cfg msfp.Config, opts serverOpts) *server {
 		}
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, r)
+		s.mu.Lock()
+		rewrite := s.rewrite
+		s.mu.Unlock()
+		if rewrite != nil {
+			// A hostile peer: its answer changed, and signed again with its
+			// key when it was signed.
+			length := rec.Header().Get("Content-Length")
+			rec.Header().Del("Content-Length")
+			if b, ok := rewrite(r.URL.Path, rec.Header(), rec.Body.Bytes()); !ok {
+				rec.Header().Set("Content-Length", length)
+			} else {
+				rec.Body = bytes.NewBuffer(b)
+				if rec.Header().Get(wire.HeaderSignature) != "" {
+					rec.Header().Set(wire.HeaderSignature, wire.SignResponse(s.key(t), r.Header.Get(wire.HeaderNonce),
+						rec.Code, rec.Header().Get("Content-Type"), b))
+				}
+			}
+		}
 		s.mu.Lock()
 		s.last = exchange{path: r.URL.Path, reqBody: string(body), reqSig: r.Header.Get("MSFP-Signature"),
 			resBody: rec.Body.String(), resSig: rec.Header().Get("MSFP-Signature"), status: rec.Code}

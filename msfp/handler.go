@@ -93,9 +93,7 @@ type request struct {
 // FederationHandler serves the calls peers make, under
 // <Prefix>/api/v1/federation/: mount it there, on the raw path (never
 // behind http.StripPrefix: the signature covers the path as sent), with
-// no authentication in front and no compression of its answers. Calls
-// this step of the engine doesn't make yet are answered as MSFP says of
-// a part that is off.
+// no authentication in front and no compression of its answers.
 func (e *Engine) FederationHandler() http.Handler {
 	return http.HandlerFunc(e.serveFederation)
 }
@@ -108,19 +106,18 @@ var calls = map[string]func(*Engine, *request) response{
 	callHello:  (*Engine).hello,
 	callRotate: (*Engine).rotate,
 	callRevoke: (*Engine).revoke,
-}
 
-// Calls known to MSFP version 1 that this engine doesn't serve yet: the
-// parts', which it doesn't list in its hellos (a signed 404
-// not-supported, as for a part that is off: MSFP core section 10.4).
-var laterCalls = map[string]bool{
-	"libraries": true, "titles": true, "play": true, "progress": true, "stop": true,
+	callLibraries: (*Engine).libraries,
+	callTitles:    (*Engine).titles,
+	callPlay:      (*Engine).play,
+	callProgress:  (*Engine).progress,
+	callStop:      (*Engine).stop,
 }
 
 func (e *Engine) serveFederation(w http.ResponseWriter, r *http.Request) {
 	base := e.cfg.Prefix + defaultBase
 	call, ok := strings.CutPrefix(r.URL.Path, base)
-	if !ok || r.Method != http.MethodPost || (calls[call] == nil && !laterCalls[call]) {
+	if !ok || r.Method != http.MethodPost || calls[call] == nil {
 		e.cfg.NotFound.ServeHTTP(w, r)
 		return
 	}

@@ -25,3 +25,25 @@ func (e *Engine) WaitForTest() { e.bg.Wait() }
 func (e *Engine) FetchBaseForTest(ctx context.Context, address string) string {
 	return e.fetchBase(ctx, address)
 }
+
+// CallForTest sends peer id a call with the body in, as the engine
+// does, and gives the status of its signed answer, read into out.
+func (e *Engine) CallForTest(ctx context.Context, id, call string, in, out any) (int, error) {
+	p, err := e.peerRecord(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	r, err := e.call(ctx, p, call, in, out, false)
+	return r.status, err
+}
+
+// TouchForTest notes a use of a peer's playback here, as a progress
+// does.
+func (e *Engine) TouchForTest(id string) {
+	e.plays.mu.Lock()
+	pb := e.plays.byID[id]
+	e.plays.mu.Unlock()
+	if pb != nil {
+		e.used(pb)
+	}
+}

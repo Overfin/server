@@ -48,8 +48,15 @@ type PeerView struct {
 	// again). RotationAnswer is its last answer to our rotate while on
 	// the old key: "pending", "refused", or "".
 	OurKey, RotationAnswer string
-	// Limits are what it may use here.
-	Limits Limits
+	// Limits are what it may use here; TheirLimits what it lets this
+	// server use of it, as its last libraries answer said (nil until it
+	// did).
+	Limits      Limits
+	TheirLimits *Limits
+	// Offers is how many of the host's libraries are offered to it;
+	// Wants how many of its libraries this server reads, WantsGone how
+	// many of those it no longer offers.
+	Offers, Wants, WantsGone int
 }
 
 // MoveView is a peer's new address, not confirmed yet (MSFP core section
@@ -75,6 +82,19 @@ func (e *Engine) view(p *PeerRecord) PeerView {
 		State: p.State, Created: p.Created, Paired: p.Paired, Seen: p.Seen, Suspended: p.Suspended,
 		Core: core, Parts: parts, Inbound: p.Inbound, CommitmentFrom: p.CommitmentFrom,
 		OurKey: p.OurKey, RotationAnswer: p.RotationAnswer, Limits: p.Limits, CallsFailed: p.CallsFailed}
+	v.Offers = len(p.Offers)
+	if p.TheirLimits != nil {
+		l := *p.TheirLimits
+		v.TheirLimits = &l
+	}
+	for _, w := range p.Wants {
+		if w.Wanted {
+			v.Wants++
+			if w.Gone {
+				v.WantsGone++
+			}
+		}
+	}
 	if a := e.address(); a.former != "" && a.reached && notMoved(p, wire.Host(a.address)) {
 		v.NotMoved, v.MoveLate = true, e.now().Sub(a.movedAt) >= moveLate
 	}

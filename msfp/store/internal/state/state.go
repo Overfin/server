@@ -59,6 +59,7 @@ type Own struct {
 	Snapshot map[string]json.RawMessage `json:"snapshot"`
 	Changes  []msfp.OwnChange           `json:"changes"`
 	Floor    int64                      `json:"floor"`
+	Seq      int64                      `json:"seq"`
 }
 
 // New is an empty state.
@@ -559,6 +560,9 @@ func (t *tx) AppendOwnChanges(changes []msfp.OwnChange) error {
 		return err
 	}
 	t.s.Own.Changes = append(t.s.Own.Changes, changes...)
+	for _, c := range changes {
+		t.s.Own.Seq = max(t.s.Own.Seq, c.Seq)
+	}
 	return nil
 }
 
@@ -579,6 +583,16 @@ func (t *tx) TrimOwnChanges(before time.Time) error {
 }
 
 func (t *tx) OwnFloor() (int64, error) { return t.s.Own.Floor, nil }
+
+func (t *tx) OwnSeq() (int64, error) { return max(t.s.Own.Seq, t.s.Own.Floor), nil }
+
+func (t *tx) BumpOwnSeq() (int64, error) {
+	if err := t.own("own"); err != nil {
+		return 0, err
+	}
+	t.s.Own.Seq = max(t.s.Own.Seq, t.s.Own.Floor) + 1
+	return t.s.Own.Seq, nil
+}
 
 // The checks that the stores are what the engine needs.
 var (

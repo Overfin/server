@@ -88,14 +88,34 @@ type Config struct {
 	// (MSFP core section 3). Default: MSFP's 404 problem document.
 	NotFound http.Handler
 
+	// Parts are the parts this server speaks besides the core (MSFP core
+	// section 10.1): "catalog", "playback", "media", "video", "music".
+	// nil, by default: all five, so that this server reads and plays its
+	// peers' films, series and music, whether or not it shares any. A
+	// part listed without the parts it needs is left out (video and music
+	// need the other three; playback needs catalog and media). A server
+	// that has no music player leaves "music" out. An empty list, not
+	// nil: the core alone.
+	Parts []string
+
 	// Catalog, Playback and Media are the host's own libraries, its
 	// playback and its media; absent, nothing is offered and nothing
-	// plays here. (Used from later steps of the engine on.)
+	// plays here (every play is answered 404).
 	Catalog  Catalog
 	Playback Playback
 	Media    Media
-	// SheetEncoder re-encodes relayed preview sheets. (Later steps.)
+	// SheetEncoder re-encodes relayed preview sheets; JPEGSheets by
+	// default.
 	SheetEncoder SheetEncoder
+	// MaxBitrateKbps is this server's own cap on what peers play here; 0,
+	// by default, for none.
+	MaxBitrateKbps int
+	// LongestPlayback ends a peer's playback here that lasts longer; 24
+	// hours by default (MSFP playback section 6.3).
+	LongestPlayback time.Duration
+	// SyncEvery is how often peers' catalogs are read; 30 minutes by
+	// default, the most often MSFP catalog section 3.2 suggests.
+	SyncEvery time.Duration
 }
 
 // CallLimits are the limits on calls (MSFP core section 8.3). A zero
@@ -169,6 +189,15 @@ func (c Config) withDefaults() Config {
 	}
 	if c.Dialer == nil {
 		c.Dialer = &checkedDialer{allowLoopback: c.AllowLoopback}
+	}
+	if c.SheetEncoder == nil {
+		c.SheetEncoder = JPEGSheets{}
+	}
+	if c.LongestPlayback <= 0 {
+		c.LongestPlayback = 24 * time.Hour
+	}
+	if c.SyncEvery <= 0 {
+		c.SyncEvery = 30 * time.Minute
 	}
 	if c.NotFound == nil {
 		c.NotFound = http.HandlerFunc(plainNotFound)

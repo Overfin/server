@@ -639,9 +639,8 @@ func (e *Engine) confirmMove(ctx context.Context, id string) {
 }
 
 // readCatalogSoon reads a peer's catalog at once (MSFP catalog section
-// 3.2): the catalog comes with the next step of the engine, and with it
-// this reading; a host is told by InboundChanged meanwhile.
-func (e *Engine) readCatalogSoon(string) {}
+// 3.2): it can be called again (MSFP core section 7.5).
+func (e *Engine) readCatalogSoon(id string) { e.readSoon(id) }
 
 // startConfirming says whether a confirmation of peer id's new address
 // may start: one at a time per peer.

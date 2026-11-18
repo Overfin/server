@@ -82,7 +82,7 @@ func newVectorPair(t *testing.T) *vectorPair {
 	v.a = newServer(t, msfp.Config{Address: "https://a.example.org", Name: func() string { return "Server A" },
 		Store: v.storeA, Clock: v.clockA, Random: v.randA, Dialer: v.dialA})
 	v.b = newServer(t, msfp.Config{Address: "https://192.0.2.10:8096", Name: func() string { return "Server B" },
-		Store: v.storeB, Clock: v.clockB, Random: v.randB, Dialer: v.dialB})
+		Store: v.storeB, Clock: v.clockB, Random: v.randB, Dialer: v.dialB, Parts: []string{}})
 
 	// pair, B to A: the code A makes is the vector's; B's request and A's
 	// answer are the vector's, byte for byte.
@@ -153,7 +153,8 @@ func TestVectorsThroughEngines(t *testing.T) {
 		t.Errorf("A on B: %+v", recB)
 	}
 
-	// play, A to B: B speaks no playback, so a signed 404 not-supported,
+	// play, A to B: B speaks no playback (the core alone, as the vectors'
+	// servers), so a signed 404 not-supported,
 	// byte for byte.
 	clockB.Set(1800000180)
 	res = serveVector(t, b.eng, vs["play, to a peer without playback"])

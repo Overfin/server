@@ -1,6 +1,8 @@
 package msfp
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"time"
 )
@@ -131,26 +133,73 @@ type InboundChanged struct {
 // (section 7.5). Nothing else changes.
 type CallsFailed struct{ Peer, Name string }
 
-func (e PeerWaiting) PeerID() string      { return e.Peer }
-func (e PeerPaired) PeerID() string       { return e.Peer }
-func (e PeerGone) PeerID() string         { return e.Peer }
-func (e PeerEnded) PeerID() string        { return e.Peer }
-func (e VersionsChanged) PeerID() string  { return e.Peer }
-func (e PeerSuspended) PeerID() string    { return e.Peer }
-func (e PeerResumed) PeerID() string      { return e.Peer }
-func (e RotationPending) PeerID() string  { return e.Peer }
-func (e RotationRefused) PeerID() string  { return e.Peer }
-func (e PeerRotated) PeerID() string      { return e.Peer }
-func (e RotationAnswered) PeerID() string { return e.Peer }
-func (e OurKeyLost) PeerID() string       { return e.Peer }
-func (RotationEnded) PeerID() string      { return "" }
-func (AddressAnnounced) PeerID() string   { return "" }
-func (MoveEnded) PeerID() string          { return "" }
-func (e NotMovedLate) PeerID() string     { return e.Peer }
-func (e PeerMoved) PeerID() string        { return e.Peer }
-func (e PeerMoveFailing) PeerID() string  { return e.Peer }
-func (e InboundChanged) PeerID() string   { return e.Peer }
-func (e CallsFailed) PeerID() string      { return e.Peer }
+// Catalogs and playbacks.
+
+// CatalogReadEnded: a reading of a peer's titles ended: Titles kept (new or
+// changed, for a reading of changes), or Err, why it failed; what was
+// kept before a failed reading stays (MSFP catalog section 3.2).
+type CatalogReadEnded struct {
+	Peer, Name string
+	Titles     int
+	Changes    bool
+	Err        error
+}
+
+// WantsGone: libraries this server wants of a peer (their public IDs)
+// weren't in its last libraries answer: it no longer offers them (MSFP
+// catalog section 2.2). Their titles go with the next reading.
+type WantsGone struct {
+	Peer, Name string
+	Libraries  []string
+}
+
+// PlaybackStarted: a peer's playback of Title started here (MSFP
+// playback section 6.1), for the host's live view.
+type PlaybackStarted struct {
+	Peer, Name, Playback, Title, Method string
+}
+
+// PlaybackEnded: a peer's playback here ended, and why.
+type PlaybackEnded struct {
+	Peer, Name, Playback, Title string
+	Reason                      EndReason
+}
+
+// RemotePlaybackEnded: a playback of this server's on a peer ended
+// without the host's Stop: the peer answered 410 (Reason EndExpired),
+// the pairing ended, the peer was suspended or can't be called
+// (EndPairingEnded). Its fetches fail from then on; the viewer's player
+// stops.
+type RemotePlaybackEnded struct {
+	Peer, Name, Playback string
+	Reason               EndReason
+}
+
+func (e PeerWaiting) PeerID() string         { return e.Peer }
+func (e PeerPaired) PeerID() string          { return e.Peer }
+func (e PeerGone) PeerID() string            { return e.Peer }
+func (e PeerEnded) PeerID() string           { return e.Peer }
+func (e VersionsChanged) PeerID() string     { return e.Peer }
+func (e PeerSuspended) PeerID() string       { return e.Peer }
+func (e PeerResumed) PeerID() string         { return e.Peer }
+func (e RotationPending) PeerID() string     { return e.Peer }
+func (e RotationRefused) PeerID() string     { return e.Peer }
+func (e PeerRotated) PeerID() string         { return e.Peer }
+func (e RotationAnswered) PeerID() string    { return e.Peer }
+func (e OurKeyLost) PeerID() string          { return e.Peer }
+func (RotationEnded) PeerID() string         { return "" }
+func (AddressAnnounced) PeerID() string      { return "" }
+func (MoveEnded) PeerID() string             { return "" }
+func (e NotMovedLate) PeerID() string        { return e.Peer }
+func (e PeerMoved) PeerID() string           { return e.Peer }
+func (e PeerMoveFailing) PeerID() string     { return e.Peer }
+func (e InboundChanged) PeerID() string      { return e.Peer }
+func (e CallsFailed) PeerID() string         { return e.Peer }
+func (e CatalogReadEnded) PeerID() string    { return e.Peer }
+func (e WantsGone) PeerID() string           { return e.Peer }
+func (e PlaybackStarted) PeerID() string     { return e.Peer }
+func (e PlaybackEnded) PeerID() string       { return e.Peer }
+func (e RemotePlaybackEnded) PeerID() string { return e.Peer }
 
 // notify tells the host events, in order, one at a time, outside the
 // engine's locks: the first caller to find nobody telling becomes the
@@ -158,6 +207,9 @@ func (e CallsFailed) PeerID() string      { return e.Peer }
 func (e *Engine) notify(events ...Event) {
 	if len(events) == 0 {
 		return
+	}
+	for _, ev := range events {
+		e.react(ev)
 	}
 	e.evMu.Lock()
 	e.events = append(e.events, events...)
@@ -190,4 +242,48 @@ func (e *Engine) tell(ev Event) {
 		return
 	}
 	e.cfg.Notifier.Notify(ev)
+}
+
+// react is what the engine itself does on an event, before the host is
+// told: a peer no longer paired, or suspended, ends its playbacks both
+// ways (MSFP playback section 6.3); one that can't be called is fetched
+// from no more, and what was kept of its titles goes (MSFP core section
+// 7.5); one that can be called again is read at once.
+func (e *Engine) react(ev Event) {
+	switch ev := ev.(type) {
+	case PeerEnded, PeerGone, PeerSuspended:
+		id := ev.PeerID()
+		e.endPlaybacks(func(pb *playback) bool { return pb.peer == id }, EndPairingEnded)
+		e.endRemotes(id, EndPairingEnded)
+		if _, gone := ev.(PeerGone); gone {
+			e.background(func(ctx context.Context) { e.dropCatalog(ctx, id) })
+		}
+	case InboundChanged:
+		if ev.Inbound == InboundNo {
+			e.endRemotes(ev.Peer, EndPairingEnded)
+			e.background(func(ctx context.Context) { e.dropCatalog(ctx, ev.Peer) })
+		}
+	case VersionsChanged:
+		// The parts on may have changed: the next reading of this
+		// server's titles is a whole one.
+		id := ev.Peer
+		e.background(func(ctx context.Context) {
+			mark, err := e.seqMark(ctx)
+			if err == nil {
+				err = e.cfg.Store.Update(ctx, func(tx Tx) error {
+					p, err := tx.Peer(id)
+					if err != nil || p == nil {
+						return err
+					}
+					if p.OffersSeq, err = e.offersSeq(tx, mark); err != nil {
+						return err
+					}
+					return tx.PutPeer(*p)
+				})
+			}
+			if err != nil && !errors.Is(err, ErrNotFound) {
+				e.log.Warn("msfp: a peer's change of versions couldn't be noted", "peer", id, "error", err)
+			}
+		})
+	}
 }

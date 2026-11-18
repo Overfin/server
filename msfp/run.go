@@ -12,8 +12,12 @@ import (
 // server's change of key after 30 days, rotate sent again daily, the 30
 // days of a revoked key, peers suspended 30 days gone; addresses' time
 // (maintainAddresses): the end of this server's move, peers late to move
-// told again, peers' new addresses tried again. Catalog readings and
-// playback expiry join it in later steps.
+// told again, peers' new addresses tried again; the playbacks left on
+// peers before a restart stopped (once); the engine's own change log of
+// the host's catalog refreshed. Every second too: peers' catalogs read
+// when due (a minute after the start, then every SyncEvery, at once when
+// what is wanted changes), peers' playbacks here expired (looked at
+// every 30 seconds).
 
 // tidyEvery is how often Run does the hourly work; tickEvery, the rest.
 const (
@@ -82,13 +86,23 @@ func (e *Engine) RunOnce(ctx context.Context) error {
 	if err := e.maintainAddresses(ctx); err != nil {
 		return err
 	}
+	e.stopLeftovers(ctx)
+	if e.keepsLog() {
+		if err := e.refreshOwn(ctx); err != nil {
+			e.log.Warn("msfp: the catalog's change log couldn't be refreshed", "error", err)
+		}
+	}
+	e.readDue(ctx, true)
+	e.expirePlaybacks(true)
 	e.tick(ctx)
 	return nil
 }
 
 // tick is the work of each second: this server's new address tried, its
-// scheduled hellos sent.
+// scheduled hellos sent, catalogs due read, playbacks expired.
 func (e *Engine) tick(ctx context.Context) {
 	e.reachAndAnnounce(ctx)
 	e.scheduledHellos(ctx)
+	e.readDue(ctx, false)
+	e.expirePlaybacks(false)
 }

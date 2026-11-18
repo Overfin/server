@@ -29,8 +29,12 @@ const defaultBase = wire.DefaultBase
 // maxAnswer caps what is read of an answer (MSFP core section 3).
 const maxAnswer = 4 << 20
 
-// callTimeout is a call's time in all.
-const callTimeout = 15 * time.Second
+// callTimeout is a call's time in all; mediaHeaderTime a media fetch's
+// time to its answer's headers (MSFP media section 2.4).
+const (
+	callTimeout     = 15 * time.Second
+	mediaHeaderTime = 60 * time.Second
+)
 
 // The calls of the core.
 const (
@@ -217,6 +221,10 @@ type peerClients struct {
 	mu      sync.Mutex
 	anyCert *http.Client
 	byPeer  map[string]pinnedClient
+	// media are the clients of media fetches, by peer: the same
+	// certificates, no time bound in all (a fetch lasts as long as its
+	// playback), 60 seconds to the answer's headers.
+	media map[string]pinnedClient
 }
 
 type pinnedClient struct {
@@ -230,33 +238,50 @@ func (c *peerClients) client(p *PeerRecord, anyCert bool) *http.Client {
 	defer c.mu.Unlock()
 	if anyCert {
 		if c.anyCert == nil {
-			c.anyCert = c.newClient("", nil, true)
+			c.anyCert = c.newClient("", nil, true, false)
 		}
 		return c.anyCert
 	}
+	if c.byPeer == nil {
+		c.byPeer = map[string]pinnedClient{}
+	}
+	return c.pinned(c.byPeer, p, false)
+}
+
+// mediaClient gives the client for media fetches from p: a trusted or
+// named certificate only (MSFP media section 1).
+func (c *peerClients) mediaClient(p *PeerRecord) *http.Client {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.media == nil {
+		c.media = map[string]pinnedClient{}
+	}
+	return c.pinned(c.media, p, true)
+}
+
+// pinned is p's client in clients, made again when its address or pins
+// changed.
+func (c *peerClients) pinned(clients map[string]pinnedClient, p *PeerRecord, media bool) *http.Client {
 	sig := p.Address + " " + strings.Join(p.Pins, " ")
-	if pc, ok := c.byPeer[p.ID]; ok && pc.sig == sig {
+	if pc, ok := clients[p.ID]; ok && pc.sig == sig {
 		return pc.client
 	}
-	if old, ok := c.byPeer[p.ID]; ok {
+	if old, ok := clients[p.ID]; ok {
 		old.client.CloseIdleConnections()
 	}
 	host := ""
 	if u, err := url.Parse(p.Address); err == nil {
 		host = u.Hostname()
 	}
-	if c.byPeer == nil {
-		c.byPeer = map[string]pinnedClient{}
-	}
-	cl := c.newClient(host, p.Pins, false)
-	c.byPeer[p.ID] = pinnedClient{sig: sig, client: cl}
+	cl := c.newClient(host, p.Pins, false, media)
+	clients[p.ID] = pinnedClient{sig: sig, client: cl}
 	return cl
 }
 
 // newClient is a client whose connections go through the Dialer, check
 // the certificate as wire.VerifyPeer says, never follow redirects, never
 // ask for compression and use no proxy.
-func (c *peerClients) newClient(host string, pins []string, anyCert bool) *http.Client {
+func (c *peerClients) newClient(host string, pins []string, anyCert, media bool) *http.Client {
 	cfg := &tls.Config{
 		// Checked by VerifyConnection instead, which Go runs either way.
 		InsecureSkipVerify: true,
@@ -274,9 +299,13 @@ func (c *peerClients) newClient(host string, pins []string, anyCert bool) *http.
 		ForceAttemptHTTP2:   true,
 		DisableCompression:  true,
 	}
+	timeout := callTimeout
+	if media {
+		tr.ResponseHeaderTimeout, timeout = mediaHeaderTime, 0
+	}
 	return &http.Client{
 		Transport: tr,
-		Timeout:   callTimeout,
+		Timeout:   timeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},

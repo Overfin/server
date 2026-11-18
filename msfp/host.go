@@ -110,9 +110,14 @@ type OwnLogTx interface {
 	OwnChanges(since int64, after string, limit int) ([]OwnChange, error)
 	AppendOwnChanges([]OwnChange) error
 	// TrimOwnChanges drops changes noted before then; OwnFloor is the
-	// last seq no longer kept (0 when none was dropped).
+	// last seq no longer kept (0 when none was dropped); OwnSeq the
+	// highest seq ever appended (0 for none).
 	TrimOwnChanges(before time.Time) error
 	OwnFloor() (int64, error)
+	OwnSeq() (int64, error)
+	// BumpOwnSeq takes a new change number without a change, and gives
+	// it: what a peer sees changed otherwise (its offers, the parts on).
+	BumpOwnSeq() (int64, error)
 }
 
 // OwnChange is one change of the host's own catalog, in the log the
@@ -135,7 +140,8 @@ type Catalog interface {
 	// limit, each once.
 	Titles(ctx context.Context, libraries []string, after string, limit int) (TitlePage, error)
 	// Copies lists the copies of exactly this film, episode or track in
-	// these libraries; none: the engine answers 404.
+	// these libraries (for an episode inside a copy holding several, the
+	// copy that holds it); none: the engine answers 404.
 	Copies(ctx context.Context, key string, libraries []string) ([]Copy, error)
 }
 
