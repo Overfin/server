@@ -397,8 +397,8 @@
       {#snippet children()}<code class="fingerprint">{s?.fingerprint}</code>{/snippet}
     </Setting>
     {#if s.nextKey}
-      <Setting stack label="Next key" hint={s.nextKey.onServer ? "Made in advance, for changing this server's key; paired servers know it is the next one. Export it to keep offline, then delete it from the server: someone who copies the server's storage then can't change its key." : "Kept offline: it's no longer on this server. Changing the key, or recovering from a stolen one, needs the copy you exported."}>
-        {#snippet children()}<code class="fingerprint">{s?.nextKey?.fingerprint}</code> <Badge kind={s?.nextKey?.onServer ? 'plain' : 'ok'}>{s?.nextKey?.onServer ? 'On this server' : 'Kept offline'}</Badge>{/snippet}
+      <Setting stack label={s.nextKey.onServer ? 'Next key, on this server' : 'Next key, kept offline'} hint={s.nextKey.onServer ? "Made in advance, for changing this server's key; paired servers know it is the next one. Export it to keep offline, then delete it from the server: someone who copies the server's storage then can't change its key." : "Kept offline: it's no longer on this server. Changing the key, or recovering from a stolen one, needs the copy you exported."}>
+        {#snippet children()}<code class="fingerprint">{s?.nextKey?.fingerprint}</code>{/snippet}
       </Setting>
     {/if}
     {#if s.rotation}
@@ -510,7 +510,7 @@
   <FormModal danger title="This server's key was stolen" description="Paired servers are told at once that this server's key is revoked: they stop hearing it. With the next key, this server then moves to it, and servers that know it as the next one follow by themselves. Without it, this server gets a new key, and every pairing ends: pair again with new codes, comparing fingerprints." saveLabel="Revoke the key" save={saveChange} close={() => (changing = null)}>
     {#if s?.nextKey?.onServer}
       <label class="inline"><input type="checkbox" bind:checked={withoutNext} /> Don't move to the next key</label>
-      <div class="hint">The next key is on this server: if the server's storage was copied, the thief may hold it too. Then tick this: every pairing ends, to make again.</div>
+      <div class="hint">The next key is on this server: if the server's storage was copied, the thief may hold it too. Then turn this on: every pairing ends, to make again.</div>
     {:else}
       <Field label="Next key, if you kept it" wide hint="The copy you exported, starting with overfin-next-key-1. Leave it empty if you don't have it: every pairing then ends."><textarea bind:value={nextKeyText} rows="2" spellcheck="false" autocomplete="off"></textarea></Field>
     {/if}
