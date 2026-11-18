@@ -10,7 +10,7 @@ func RetryAfter(body []byte) int {
 	var p struct {
 		RetryAfter int `json:"retryAfter"` // a fraction or a string: not one
 	}
-	if DecodeJSON(body, &p) != nil || p.RetryAfter < 1 || p.RetryAfter > MaxRetryAfter {
+	if DecodeAnswer(body, &p) != nil || p.RetryAfter < 1 || p.RetryAfter > MaxRetryAfter {
 		return 0
 	}
 	return p.RetryAfter

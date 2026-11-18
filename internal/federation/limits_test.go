@@ -267,7 +267,8 @@ func TestPlayBusyIsAnAnswer(t *testing.T) {
 	k := msfp.NewKey()
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := []byte(`{"type":"server-busy","title":"busy","status":503}`)
-		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 503, body))
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 503, "application/problem+json", body))
 		w.WriteHeader(503)
 		_, _ = w.Write(body)
 	}))

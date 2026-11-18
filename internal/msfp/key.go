@@ -49,7 +49,7 @@ func (k Key) sign(message []byte) []byte { return ed25519.Sign(k.private, messag
 const idLabel = "overfin-federation-1 ids\n"
 
 // OpaqueID is an ID for a peer, made from one of ours that it must never
-// see nor compute (MSFP section 9.5: version IDs): a MAC, under a key
+// see nor compute (MSFP playback, section 2.3: version IDs): a MAC, under a key
 // derived from this server's own, of what it is, for whom, and our ID.
 // The same for the same three, across restarts; 128 bits, base64url.
 func (k Key) OpaqueID(what, peerID, id string) string {

@@ -56,7 +56,7 @@ func Transport() *http.Transport {
 		MaxIdleConnsPerHost: 8,
 		IdleConnTimeout:     90 * time.Second,
 		ForceAttemptHTTP2:   true,
-		// Never asked compressed (MSFP section 3, "Content codings:
+		// Never asked compressed (MSFP core section 3, "Content codings:
 		// none"): the signature covers the bytes as sent.
 		DisableCompression: true,
 	}

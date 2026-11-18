@@ -18,37 +18,43 @@ import (
 	"time"
 )
 
-// Every request between paired servers carries four headers:
+// Every request between paired servers carries four headers (MSFP core
+// section 6.1):
 //
-//	Overfin-Key:       the sender's public key (URL-safe base64)
-//	Overfin-Date:      when it was signed (Unix seconds)
-//	Overfin-Nonce:     16 random bytes, never used twice
-//	Overfin-Signature: the sender's Ed25519 signature
+//	MSFP-Key:       the sender's public key (base64url)
+//	MSFP-Date:      when it was signed (Unix seconds)
+//	MSFP-Nonce:     16 random bytes, never used twice
+//	MSFP-Signature: the sender's Ed25519 signature
 //
-// The signature covers the method, the server it's meant for, the path and
-// query, the date, the nonce and the body's SHA-256: changing any of them,
+// The signature covers the method, the server it's meant for, the path,
+// the date, the nonce and the body's SHA-256: changing any of them,
 // sending it to another server, or sending it again, is caught. The answer
-// carries an Overfin-Signature too, from the server answering, over the
-// request's nonce, the status and the body: an answer can't be forged or
-// swapped for another request's, even by someone who can read and change
-// the traffic (a web certificate alone is never trusted).
+// carries an MSFP-Signature too, from the server answering, over the
+// request's nonce, the status, the answer's media type and its body: an
+// answer can't be forged or swapped for another request's, even by
+// someone who can read and change the traffic (a web certificate alone is
+// never trusted).
 const (
-	HeaderKey       = "Overfin-Key"
-	HeaderDate      = "Overfin-Date"
-	HeaderNonce     = "Overfin-Nonce"
-	HeaderSignature = "Overfin-Signature"
+	HeaderKey       = "MSFP-Key"
+	HeaderDate      = "MSFP-Date"
+	HeaderNonce     = "MSFP-Nonce"
+	HeaderSignature = "MSFP-Signature"
 )
+
+// oldHeaders are the signature headers of MSFP's first test version: a
+// request that carries one of them is refused (core section 6.1).
+var oldHeaders = []string{"Overfin-Key", "Overfin-Date", "Overfin-Nonce", "Overfin-Signature"}
 
 // MaxSkew is how far a request's date may be from the receiver's clock.
 // Servers' clocks are set by the network, usually within a second.
 const MaxSkew = 5 * time.Minute
 
 // What's signed starts with what it is, so a signature made for one use
-// never passes for another.
+// never passes for another (core sections 6.2, 6.3 and 9.1).
 const (
-	requestLabel  = "overfin-federation-1 request\n"
-	responseLabel = "overfin-federation-1 response\n"
-	pairingLabel  = "overfin-federation-1 pairing\n"
+	requestLabel  = "msfp-1 request\n"
+	responseLabel = "msfp-1 response\n"
+	pairingLabel  = "msfp-1 pairing\n"
 )
 
 var b64 = base64.RawURLEncoding
@@ -58,11 +64,11 @@ var b64 = base64.RawURLEncoding
 // answers every one the same way.
 var ErrSignature = errors.New("federation: not a valid signature")
 
-// Encode64 writes b as base64url in MSFP's one form (section 2.1): no
+// Encode64 writes b as base64url in MSFP's one form (section 2.2): no
 // padding.
 func Encode64(b []byte) string { return b64.EncodeToString(b) }
 
-// Decode64 decodes base64url in MSFP's one form (section 2.1): no
+// Decode64 decodes base64url in MSFP's one form (section 2.2): no
 // padding, no white space, unused bits zero, n bytes (any, for n < 0);
 // re-encoding gives the same text.
 func Decode64(s string, n int) ([]byte, bool) {
@@ -80,7 +86,7 @@ const maxInteger = 1<<53 - 1
 // leading zero, nothing else.
 var dateRe = regexp.MustCompile(`^[1-9][0-9]{0,15}$`)
 
-// parseDate reads an Overfin-Date (section 2.1).
+// parseDate reads an MSFP-Date (section 2.2).
 func parseDate(s string) (int64, bool) {
 	if !dateRe.MatchString(s) {
 		return 0, false
@@ -90,7 +96,7 @@ func parseDate(s string) (int64, bool) {
 }
 
 // OneHeader is a signature header sent exactly once, its value without a
-// comma (section 2.1); false otherwise.
+// comma (section 2.4); false otherwise.
 func OneHeader(h http.Header, name string) (string, bool) {
 	v := h.Values(name)
 	if len(v) != 1 || strings.Contains(v[0], ",") {
@@ -105,9 +111,25 @@ func requestMessage(method, host, target, date, nonce string, body []byte) []byt
 		date + "\n" + nonce + "\n" + hex.EncodeToString(sum[:]))
 }
 
-func responseMessage(nonce string, status int, body []byte) []byte {
+// responseMessage is what an answer's signature covers (core section
+// 6.3): the request's nonce, the status, the answer's media type (from its
+// Content-Type header, MediaType) and the body's SHA-256.
+func responseMessage(nonce string, status int, contentType string, body []byte) []byte {
 	sum := sha256.Sum256(body)
-	return []byte(responseLabel + nonce + "\n" + strconv.Itoa(status) + "\n" + hex.EncodeToString(sum[:]))
+	return []byte(responseLabel + nonce + "\n" + strconv.Itoa(status) + "\n" + MediaType(contentType) + "\n" +
+		hex.EncodeToString(sum[:]))
+}
+
+// MediaType is a Content-Type header as an answer's signature names it
+// (core section 6.3): its type and subtype in lower case, without
+// parameters or white space; "-" when there is none.
+func MediaType(contentType string) string {
+	mt, _, _ := strings.Cut(contentType, ";")
+	mt = strings.ToLower(strings.TrimSpace(mt))
+	if mt == "" {
+		return "-"
+	}
+	return mt
 }
 
 // SignRequest signs req, whose body is body, with k. It returns the nonce,
@@ -125,17 +147,19 @@ func SignRequest(req *http.Request, body []byte, k Key, now time.Time) string {
 	return nonce
 }
 
-// SignResponse is the signature to put in an answer's Overfin-Signature,
-// for the request whose nonce it was.
-func SignResponse(k Key, nonce string, status int, body []byte) string {
-	return b64.EncodeToString(k.sign(responseMessage(nonce, status, body)))
+// SignResponse is the signature to put in an answer's MSFP-Signature, for
+// the request whose nonce it was: contentType is the answer's
+// Content-Type header ("" for none).
+func SignResponse(k Key, nonce string, status int, contentType string, body []byte) string {
+	return b64.EncodeToString(k.sign(responseMessage(nonce, status, contentType, body)))
 }
 
 // CheckResponse checks an answer's signature against the key the
-// requester knows the other server by.
-func CheckResponse(peer ed25519.PublicKey, nonce string, status int, body []byte, signature string) error {
+// requester knows the other server by: contentType is the Content-Type
+// header the answer came with ("" for none).
+func CheckResponse(peer ed25519.PublicKey, nonce string, status int, contentType string, body []byte, signature string) error {
 	sig, ok := Decode64(signature, ed25519.SignatureSize)
-	if !ok || !verify(peer, responseMessage(nonce, status, body), sig) {
+	if !ok || !verify(peer, responseMessage(nonce, status, contentType, body), sig) {
 		return ErrSignature
 	}
 	return nil
@@ -182,12 +206,18 @@ type Verified struct {
 // request was signed by the key it names, for this server, recently, and
 // never seen before: who that key belongs to is the caller's question.
 func (v *Verifier) Check(r *http.Request, body []byte, now time.Time) (Verified, error) {
-	// No query (MSFP section 6.4, step 1): a call with one is refused
+	// No query (MSFP core section 6.4, step 1): a call with one is refused
 	// like a bad signature, even one signed over it.
 	if r.URL.RawQuery != "" || r.URL.ForceQuery {
 		return Verified{}, ErrSignature
 	}
-	// Each header once, each value in its one form (MSFP section 2.1).
+	// Never beside the first test version's headers (section 6.1).
+	for _, h := range oldHeaders {
+		if _, ok := r.Header[http.CanonicalHeaderKey(h)]; ok {
+			return Verified{}, ErrSignature
+		}
+	}
+	// Each header once, each value in its one form (MSFP section 2.4).
 	keyText, ok1 := OneHeader(r.Header, HeaderKey)
 	date, ok2 := OneHeader(r.Header, HeaderDate)
 	nonce, ok3 := OneHeader(r.Header, HeaderNonce)
@@ -271,7 +301,7 @@ const maxStrangerNonces = 1_000
 type Nonces struct {
 	// Since is when the memory began (NewNonces): a request signed before
 	// it is refused, since its nonce may have been seen before (a request
-	// read on an http pairing, replayed after a restart). There's no
+	// seen before a restart, replayed after it). There's no
 	// allowance for the other server's clock: one running behind is
 	// refused for that much after a start, as each second allowed would
 	// let a request from that second before the start be replayed. Zero:

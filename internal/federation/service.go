@@ -1,8 +1,9 @@
 // Package federation is the server side of federation between servers
-// (ROADMAP.md milestone 6, SECURITY.md rule 94): pairing and its states,
-// the calls and their handlers, limits, and connections to paired
-// servers. The protocol itself (keys, pairing codes, signatures, strict
-// JSON, pins) is package msfp.
+// (ROADMAP.md milestone 6, SECURITY.md rule 94), in MSFP version 1:
+// pairing and its states, the calls and their handlers, which parts of
+// MSFP are on with each peer, limits, and connections to paired servers.
+// The protocol itself (keys, pairing codes, signatures, strict JSON,
+// pins, versions) is package msfp.
 package federation
 
 import (
@@ -59,7 +60,8 @@ type Service struct {
 	Store *store.Store
 	Key   msfp.Key
 	// Address is this server's site address, as its codes give it:
-	// http(s)://host, without a path.
+	// https://host, without a path (plain http only with the test switch,
+	// msfp.AllowPlainHTTPForTests).
 	Address string
 	// Name is what this server calls itself to its peers.
 	Name   func(context.Context) string
@@ -91,6 +93,12 @@ type Service struct {
 	peerConns map[string]*peerConns
 	// readings holds a lock per peer ID, for SyncTitles.
 	readings sync.Map
+	// refused are the parts each peer answered not-supported (MSFP core
+	// section 10.4), by peer ID: off with it until its next hello.
+	refused map[string]map[string]bool
+	// rechecked is when each peer was last asked its versions again after
+	// such an answer, by peer ID: at most once an hour.
+	rechecked map[string]time.Time
 }
 
 // NewHTTPClient is the client for talking to peers: short timeouts, and
@@ -175,7 +183,7 @@ func (s *Service) forgotten(r *http.Request, key ed25519.PublicKey) bool {
 // (the signature covers the body). A stranger's stays the plain 404.
 type refusalWriter struct {
 	rec  *httptest.ResponseRecorder
-	sign func(status int, body []byte) string
+	sign func(status int, contentType string, body []byte) string
 	// free frees the request's slots (Limits), once its handler is done.
 	free func()
 }
@@ -218,7 +226,7 @@ func SignRefusals(h http.Handler) http.Handler {
 		}
 		body := res.Body.Bytes()
 		if res.Code != http.StatusOK && rw.sign != nil && w.Header().Get(msfp.HeaderSignature) == "" {
-			w.Header().Set(msfp.HeaderSignature, rw.sign(res.Code, body))
+			w.Header().Set(msfp.HeaderSignature, rw.sign(res.Code, w.Header().Get("Content-Type"), body))
 		}
 		w.WriteHeader(res.Code)
 		w.Write(body)
@@ -229,7 +237,9 @@ func SignRefusals(h http.Handler) http.Handler {
 // was, when w is a route's (SignRefusals).
 func (s *Service) signsFor(w http.ResponseWriter, nonce string) {
 	if rw, ok := w.(*refusalWriter); ok {
-		rw.sign = func(status int, body []byte) string { return msfp.SignResponse(s.Key, nonce, status, body) }
+		rw.sign = func(status int, contentType string, body []byte) string {
+			return msfp.SignResponse(s.Key, nonce, status, contentType, body)
+		}
 	}
 }
 
@@ -238,19 +248,57 @@ type pairRequest struct {
 	Name       string `json:"name"`
 	SecretHash string `json:"secretHash"`
 	Proof      string `json:"proof"`
+	// NextCommitment and Inbound are read to check their form only (MSFP
+	// core section 9.1): this server doesn't rotate keys yet, and calls
+	// every peer.
+	NextCommitment *string `json:"nextCommitment,omitempty"`
+	Inbound        *bool   `json:"inbound,omitempty"`
 }
 
 type pairAnswer struct {
 	Name string `json:"name"`
 }
 
+// helloMessage is the hello this server sends, and answers (MSFP core
+// section 9.2); those it receives are read by msfp.ReadHello.
 type helloMessage struct {
 	// State is the sender's view: "paired", "waiting", or "ended".
 	State string `json:"state"`
+	// Core and Parts are the versions of MSFP it speaks (ourVersions).
+	Core  []int            `json:"core,omitempty"`
+	Parts map[string][]int `json:"parts,omitempty"`
 	// Certificates are the pins of the certificates the sender's address
-	// serves (Pin), for the other's connections to accept: none when its
-	// address is http, or it couldn't tell.
+	// serves (Pin), for the other's connections to accept: none when it
+	// couldn't tell.
 	Certificates []string `json:"certificates,omitempty"`
+	// Address is the sender's address.
+	Address string `json:"address,omitempty"`
+}
+
+// ourVersions is what this server speaks of MSFP (core section 10): core
+// 1, and the parts catalog, playback, media and video at version 1. It
+// has no music.
+var ourVersions = msfp.Versions{Core: []int{1}, Parts: map[string][]int{
+	msfp.PartCatalog: {1}, msfp.PartPlayback: {1}, msfp.PartMedia: {1}, msfp.PartVideo: {1}}}
+
+// OurVersions is what this server speaks of MSFP, as its hellos list it.
+func OurVersions() msfp.Versions {
+	parts := map[string][]int{}
+	for name, list := range ourVersions.Parts {
+		parts[name] = slices.Clone(list)
+	}
+	return msfp.Versions{Core: slices.Clone(ourVersions.Core), Parts: parts}
+}
+
+// ourHello is the hello this server sends, or answers, in state: with its
+// versions, pins and address, except for "ended", which says nothing
+// else.
+func (s *Service) ourHello(ctx context.Context, state string, answering bool) helloMessage {
+	if state == helloEnded {
+		return helloMessage{State: helloEnded}
+	}
+	return helloMessage{State: state, Core: ourVersions.Core, Parts: ourVersions.Parts,
+		Certificates: s.ownCertificates(ctx, answering), Address: s.Address}
 }
 
 // ownCertificates is what this server names of its certificates in a
@@ -346,15 +394,16 @@ func (s *Service) verified(w http.ResponseWriter, r *http.Request) (msfp.Verifie
 	return v, body, true
 }
 
-// answer sends a signed JSON answer to the request whose nonce it was.
+// answer sends a signed JSON answer to the request whose nonce it was:
+// never with a null in it (MSFP core section 2.3).
 func (s *Service) answer(w http.ResponseWriter, nonce string, v any) {
-	body, err := json.Marshal(v)
+	body, err := msfp.Marshal(v)
 	if err != nil {
 		problem.Send(w, problem.Internal, "")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(s.Key, nonce, http.StatusOK, body))
+	w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(s.Key, nonce, http.StatusOK, "application/json", body))
 	w.WriteHeader(http.StatusOK)
 	w.Write(body)
 }
@@ -370,6 +419,10 @@ func (s *Service) pair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hash, ok := msfp.Decode64(req.SecretHash, 32)
+	if req.NextCommitment != nil {
+		_, good := msfp.Decode64(*req.NextCommitment, 32)
+		ok = ok && good
+	}
 	if !ok {
 		problem.Send(w, problem.NotFound, "")
 		return
@@ -407,27 +460,24 @@ func (s *Service) hello(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	// state is required, and a string (MSFP section 9.2): "State" is
-	// another member.
-	var msg helloMessage
-	var state struct {
-		State *string `json:"state"`
-	}
-	if msfp.DecodeJSON(body, &msg) != nil || msfp.DecodeJSON(body, &state) != nil || state.State == nil {
+	// state is required, and a string, and every member of its type (MSFP
+	// core section 9.2): otherwise nothing is kept.
+	msg, err := msfp.ReadHello(body, false)
+	if err != nil {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
 	switch msg.State {
 	case helloEnded:
 		// Forgotten without its key remembered: only the side that ends
-		// remembers (MSFP section 7.4, step 3).
+		// remembers (MSFP core section 7.4, step 3).
 		if err := s.Store.PeerEnded(ctx, p.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
 			problem.Send(w, problem.Internal, "")
 			return
 		}
 		s.changed(p.ID)
 		s.Logger.Info("federation: a peer ended the pairing", "name", p.Name)
-		s.answer(w, v.Nonce, helloMessage{State: helloEnded})
+		s.answer(w, v.Nonce, s.ourHello(ctx, helloEnded, true))
 		return
 	case helloPaired:
 		if err := s.theyPaired(ctx, p); err != nil {
@@ -435,7 +485,7 @@ func (s *Service) hello(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.keepCertificates(ctx, p, msg.Certificates); err != nil {
+	if err := s.keepHello(ctx, p, msg); err != nil {
 		problem.Send(w, problem.Internal, "")
 		return
 	}
@@ -448,7 +498,120 @@ func (s *Service) hello(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	s.answer(w, v.Nonce, helloMessage{State: viewOf(p), Certificates: s.ownCertificates(ctx, true)})
+	s.answer(w, v.Nonce, s.ourHello(ctx, viewOf(p), true))
+}
+
+// keepHello keeps what a peer's signed hello, request or answer, says of
+// it: its versions (MSFP core section 10.3) and its pins (section 3.2).
+// Its address is read, not acted on: this server doesn't follow a peer's
+// change of address yet.
+func (s *Service) keepHello(ctx context.Context, p *store.Peer, h msfp.Hello) error {
+	if err := s.keepCertificates(ctx, p, h.Certificates); err != nil {
+		return err
+	}
+	versions, err := json.Marshal(h.Versions)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	delete(s.refused, p.ID) // a new hello: what it speaks is read again
+	s.mu.Unlock()
+	if string(versions) == p.Versions {
+		return nil
+	}
+	if err := s.Store.SetPeerVersions(ctx, p.ID, string(versions)); err != nil {
+		return err
+	}
+	p.Versions = string(versions)
+	if _, _, ok := msfp.Agreed(ourVersions, h.Versions); !ok {
+		s.Logger.Info("federation: a peer speaks no version of MSFP's core this server speaks", "name", p.Name)
+	}
+	return nil
+}
+
+// Speaks says whether part is on between this server and p (MSFP core
+// section 10.3), by what p's latest signed hello listed: never before its
+// first, nor once p answered a call of it not-supported, until its next
+// hello.
+func (s *Service) Speaks(p *store.Peer, part string) bool {
+	var theirs msfp.Versions
+	if p.Versions == "" || json.Unmarshal([]byte(p.Versions), &theirs) != nil {
+		return false
+	}
+	_, parts, ok := msfp.Agreed(ourVersions, theirs)
+	if _, on := parts[part]; !ok || !on {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.refused[p.ID][part]
+}
+
+// SpeaksCore says whether p and this server have a version of MSFP's core
+// in common, by p's latest signed hello; true before its first (nothing
+// is known yet).
+func SpeaksCore(p *store.Peer) bool {
+	var theirs msfp.Versions
+	if p.Versions == "" || json.Unmarshal([]byte(p.Versions), &theirs) != nil {
+		return true
+	}
+	_, _, ok := msfp.Agreed(ourVersions, theirs)
+	return ok
+}
+
+// partOf is the part of MSFP each call belongs to (core section 3): pair
+// and hello are the core's.
+var partOf = map[string]string{
+	librariesPath:                 msfp.PartCatalog,
+	titlesPath:                    msfp.PartCatalog,
+	playPath:                      msfp.PartPlayback,
+	"/api/v1/federation/progress": msfp.PartPlayback,
+	"/api/v1/federation/stop":     msfp.PartPlayback,
+}
+
+// Paths of the catalog's calls.
+const (
+	librariesPath = "/api/v1/federation/libraries"
+	titlesPath    = "/api/v1/federation/titles"
+)
+
+// ErrNotSupported is returned for a call of a part of MSFP that isn't on
+// with the peer (core section 10.4): it isn't made.
+var ErrNotSupported = errors.New("federation: the other server doesn't speak that part of MSFP with this one")
+
+// notSupported answers a call of a part that is off with the caller: a
+// signed 404 not-supported (MSFP core section 10.4).
+func notSupported(w http.ResponseWriter) {
+	problem.Send(w, problem.NotSupported, "")
+}
+
+// recheckEvery is how often, at most, a peer that answered not-supported
+// is asked its versions again (MSFP core section 10.4).
+const recheckEvery = time.Hour
+
+// refusedPart is a peer answering a call of part not-supported: no more
+// calls of it until its next hello, which is asked for, at most once an
+// hour.
+func (s *Service) refusedPart(p *store.Peer, part string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.refused == nil {
+		s.refused, s.rechecked = map[string]map[string]bool{}, map[string]time.Time{}
+	}
+	if s.refused[p.ID] == nil {
+		s.refused[p.ID] = map[string]bool{}
+	}
+	s.refused[p.ID][part] = true
+	now := s.now()
+	if last, ok := s.rechecked[p.ID]; ok && now.Sub(last) < recheckEvery {
+		return
+	}
+	s.rechecked[p.ID] = now
+	go func() {
+		ctx, cancel := context.WithTimeout(Background(context.Background()), 20*time.Second)
+		defer cancel()
+		s.Check(ctx, p)
+	}()
 }
 
 // theyPaired is a peer saying it has accepted: if we were waiting for it,
@@ -477,7 +640,7 @@ func viewOf(p *store.Peer) string {
 	return helloWaiting
 }
 
-// libraryIDRe is a library ID's form (MSFP section 9.3).
+// libraryIDRe is a library ID's form (MSFP catalog, section 2).
 var libraryIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 // cleanName keeps a peer's name short and printable, or its host when
@@ -538,6 +701,11 @@ const (
 // core section 8.3): ErrBackingOff. A code's server isn't known yet:
 // pair always goes.
 func (s *Service) call(ctx context.Context, p *store.Peer, path string, in, out any) (Reply, error) {
+	// A part that is off with it: not called (MSFP core section 10.4).
+	part := partOf[path]
+	if part != "" && !s.Speaks(p, part) {
+		return Reply{}, ErrNotSupported
+	}
 	key := msfp.Encode64(p.PublicKey)
 	lim := s.lim()
 	if path != pairPath && !lim.mayCall(key, background(ctx), lim.now()) {
@@ -556,6 +724,10 @@ func (s *Service) call(ctx context.Context, p *store.Peer, path string, in, out 
 		}
 		lim.heard(key, err == nil, status, r.RetryAfter, lim.now())
 	}
+	if err == nil && part != "" && r.Status == http.StatusNotFound && r.Problem == string(problem.NotSupported) {
+		s.refusedPart(p, part)
+		return r, ErrNotSupported
+	}
 	return r, err
 }
 
@@ -573,7 +745,7 @@ func (s *Service) callOnce(ctx context.Context, p *store.Peer, path string, in, 
 
 // exchange is one call, by client.
 func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Peer, path string, in, out any) (Reply, error) {
-	body, err := json.Marshal(in)
+	body, err := msfp.Marshal(in)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -588,7 +760,7 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 		return Reply{}, fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
 	defer res.Body.Close()
-	// No content coding (MSFP section 3): an answer sent coded, or
+	// No content coding (MSFP core section 3): an answer sent coded, or
 	// unpacked on the way (a client that asked for gzip), is refused
 	// like a badly signed one.
 	if ce := res.Header.Get("Content-Encoding"); res.Uncompressed || ce != "" && !strings.EqualFold(ce, "identity") {
@@ -598,13 +770,15 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 	if err != nil {
 		return Reply{}, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
+	// The answer's media type is signed (MSFP core section 6.3).
+	contentType := res.Header.Get("Content-Type")
 	if res.StatusCode != http.StatusOK {
 		// A refusal counts only signed by its key: a server we're paired
 		// with, or were, signs its own; anything else may come from
 		// someone between the two. A code's server doesn't know us yet:
 		// its refusal is a stranger's, plain, and costs only that pairing.
 		sigText, _ := msfp.OneHeader(res.Header, msfp.HeaderSignature)
-		signed := msfp.CheckResponse(p.PublicKey, nonce, res.StatusCode, answer, sigText) == nil
+		signed := msfp.CheckResponse(p.PublicKey, nonce, res.StatusCode, contentType, answer, sigText) == nil
 		if !signed && path != pairPath {
 			return Reply{}, fmt.Errorf("%w: a refusal not signed by its key (%d)", ErrUnreachable, res.StatusCode)
 		}
@@ -615,7 +789,7 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 			var pd struct {
 				Type string `json:"type"`
 			}
-			if msfp.DecodeJSON(answer, &pd) == nil && len(pd.Type) <= 64 {
+			if msfp.DecodeAnswer(answer, &pd) == nil && len(pd.Type) <= 64 {
 				r.Problem = pd.Type
 			}
 			if r.Status == http.StatusTooManyRequests || r.Status == http.StatusServiceUnavailable {
@@ -624,10 +798,13 @@ func (s *Service) exchange(ctx context.Context, client *http.Client, p *store.Pe
 		}
 		return r, nil
 	}
-	if sigText, _ := msfp.OneHeader(res.Header, msfp.HeaderSignature); msfp.CheckResponse(p.PublicKey, nonce, res.StatusCode, answer, sigText) != nil {
+	if sigText, _ := msfp.OneHeader(res.Header, msfp.HeaderSignature); msfp.CheckResponse(p.PublicKey, nonce, res.StatusCode, contentType, answer, sigText) != nil {
 		return Reply{}, fmt.Errorf("%w: its answer isn't signed by its key", ErrUnreachable)
 	}
-	if err := msfp.DecodeJSON(answer, out); err != nil {
+	if msfp.MediaType(contentType) != "application/json" {
+		return Reply{}, fmt.Errorf("%w: an answer that isn't JSON", ErrUnreachable)
+	}
+	if err := msfp.DecodeAnswer(answer, out); err != nil {
 		return Reply{}, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
 	return Reply{Status: http.StatusOK}, nil
@@ -703,8 +880,8 @@ func (s *Service) End(ctx context.Context, id string) error {
 	}
 	s.changed(id)
 	s.Logger.Info("federation: pairing ended", "name", p.Name)
-	var answer helloMessage
-	if _, err := s.call(ctx, p, helloPath, helloMessage{State: helloEnded}, &answer); err != nil {
+	var answer json.RawMessage
+	if _, err := s.call(ctx, p, helloPath, s.ourHello(ctx, helloEnded, false), &answer); err != nil {
 		s.Logger.Info("federation: the other server couldn't be told the pairing ended", "name", p.Name, "error", err)
 	}
 	return nil
@@ -715,8 +892,15 @@ func (s *Service) End(ctx context.Context, id string) error {
 // marked gone; one that can't be reached is left as it was (and the
 // error says so).
 func (s *Service) Check(ctx context.Context, p *store.Peer) (*store.Peer, error) {
-	var answer helloMessage
-	r, err := s.call(ctx, p, helloPath, helloMessage{State: viewOf(p), Certificates: s.ownCertificates(ctx, false)}, &answer)
+	var raw json.RawMessage
+	r, err := s.call(ctx, p, helloPath, s.ourHello(ctx, viewOf(p), false), &raw)
+	var answer msfp.Hello
+	if err == nil && r.Status == http.StatusOK {
+		// An answer with a member of the wrong type changes nothing.
+		if answer, err = msfp.ReadHello(raw, true); err != nil {
+			err = fmt.Errorf("%w: %v", ErrUnreachable, err)
+		}
+	}
 	switch {
 	case err != nil:
 		return p, err
@@ -734,7 +918,7 @@ func (s *Service) Check(ctx context.Context, p *store.Peer) (*store.Peer, error)
 		if err := s.Store.PeerSeen(ctx, p.ID); err != nil {
 			return p, err
 		}
-		if err := s.keepCertificates(ctx, p, answer.Certificates); err != nil {
+		if err := s.keepHello(ctx, p, answer); err != nil {
 			return p, err
 		}
 		if answer.State == helloPaired {
@@ -870,12 +1054,16 @@ func (s *Service) libraries(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
+	if !s.Speaks(p, msfp.PartCatalog) {
+		notSupported(w)
+		return
+	}
 	offered, err := s.OfferedTo(ctx, p.ID)
 	if err != nil {
 		problem.Send(w, problem.Internal, "")
 		return
 	}
-	// By the IDs peers know them by, never Jellyfin's (MSFP section 9.3).
+	// By the IDs peers know them by, never Jellyfin's (MSFP catalog, section 2).
 	ids := make([]string, len(offered))
 	for i, l := range offered {
 		ids[i] = l.ID
@@ -889,7 +1077,13 @@ func (s *Service) libraries(w http.ResponseWriter, r *http.Request) {
 		offered[i].ID = public[offered[i].ID]
 	}
 	s.Store.PeerSeen(ctx, p.ID)
-	s.answer(w, v.Nonce, librariesAnswer{Name: s.Name(r.Context()), Libraries: offered, Limits: &p.Limits})
+	answer := librariesAnswer{Name: s.Name(r.Context()), Libraries: offered}
+	// The limits are playback's, sent only when it is on (MSFP catalog,
+	// section 2).
+	if s.Speaks(p, msfp.PartPlayback) {
+		answer.Limits = &p.Limits
+	}
+	s.answer(w, v.Nonce, answer)
 }
 
 // ErrNotPaired is returned for sharing with a server not paired yet.
@@ -901,13 +1095,13 @@ func (s *Service) TheirLibraries(ctx context.Context, p *store.Peer) ([]store.Pe
 		return nil, ErrNotPaired
 	}
 	// Each library read on its own: one that isn't one is skipped alone
-	// (MSFP section 9.3).
+	// (MSFP catalog, section 2.2).
 	var answer struct {
 		Name      string            `json:"name"`
 		Libraries []json.RawMessage `json:"libraries"`
 		Limits    json.RawMessage   `json:"limits"` // ignored when it isn't limits
 	}
-	r, err := s.call(ctx, p, "/api/v1/federation/libraries", struct{}{}, &answer)
+	r, err := s.call(ctx, p, librariesPath, struct{}{}, &answer)
 	switch {
 	case err != nil:
 		return nil, err
@@ -919,7 +1113,7 @@ func (s *Service) TheirLibraries(ctx context.Context, p *store.Peer) ([]store.Pe
 	}
 	s.Store.PeerSeen(ctx, p.ID)
 	var l *store.PeerLimits
-	if answer.Limits != nil && msfp.DecodeJSON(answer.Limits, &l) == nil && l != nil && ValidLimits(*l) == nil {
+	if answer.Limits != nil && msfp.DecodeEntry(answer.Limits, &l) == nil && l != nil && ValidLimits(*l) == nil {
 		if err := s.Store.SetTheirLimits(ctx, p.ID, *l); err != nil {
 			return nil, err
 		}
@@ -935,7 +1129,7 @@ func (s *Service) TheirLibraries(ctx context.Context, p *store.Peer) ([]store.Pe
 			Kind json.RawMessage `json:"kind"`
 		}
 		// Its ID in the form MSFP gives, each once (the first kept).
-		if msfp.DecodeJSON(raw, &l) != nil || !libraryIDRe.MatchString(l.ID) ||
+		if msfp.DecodeEntry(raw, &l) != nil || !libraryIDRe.MatchString(l.ID) ||
 			slices.ContainsFunc(out, func(o store.PeerLibrary) bool { return o.ID == l.ID }) {
 			continue
 		}
@@ -1070,7 +1264,7 @@ func readPeerTitle(raw json.RawMessage) (store.PeerTitle, bool) {
 		Audio     json.RawMessage `json:"audio"`
 		Subtitles json.RawMessage `json:"subtitles"`
 	}
-	if msfp.DecodeJSON(raw, &t) != nil {
+	if msfp.DecodeEntry(raw, &t) != nil {
 		return store.PeerTitle{}, false
 	}
 	tags := func(raw json.RawMessage) []string {
@@ -1123,6 +1317,17 @@ func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
+	if !s.Speaks(p, msfp.PartCatalog) {
+		notSupported(w)
+		return
+	}
+	// Every title here is a film's or a series': none without video
+	// (MSFP catalog, section 5), and no seq, so that a reading once video
+	// is on is a whole one.
+	if !s.Speaks(p, msfp.PartVideo) {
+		s.answer(w, v.Nonce, titlesAnswer{Titles: []store.PeerTitle{}})
+		return
+	}
 	offered, err := s.Store.PeerOffers(ctx, p.ID)
 	if err != nil {
 		problem.Send(w, problem.Internal, "")
@@ -1155,7 +1360,7 @@ func (s *Service) titles(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.Internal, "")
 		return
 	}
-	// titles is a list, empty or not: never null (MSFP section 2).
+	// titles is a list, empty or not: never null (MSFP core section 2.3).
 	answer := titlesAnswer{Seq: head, Titles: []store.PeerTitle{}}
 	// Only what changed, when we still know what changed since then, and
 	// what we offer it hasn't changed since.
@@ -1217,7 +1422,9 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 		return 0, err
 	}
 	libs := []string{}
-	if len(wants) > 0 {
+	// Its titles are films and series: none while video is off with it
+	// (MSFP catalog, section 5), and the reading drops what we had.
+	if len(wants) > 0 && s.Speaks(p, msfp.PartVideo) {
 		// Its names and ours of it, as it gives them now.
 		theirs, err := s.TheirLibraries(ctx, p)
 		if err != nil {
@@ -1254,7 +1461,7 @@ func (s *Service) SyncTitles(ctx context.Context, p *store.Peer) (int, error) {
 	var seq int64
 	for len(libs) > 0 {
 		var answer titlesReading
-		r, err := s.call(ctx, p, "/api/v1/federation/titles", titlesRequest{Libraries: libs, After: after, Since: since}, &answer)
+		r, err := s.call(ctx, p, titlesPath, titlesRequest{Libraries: libs, After: after, Since: since}, &answer)
 		// Asked to wait a moment: the same page again, once it's time
 		// (never sooner); asked longer, the next reading.
 		if err == nil && r.Status != http.StatusOK && s.waitTurn(ctx, r, pageWait) {
@@ -1432,6 +1639,10 @@ func (s *Service) PeerRequest(w http.ResponseWriter, r *http.Request) (p *store.
 	p, err := s.Store.PeerByKey(r.Context(), v.Key)
 	if err != nil || p.State != store.PeerPaired {
 		problem.Send(w, problem.NotFound, "")
+		return nil, nil, "", false
+	}
+	if part := partOf[r.URL.Path]; part != "" && !s.Speaks(p, part) {
+		notSupported(w)
 		return nil, nil, "", false
 	}
 	s.Store.PeerSeen(r.Context(), p.ID)

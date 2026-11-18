@@ -2,21 +2,24 @@ package msfp
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
 
-// MSFP's version 0 test vectors (https://github.com/msfp-io/msfp-spec,
-// vectors/v0.json), copied in testdata/vectors.json: recomputed here with
-// the code, so the code keeps speaking the protocol they describe.
+// MSFP's version 1 test vectors (https://github.com/msfp-io/msfp-spec,
+// vectors/v1/), copied as they are in testdata/v1/: recomputed here with
+// the code, so the code keeps speaking the protocol they describe. The
+// rotation and revocation vectors, and the exchanges' members of servers
+// that can't be called, are for what Overfin doesn't do yet.
 
 type vectorKey struct {
 	Seed        string `json:"seed"` // hex
@@ -39,28 +42,11 @@ type vectorExchange struct {
 	Message   string `json:"message"`
 	Signature string `json:"signature"`
 	// The answer.
-	Status          int    `json:"status"`
-	AnswerBody      string `json:"answerBody"`
-	AnswerMessage   string `json:"answerMessage"`
-	AnswerSignature string `json:"answerSignature"`
-}
-
-type vectors struct {
-	Keys map[string]vectorKey `json:"keys"`
-	Code struct {
-		Key        string `json:"key"` // by name
-		Address    string `json:"address"`
-		Secret     string `json:"secret"` // hex
-		Expires    int64  `json:"expires"`
-		Text       string `json:"text"`
-		SecretHash string `json:"secretHash"`
-	} `json:"code"`
-	Proof struct {
-		Redeemer string `json:"redeemer"` // by name
-		Address  string `json:"address"`
-		Value    string `json:"value"`
-	} `json:"proof"`
-	Exchanges []vectorExchange `json:"exchanges"`
+	Status            int    `json:"status"`
+	AnswerContentType string `json:"answerContentType"`
+	AnswerBody        string `json:"answerBody"`
+	AnswerMessage     string `json:"answerMessage"`
+	AnswerSignature   string `json:"answerSignature"`
 }
 
 func unhex(t *testing.T, s string) []byte {
@@ -72,22 +58,29 @@ func unhex(t *testing.T, s string) []byte {
 	return b
 }
 
-func TestVectors(t *testing.T) {
-	raw, err := os.ReadFile("testdata/vectors.json")
+// readVectors reads testdata/v1/name into v.
+func readVectors(t *testing.T, name string, v any) {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/v1/" + name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var v vectors
-	if err := json.Unmarshal(raw, &v); err != nil {
-		t.Fatal(err)
+	if err := json.Unmarshal(raw, v); err != nil {
+		t.Fatalf("%s: %v", name, err)
 	}
-	same := func(what, got, want string) {
-		t.Helper()
-		if got != want {
-			t.Errorf("%s: the code gives %q, vectors.json says %q", what, got, want)
-		}
-	}
+}
 
+// vectorKeys are the keys of keys.json, rebuilt from their seeds and
+// checked against their public keys and fingerprints.
+func vectorKeys(t *testing.T) map[string]Key {
+	t.Helper()
+	var v struct {
+		Keys map[string]vectorKey `json:"keys"`
+	}
+	readVectors(t, "keys.json", &v)
+	if len(v.Keys) == 0 {
+		t.Fatal("no keys")
+	}
 	keys := map[string]Key{}
 	for name, k := range v.Keys {
 		key, err := KeyFromSeed(unhex(t, k.Seed))
@@ -95,32 +88,80 @@ func TestVectors(t *testing.T) {
 			t.Fatal(err)
 		}
 		keys[name] = key
-		same(name+" seed", k.Seed, k.Seed)
-		same(name+" public key", b64.EncodeToString(key.Public()), k.Public)
-		same(name+" fingerprint", Fingerprint(key.Public()), k.Fingerprint)
+		if got := b64.EncodeToString(key.Public()); got != k.Public {
+			t.Errorf("%s: public key %q, keys.json says %q", name, got, k.Public)
+		}
+		if got := Fingerprint(key.Public()); got != k.Fingerprint {
+			t.Errorf("%s: fingerprint %q, keys.json says %q", name, got, k.Fingerprint)
+		}
 	}
+	return keys
+}
 
+func TestVectorCode(t *testing.T) {
+	keys := vectorKeys(t)
+	var v struct {
+		Code struct {
+			Key        string `json:"key"` // by name
+			Address    string `json:"address"`
+			Secret     string `json:"secret"` // hex
+			Expires    int64  `json:"expires"`
+			Text       string `json:"text"`
+			SecretHash string `json:"secretHash"`
+		} `json:"code"`
+		Proof struct {
+			Redeemer string `json:"redeemer"` // by name
+			Address  string `json:"address"`
+			Value    string `json:"value"`
+		} `json:"proof"`
+	}
+	readVectors(t, "code.json", &v)
 	secret := unhex(t, v.Code.Secret)
 	code := Code{Address: v.Code.Address, Key: keys[v.Code.Key].Public(), Secret: secret, Expires: time.Unix(v.Code.Expires, 0)}
-	same("pairing code", code.String(), v.Code.Text)
+	if code.String() != v.Code.Text {
+		t.Errorf("pairing code %q, code.json says %q", code.String(), v.Code.Text)
+	}
 	if c, err := ParseCode(v.Code.Text); err != nil || c.Address != code.Address || !SameKey(c.Key, code.Key) ||
 		!bytes.Equal(c.Secret, secret) || !c.Expires.Equal(code.Expires) {
 		t.Errorf("the pairing code reads back as %+v, %v", c, err)
 	}
-	same("secret hash", b64.EncodeToString(SecretHash(secret)), v.Code.SecretHash)
-	same("pairing proof", PairingProof(secret, keys[v.Proof.Redeemer].Public(), v.Proof.Address), v.Proof.Value)
+	if got := b64.EncodeToString(SecretHash(secret)); got != v.Code.SecretHash {
+		t.Errorf("secret hash %q, code.json says %q", got, v.Code.SecretHash)
+	}
+	if got := PairingProof(secret, keys[v.Proof.Redeemer].Public(), v.Proof.Address); got != v.Proof.Value {
+		t.Errorf("pairing proof %q, code.json says %q", got, v.Proof.Value)
+	}
+	if !CheckPairingProof(secret, keys[v.Proof.Redeemer].Public(), v.Proof.Address, v.Proof.Value) {
+		t.Error("the pairing proof is refused")
+	}
+}
 
+func TestVectorExchanges(t *testing.T) {
+	keys := vectorKeys(t)
+	var v struct {
+		Exchanges []vectorExchange `json:"exchanges"`
+	}
+	readVectors(t, "exchanges.json", &v)
+	if len(v.Exchanges) == 0 {
+		t.Fatal("no exchanges")
+	}
+	same := func(what, got, want string) {
+		t.Helper()
+		if got != want {
+			t.Errorf("%s: the code gives %q, exchanges.json says %q", what, got, want)
+		}
+	}
 	for _, x := range v.Exchanges {
 		signer, answerer := keys[x.Signer], keys[x.Answerer]
 		same(x.Name+" nonce", b64.EncodeToString(unhex(t, x.Nonce)), x.NonceText)
 		msg := requestMessage(x.Method, x.Host, x.Target, x.Date, x.NonceText, []byte(x.Body))
 		same(x.Name+" signed message", string(msg), x.Message)
 		same(x.Name+" signature", b64.EncodeToString(signer.sign(msg)), x.Signature)
-		same(x.Name+" body", x.Body, x.Body)
 
 		// The request as it arrives, checked as a server checks it.
-		req := httptest.NewRequest(x.Method, "http://"+x.Host+x.Target, strings.NewReader(x.Body))
-		req.Header.Set(HeaderKey, v.Keys[x.Signer].Public)
+		req := httptest.NewRequest(x.Method, "https://"+x.Host+x.Target, strings.NewReader(x.Body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(HeaderKey, b64.EncodeToString(signer.Public()))
 		req.Header.Set(HeaderDate, x.Date)
 		req.Header.Set(HeaderNonce, x.NonceText)
 		req.Header.Set(HeaderSignature, x.Signature)
@@ -130,20 +171,103 @@ func TestVectors(t *testing.T) {
 		if got, err := ver.Check(req, []byte(x.Body), at); err != nil || !SameKey(got.Key, signer.Public()) {
 			t.Errorf("%s: the request is refused: %v", x.Name, err)
 		}
+		// With a header of the first test version beside: refused.
+		old := req.Clone(req.Context())
+		old.Body = http.NoBody
+		old.Header.Set("Overfin-Nonce", x.NonceText)
+		if _, err := (&Verifier{Host: x.Host}).Check(old, []byte(x.Body), at); err == nil {
+			t.Errorf("%s: passes with an Overfin-Nonce header beside", x.Name)
+		}
 
 		answer := []byte(x.AnswerBody)
-		same(x.Name+" answer's signed message", string(responseMessage(x.NonceText, x.Status, answer)), x.AnswerMessage)
-		same(x.Name+" answer's signature", SignResponse(answerer, x.NonceText, x.Status, answer), x.AnswerSignature)
-		if err := CheckResponse(answerer.Public(), x.NonceText, x.Status, answer, x.AnswerSignature); err != nil {
+		same(x.Name+" answer's signed message", string(responseMessage(x.NonceText, x.Status, x.AnswerContentType, answer)), x.AnswerMessage)
+		same(x.Name+" answer's signature", SignResponse(answerer, x.NonceText, x.Status, x.AnswerContentType, answer), x.AnswerSignature)
+		if err := CheckResponse(answerer.Public(), x.NonceText, x.Status, x.AnswerContentType, answer, x.AnswerSignature); err != nil {
 			t.Errorf("%s: the answer is refused: %v", x.Name, err)
+		}
+		// Its Content-Type changed on the way, its parameters aside: refused.
+		if CheckResponse(answerer.Public(), x.NonceText, x.Status, "text/plain", answer, x.AnswerSignature) == nil {
+			t.Errorf("%s: the answer passes with another media type", x.Name)
+		}
+		if CheckResponse(answerer.Public(), x.NonceText, x.Status, x.AnswerContentType+"; charset=utf-8", answer, x.AnswerSignature) != nil {
+			t.Errorf("%s: the answer is refused with a charset parameter", x.Name)
 		}
 	}
 }
 
-// MSFP's version 0 canonical forms (vectors/v0-strict.json, copied in
-// testdata/v0-strict.json): addresses, codes, dates, base64url, keys and
-// signatures, through the code that reads them.
+// The hello of core section 17.1, A to B, and B's answer: the versions
+// each lists, and what is on between them (catalog only).
+func TestVectorHello(t *testing.T) {
+	var v struct {
+		Exchanges []vectorExchange `json:"exchanges"`
+	}
+	readVectors(t, "exchanges.json", &v)
+	i := slices.IndexFunc(v.Exchanges, func(x vectorExchange) bool { return x.Name == "hello" })
+	if i < 0 {
+		t.Fatal("no hello")
+	}
+	x := v.Exchanges[i]
+	a, err := ReadHello([]byte(x.Body), false)
+	if err != nil || a.State != "paired" || a.Address != "https://a.example.org" ||
+		!slices.Equal(a.Versions.Core, []int{0, 1}) || len(a.Versions.Parts) != 4 || len(a.Certificates) != 1 {
+		t.Fatalf("A's hello reads as %+v, %v", a, err)
+	}
+	b, err := ReadHello([]byte(x.AnswerBody), true)
+	if err != nil || b.State != "paired" || !slices.Equal(b.Versions.Core, []int{1}) || len(b.Certificates) != 1 {
+		t.Fatalf("B's answer reads as %+v, %v", b, err)
+	}
+	core, parts, ok := Agreed(a.Versions, b.Versions)
+	if !ok || core != 1 || !maps.Equal(parts, map[string]int{PartCatalog: 1}) {
+		t.Errorf("agreed core %d, parts %v, %v; want core 1, catalog 1 only", core, parts, ok)
+	}
+}
+
+// Addresses and codes under core 1 (vectors/v1/strict.json): https only,
+// the prefix msfp-pair-1.; and the names of a stream's files.
 func TestStrictVectors(t *testing.T) {
+	type tc struct {
+		Name, Text string
+		Valid      bool
+	}
+	var v struct {
+		Addresses, Codes, MediaNames []tc
+	}
+	readVectors(t, "strict.json", &v)
+	if len(v.Addresses) == 0 || len(v.Codes) == 0 || len(v.MediaNames) == 0 {
+		t.Fatal("no cases")
+	}
+	for _, c := range v.Addresses {
+		if err := CheckAddress(c.Text); (err == nil) != c.Valid {
+			t.Errorf("address %q: %v", c.Text, err)
+		}
+	}
+	for _, c := range v.Codes {
+		if _, err := ParseCode(c.Text); (err == nil) != c.Valid {
+			t.Errorf("code %s: %v", c.Name, err)
+		}
+	}
+	for _, c := range v.MediaNames {
+		if FileName(c.Text) != c.Valid {
+			t.Errorf("media name %q: valid %v", c.Text, !c.Valid)
+		}
+	}
+	// With the test switch on, plain http is an address, and nothing else
+	// changes.
+	AllowPlainHTTPForTests(true)
+	defer AllowPlainHTTPForTests(false)
+	for _, c := range v.Addresses {
+		valid := c.Valid || c.Text == "http://192.0.2.10:8096"
+		if err := CheckAddress(c.Text); (err == nil) != valid {
+			t.Errorf("address %q, plain http allowed: %v", c.Text, err)
+		}
+	}
+}
+
+// The canonical forms of vectors/v0-strict.json that hold for core 1 too
+// (keys, signatures, base64url, dates; its json and integers are in
+// json_test.go). Its addresses and codes are version 0's: strict.json's
+// replace them.
+func TestStrictFormVectors(t *testing.T) {
 	b, err := os.ReadFile("testdata/v0-strict.json")
 	if err != nil {
 		t.Fatal(err)
@@ -153,8 +277,8 @@ func TestStrictVectors(t *testing.T) {
 		Valid      bool
 	}
 	var v struct {
-		Addresses, Codes, Dates, Base64url, Keys []tc
-		Signatures                               []struct {
+		Dates, Base64url, Keys []tc
+		Signatures             []struct {
 			Name, Public, Message, Signature string
 			Valid                            bool
 		}
@@ -162,8 +286,7 @@ func TestStrictVectors(t *testing.T) {
 	if err := json.Unmarshal(b, &v); err != nil {
 		t.Fatal(err)
 	}
-	if len(v.Addresses) == 0 || len(v.Codes) == 0 || len(v.Dates) == 0 || len(v.Base64url) == 0 ||
-		len(v.Keys) == 0 || len(v.Signatures) == 0 {
+	if len(v.Dates) == 0 || len(v.Base64url) == 0 || len(v.Keys) == 0 || len(v.Signatures) == 0 {
 		t.Fatal("no cases")
 	}
 	for _, c := range v.Keys {
@@ -171,7 +294,7 @@ func TestStrictVectors(t *testing.T) {
 		if ValidKey(key) != c.Valid {
 			t.Errorf("key %s: valid %v", c.Name, !c.Valid)
 		}
-		// And as a request's Overfin-Key, and a code's key.
+		// And as a request's MSFP-Key, and a code's key.
 		req := httptest.NewRequest("POST", "https://a.example.org/api/v1/federation/pair", strings.NewReader("{}"))
 		SignRequest(req, []byte("{}"), NewKey(), time.Now())
 		req.Header.Set(HeaderKey, c.Text)
@@ -185,40 +308,9 @@ func TestStrictVectors(t *testing.T) {
 	}
 	for _, c := range v.Signatures {
 		public, _ := Decode64(c.Public, 32)
-		if got := CheckResponse(public, "", 0, nil, c.Signature) == nil; got {
-			t.Errorf("signature %s: an answer's check passes a request's message", c.Name)
-		}
 		sig, _ := Decode64(c.Signature, 64)
 		if verify(public, []byte(c.Message), sig) != c.Valid {
 			t.Errorf("signature %s: valid %v", c.Name, !c.Valid)
-		}
-		// Through the check of a request, as it arrives: the message is
-		// that of v0.json's hello exchange.
-		lines := strings.Split(c.Message, "\n")
-		req := httptest.NewRequest(lines[1], "http://"+lines[2]+lines[3], strings.NewReader(""))
-		req.Header.Set(HeaderKey, c.Public)
-		req.Header.Set(HeaderDate, lines[4])
-		req.Header.Set(HeaderNonce, lines[5])
-		req.Header.Set(HeaderSignature, c.Signature)
-		date, _ := strconv.ParseInt(lines[4], 10, 64)
-		at := time.Unix(date, 0)
-		body := []byte(`{"state":"paired"}`)
-		if lines[6] != hexSum(body) {
-			t.Fatalf("signature %s: the body isn't the one signed", c.Name)
-		}
-		_, err := (&Verifier{Host: lines[2], Seen: NewNonces(at.Add(-time.Minute))}).Check(req, body, at)
-		if (err == nil) != c.Valid {
-			t.Errorf("signature %s, in a request: %v", c.Name, err)
-		}
-	}
-	for _, c := range v.Addresses {
-		if err := CheckAddress(c.Text); (err == nil) != c.Valid {
-			t.Errorf("address %q: %v", c.Text, err)
-		}
-	}
-	for _, c := range v.Codes {
-		if _, err := ParseCode(c.Text); (err == nil) != c.Valid {
-			t.Errorf("code %s: %v", c.Name, err)
 		}
 	}
 	for _, c := range v.Dates {
@@ -234,7 +326,7 @@ func TestStrictVectors(t *testing.T) {
 	}
 }
 
-// Each signature header once, without a comma (MSFP section 2.1).
+// Each signature header once, without a comma (MSFP core section 2.4).
 func TestSignatureHeadersOnce(t *testing.T) {
 	k := NewKey()
 	now := time.Now()
@@ -254,9 +346,4 @@ func TestSignatureHeadersOnce(t *testing.T) {
 	if ok(func(r *http.Request) { r.Header.Set(HeaderNonce, r.Header.Get(HeaderNonce)+",x") }) {
 		t.Error("a comma")
 	}
-}
-
-func hexSum(b []byte) string {
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
 }

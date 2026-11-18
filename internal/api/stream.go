@@ -49,8 +49,8 @@ func (s Stream) Register(r *plugin.Registrar) error {
 }
 
 // trickplay serves a sheet of a playback's seek-bar previews by its
-// ticket: what a paired server's viewer's server fetches (MSFP section
-// 10), checked as the stream is. A paired server's playback here has its
+// ticket: what a paired server's viewer's server fetches (MSFP video,
+// section 5.5), checked as the stream is. A paired server's playback here has its
 // sheets at this server's playback route only.
 func (s Stream) trickplay(w http.ResponseWriter, r *http.Request) {
 	if hasQuery(r) {

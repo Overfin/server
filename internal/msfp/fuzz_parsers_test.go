@@ -29,7 +29,7 @@ func FuzzDecodeJSON(f *testing.F) {
 		f.Add([]byte(s))
 	}
 	f.Fuzz(func(t *testing.T, body []byte) {
-		tree, err := strictTree(body)
+		tree, err := strictTree(body, false)
 		var v fuzzBody
 		derr := DecodeJSON(body, &v)
 		if (err == nil) != (derr == nil) && derr == nil {
@@ -48,7 +48,7 @@ func FuzzDecodeJSON(f *testing.F) {
 		if err != nil {
 			t.Fatalf("its tree: %v", err)
 		}
-		if _, err := strictTree(again); err != nil {
+		if _, err := strictTree(again, false); err != nil {
 			t.Fatalf("its tree written out (%q) refused: %v", again, err)
 		}
 	})

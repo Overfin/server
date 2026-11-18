@@ -234,6 +234,12 @@ func run(logger *slog.Logger) error {
 	// operator allows it (SECURITY.md rule 136). On a gateway, its egress
 	// for the backend follows the same.
 	outbound.AllowLoopback(cfg.Federation.AllowLoopback)
+	// Plain http between servers: a test setting outside MSFP, which is
+	// HTTPS only, never for a server in use.
+	msfp.AllowPlainHTTPForTests(cfg.Federation.TestPlainHTTP)
+	if cfg.Federation.TestPlainHTTP {
+		logger.Warn("federation: test_plain_http is on: plain http pairings are accepted, for testing only; turn it off on a server in use")
+	}
 	addr := cfg.Listen
 	linkDir := filepath.Join(filepath.Dir(cfg.Storage.Path), "link")
 	if backendMode {

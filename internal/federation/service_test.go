@@ -30,9 +30,10 @@ type server struct {
 	url string
 }
 
+// newServer is one over HTTPS, as MSFP is (core section 3).
 func newServer(t *testing.T, name string) *server {
 	t.Helper()
-	return newServerOn(t, name, false)
+	return newServerOn(t, name, true)
 }
 
 // newServerOn is newServer, over HTTPS with withTLS: with the test
@@ -70,6 +71,9 @@ func newServerOn(t *testing.T, name string, withTLS bool) *server {
 	}
 	return &server{s: s, url: ts.URL}
 }
+
+// allParts is a peer's versions when it speaks all that this server does.
+const allParts = `{"core":[1],"parts":{"catalog":[1],"media":[1],"playback":[1],"video":[1]}}`
 
 func onlyPeer(t *testing.T, s *server) *store.Peer {
 	t.Helper()
@@ -170,7 +174,8 @@ func TestStrangers(t *testing.T) {
 		req, _ := http.NewRequest("POST", a.url+path, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		msfp.SignRequest(req, body, stranger, a.s.now())
-		res, err := http.DefaultClient.Do(req)
+		client := a.s.conns(&store.Peer{}, true).client // any certificate, its own
+		res, err := client.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -179,7 +184,7 @@ func TestStrangers(t *testing.T) {
 			t.Errorf("%s: %d, signed %q", path, res.StatusCode, res.Header.Get(msfp.HeaderSignature))
 		}
 		// Unsigned.
-		res, err = http.Post(a.url+path, "application/json", strings.NewReader(`{}`))
+		res, err = client.Post(a.url+path, "application/json", strings.NewReader(`{}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -271,7 +276,7 @@ func TestSharing(t *testing.T) {
 
 	// A stranger, signing with its own key, gets the plain 404, unsigned:
 	// to it, as good as no answer.
-	stranger := &store.Peer{State: store.PeerPaired, Address: a.url, PublicKey: a.s.Key.Public()}
+	stranger := &store.Peer{State: store.PeerPaired, Address: a.url, PublicKey: a.s.Key.Public(), Versions: allParts}
 	if _, err := c.s.TheirLibraries(ctx, stranger); !errors.Is(err, ErrUnreachable) {
 		t.Fatalf("a stranger: %v", err)
 	}
@@ -582,7 +587,8 @@ func TestSyncTitlesPageTooLarge(t *testing.T) {
 			}
 			body, _ = json.Marshal(map[string]any{"titles": titles})
 		}
-		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, body))
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, "application/json", body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()
@@ -622,7 +628,8 @@ func TestSyncTitlesBounded(t *testing.T) {
 			}
 			body, _ = json.Marshal(map[string]any{"titles": titles, "next": fmt.Sprintf("movie/tmdb/%d", p*10_000+titlesPage)})
 		}
-		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, body))
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, "application/json", body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()
@@ -653,7 +660,8 @@ func TestSyncTitlesSkipsOddOnesAlone(t *testing.T) {
 				{"key":4,"kind":"movie","library":"` + lib + `"},
 				{"key":"movie/tmdb/5","kind":"movie","library":"` + lib + `"}],"seq":7}`)
 		}
-		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, body))
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, "application/json", body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()
@@ -687,7 +695,8 @@ func TestTheirLibrariesOddOnes(t *testing.T) {
 			{"id":"lib_B","name":"Mixed\u200b\u0001 one","kind":"TVSHOWS"},
 			{"id":"lib_N","name":42,"kind":7}],
 			"limits":{"streams":"two"}}`)
-		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, body))
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, "application/json", body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()

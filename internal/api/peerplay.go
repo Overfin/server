@@ -33,7 +33,7 @@ import (
 // asks here (rule 97). Everything personal (what they watch, where they
 // are, their address) stays on their server.
 
-// peerPlayRequest is MSFP's play (version 0, section 9.5). Its optional
+// peerPlayRequest is MSFP's play (playback section 2, video section 5). Its optional
 // members are left out when empty, never sent as "" or null.
 type peerPlayRequest struct {
 	// Title is the title key: a film's or an episode's.
@@ -70,7 +70,9 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req peerPlayRequest
-	if msfp.DecodeJSON(body, &req) != nil {
+	// Its titles are films and episodes, video's: none plays while video
+	// is off with it (MSFP playback, section 2.2).
+	if msfp.DecodeJSON(body, &req) != nil || !fed.Speaks(peer, msfp.PartVideo) {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
@@ -166,7 +168,7 @@ func (pb Playback) peerPlay(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	// Its seek-bar previews, a bonus, by the same ticket (MSFP section 10).
+	// Its seek-bar previews, a bonus, by the same ticket (MSFP video, section 5.5).
 	out.Trickplay = pb.previews(ctx, s, ja, uid, func(n int) string {
 		return fed.Address + "/api/v1/stream/" + s.Ticket + "/trickplay/" + strconv.Itoa(n)
 	})
@@ -462,6 +464,12 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 		problem.Send(w, problem.ServerBusy, "")
 		return
 	}
+	if errors.Is(err, federation.ErrNotSupported) {
+		// It doesn't speak playback with this server (MSFP core section
+		// 10.4): nothing of it plays.
+		problem.Send(w, problem.NotPlayable, "")
+		return
+	}
 	if err != nil {
 		// No answer, or none signed (its host's own 429 among them):
 		// busy for now, as MSFP core section 8.3 says; only its signed
@@ -606,7 +614,7 @@ func keepPeerURLs(out *sessionJSON, address string) (string, bool) {
 	return base, true
 }
 
-// Bounds on a paired server's seek-bar previews (MSFP section 9.5): tiles
+// Bounds on a paired server's seek-bar previews (MSFP video, section 5.5): tiles
 // and sheets of sizes this server re-encodes (images.MaxDimension), a
 // sheet count that a film's previews never need more than.
 const (

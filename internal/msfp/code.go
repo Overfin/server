@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,8 +27,8 @@ import (
 //     the one it was sent to;
 //   - when the code stops working (a day after it was made).
 //
-// The code is text, one line, easy to paste: "overfin-pair-1." then the
-// rest in URL-safe base64.
+// The code is text, one line, easy to paste: "msfp-pair-1." then the
+// rest in URL-safe base64 (MSFP core section 5).
 type Code struct {
 	Address string
 	Key     ed25519.PublicKey
@@ -35,9 +36,9 @@ type Code struct {
 	Expires time.Time
 }
 
-// codePrefix names the format and its version, so a code from a later
-// Overfin is told apart instead of misread.
-const codePrefix = "overfin-pair-1."
+// codePrefix names the format and the core version it pairs in, so a
+// code of another version is told apart instead of misread.
+const codePrefix = "msfp-pair-1."
 
 // SecretSize is the secret's length: 32 random bytes, never guessed.
 const SecretSize = 32
@@ -48,8 +49,24 @@ const CodeLifetime = 24 * time.Hour
 // maxAddress caps a code's address, so a code can't be made huge.
 const maxAddress = 512
 
+// maxCode caps a code's text after its prefix: 72 bytes and the longest
+// address, in base64url (core section 5.1).
+const maxCode = ((ed25519.PublicKeySize+SecretSize+8+maxAddress)*8 + 5) / 6 // 779
+
 // ErrCode is returned for any text that isn't a valid pairing code.
 var ErrCode = errors.New("federation: not a valid pairing code")
+
+// ErrPlainHTTP is returned for an address, or a code with one, that is
+// plain http: MSFP is HTTPS only (core section 3).
+var ErrPlainHTTP = errors.New("federation: a plain http address; MSFP is HTTPS only")
+
+// plainHTTP is the test switch of AllowPlainHTTPForTests.
+var plainHTTP atomic.Bool
+
+// AllowPlainHTTPForTests lets addresses be plain http, as MSFP allows an
+// implementation's tests to (core section 3.1): it is outside the
+// protocol, never for servers in use. Off by default.
+func AllowPlainHTTPForTests(on bool) { plainHTTP.Store(on) }
 
 // NewCode makes a pairing code for this server at address, with a new
 // secret, valid from now for CodeLifetime.
@@ -82,7 +99,7 @@ func (c Code) String() string {
 func ParseCode(text string) (Code, error) {
 	text = strings.Join(strings.Fields(text), "")
 	rest, ok := strings.CutPrefix(text, codePrefix)
-	if !ok || len(rest) > 2*(maxAddress+ed25519.PublicKeySize+SecretSize+8) {
+	if !ok || len(rest) > maxCode {
 		return Code{}, ErrCode
 	}
 	b, ok := Decode64(rest, -1)
@@ -97,26 +114,33 @@ func ParseCode(text string) (Code, error) {
 		Address: string(b[fixed:]),
 	}
 	// A key MSFP accepts (section 2.1): never one of small order.
-	if CheckAddress(c.Address) != nil || !ValidKey(c.Key) {
+	if !ValidKey(c.Key) {
+		return Code{}, ErrCode
+	}
+	switch err := CheckAddress(c.Address); {
+	case errors.Is(err, ErrPlainHTTP):
+		return Code{}, err // a code otherwise good: the panel says why
+	case err != nil:
 		return Code{}, ErrCode
 	}
 	return c, nil
 }
 
-// CheckAddress accepts a site's address in MSFP's one form (section 5.2):
-// "http" or "https" in lower case, "://", a host, an optional port, and
-// nothing after (no path, not even "/", no "?", "#" or "@"); at most
+// CheckAddress accepts a server's address in MSFP's one form (core
+// section 5.2): "https" in lower case, "://", a host, an optional port,
+// and nothing after (no path, not even "/", no "?", "#" or "@"); at most
 // maxAddress bytes. The host is a name (labels of a-z 0-9 -, 1 to 63
 // characters, not starting or ending with -, at most 253 in all), an IPv4
 // address as four numbers without leading zeros (a host whose last label
 // is all digits must be one), or a bracketed IPv6 address as RFC 5952
-// writes it. The port is 1 to 65535 without leading zeros, never the
-// scheme's default. Plain http is accepted because every request and
-// answer is signed either way, so a server can't be impersonated over it;
-// the panel says what it exposes. One server, one way of writing its
-// address.
+// writes it. The port is 1 to 65535 without leading zeros, never 443. One
+// server, one way of writing its address.
+//
+// Plain http, otherwise in that form, gives ErrPlainHTTP; it is accepted
+// only with the test switch on (AllowPlainHTTPForTests), its port then
+// never 80.
 func CheckAddress(address string) error {
-	bad := errors.New("federation: an address is http(s)://host[:port], with nothing after it")
+	bad := errors.New("federation: an address is https://host[:port], with nothing after it")
 	scheme, rest, ok := strings.Cut(address, "://")
 	if len(address) > maxAddress || !ok || (scheme != "https" && scheme != "http") || rest == "" ||
 		strings.ContainsAny(rest, "/?#@") {
@@ -161,6 +185,9 @@ func CheckAddress(address string) error {
 			(scheme == "https" && n == 443) || (scheme == "http" && n == 80) {
 			return bad
 		}
+	}
+	if scheme == "http" && !plainHTTP.Load() {
+		return ErrPlainHTTP
 	}
 	return nil
 }

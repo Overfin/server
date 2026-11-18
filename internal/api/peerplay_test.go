@@ -49,7 +49,24 @@ func viewer(t *testing.T, b *federation.Service, client *http.Client) (*federati
 	if err := b.SetOffers(ctx, aOnB, []string{"films"}); err != nil {
 		t.Fatal(err)
 	}
-	return a, bOnA, aOnB
+	// Each knows what the other speaks, as their hellos would have said.
+	return a, heardHello(t, a.Store, bOnA), heardHello(t, b.Store, aOnB)
+}
+
+// heardHello is p as st keeps it once p's hello listed all that Overfin
+// speaks of MSFP.
+func heardHello(t *testing.T, st *store.Store, p *store.Peer) *store.Peer {
+	t.Helper()
+	ctx := context.Background()
+	v, _ := json.Marshal(federation.OurVersions())
+	if err := st.SetPeerVersions(ctx, p.ID, string(v)); err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.PeerByID(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 // Members by their exact names: federation answers are read so.

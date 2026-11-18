@@ -187,7 +187,7 @@ func refused(p string) bool {
 func notFound(w http.ResponseWriter) {
 	// The backend's own 404, byte for byte: a path refused here can't be
 	// told from one the backend refused, a federation call whose
-	// signature failed among them (MSFP section 3, "Probing").
+	// signature failed among them (MSFP core sections 3 and 14, "Probing").
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")

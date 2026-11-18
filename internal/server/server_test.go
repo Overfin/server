@@ -211,6 +211,31 @@ func TestStateChangesMustBeJSON(t *testing.T) {
 	}
 }
 
+// A federation call that isn't JSON, or is a browser's cross-site request,
+// gets the plain 404 of a path that doesn't exist (MSFP core section 3),
+// never a refusal that would say federation is here.
+func TestFederationRefusalsAre404(t *testing.T) {
+	srv := newTestServer(t)
+	for _, edit := range []func(*http.Request){
+		func(r *http.Request) { r.Header.Set("Content-Type", "text/plain") },
+		func(r *http.Request) { r.Header.Del("Content-Type") },
+		func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "cross-site") },
+	} {
+		req, _ := http.NewRequest("POST", srv.URL+"/api/v1/federation/hello", strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		edit(req)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !strings.Contains(string(body), `"not-found"`) {
+			t.Errorf("%v: %d %s", req.Header, res.StatusCode, body)
+		}
+	}
+}
+
 // The control panel's and the apps' paths reaching the site (the panel on
 // a listener of its own) are a plain 404, never the site's page.
 func TestPanelPathsNotTheSite(t *testing.T) {

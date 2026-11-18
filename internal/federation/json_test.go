@@ -11,15 +11,22 @@ import (
 	"github.com/overfin/server/internal/store"
 )
 
-// Names match exactly: "State" is an unknown member, ignored; null is a
-// member left out; each check reaches into lists and nested objects.
+// Names match exactly: "State" is an unknown member, ignored; null is
+// refused in a request, and at the top of an answer; each check reaches
+// into lists and nested objects.
 func TestDecodeJSONExact(t *testing.T) {
 	var msg helloMessage
-	if err := msfp.DecodeJSON([]byte(`{"State":"ended","certificates":null}`), &msg); err != nil || msg.State != "" || msg.Certificates != nil {
+	if err := msfp.DecodeJSON([]byte(`{"State":"ended"}`), &msg); err != nil || msg.State != "" {
 		t.Errorf("another case: %+v %v", msg, err)
 	}
+	if err := msfp.DecodeJSON([]byte(`{"state":"paired","certificates":null}`), &msg); err == nil {
+		t.Error("null accepted in a request")
+	}
 	var a titlesAnswer
-	err := msfp.DecodeJSON([]byte(`{"titles":[{"key":"movie/tmdb/1","KIND":"movie","kind":"movie","Library":"x","library":"l"}],"next":null,"Seq":3}`), &a)
+	if err := msfp.DecodeAnswer([]byte(`{"titles":[],"next":null}`), &a); err == nil {
+		t.Error("null accepted at the top of an answer")
+	}
+	err := msfp.DecodeAnswer([]byte(`{"titles":[{"key":"movie/tmdb/1","KIND":"movie","kind":"movie","Library":"x","library":"l","audio":null}],"Seq":3}`), &a)
 	if err != nil || len(a.Titles) != 1 || a.Titles[0].Kind != "movie" || a.Titles[0].Library != "l" || a.Seq != 0 {
 		t.Errorf("nested: %+v %v", a, err)
 	}
@@ -104,10 +111,28 @@ func TestHelloStateExactCase(t *testing.T) {
 	if got := onlyPeer(t, a); got.State != store.PeerPaired {
 		t.Fatalf("A after it: %+v", got)
 	}
-	// Two members of the same name: refused too.
-	status, err = b.s.Call(ctx, aOnB, helloPath, json.RawMessage(`{"state":"paired","state":"ended"}`), &out)
-	if err != nil || status != http.StatusNotFound {
-		t.Fatalf("hello with state twice: %d, %v", status, err)
+	// Two members of the same name: refused too (sent as they are: this
+	// server never writes them).
+	if status := rawCall(t, b, aOnB, helloPath, `{"state":"paired","state":"ended"}`); status != http.StatusNotFound {
+		t.Fatalf("hello with state twice: %d", status)
 	}
 	onlyPeer(t, a)
+}
+
+// rawCall sends p, from s, a signed request of exactly body, and gives the
+// status of its answer.
+func rawCall(t *testing.T, s *server, p *store.Peer, path, body string) int {
+	t.Helper()
+	req, err := http.NewRequest("POST", p.Address+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	msfp.SignRequest(req, []byte(body), s.s.Key, s.s.now())
+	res, err := s.s.conns(p, true).client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	return res.StatusCode
 }

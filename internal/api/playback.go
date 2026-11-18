@@ -1020,7 +1020,7 @@ type openArgs struct {
 	// those viewers fetch it from (Stream.Origin).
 	urlBase, origin string
 	// versionID, when set, is a version's ID as the playback's viewer
-	// knows it (a paired server's: never Jellyfin's, MSFP section 9.5);
+	// knows it (a paired server's: never Jellyfin's, MSFP playback, section 2.3);
 	// nil for this server's own site, which knows them as "ver_" and
 	// Jellyfin's.
 	versionID func(sourceID string) string

@@ -71,15 +71,35 @@ func TestCodeRefused(t *testing.T) {
 			t.Errorf("address %q accepted", address)
 		}
 	}
-	good, _ := NewCode("http://10.1.2.3:8080", k.Public(), now)
-	for _, text := range []string{"", "overfin-pair-1.", "overfin-pair-2." + strings.TrimPrefix(good.String(), codePrefix),
-		"overfin-pair-1.!!!!", good.String()[:40], "overfin-pair-1." + strings.Repeat("A", 5000)} {
+	good, _ := NewCode("https://10.1.2.3:8080", k.Public(), now)
+	for _, text := range []string{"", "msfp-pair-1.", "msfp-pair-2." + strings.TrimPrefix(good.String(), codePrefix),
+		"overfin-pair-1." + strings.TrimPrefix(good.String(), codePrefix),
+		"msfp-pair-1.!!!!", good.String()[:40], "msfp-pair-1." + strings.Repeat("A", 5000)} {
 		if _, err := ParseCode(text); err == nil {
 			t.Errorf("code %q accepted", text)
 		}
 	}
 	if _, err := ParseCode(good.String()); err != nil {
-		t.Errorf("plain http on a private address refused: %v", err)
+		t.Errorf("a private address refused: %v", err)
+	}
+	// Plain http: HTTPS only, said as such, unless the test switch is on.
+	plain := Code{Address: "http://10.1.2.3:8080", Key: k.Public(), Secret: good.Secret, Expires: good.Expires}
+	if _, err := ParseCode(plain.String()); !errors.Is(err, ErrPlainHTTP) {
+		t.Errorf("a plain http code: %v", err)
+	}
+	if _, err := NewCode(plain.Address, k.Public(), now); !errors.Is(err, ErrPlainHTTP) {
+		t.Errorf("a plain http code made: %v", err)
+	}
+	AllowPlainHTTPForTests(true)
+	_, err := ParseCode(plain.String())
+	AllowPlainHTTPForTests(false)
+	if err != nil {
+		t.Errorf("a plain http code, the test switch on: %v", err)
+	}
+	// Past 779 characters after the prefix (584 bytes): refused before
+	// it is decoded.
+	if _, err := ParseCode(codePrefix + strings.Repeat("A", 780)); err == nil {
+		t.Error("a code of 780 characters accepted")
 	}
 }
 
@@ -92,13 +112,13 @@ func request(k Key, method, target string, body []byte, at time.Time) (*http.Req
 // An address is what browsers send as an origin: lower case, no default
 // port; anything a CSP or CORS header could be broken by is refused.
 func TestAddresses(t *testing.T) {
-	for _, ok := range []string{"https://films.example.org", "http://192.0.2.10:8096", "https://[2001:db8::1]:8443"} {
+	for _, ok := range []string{"https://films.example.org", "https://192.0.2.10:8096", "https://[2001:db8::1]:8443"} {
 		if CheckAddress(ok) != nil {
 			t.Errorf("%s refused", ok)
 		}
 	}
 	for _, bad := range []string{"https://evil;script-src", "https://a,b", "https://ex.com'", "https://Films.example.org",
-		"https://films.example.org:443", "http://films.example.org:80", "https://films.example.org/path", "ftp://films.example.org"} {
+		"https://films.example.org:443", "http://films.example.org", "https://films.example.org/path", "ftp://films.example.org"} {
 		if CheckAddress(bad) == nil {
 			t.Errorf("%s accepted", bad)
 		}
@@ -227,16 +247,18 @@ func TestStrangersFillNoMemory(t *testing.T) {
 func TestSignedResponse(t *testing.T) {
 	k := NewKey()
 	body := []byte(`{"ok":true}`)
-	sig := SignResponse(k, "nonce1", 200, body)
-	if err := CheckResponse(k.Public(), "nonce1", 200, body, sig); err != nil {
+	sig := SignResponse(k, "nonce1", 200, "application/json", body)
+	if err := CheckResponse(k.Public(), "nonce1", 200, "application/json", body, sig); err != nil {
 		t.Fatal(err)
 	}
 	for name, err := range map[string]error{
-		"other nonce":  CheckResponse(k.Public(), "nonce2", 200, body, sig),
-		"other status": CheckResponse(k.Public(), "nonce1", 500, body, sig),
-		"other body":   CheckResponse(k.Public(), "nonce1", 200, []byte(`{}`), sig),
-		"other key":    CheckResponse(NewKey().Public(), "nonce1", 200, body, sig),
-		"no signature": CheckResponse(k.Public(), "nonce1", 200, body, ""),
+		"other nonce":      CheckResponse(k.Public(), "nonce2", 200, "application/json", body, sig),
+		"other status":     CheckResponse(k.Public(), "nonce1", 500, "application/json", body, sig),
+		"other media type": CheckResponse(k.Public(), "nonce1", 200, "text/html", body, sig),
+		"no media type":    CheckResponse(k.Public(), "nonce1", 200, "", body, sig),
+		"other body":       CheckResponse(k.Public(), "nonce1", 200, "application/json", []byte(`{}`), sig),
+		"other key":        CheckResponse(NewKey().Public(), "nonce1", 200, "application/json", body, sig),
+		"no signature":     CheckResponse(k.Public(), "nonce1", 200, "application/json", body, ""),
 	} {
 		if err == nil {
 			t.Errorf("%s: accepted", name)
@@ -268,7 +290,7 @@ func TestPairingProof(t *testing.T) {
 func FuzzParseCode(f *testing.F) {
 	good, _ := NewCode("https://films.example.org", NewKey().Public(), now)
 	f.Add(good.String())
-	f.Add("overfin-pair-1.")
+	f.Add("msfp-pair-1.")
 	f.Fuzz(func(t *testing.T, text string) {
 		c, err := ParseCode(text)
 		if err != nil {

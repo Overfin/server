@@ -427,6 +427,12 @@ type Federation struct {
 	// (SECURITY.md rule 136). Link-local addresses, a cloud's metadata
 	// service among them, stay refused either way.
 	AllowLoopback bool `toml:"allow_loopback"`
+	// TestPlainHTTP lets this server pair over plain http: its own
+	// address, and the addresses in codes and pairing requests, may be
+	// http://. For testing two servers on one machine only: MSFP is HTTPS
+	// only (its core, section 3.1, leaves this to an implementation's
+	// tests), so a server in use keeps it off, the default.
+	TestPlainHTTP bool `toml:"test_plain_http"`
 }
 
 type Storage struct {

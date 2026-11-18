@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/overfin/server/internal/federation"
@@ -42,12 +43,15 @@ type peerJSON struct {
 	// order, say): no request from it, nor answer, is accepted. An honest
 	// server's key never is.
 	Unusable bool `json:"unusable,omitempty"`
+	// OtherVersion: its latest hello lists no version of MSFP's core this
+	// server speaks: the two can't talk (MSFP core section 10.3).
+	OtherVersion bool `json:"otherVersion,omitempty"`
 }
 
 func peerOf(p *store.Peer) peerJSON {
 	j := peerJSON{ID: p.ID, Name: p.Name, Address: p.Address, State: p.State,
 		Fingerprint: msfp.Fingerprint(p.PublicKey), CreatedAt: p.Created.Format(time.RFC3339),
-		Unusable: !msfp.ValidKey(p.PublicKey)}
+		Unusable: !msfp.ValidKey(p.PublicKey), OtherVersion: !federation.SpeaksCore(p)}
 	if p.Paired != nil {
 		j.PairedAt = p.Paired.Format(time.RFC3339)
 	}
@@ -99,7 +103,7 @@ func (p *Panel) fed(w http.ResponseWriter) *federation.Service {
 	}
 	if s == nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"type": "unavailable",
-			"detail": "Federation needs the site's address: set site.url (or an HTTPS domain) in the configuration."})
+			"detail": "Federation needs the site's https address: set site.url (or an HTTPS domain) in the configuration."})
 	}
 	return s
 }
@@ -145,7 +149,9 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 		outPeers = append(outPeers, j)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"available": true, "address": s.Address,
-		"fingerprint": msfp.Fingerprint(s.Key.Public()), "codes": outCodes, "peers": outPeers})
+		// The test setting federation.test_plain_http, on: said so.
+		"testPlainHTTP": strings.HasPrefix(s.Address, "http://"),
+		"fingerprint":   msfp.Fingerprint(s.Key.Public()), "codes": outCodes, "peers": outPeers})
 }
 
 func (p *Panel) createPairingCode(w http.ResponseWriter, r *http.Request, s *session) {
@@ -311,7 +317,9 @@ func (p *Panel) pairingProblem(w http.ResponseWriter, err error) {
 	detail := ""
 	switch {
 	case errors.Is(err, msfp.ErrCode):
-		detail = "That isn't a pairing code. Paste the whole code, starting with overfin-pair-1."
+		detail = "That isn't a pairing code. Paste the whole code, starting with msfp-pair-1."
+	case errors.Is(err, msfp.ErrPlainHTTP):
+		detail = "That code is for a server at a plain http:// address. Servers pair over HTTPS only: ask its operator to give it an https address, then a new code."
 	case errors.Is(err, federation.ErrOwnCode):
 		detail = "That's this server's own code: send it to the other server's operator instead."
 	case errors.Is(err, store.ErrPeerExists):
@@ -405,7 +413,7 @@ func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ours": outOurs, "theirs": outTheirs, "reachable": reachable,
-		"limits": peer.Limits, "theirLimits": peer.Theirs})
+		"notSupported": errors.Is(err, federation.ErrNotSupported), "limits": peer.Limits, "theirLimits": peer.Theirs})
 }
 
 func (p *Panel) setSharing(w http.ResponseWriter, r *http.Request, s *session) {
@@ -470,6 +478,11 @@ func (p *Panel) setSharing(w http.ResponseWriter, r *http.Request, s *session) {
 			if errors.Is(err, federation.ErrUnreachable) || errors.Is(err, federation.ErrUnknown) {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
 					"detail": "What you offer is saved, but what you want couldn't be: the other server can't be reached now. Try again later."})
+				return
+			}
+			if errors.Is(err, federation.ErrNotSupported) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
+					"detail": "What you offer is saved, but what you want couldn't be: the other server doesn't share libraries with this one (it speaks another version of the protocol, or hasn't said which yet). Try Check, then again."})
 				return
 			}
 			p.fail(w, "setting wants", err)

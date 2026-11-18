@@ -58,3 +58,35 @@ func TestStrictJSONVectors(t *testing.T) {
 		}
 	}
 }
+
+// null is never a valid value (core section 2.3): refused anywhere in a
+// request, at the top of an answer; inside an answer, read as left out.
+// Marshal never writes one.
+func TestNull(t *testing.T) {
+	for _, body := range []string{`{"state":null}`, `{"list":[1,null]}`, `{"a":{"b":null}}`} {
+		var m map[string]any
+		if DecodeJSON([]byte(body), &m) == nil {
+			t.Errorf("%s accepted", body)
+		}
+		inside := body != `{"state":null}`
+		if err := DecodeAnswer([]byte(body), &m); (err == nil) != inside {
+			t.Errorf("%s, as an answer: %v", body, err)
+		}
+		if err := DecodeEntry([]byte(body), &m); err != nil {
+			t.Errorf("%s, as an entry: %v", body, err)
+		}
+	}
+	var v struct {
+		List  []string          `json:"list"`
+		Inner *struct{ A int }  `json:"inner"`
+		Map   map[string]string `json:"map"`
+		Name  string            `json:"name"`
+	}
+	b, err := Marshal(v)
+	if err != nil || string(b) != `{"name":""}` {
+		t.Errorf("Marshal: %s, %v", b, err)
+	}
+	if _, err := Marshal([]any{1, nil}); err == nil {
+		t.Error("null in a list written")
+	}
+}

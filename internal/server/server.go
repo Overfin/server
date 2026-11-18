@@ -143,18 +143,28 @@ func sameOrigin(reg *plugin.Registrar, next http.Handler) http.Handler {
 			if (r.Method == http.MethodGet || r.Method == http.MethodHead) && !isAPI(r.URL.Path) {
 				break
 			}
-			problem.Send(w, problem.CrossSiteRequest, "")
+			refuse(w, r, problem.CrossSiteRequest)
 			return
 		}
 		switch r.Method {
 		case http.MethodPost, http.MethodPut, http.MethodPatch:
 			if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
-				problem.Send(w, problem.UnsupportedMediaType, "")
+				refuse(w, r, problem.UnsupportedMediaType)
 				return
 			}
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// refuse answers a request sameOrigin refuses: with t, or, for a
+// federation call, the same plain 404 as a path that doesn't exist (MSFP
+// core section 3), so that nobody learns federation is on.
+func refuse(w http.ResponseWriter, r *http.Request, t problem.Type) {
+	if strings.HasPrefix(r.URL.Path, "/api/v1/federation/") {
+		t = problem.NotFound
+	}
+	problem.Send(w, t, "")
 }
 
 func limitBody(next http.Handler) http.Handler {

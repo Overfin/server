@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Certificates between servers (section 3): a server's key vouches for
+// Certificates between servers (core section 3.2): a server's key vouches for
 // the certificates its address serves, named by pin in its signed hello.
 // A connection to a peer is accepted when its certificate is publicly
 // trusted, or is one the peer named.
@@ -31,18 +31,19 @@ func ValidPin(s string) bool {
 	return err == nil && len(b) == sha256.Size && b64.EncodeToString(b) == s
 }
 
-// CleanPins keeps the valid pins, each once, sorted, at most MaxPins.
+// CleanPins keeps the first MaxPins valid pins, each once, in the order
+// sent (core section 3.2), then sorted, so that two lists compare as sets.
 func CleanPins(in []string) []string {
 	var out []string
 	for _, p := range in {
+		if len(out) == MaxPins {
+			break
+		}
 		if ValidPin(p) && !slices.Contains(out, p) {
 			out = append(out, p)
 		}
 	}
 	slices.Sort(out)
-	if len(out) > MaxPins {
-		out = out[:MaxPins]
-	}
 	return out
 }
 

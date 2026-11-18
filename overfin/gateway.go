@@ -359,15 +359,16 @@ type fedShared struct {
 
 // federationService is federation on this server, or nil when the site has
 // no address a code could give (no site.url, HTTPS domain or sign-in
-// return address), or one with a path: peers reach a server at its site's
-// root.
+// return address), one with a path (peers reach a server at its site's
+// root), or one that is plain http: MSFP is HTTPS only, but for the test
+// setting federation.test_plain_http.
 func federationService(cfg *config.Config, sh *shared) *federation.Service {
 	address := msfp.Origin(siteURL(cfg))
 	if address == "" || sh.fed.http == nil {
 		return nil
 	}
 	if _, err := msfp.NewCode(address, sh.fed.key.Public(), time.Now()); err != nil {
-		sh.logger.Info("federation: off, the site's address isn't http(s)://host alone", "address", address)
+		sh.logger.Info("federation: off, the site's address isn't https://host alone", "address", address, "error", err)
 		return nil
 	}
 	db := sh.db

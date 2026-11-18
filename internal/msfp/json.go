@@ -13,7 +13,7 @@ import (
 	"unicode/utf8"
 )
 
-// Federation bodies are I-JSON (RFC 7493), read as MSFP section 2.1 says,
+// Federation bodies are I-JSON (RFC 7493), read as MSFP core section 2.3 says,
 // both ways: the requests peers send here and the answers they give.
 // encoding/json alone is more lenient: it keeps the last of two members
 // of the same name, replaces invalid UTF-8 and lone surrogates with
@@ -23,8 +23,13 @@ import (
 // members whose names are exactly a field's: "State" is an unknown member,
 // ignored, never "state".
 //
-// null is read as the member left out, as version 0 says a receiver does
-// (Overfin itself used to send it for empty lists).
+// null is never a valid value (core section 2.3). A request that holds
+// one, anywhere, is refused (DecodeJSON). In an answer, a member of the
+// wrong type fails the whole answer at its top, and only counts as absent,
+// or skips its entry, inside it: DecodeAnswer refuses null at the top,
+// and reads it as the member left out inside; DecodeEntry reads an entry
+// of an answer's list, null anywhere as left out. Marshal writes bodies
+// without any.
 
 // ErrJSON is returned for a body that isn't I-JSON, or doesn't fit.
 var ErrJSON = errors.New("federation: not a valid body")
@@ -33,16 +38,43 @@ var ErrJSON = errors.New("federation: not a valid body")
 const maxDepth = 64
 
 // DecodeJSON reads a federation body, a JSON object, into v (a pointer),
-// as MSFP section 2.1 says.
+// as MSFP core section 2.3 says.
 func DecodeJSON(body []byte, v any) error {
-	tree, err := strictTree(body)
+	return decode(body, v, false, false)
+}
+
+// DecodeAnswer reads a federation answer into v, as DecodeJSON does a
+// request, but for null inside it, which reads as the member left out:
+// the caller checks each member's type, as each call's section says.
+func DecodeAnswer(body []byte, v any) error {
+	return decode(body, v, true, true)
+}
+
+// DecodeEntry reads an entry of an answer's list (a title, a library),
+// raw, into v: null anywhere reads as the member left out.
+func DecodeEntry(raw []byte, v any) error {
+	return decode(raw, v, true, false)
+}
+
+// decode reads body into v: with nulls, null is read as the member left
+// out, except at the top with topNull refused.
+func decode(body []byte, v any, nulls, topNull bool) error {
+	tree, err := strictTree(body, nulls)
 	if err != nil {
 		return err
 	}
 	// Every MSFP body, request or answer, is an object (core section
 	// 8.1): "null", a list or a string isn't one.
-	if _, ok := tree.(map[string]any); !ok {
+	obj, ok := tree.(map[string]any)
+	if !ok {
 		return ErrJSON
+	}
+	if topNull {
+		for _, value := range obj {
+			if value == nil {
+				return ErrJSON
+			}
+		}
 	}
 	exact, err := json.Marshal(keepExact(tree, reflect.TypeOf(v)))
 	if err != nil {
@@ -59,13 +91,14 @@ func DecodeJSON(body []byte, v any) error {
 // same member name twice, compared once their escapes are decoded;
 // integers only, without fraction, exponent or -0, within ±(2^53 − 1).
 // Objects become map[string]any, numbers json.Number.
-func strictTree(body []byte) (any, error) {
+// With nulls, null is a value; otherwise it is refused.
+func strictTree(body []byte, nulls bool) (any, error) {
 	if bytes.HasPrefix(body, []byte("\xef\xbb\xbf")) || !utf8.Valid(body) || !escapesOK(body) {
 		return nil, ErrJSON
 	}
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
-	v, err := readValue(dec, 0)
+	v, err := readValue(dec, 0, nulls)
 	if err != nil {
 		return nil, ErrJSON
 	}
@@ -144,7 +177,7 @@ func noncharacter(r rune) bool {
 var integerRe = regexp.MustCompile(`^-?(0|[1-9][0-9]{0,15})$`)
 
 // readValue reads one value, token by token.
-func readValue(dec *json.Decoder, depth int) (any, error) {
+func readValue(dec *json.Decoder, depth int, nulls bool) (any, error) {
 	if depth > maxDepth {
 		return nil, ErrJSON
 	}
@@ -166,7 +199,7 @@ func readValue(dec *json.Decoder, depth int) (any, error) {
 				if _, dup := obj[key]; !ok || dup {
 					return nil, ErrJSON // the same member twice
 				}
-				if obj[key], err = readValue(dec, depth+1); err != nil {
+				if obj[key], err = readValue(dec, depth+1, nulls); err != nil {
 					return nil, err
 				}
 			}
@@ -175,7 +208,7 @@ func readValue(dec *json.Decoder, depth int) (any, error) {
 		case '[':
 			list := []any{}
 			for dec.More() {
-				v, err := readValue(dec, depth+1)
+				v, err := readValue(dec, depth+1, nulls)
 				if err != nil {
 					return nil, err
 				}
@@ -195,9 +228,66 @@ func readValue(dec *json.Decoder, depth int) (any, error) {
 			return nil, ErrJSON
 		}
 		return t, nil
-	default: // string, bool, nil
+	case nil:
+		if !nulls {
+			return nil, ErrJSON // null is never a valid value
+		}
+		return nil, nil
+	default: // string, bool
 		return t, nil
 	}
+}
+
+// Marshal writes v as a federation body: JSON, with no null anywhere
+// (core section 2.3). A member that would be null (a nil list, map or
+// pointer) is left out, as omitempty would; null inside a list is an
+// error, since leaving it out would change the list.
+func Marshal(v any) ([]byte, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	var tree any
+	if err := dec.Decode(&tree); err != nil {
+		return nil, err
+	}
+	tree, err = dropNulls(tree)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(tree)
+}
+
+// dropNulls removes the null members of every object in v.
+func dropNulls(v any) (any, error) {
+	switch t := v.(type) {
+	case map[string]any:
+		for name, value := range t {
+			if value == nil {
+				delete(t, name)
+				continue
+			}
+			kept, err := dropNulls(value)
+			if err != nil {
+				return nil, err
+			}
+			t[name] = kept
+		}
+	case []any:
+		for i, value := range t {
+			if value == nil {
+				return nil, errors.New("federation: null in a list")
+			}
+			kept, err := dropNulls(value)
+			if err != nil {
+				return nil, err
+			}
+			t[i] = kept
+		}
+	}
+	return v, nil
 }
 
 var unmarshaler = reflect.TypeFor[json.Unmarshaler]()

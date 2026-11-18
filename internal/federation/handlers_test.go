@@ -19,7 +19,7 @@ func TestSignRefusalsCrash(t *testing.T) {
 	h := SignRefusals(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rw := w.(*refusalWriter)
 		rw.free = func() { freed = true }
-		rw.sign = func(status int, body []byte) string { return "signed" }
+		rw.sign = func(status int, contentType string, body []byte) string { return "signed" }
 		panic("boom")
 	}))
 	rec := httptest.NewRecorder()
@@ -102,7 +102,8 @@ func TestNoContentCoding(t *testing.T) {
 		if coding != "" {
 			w.Header().Set("Content-Encoding", coding)
 		}
-		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, body))
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(msfp.HeaderSignature, msfp.SignResponse(k, r.Header.Get(msfp.HeaderNonce), 200, "application/json", body))
 		_, _ = w.Write(body)
 	}))
 	defer fake.Close()

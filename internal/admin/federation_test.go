@@ -26,10 +26,13 @@ func fedPanel(t *testing.T, name string) (*browser, *federation.Service) {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	ts := httptest.NewServer(mux)
+	// Over HTTPS, as MSFP is, with the test server's certificate, which
+	// the server names to its peers.
+	ts := httptest.NewTLSServer(mux)
 	t.Cleanup(ts.Close)
 	s := &federation.Service{Store: db, Key: key, Address: ts.URL, HTTP: federation.NewHTTPClient(),
-		Name: func(context.Context) string { return name }, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		Certificates: &federation.Certificates{},
+		Name:         func(context.Context) string { return name }, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	if err := plugin.NewRegistrar(mux, func(h http.Handler) http.Handler { return h }).Load(federation.Plugin{S: s}); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +69,7 @@ func TestFederationPanel(t *testing.T) {
 	rec := a.do("POST", "/admin/api/federation/codes", `{"note":"  for   B "}`, nil)
 	var made struct{ ID, Note, Code string }
 	json.Unmarshal(rec.Body.Bytes(), &made)
-	if rec.Code != 201 || !strings.HasPrefix(made.Code, "overfin-pair-1.") || made.Note != "for B" {
+	if rec.Code != 201 || !strings.HasPrefix(made.Code, "msfp-pair-1.") || made.Note != "for B" {
 		t.Fatalf("code: %d %s", rec.Code, rec.Body)
 	}
 	sa := readState(t, a)

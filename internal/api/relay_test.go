@@ -52,7 +52,7 @@ func TestRelayErrorWithoutTicket(t *testing.T) {
 // https://github.com/msfp-io/msfp-spec, copied in the msfp package's
 // testdata), through the code that rebuilds what a paired server sends.
 func TestWebVTTVectors(t *testing.T) {
-	b, err := os.ReadFile("../msfp/testdata/media-vectors.json")
+	b, err := os.ReadFile("../msfp/testdata/v1/media.json")
 	if err != nil {
 		t.Fatal(err)
 	}
