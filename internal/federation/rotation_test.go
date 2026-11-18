@@ -213,39 +213,42 @@ func TestRotateWithoutCommitment(t *testing.T) {
 	}
 }
 
-// A pairing made before commitments gets them from the first hello that
-// carries one (trust on first use, MSFP core section 12.5); a hello can't
-// change one after.
-func TestCommitmentFromHello(t *testing.T) {
+// A commitment comes from pair or a rotation only: there is no trust on
+// first use from a hello (MSFP core section 12.5). A pairing that holds
+// none (a rotation statement without one, or one from a hello before) gets
+// none from a hello: its form is checked, then it is ignored, and the
+// next change of key waits for the operator.
+func TestNoCommitmentFromHello(t *testing.T) {
 	ctx := context.Background()
 	a, b, bOnA, aOnB := pairedPair(t)
 	for _, s := range []*server{a, b} {
-		exec(t, s, `UPDATE peers SET next_commitment = NULL, commitment_from = '', commitment_told = 0`)
+		exec(t, s, `UPDATE peers SET next_commitment = NULL, commitment_from = ''`)
 	}
-	// A's hourly round sends B a hello carrying its commitment, once.
 	a.s.Maintain(ctx)
-	ab, ba := peer(t, b, aOnB.ID), peer(t, a, bOnA.ID)
-	if ab.CommitmentFrom != store.CommitmentHello || !bytes.Equal(ab.NextCommitment, a.s.Keys.NextCommitment()) {
-		t.Fatalf("B from A's hello: %x %q", ab.NextCommitment, ab.CommitmentFrom)
+	if _, err := a.s.Check(ctx, peer(t, a, bOnA.ID)); err != nil {
+		t.Fatal(err)
 	}
-	if ba.CommitmentFrom != store.CommitmentHello || !bytes.Equal(ba.NextCommitment, b.s.Keys.NextCommitment()) {
-		t.Fatalf("A from B's answer: %x %q", ba.NextCommitment, ba.CommitmentFrom)
-	}
-	// Another commitment in a later hello: ignored.
-	other := msfp.Encode64(msfp.Commitment(msfp.NewKey().Public()))
-	hello := `{"state":"paired","core":[1],"parts":{"catalog":[1]},"nextCommitment":"` + other + `"}`
+	// A hello carrying a commitment, its own: ignored.
+	hello := `{"state":"paired","core":[1],"parts":{"catalog":[1]},"nextCommitment":"` + msfp.Encode64(a.s.Keys.NextCommitment()) + `"}`
 	if status, _ := signedCall(t, a, onlyPeer(t, a), helloPath, []byte(hello), a.s.Keys.Current()); status != http.StatusOK {
 		t.Fatalf("hello: %d", status)
 	}
-	if got := peer(t, b, aOnB.ID); !bytes.Equal(got.NextCommitment, a.s.Keys.NextCommitment()) {
-		t.Fatal("a hello replaced the commitment")
+	ab, ba := peer(t, b, aOnB.ID), peer(t, a, bOnA.ID)
+	if ab.NextCommitment != nil || ab.CommitmentFrom != "" || ba.NextCommitment != nil || ba.CommitmentFrom != "" {
+		t.Fatalf("a commitment from a hello: B holds %x (%q), A holds %x (%q)", ab.NextCommitment, ab.CommitmentFrom,
+			ba.NextCommitment, ba.CommitmentFrom)
 	}
-	// And the rotation follows it.
+	// One not of its form: a bad body, a 404, nothing kept.
+	bad := `{"state":"paired","core":[1],"parts":{"catalog":[1]},"nextCommitment":"abc"}`
+	if status, _ := signedCall(t, a, onlyPeer(t, a), helloPath, []byte(bad), a.s.Keys.Current()); status != http.StatusNotFound {
+		t.Fatalf("a hello with a bent commitment: %d", status)
+	}
+	// So A's change of key waits for B's operator.
 	if err := a.s.Rotate(ctx, ""); err != nil {
 		t.Fatal(err)
 	}
-	if got := peer(t, b, aOnB.ID); !msfp.SameKey(got.PublicKey, a.s.Keys.Current().Public()) {
-		t.Fatal("B didn't follow the commitment it got from a hello")
+	if got := peer(t, b, aOnB.ID); msfp.SameKey(got.PublicKey, a.s.Keys.Current().Public()) || got.Pending == nil {
+		t.Fatalf("B followed a key it holds no commitment to: pending %v", got.Pending)
 	}
 }
 

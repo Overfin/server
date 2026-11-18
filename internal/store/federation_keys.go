@@ -24,6 +24,9 @@ const (
 	federationNextContext = "federation next key"
 	federationOldContext  = "federation old key"
 	federationIDsContext  = "federation ids key"
+	// federationRevokedContext: a key revoked with no next key, kept 30
+	// days for one use (FederationKeys.Revoked).
+	federationRevokedContext = "federation revoked key"
 )
 
 // FederationKeys are this server's federation keys, as stored.
@@ -45,6 +48,13 @@ type FederationKeys struct {
 	// IDs is the secret that makes the IDs peers know this server's
 	// things by (federation's opaque IDs): it never changes.
 	IDs []byte
+	// Revoked is a key revoked with no next key safe, replaced by a new
+	// one (ReplaceFederationKey), since RevokedAt: kept 30 days to answer
+	// the hellos of the servers whose pairing ended then with the
+	// revocation, signed with it (MSFP core section 12.7, case 2). nil
+	// for none.
+	Revoked   []byte
+	RevokedAt time.Time
 }
 
 // metaValue reads one meta value: nil when there's none.
@@ -108,7 +118,39 @@ func (s *Store) FederationKeys(ctx context.Context) (FederationKeys, error) {
 		return k, err
 	}
 	k.OldRevoked = k.Old != nil && string(revoked) == "1"
+	if k.Revoked, err = open("federation-revoked-key", federationRevokedContext); err != nil {
+		return k, err
+	}
+	if k.Revoked != nil {
+		at, err := metaValue(ctx, s.read, "federation-revoked-at")
+		if err != nil {
+			return k, err
+		}
+		n, err := strconv.ParseInt(string(at), 10, 64)
+		if err != nil {
+			return k, fmt.Errorf("store: federation-revoked-at: %w", err)
+		}
+		k.RevokedAt = time.Unix(n, 0).UTC()
+	}
 	return k, nil
+}
+
+// DeleteFederationRevokedKey deletes the key kept after it was revoked
+// with no next key (FederationKeys.Revoked), once its 30 days are over:
+// the servers it ended with are then only forgotten.
+func (s *Store) DeleteFederationRevokedKey(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE name IN ('federation-revoked-key', 'federation-revoked-at')`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE forgotten_peers SET revoked = 0 WHERE revoked = 1`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // KeepFederationIDs stores the IDs secret, unless one is there already.
@@ -266,9 +308,11 @@ func (s *Store) FinishFederationRotation(ctx context.Context, old ed25519.Public
 // with no rotation: what a server does after revoking a key whose next
 // key is lost (MSFP core section 12.7, case 2). Every peer knew it by the
 // revoked key, so every pairing ends, each peer's keys remembered as
-// forgotten: they are made again with new codes. All in one transaction:
-// no pairing ends unless the key is replaced too.
-func (s *Store) ReplaceFederationKey(ctx context.Context, newSeed, nextSeed, nextCommitment []byte) error {
+// forgotten: they are made again with new codes. The revoked key, the
+// current one until now, is kept from at for 30 days, to answer those
+// peers' hellos with its revocation (FederationKeys.Revoked). All in one
+// transaction: no pairing ends unless the key is replaced too.
+func (s *Store) ReplaceFederationKey(ctx context.Context, newSeed, nextSeed, nextCommitment []byte, at time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -291,8 +335,20 @@ func (s *Store) ReplaceFederationKey(ctx context.Context, newSeed, nextSeed, nex
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	sealed, err := metaValue(ctx, tx, "federation-key")
+	if err != nil {
+		return err
+	}
+	revoked, err := s.box.Open(sealed, federationKeyContext)
+	if err != nil {
+		return err
+	}
+	// Those a revocation before ended: only forgotten now.
+	if _, err := tx.ExecContext(ctx, `UPDATE forgotten_peers SET revoked = 0 WHERE revoked = 1`); err != nil {
+		return err
+	}
 	for _, id := range ids {
-		if err := s.deletePeerTx(ctx, tx, id, true); err != nil {
+		if err := s.deletePeerTx(ctx, tx, id, true, true); err != nil {
 			return err
 		}
 	}
@@ -307,6 +363,8 @@ func (s *Store) ReplaceFederationKey(ctx context.Context, newSeed, nextSeed, nex
 		{"federation-key", s.box.Seal(newSeed, federationKeyContext)},
 		{"federation-next-key", s.box.Seal(nextSeed, federationNextContext)},
 		{"federation-next-commitment", nextCommitment},
+		{"federation-revoked-key", s.box.Seal(revoked, federationRevokedContext)},
+		{"federation-revoked-at", []byte(strconv.FormatInt(at.Unix(), 10))},
 	} {
 		if err := setMeta(ctx, tx, m.name, m.value); err != nil {
 			return err
@@ -317,31 +375,21 @@ func (s *Store) ReplaceFederationKey(ctx context.Context, newSeed, nextSeed, nex
 
 // What this server knows of a peer's keys.
 
-// SetPeerCommitment sets a peer's next key commitment from its hello,
-// only if it never had one (trust on first use, MSFP core section
-// 12.5): false when it had.
-func (s *Store) SetPeerCommitment(ctx context.Context, id string, commitment []byte) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `UPDATE peers SET next_commitment = ?, commitment_from = 'hello'
-		WHERE id = ? AND commitment_from = ''`, commitment, id)
-	if err != nil {
-		return false, err
-	}
-	n, _ := res.RowsAffected()
-	return n > 0, nil
-}
-
 // RotatePeer makes r.New a peer's current key (MSFP core section 12.3,
 // step 5): r.Old, which must be its current key, is its previous one,
-// heard until until; r.Next its commitment; the statement kept in its
-// history. It lifts a suspension, and drops a pending rotation and a
-// refused one. ErrNotFound if the peer isn't there, or isn't on r.Old.
+// heard until until, unless it was revoked (the peer suspended): a
+// revoked key is never heard again (section 12.6); r.Next its
+// commitment; the statement kept in its history. It lifts a suspension,
+// and drops a pending rotation and a refused one. ErrNotFound if the
+// peer isn't there, or isn't on r.Old.
 func (s *Store) RotatePeer(ctx context.Context, id string, r msfp.Rotation, until, at time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.ExecContext(ctx, `UPDATE peers SET public_key = ?, previous_key = ?, previous_until = ?,
+	res, err := tx.ExecContext(ctx, `UPDATE peers SET public_key = ?, previous_key = ?,
+		previous_until = CASE WHEN suspended_at IS NULL THEN ? ELSE 0 END,
 		next_commitment = ?, commitment_from = 'rotation', pending_rotation = '', suspended_at = NULL,
 		refused_key = NULL, refused_at = NULL
 		WHERE id = ? AND public_key = ?`, r.New, r.Old, until.Unix(), r.Next, id, r.Old)
@@ -357,6 +405,16 @@ func (s *Store) RotatePeer(ctx context.Context, id string, r msfp.Rotation, unti
 		return err
 	}
 	return tx.Commit()
+}
+
+// PeerFormerKey says whether key is one a peer was known by before: its
+// previous key, or the old key of any of its rotations (MSFP core
+// section 12.3, step 1: a retired key never becomes current again).
+func (s *Store) PeerFormerKey(ctx context.Context, id string, key []byte) (bool, error) {
+	var n int
+	err := s.read.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM peers WHERE id = ?1 AND previous_key = ?2)
+		+ (SELECT count(*) FROM peer_rotations WHERE peer_id = ?1 AND old_key = ?2)`, id, key).Scan(&n)
+	return n > 0, err
 }
 
 // SetPeerPending keeps a rotation waiting for our operator (r, or nil to
@@ -453,7 +511,7 @@ func (s *Store) PeerMovedTo(ctx context.Context, id string, current ed25519.Publ
 	if old, err := s.sealedPublic(ctx, tx, "federation-old-key", federationOldContext); err != nil || old == nil {
 		return false, false, err
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE peers SET our_key = '', rotation_answer = '', commitment_told = 1
+	res, err := tx.ExecContext(ctx, `UPDATE peers SET our_key = '', rotation_answer = ''
 		WHERE id = ? AND our_key = 'old'`, id)
 	if err != nil {
 		return false, false, err
@@ -477,8 +535,7 @@ func (s *Store) PeerMovedTo(ctx context.Context, id string, current ed25519.Publ
 // …Lost) and its latest answer to our rotate. Moved to our current key,
 // it holds our commitment, from the statement.
 func (s *Store) SetOurKey(ctx context.Context, id, state, answer string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE peers SET our_key = ?2, rotation_answer = ?3,
-		commitment_told = CASE WHEN ?2 = '' THEN 1 ELSE commitment_told END WHERE id = ?1`, id, state, answer)
+	_, err := s.db.ExecContext(ctx, `UPDATE peers SET our_key = ?, rotation_answer = ? WHERE id = ?`, state, answer, id)
 	return err
 }
 

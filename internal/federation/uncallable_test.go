@@ -537,7 +537,7 @@ func TestUncallableHelloVector(t *testing.T) {
 	json.Unmarshal([]byte(v.Exchanges[i].Body), &want)
 	a, _ := msfp.Decode64(want["knownKey"].(string), 32)
 	s := &Service{Uncallable: true, Address: want["address"].(string)}
-	body, err := msfp.Marshal(s.ourHello(context.Background(), &store.Peer{PublicKey: a, CommitmentTold: true}, helloPaired, false))
+	body, err := msfp.Marshal(s.ourHello(context.Background(), &store.Peer{PublicKey: a}, helloPaired, false))
 	if err != nil {
 		t.Fatal(err)
 	}

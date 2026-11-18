@@ -19,9 +19,8 @@ import (
 // Changes of key (MSFP core section 12), this server's and its peers'.
 //
 // This server keeps a next key ready, made in advance; its peers hold the
-// commitment to it (SHA-256 of its public key), from pair, from a
-// rotation, or, for a pairing that had none, from the first hello that
-// carried it. When our operator changes the key, the next key becomes the
+// commitment to it (SHA-256 of its public key), from pair or from a
+// rotation. When our operator changes the key, the next key becomes the
 // current one: every peer is sent a rotate, signed with the old key, and
 // moves to the new one at once since it matches the commitment. Until a
 // peer answered that it did, this server signs toward it with the old key,
@@ -133,18 +132,13 @@ func (s *Service) receiveRotation(ctx context.Context, p *store.Peer, rot msfp.R
 		}
 		return "", errRefused
 	}
-	// The new key may not be another peer's, nor a forgotten one.
-	switch other, err := s.Store.PeerByKey(ctx, rot.New); {
-	case err == nil && other.ID != p.ID:
+	// The new key may not be another peer's, nor a forgotten one, nor
+	// one this peer was known by before.
+	switch taken, err := s.keyTaken(ctx, p, rot.New); {
+	case err != nil:
+		return "", err
+	case taken:
 		return "", errRefused
-	case err != nil && !errors.Is(err, store.ErrNotFound):
-		return "", err
-	}
-	if forgotten, err := s.Store.PeerForgotten(ctx, rot.New); err != nil || forgotten {
-		if err == nil {
-			err = errRefused
-		}
-		return "", err
 	}
 	now := s.now()
 	match := p.NextCommitment != nil && bytes.Equal(msfp.Commitment(rot.New), p.NextCommitment)
@@ -184,6 +178,22 @@ func (s *Service) receiveRotation(ctx context.Context, p *store.Peer, rot msfp.R
 		return "", err
 	}
 	return msfp.StatePending, nil
+}
+
+// keyTaken says whether p may not move to key (MSFP core section 12.3,
+// step 1): another peer's key, a forgotten one, or one of p's own former
+// keys, since a retired key never becomes current again.
+func (s *Service) keyTaken(ctx context.Context, p *store.Peer, key ed25519.PublicKey) (bool, error) {
+	switch other, err := s.Store.PeerByKey(ctx, key); {
+	case err == nil && other.ID != p.ID:
+		return true, nil
+	case err != nil && !errors.Is(err, store.ErrNotFound):
+		return false, err
+	}
+	if forgotten, err := s.Store.PeerForgotten(ctx, key); err != nil || forgotten {
+		return forgotten, err
+	}
+	return s.Store.PeerFormerKey(ctx, p.ID, key)
 }
 
 // revoke is a peer saying its key was stolen (MSFP core sections 9.4 and
@@ -241,17 +251,11 @@ func (s *Service) ConfirmRotation(ctx context.Context, id string) (*store.Peer, 
 		return nil, ErrNoPending
 	}
 	rot := *p.Pending
-	switch other, err := s.Store.PeerByKey(ctx, rot.New); {
-	case err == nil && other.ID != p.ID:
+	switch taken, err := s.keyTaken(ctx, p, rot.New); {
+	case err != nil:
+		return nil, err
+	case taken:
 		return nil, ErrKeyTaken
-	case err != nil && !errors.Is(err, store.ErrNotFound):
-		return nil, err
-	}
-	if forgotten, err := s.Store.PeerForgotten(ctx, rot.New); err != nil || forgotten {
-		if err == nil {
-			err = ErrKeyTaken
-		}
-		return nil, err
 	}
 	now := s.now()
 	if err := s.Store.RotatePeer(ctx, p.ID, rot, now.Add(PreviousHeard), now); err != nil {
@@ -568,8 +572,12 @@ func (s *Service) Revoke(ctx context.Context, nextKey string, withoutNext bool) 
 	if err != nil {
 		return false, err
 	}
+	// Every pairing ends, and no ended is sent: its peers would refuse
+	// it from a key they suspend. For 30 days, a hello from one of them
+	// is answered with the revocation, signed with the key revoked
+	// (MSFP core section 12.7, case 2: revocationAnswer).
 	fresh, after := msfp.NewKey(), msfp.NewKey()
-	if err := s.Store.ReplaceFederationKey(ctx, fresh.Seed(), after.Seed(), msfp.Commitment(after.Public())); err != nil {
+	if err := s.Store.ReplaceFederationKey(ctx, fresh.Seed(), after.Seed(), msfp.Commitment(after.Public()), s.now()); err != nil {
 		return false, err
 	}
 	if err := s.Keys.reload(ctx, s.Store); err != nil {
@@ -624,11 +632,9 @@ const rotateDaily = 24 * time.Hour
 
 // Maintain does what time brings to keys and addresses, run every hour
 // or so (MSFP core sections 12 and 13; maintainAddresses for addresses):
-// our old key deleted 30 days after the change began;
-// a peer on it told again daily; a peer suspended 30 days without a
-// valid rotation becomes gone; and a peer that holds no commitment of
-// ours, from a pairing made before commitments, sent a hello carrying it
-// once.
+// our old key deleted 30 days after the change began, and a key revoked
+// with no next key 30 days after; a peer on the old key told again
+// daily; a peer suspended 30 days without a valid rotation becomes gone.
 func (s *Service) Maintain(ctx context.Context) {
 	now := s.now()
 	// That change only: one our operator made meanwhile isn't ended.
@@ -638,6 +644,17 @@ func (s *Service) Maintain(ctx context.Context) {
 		rotations.Unlock()
 		if err != nil {
 			s.Logger.Error("federation: the old key couldn't be deleted", "error", err)
+		}
+	}
+	if _, since, ok := s.Keys.Revoked(); ok && now.Sub(since) >= KeyOverlap {
+		rotations.Lock()
+		err := s.Store.DeleteFederationRevokedKey(ctx)
+		if err == nil {
+			err = s.Keys.reload(ctx, s.Store)
+		}
+		rotations.Unlock()
+		if err != nil {
+			s.Logger.Error("federation: the revoked key couldn't be deleted", "error", err)
 		}
 	}
 	peers, err := s.Store.Peers(ctx)
@@ -660,23 +677,6 @@ func (s *Service) Maintain(ctx context.Context) {
 			// Told in our answers to its hellos (MSFP core section 7.5).
 		case p.OurKey == store.OurKeyOld && (p.RotateSent == nil || now.Sub(*p.RotateSent) >= rotateDaily):
 			s.sendRotate(ctx, p)
-		case !p.CommitmentTold && p.Usable() && s.firstTell(p.ID):
-			s.Check(ctx, p)
 		}
 	}
-}
-
-// firstTell says, once per peer for a Service, that it's yet to be sent
-// our commitment in a hello.
-func (s *Service) firstTell(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.told == nil {
-		s.told = map[string]bool{}
-	}
-	if s.told[id] {
-		return false
-	}
-	s.told[id] = true
-	return true
 }

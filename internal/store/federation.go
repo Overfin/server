@@ -133,8 +133,8 @@ type Peer struct {
 	// What this server knows of its keys (MSFP core section 12).
 	//
 	// NextCommitment is its next key commitment (nil for none), and
-	// CommitmentFrom where it came from: CommitmentPair, …Rotation,
-	// …Hello, or "" for none ever.
+	// CommitmentFrom where it came from: CommitmentPair, CommitmentRotation,
+	// or "" for none (after a rotation statement without one).
 	NextCommitment []byte `json:"-"`
 	CommitmentFrom string `json:"-"`
 	// PreviousKey is its key before its latest rotation, still heard
@@ -162,9 +162,6 @@ type Peer struct {
 	RotationAnswer string `json:"-"`
 	// RotateSent is when we last sent it a rotate.
 	RotateSent *time.Time `json:"-"`
-	// CommitmentTold: it holds our next key commitment, from pair or a
-	// rotation; until then our hellos carry it.
-	CommitmentTold bool `json:"-"`
 
 	// Addresses (MSFP core section 13).
 	//
@@ -210,9 +207,6 @@ func (p *Peer) Usable() bool { return p.State == PeerPaired && p.Suspended == ni
 const (
 	CommitmentPair     = "pair"
 	CommitmentRotation = "rotation"
-	// CommitmentHello: from its first hello that carried one, for a
-	// pairing that had none: trust on first use.
-	CommitmentHello = "hello"
 )
 
 // What a peer knows of this server's key.
@@ -296,12 +290,12 @@ func (s *Store) RedeemPairingCode(ctx context.Context, secretHash, publicKey []b
 	return p, tx.Commit()
 }
 
-// insertPeer adds a peer, made by pair: it holds our commitment, which
-// pair carries both ways, and commitment is its own (nil for none).
+// insertPeer adds a peer, made by pair: commitment is its own, which pair
+// carries both ways (MSFP core section 9.1), as it holds ours.
 func insertPeer(ctx context.Context, tx *sql.Tx, now time.Time, publicKey []byte, address, name, state string, commitment []byte) (*Peer, error) {
 	now = now.UTC().Truncate(time.Second)
 	p := &Peer{ID: ids.New("peer"), PublicKey: publicKey, Address: address, Name: name, State: state, Created: now, Seen: &now,
-		CommitmentTold: true, Inbound: InboundYes}
+		Inbound: InboundYes}
 	if commitment != nil {
 		p.NextCommitment, p.CommitmentFrom = commitment, CommitmentPair
 	}
@@ -338,7 +332,7 @@ func (s *Store) AddPeer(ctx context.Context, publicKey []byte, address, name str
 const peerSelect = `SELECT id, public_key, address, name, state, created_at, paired_at, seen_at,
 	max_streams, max_transcodes, max_bitrate_kbps, their_streams, their_transcodes, their_bitrate_kbps, certificates, versions,
 	next_commitment, commitment_from, previous_key, previous_until, pending_rotation, suspended_at, refused_key, refused_at,
-	our_key, rotation_answer, rotate_sent_at, commitment_told, our_address, new_address, new_address_tried, new_address_failing,
+	our_key, rotation_answer, rotate_sent_at, our_address, new_address, new_address_tried, new_address_failing,
 	inbound, calls_failed FROM peers`
 
 func scanPeer(row interface{ Scan(...any) error }) (*Peer, error) {
@@ -352,7 +346,7 @@ func scanPeer(row interface{ Scan(...any) error }) (*Peer, error) {
 	if err := row.Scan(&p.ID, &p.PublicKey, &p.Address, &p.Name, &p.State, &created, &paired, &seen,
 		&p.Limits.Streams, &p.Limits.Transcodes, &p.Limits.BitrateKbps, &ts, &tt, &tb, &certificates, &p.Versions,
 		&p.NextCommitment, &p.CommitmentFrom, &p.PreviousKey, &previousUntil, &pending, &suspended, &p.RefusedKey, &refused,
-		&p.OurKey, &p.RotationAnswer, &rotateSent, &p.CommitmentTold, &p.OurAddress, &newAddress, &newTried, &newFailing,
+		&p.OurKey, &p.RotationAnswer, &rotateSent, &p.OurAddress, &newAddress, &newTried, &newFailing,
 		&p.Inbound, &p.CallsFailed); err != nil {
 		return nil, err
 	}
@@ -474,17 +468,21 @@ func (s *Store) deletePeer(ctx context.Context, id string, remember bool) error 
 		return err
 	}
 	defer tx.Rollback()
-	if err := s.deletePeerTx(ctx, tx, id, remember); err != nil {
+	if err := s.deletePeerTx(ctx, tx, id, remember, false); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
 // deletePeerTx is deletePeer in tx, for a caller that removes more with
-// it, all or nothing.
-func (s *Store) deletePeerTx(ctx context.Context, tx *sql.Tx, id string, remember bool) error {
+// it, all or nothing. revoked marks the keys remembered as those of a
+// server whose pairing ended because this server's key was stolen
+// (ReplaceFederationKey).
+func (s *Store) deletePeerTx(ctx context.Context, tx *sql.Tx, id string, remember, revoked bool) error {
 	var key, previous []byte
-	switch err := tx.QueryRowContext(ctx, `SELECT public_key, previous_key FROM peers WHERE id = ?`, id).Scan(&key, &previous); {
+	var pending string
+	switch err := tx.QueryRowContext(ctx, `SELECT public_key, previous_key, pending_rotation FROM peers WHERE id = ?`, id).
+		Scan(&key, &previous, &pending); {
 	case errors.Is(err, sql.ErrNoRows):
 		return ErrNotFound
 	case err != nil:
@@ -492,10 +490,18 @@ func (s *Store) deletePeerTx(ctx context.Context, tx *sql.Tx, id string, remembe
 	}
 	if remember {
 		// Every key of its history (MSFP core section 7.4): its current
-		// one, its previous one, and those of its rotations.
+		// one, its previous one, those of its rotations, and the key of
+		// a rotation waiting for our operator. None is kept.
 		keys := [][]byte{key}
 		if previous != nil {
 			keys = append(keys, previous)
+		}
+		if pending != "" {
+			var r msfp.Rotation
+			if err := json.Unmarshal([]byte(pending), &r); err != nil {
+				return err
+			}
+			keys = append(keys, r.New)
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT old_key, new_key FROM peer_rotations WHERE peer_id = ?`, id)
 		if err != nil {
@@ -515,8 +521,9 @@ func (s *Store) deletePeerTx(ctx context.Context, tx *sql.Tx, id string, remembe
 		}
 		for _, k := range keys {
 			hash := sha256.Sum256(k)
-			if _, err := tx.ExecContext(ctx, `INSERT INTO forgotten_peers (key_hash, forgotten_at) VALUES (?, ?)
-				ON CONFLICT (key_hash) DO UPDATE SET forgotten_at = excluded.forgotten_at`, hash[:], s.now().Unix()); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO forgotten_peers (key_hash, forgotten_at, revoked) VALUES (?, ?, ?)
+				ON CONFLICT (key_hash) DO UPDATE SET forgotten_at = excluded.forgotten_at, revoked = excluded.revoked`,
+				hash[:], s.now().Unix(), revoked); err != nil {
 				return err
 			}
 		}
@@ -531,6 +538,18 @@ func (s *Store) PeerForgotten(ctx context.Context, publicKey []byte) (bool, erro
 	hash := sha256.Sum256(publicKey)
 	var n int
 	err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM forgotten_peers f WHERE f.key_hash = ?
+		AND NOT EXISTS (SELECT 1 FROM peers p WHERE p.public_key = ?)`, hash[:], publicKey).Scan(&n)
+	return n > 0, err
+}
+
+// ForgottenByRevocation says whether a key is a server's whose pairing
+// ended when this server's key was revoked with no next key
+// (ReplaceFederationKey), and that isn't paired again: its hellos get the
+// revocation (MSFP core section 12.7, case 2).
+func (s *Store) ForgottenByRevocation(ctx context.Context, publicKey []byte) (bool, error) {
+	hash := sha256.Sum256(publicKey)
+	var n int
+	err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM forgotten_peers f WHERE f.key_hash = ? AND f.revoked = 1
 		AND NOT EXISTS (SELECT 1 FROM peers p WHERE p.public_key = ?)`, hash[:], publicKey).Scan(&n)
 	return n > 0, err
 }

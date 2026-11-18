@@ -104,8 +104,6 @@ type Service struct {
 	// rechecked is when each peer was last asked its versions again after
 	// such an answer, by peer ID: at most once an hour.
 	rechecked map[string]time.Time
-	// told are the peers Maintain sent our commitment in a hello, by ID.
-	told map[string]bool
 	// former is this server's address before it moved, and movedAt when,
 	// while the move lasts (NoteAddress); "" for none.
 	former  string
@@ -277,14 +275,16 @@ type pairRequest struct {
 	SecretHash string `json:"secretHash"`
 	Proof      string `json:"proof"`
 	// NextCommitment is the caller's next key commitment (MSFP core
-	// section 12.5). Inbound false: the caller can't be called (section
-	// 7.5).
+	// section 12.5), required (section 9.1). Inbound false: the caller
+	// can't be called (section 7.5).
 	NextCommitment *string `json:"nextCommitment,omitempty"`
 	Inbound        *bool   `json:"inbound,omitempty"`
 }
 
 type pairAnswer struct {
-	Name           string `json:"name"`
+	Name string `json:"name"`
+	// NextCommitment is the maker's next key commitment, required
+	// (MSFP core section 9.1).
 	NextCommitment string `json:"nextCommitment,omitempty"`
 }
 
@@ -300,11 +300,10 @@ type helloMessage struct {
 	// serves (Pin), for the other's connections to accept: none when it
 	// couldn't tell.
 	Certificates []string `json:"certificates,omitempty"`
-	// Address is the sender's address.
+	// Address is the sender's address. A hello's nextCommitment, which
+	// only repeats the one its receiver stores (MSFP core section 12.5),
+	// isn't sent.
 	Address string `json:"address,omitempty"`
-	// NextCommitment is the sender's next key commitment, while the peer
-	// holds none from pair or a rotation (MSFP core section 12.5).
-	NextCommitment string `json:"nextCommitment,omitempty"`
 	// Inbound is false when this server can't be called (MSFP core
 	// section 7.5), and left out otherwise.
 	Inbound *bool `json:"inbound,omitempty"`
@@ -340,8 +339,8 @@ func OurVersions() msfp.Versions {
 }
 
 // ourHello is the hello this server sends p, or answers it, in state:
-// with its versions, pins and address, and its next key commitment while
-// p holds none from us, except for "ended", which says nothing else.
+// with its versions, pins and address, except for "ended", which says
+// nothing else.
 // A server that can't be called names no pins (nothing is served at its
 // address), says so in each, and its requests say which key it knows p by
 // (MSFP core section 7.5).
@@ -350,9 +349,6 @@ func (s *Service) ourHello(ctx context.Context, p *store.Peer, state string, ans
 		return helloMessage{State: helloEnded}
 	}
 	h := helloMessage{State: state, Core: ourVersions.Core, Parts: ourVersions.Parts, Address: s.Address}
-	if !p.CommitmentTold {
-		h.NextCommitment = msfp.Encode64(s.Keys.NextCommitment())
-	}
 	if !s.Uncallable {
 		h.Certificates = s.ownCertificates(ctx, answering)
 		return h
@@ -365,17 +361,27 @@ func (s *Service) ourHello(ctx context.Context, p *store.Peer, state string, ans
 }
 
 // ownCertificates is what this server names of its certificates in a
-// hello.
+// hello: those of its address, and during a move, those of its former
+// address too, until the move ends (MSFP core section 3.2), so a peer
+// still calling it there keeps reaching it.
 func (s *Service) ownCertificates(ctx context.Context, answering bool) []string {
 	look := s.Certificates.For
 	if answering {
 		look = s.Certificates.Fresh // a peer asking may have just been refused the old one
 	}
-	pins, err := look(ctx, s.Address)
-	if err != nil {
-		s.Logger.Info("federation: this server's certificate couldn't be read at its address", "address", s.Address, "error", err)
+	addresses := []string{s.Address}
+	if former, _, ok := s.Moving(); ok {
+		addresses = append(addresses, former)
 	}
-	return pins
+	var pins []string
+	for _, address := range addresses {
+		seen, err := look(ctx, address)
+		if err != nil {
+			s.Logger.Info("federation: this server's certificate couldn't be read at its address", "address", address, "error", err)
+		}
+		pins = append(pins, seen...)
+	}
+	return msfp.CleanPins(pins)
 }
 
 // Hello states.
@@ -424,6 +430,9 @@ func (s *Service) verified(w http.ResponseWriter, r *http.Request) (msfp.Verifie
 	}
 	v, err := s.verifier.Check(r, body, s.now())
 	if errors.Is(err, msfp.ErrForgotten) {
+		if s.revocationAnswer(w, r, v) {
+			return msfp.Verified{}, nil, false
+		}
 		// A server whose pairing ended: "unknown", signed.
 		s.signsFor(w, v.Nonce, s.Keys.Current())
 		problem.Send(w, problem.NotFound, "")
@@ -447,6 +456,13 @@ func (s *Service) verified(w http.ResponseWriter, r *http.Request) (msfp.Verifie
 		// else gets the signed 404 of a forgotten key (section 12.6).
 		if p.Suspended != nil && r.URL.Path != rotatePath && r.URL.Path != revokePath {
 			problem.Send(w, problem.NotFound, "")
+			return msfp.Verified{}, nil, false
+		}
+		// No core in common: every call but hello is not-supported
+		// (sections 10.3 and 10.4); pair, from a key already known, gets
+		// its own 409.
+		if !SpeaksCore(p) && r.URL.Path != helloPath && r.URL.Path != pairPath {
+			notSupported(w)
 			return msfp.Verified{}, nil, false
 		}
 		// A peer still on our old key: told of the new one again, at
@@ -480,6 +496,27 @@ func (s *Service) verified(w http.ResponseWriter, r *http.Request) (msfp.Verifie
 		free() // not a route's: nothing to hold the slots until it's done
 	}
 	return v, body, true
+}
+
+// revocationAnswer answers, for the 30 days after this server's key was
+// revoked with no next key (MSFP core section 12.7, case 2), a hello from
+// a server whose pairing ended then: a 200 signed with the key revoked,
+// carrying only the revocation, newly dated. A server that can't be
+// called, or that revoke didn't reach, learns of it so, and suspends the
+// pairing. false for any other request: it isn't answered here.
+func (s *Service) revocationAnswer(w http.ResponseWriter, r *http.Request, v msfp.Verified) bool {
+	revoked, since, ok := s.Keys.Revoked()
+	if !ok || r.URL.Path != helloPath || s.now().Sub(since) >= KeyOverlap {
+		return false
+	}
+	if former, err := s.Store.ForgottenByRevocation(r.Context(), v.Key); err != nil || !former {
+		return false
+	}
+	s.signsFor(w, v.Nonce, revoked)
+	s.answer(w, v.Nonce, struct {
+		Revocation msfp.RevokeBody `json:"revocation"`
+	}{msfp.SignRevocation(revoked, s.now()).Body()})
+	return true
 }
 
 // answer sends a signed JSON answer to the request whose nonce it was:
@@ -522,9 +559,13 @@ func (s *Service) pair(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
+	// Both sides commit to their next key (MSFP core section 9.1): a
+	// request without its commitment is a bad body.
 	hash, ok := msfp.Decode64(req.SecretHash, 32)
 	var commitment []byte
-	if req.NextCommitment != nil {
+	if req.NextCommitment == nil {
+		ok = false
+	} else {
 		var good bool
 		commitment, good = msfp.Decode64(*req.NextCommitment, 32)
 		ok = ok && good
@@ -621,9 +662,10 @@ func (s *Service) hello(w http.ResponseWriter, r *http.Request) {
 
 // keepHello keeps what a peer's signed hello, request or answer, says of
 // it: whether it can be called (MSFP core section 7.5), its versions
-// (section 10.3), its pins (section 3.2), its next key commitment if it
-// never had one (section 12.5), and, for another address than the one
-// stored, the check of that address (section 13.2).
+// (section 10.3), its pins (section 3.2), and, for another address than
+// the one stored, the check of that address (section 13.2). Its
+// nextCommitment, its form checked (msfp.ReadHello), is ignored: a
+// commitment comes from pair or a rotation only (section 12.5).
 func (s *Service) keepHello(ctx context.Context, p *store.Peer, h msfp.Hello) error {
 	// Whether it can be called first: where its address is checked, or
 	// stored at once, depends on it (MSFP core sections 7.5 and 13.2).
@@ -635,18 +677,6 @@ func (s *Service) keepHello(ctx context.Context, p *store.Peer, h msfp.Hello) er
 	}
 	if err := s.announcedAddress(ctx, p, h.Address); err != nil {
 		return err
-	}
-	if h.NextCommitment != nil && p.CommitmentFrom == "" {
-		// Trust on first use, signed by its current key: weaker than
-		// one from pair, and the panel says so.
-		set, err := s.Store.SetPeerCommitment(ctx, p.ID, h.NextCommitment)
-		if err != nil {
-			return err
-		}
-		if set {
-			p.NextCommitment, p.CommitmentFrom = h.NextCommitment, store.CommitmentHello
-			s.Logger.Info("federation: a peer's next key commitment, from its hello", "name", p.Name)
-		}
 	}
 	versions, err := json.Marshal(h.Versions)
 	if err != nil {
@@ -861,9 +891,10 @@ func (s *Service) call(ctx context.Context, p *store.Peer, path string, in, out 
 	if notMoved, _ := s.NotMoved(p); notMoved && path != helloPath && path != pairPath {
 		s.announceSoon(p)
 	}
-	// A part that is off with it: not called (MSFP core section 10.4).
+	// A part that is off with it: not called (MSFP core section 10.4);
+	// with no core in common, nothing but hello (section 10.3).
 	part := partOf[path]
-	if part != "" && !s.Speaks(p, part) {
+	if part != "" && !s.Speaks(p, part) || path != helloPath && path != pairPath && !SpeaksCore(p) {
 		return Reply{}, ErrNotSupported
 	}
 	key := msfp.Encode64(p.PublicKey)
@@ -1051,9 +1082,13 @@ func (s *Service) UseCode(ctx context.Context, text string) (*store.Peer, error)
 	case r.Status != http.StatusOK:
 		return nil, ErrCodeRefused
 	}
-	// Its commitment, when it gave one in its form (MSFP core section
-	// 9.1); one that isn't is left out.
-	commitment, _ := msfp.Decode64(answer.NextCommitment, 32)
+	// Its commitment is required (MSFP core section 9.1): an answer
+	// without it, or with one not of its form, fails like a badly signed
+	// one, and nothing is kept.
+	commitment, ok := msfp.Decode64(answer.NextCommitment, 32)
+	if !ok {
+		return nil, fmt.Errorf("%w: its answer gives no next key commitment", ErrUnreachable)
+	}
 	return s.Store.AddPeer(ctx, c.Key, c.Address, cleanName(answer.Name, c.Address), commitment)
 }
 
@@ -1142,6 +1177,11 @@ func (s *Service) Check(ctx context.Context, p *store.Peer) (*store.Peer, error)
 		}
 	case r.Status != http.StatusOK:
 		return p, ErrUnreachable
+	case answer.Pull(p.PublicKey, s.now()).Revocation != nil:
+		// Its key revoked, in its answer (MSFP core sections 12.6 and
+		// 12.7): suspended, and nothing else of that answer kept, since
+		// one from a server that replaced its key carries nothing else.
+		s.applyPulled(ctx, p, answer, false)
 	default:
 		if err := s.Store.PeerSeen(ctx, p.ID); err != nil {
 			return p, err

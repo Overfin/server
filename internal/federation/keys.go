@@ -31,6 +31,12 @@ type Keys struct {
 	since time.Time
 	// oldRevoked: old was revoked, the change of key made after it.
 	oldRevoked bool
+	// revoked is a key revoked with no next key, replaced by current,
+	// since revokedAt (nil: none): kept 30 days for one use, the answers
+	// to the hellos of the servers whose pairing ended then (MSFP core
+	// section 12.7, case 2).
+	revoked   *msfp.Key
+	revokedAt time.Time
 	// next is the commitment to the next key, whose seed is in the store
 	// or kept offline by the operator.
 	next []byte
@@ -93,6 +99,13 @@ func keysOf(k store.FederationKeys) (*Keys, error) {
 		}
 		keys.old, keys.since, keys.oldRevoked = &old, k.RotatedAt, k.OldRevoked
 	}
+	if k.Revoked != nil {
+		revoked, err := msfp.KeyFromSeed(k.Revoked)
+		if err != nil {
+			return nil, err
+		}
+		keys.revoked, keys.revokedAt = &revoked, k.RevokedAt
+	}
 	return keys, nil
 }
 
@@ -112,6 +125,7 @@ func (k *Keys) reload(ctx context.Context, st *store.Store) error {
 	defer k.mu.Unlock()
 	k.current, k.old, k.since, k.next, k.ids = fresh.current, fresh.old, fresh.since, fresh.next, fresh.ids
 	k.oldRevoked = fresh.oldRevoked
+	k.revoked, k.revokedAt = fresh.revoked, fresh.revokedAt
 	return nil
 }
 
@@ -139,6 +153,18 @@ func (k *Keys) OldRevoked() bool {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
 	return k.old != nil && k.oldRevoked
+}
+
+// Revoked is the key revoked with no next key safe, and when (MSFP core
+// section 12.7, case 2): kept for its 30 days only (Maintain deletes it
+// then); false when there's none.
+func (k *Keys) Revoked() (msfp.Key, time.Time, bool) {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	if k.revoked == nil {
+		return msfp.Key{}, time.Time{}, false
+	}
+	return *k.revoked, k.revokedAt, true
 }
 
 // NextCommitment is the commitment to the next key (MSFP core section

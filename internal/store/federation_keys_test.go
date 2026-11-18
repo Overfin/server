@@ -92,7 +92,7 @@ func TestReplaceFederationKeyAllOrNothing(t *testing.T) {
 		}
 	}
 	fresh, after := msfp.NewKey(), msfp.NewKey()
-	if err := s.ReplaceFederationKey(ctx, fresh.Seed(), after.Seed(), msfp.Commitment(after.Public())); err == nil {
+	if err := s.ReplaceFederationKey(ctx, fresh.Seed(), after.Seed(), msfp.Commitment(after.Public()), time.Unix(1000, 0)); err == nil {
 		t.Fatal("replaced, its write refused")
 	}
 	if peers, err := s.Peers(ctx); err != nil || len(peers) != 2 {
@@ -110,7 +110,7 @@ func TestReplaceFederationKeyAllOrNothing(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.ReplaceFederationKey(ctx, fresh.Seed(), after.Seed(), msfp.Commitment(after.Public())); err != nil {
+	if err := s.ReplaceFederationKey(ctx, fresh.Seed(), after.Seed(), msfp.Commitment(after.Public()), time.Unix(1000, 0)); err != nil {
 		t.Fatal(err)
 	}
 	if peers, err := s.Peers(ctx); err != nil || len(peers) != 0 {
@@ -121,6 +121,27 @@ func TestReplaceFederationKeyAllOrNothing(t *testing.T) {
 	}
 	if seed, _, err := s.FederationSeed(ctx); err != nil || !bytes.Equal(seed, fresh.Seed()) {
 		t.Fatalf("the key after the replace: %v", err)
+	}
+	// The key revoked kept 30 days, for the hellos of the servers it
+	// ended with (MSFP core section 12.7, case 2); then deleted.
+	keys, err := s.FederationKeys(ctx)
+	if err != nil || !bytes.Equal(keys.Revoked, k.Seed()) || keys.RevokedAt.Unix() != 1000 {
+		t.Fatalf("the revoked key: %x at %v, %v", keys.Revoked, keys.RevokedAt, err)
+	}
+	if f, err := s.ForgottenByRevocation(ctx, peerKey); err != nil || !f {
+		t.Fatalf("a peer ended by the revocation: %v %v", f, err)
+	}
+	if err := s.DeleteFederationRevokedKey(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if keys, _ := s.FederationKeys(ctx); keys.Revoked != nil {
+		t.Fatal("the revoked key kept")
+	}
+	if f, _ := s.ForgottenByRevocation(ctx, peerKey); f {
+		t.Fatal("a peer still answered with the revocation after its 30 days")
+	}
+	if f, _ := s.PeerForgotten(ctx, peerKey); !f {
+		t.Fatal("a peer no longer forgotten after the revoked key went")
 	}
 }
 

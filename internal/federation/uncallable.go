@@ -105,16 +105,19 @@ func (s *Service) pullable(p *store.Peer, h *helloMessage) {
 	}
 }
 
-// applyPulled is a hello answer of p's, signed, when this server can't be
-// called: its revocation, then its rotation, as revoke and rotate would
-// be (MSFP core sections 12.6 and 12.3), checked against p's key now, the
-// one the answer verified under. onlyRotation, for a suspended p: its
-// rotation only. Once p's new key is current, the next hello goes at once,
-// to say we know it (section 12.4, step 3).
+// applyPulled is a hello answer of p's, signed: its revocation, then,
+// when this server can't be called, its rotation, as revoke and rotate
+// would be (MSFP core sections 12.6 and 12.3), checked against p's key
+// now, the one the answer verified under. onlyRotation, for a suspended
+// p: its rotation only. Once p's new key is current, the next hello goes
+// at once, to say we know it (section 12.4, step 3).
+//
+// A revocation is applied whether or not this server can be called: a
+// server whose key was stolen with no next key answers every former
+// peer's hello with it for 30 days, so that a peer revoke didn't reach
+// learns of it too (section 12.7, case 2). Signed by the key it revokes,
+// it can only stop a pairing, never start or move one.
 func (s *Service) applyPulled(ctx context.Context, p *store.Peer, h msfp.Hello, onlyRotation bool) {
-	if !s.Uncallable {
-		return
-	}
 	pulled := h.Pull(p.PublicKey, s.now())
 	if pulled.Revocation != nil && !onlyRotation && p.Suspended == nil {
 		suspended, err := s.Store.SuspendPeer(ctx, p.ID, s.now())
@@ -128,7 +131,7 @@ func (s *Service) applyPulled(ctx context.Context, p *store.Peer, h msfp.Hello, 
 			s.changed(p.ID)
 		}
 	}
-	if pulled.Rotation == nil {
+	if !s.Uncallable || pulled.Rotation == nil {
 		return
 	}
 	q, err := s.Store.PeerByID(ctx, p.ID)

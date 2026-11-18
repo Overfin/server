@@ -146,7 +146,15 @@ type Certificates struct {
 	// nothing is looked at.
 	Pins []string
 
-	mu   sync.Mutex
+	mu sync.Mutex
+	// looks are what was seen at each address looked at: this server's,
+	// and its former one while it moves (MSFP core section 3.2).
+	looks map[string]*look
+}
+
+// look is what an address was seen to serve, and when it was last looked
+// at.
+type look struct {
 	seen []string
 	at   time.Time
 }
@@ -184,22 +192,30 @@ func (c *Certificates) within(ctx context.Context, address string, maxAge time.D
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.at.IsZero() && time.Since(c.at) < maxAge {
-		return c.seen, nil
+	if c.looks == nil {
+		c.looks = map[string]*look{}
 	}
-	c.at = time.Now()
+	l := c.looks[u.Host]
+	if l == nil {
+		l = &look{}
+		c.looks[u.Host] = l
+	}
+	if !l.at.IsZero() && time.Since(l.at) < maxAge {
+		return l.seen, nil
+	}
+	l.at = time.Now()
 	pin, err := probe(ctx, u)
 	if err != nil {
-		if c.seen == nil {
+		if l.seen == nil {
 			// Never read yet (a reverse proxy starting after Overfin):
 			// tried again soon, rather than naming none for a minute,
 			// which has peers drop the pins they had.
-			c.at = c.at.Add(probeAgain - probeEvery)
+			l.at = l.at.Add(probeAgain - probeEvery)
 		}
-		return c.seen, err
+		return l.seen, err
 	}
-	c.seen = []string{pin}
-	return c.seen, nil
+	l.seen = []string{pin}
+	return l.seen, nil
 }
 
 // probe connects to this server's own address, as a peer would, and
