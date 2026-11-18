@@ -62,3 +62,31 @@ func Region(language, country string) string {
 	}
 	return first
 }
+
+// CountryLanguages are the languages an operator can offer in a country
+// (its ISO 3166 code, such as "CA"), the most spoken first; none for a
+// country Overfin has none for. They're in countries.go, made from
+// Unicode CLDR and TMDB's translations by tools/countrylangs.
+func CountryLanguages(country string) []string {
+	return slices.Clone(countryLanguages[country])
+}
+
+// Countries are the countries with languages to offer (CountryLanguages),
+// by their codes, in order.
+func Countries() []string {
+	out := make([]string, 0, len(countryLanguages))
+	for c := range countryLanguages {
+		out = append(out, c)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// Named gives languages their names (Name), in the order given.
+func Named(tags []string) []Choice {
+	out := make([]Choice, 0, len(tags))
+	for _, t := range tags {
+		out = append(out, Choice{t, Name(t)})
+	}
+	return out
+}

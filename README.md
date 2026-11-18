@@ -175,6 +175,10 @@ Overfin is designed by its maintainer, who makes the architecture, security and 
 
 [MIT](LICENSE). overfin-web, which the official build bundles, includes
 [hls.js](https://github.com/video-dev/hls.js), unmodified, under the Apache License 2.0.
+Each country's languages, and their countries' names, come from
+[Unicode CLDR](https://cldr.unicode.org) 49.0.0, under the
+[Unicode License v3](https://www.unicode.org/license.txt) (Copyright © 2001–2026
+Unicode, Inc.): its notice is in full in `internal/lang/countries.go`.
 
 Overfin is an independent project, not affiliated with or endorsed by the
 Jellyfin project, Seerr or TMDB.

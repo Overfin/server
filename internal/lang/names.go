@@ -7,8 +7,8 @@ import (
 
 // Languages' names: each in itself, the same on the site, in the player,
 // in the control panel and through the API. A variant an operator can
-// offer (Choices) has its country: "Français (Canada)"; any other, its
-// language's name alone.
+// offer (Choices, or a country's) has its country: "Français (Canada)";
+// any other, its language's name alone.
 
 // language is one language: its two-letter code (ISO 639-1, or TMDB's own
 // for Cantonese), its three-letter ones (ISO 639-2, bibliographic and
@@ -167,8 +167,8 @@ func Tag(s string) string {
 }
 
 // Name is a language's name in itself: "Français (Canada)" for a variant
-// an operator can offer, "Français" for the language alone or a variant
-// it can't; a language Overfin doesn't know, its code as written (a code
+// an operator can offer (Choices, or a country's: CountryLanguages),
+// "Français" for the language alone or a variant it can't; a language Overfin doesn't know, its code as written (a code
 // only: letters, 2 or 3); none, or one said unknown, "?".
 func Name(s string) string {
 	t := Tag(s)
@@ -183,6 +183,9 @@ func Name(s string) string {
 		if c.Tag == t {
 			return c.Name
 		}
+	}
+	if n, ok := countryNames[t]; ok {
+		return n
 	}
 	if n, ok := variants[t]; ok {
 		return n
