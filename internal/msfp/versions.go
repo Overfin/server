@@ -2,7 +2,6 @@ package msfp
 
 import (
 	"encoding/json"
-	"regexp"
 	"slices"
 )
 
@@ -45,16 +44,14 @@ type Versions struct {
 // 10.2).
 const maxVersions = 8
 
-// partNameRe is a part's name: lowercase ASCII letters and "-", at most
-// 32 (core section 10.2). Other names are ignored.
-var partNameRe = regexp.MustCompile(`^[a-z-]{1,32}$`)
-
 // readVersions reads a hello's core and parts members, raw (nil when
 // absent), as core section 10.2 says: core left out means [0]; parts left
 // out, catalog, playback and media at [0]. Entries beyond 8 and entries
 // that aren't non-negative integers are ignored, duplicates count once.
-// A core or a part's list that isn't a list, or parts that isn't an
-// object, is a bad body: ErrJSON.
+// A part this package doesn't know is ignored, whatever its value, so
+// that a later version may announce one in another shape. A core or a
+// known part's list that isn't a list, or parts that isn't an object, is
+// a bad body: ErrJSON.
 func readVersions(core, parts json.RawMessage) (Versions, error) {
 	v := Versions{Core: []int{0}, Parts: map[string][]int{PartCatalog: {0}, PartPlayback: {0}, PartMedia: {0}}}
 	if core != nil {
@@ -71,8 +68,8 @@ func readVersions(core, parts json.RawMessage) (Versions, error) {
 		}
 		v.Parts = map[string][]int{}
 		for name, raw := range obj {
-			if !partNameRe.MatchString(name) {
-				continue // not a part's name: ignored, whatever it holds
+			if _, known := needs[name]; !known {
+				continue // not a part we know: ignored, whatever it holds
 			}
 			list, err := readList(raw)
 			if err != nil {

@@ -27,7 +27,10 @@ type Hello struct {
 // aren't a list, which in an answer only count as none (section 3.2).
 // A nextCommitment that isn't 32 bytes of base64url is a bad body too.
 // The members that go one way only (knownKey, rotation, revocation,
-// callsFailed) are not read here.
+// callsFailed) are not read here. In a request, knownKey and rotation
+// are type-checked only from a server that can't be called, which this
+// package doesn't read yet: from any other they are ignored, whatever
+// their value, null included (section 9.2).
 func ReadHello(body []byte, answer bool) (Hello, error) {
 	var m struct {
 		State          json.RawMessage `json:"state"`
@@ -38,18 +41,19 @@ func ReadHello(body []byte, answer bool) (Hello, error) {
 		NextCommitment json.RawMessage `json:"nextCommitment"`
 		Inbound        json.RawMessage `json:"inbound"`
 	}
-	decode := DecodeJSON
+	var err error
 	if answer {
-		decode = DecodeAnswer
+		err = DecodeAnswer(body, &m)
+	} else {
+		err = decodeIgnoring(body, &m, "knownKey", "rotation")
 	}
-	if err := decode(body, &m); err != nil {
+	if err != nil {
 		return Hello{}, err
 	}
 	var h Hello
 	if m.State == nil && !answer || m.State != nil && json.Unmarshal(m.State, &h.State) != nil {
 		return Hello{}, ErrJSON
 	}
-	var err error
 	if h.Versions, err = readVersions(m.Core, m.Parts); err != nil {
 		return Hello{}, err
 	}

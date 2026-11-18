@@ -56,6 +56,49 @@ func DecodeEntry(raw []byte, v any) error {
 	return decode(raw, v, true, false)
 }
 
+// decodeIgnoring reads a request into v as DecodeJSON does, but for the
+// members named ignored, at its top, which are dropped first, whatever
+// their value, null included: a hello's knownKey and rotation, from a
+// server that can be called (core section 9.2).
+func decodeIgnoring(body []byte, v any, ignored ...string) error {
+	tree, err := strictTree(body, true)
+	if err != nil {
+		return err
+	}
+	obj, ok := tree.(map[string]any)
+	if !ok {
+		return ErrJSON
+	}
+	for _, name := range ignored {
+		delete(obj, name)
+	}
+	if holdsNull(obj) {
+		return ErrJSON // null is never a valid value in a request
+	}
+	return decodeTree(obj, v)
+}
+
+// holdsNull says whether v holds null anywhere.
+func holdsNull(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case map[string]any:
+		for _, value := range t {
+			if holdsNull(value) {
+				return true
+			}
+		}
+	case []any:
+		for _, value := range t {
+			if holdsNull(value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // decode reads body into v: with nulls, null is read as the member left
 // out, except at the top with topNull refused.
 func decode(body []byte, v any, nulls, topNull bool) error {
@@ -76,6 +119,12 @@ func decode(body []byte, v any, nulls, topNull bool) error {
 			}
 		}
 	}
+	return decodeTree(obj, v)
+}
+
+// decodeTree gives a body already read (strictTree) to encoding/json,
+// with only the members whose names are exactly v's fields'.
+func decodeTree(tree map[string]any, v any) error {
 	exact, err := json.Marshal(keepExact(tree, reflect.TypeOf(v)))
 	if err != nil {
 		return ErrJSON
