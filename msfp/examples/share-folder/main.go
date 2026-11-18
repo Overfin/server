@@ -12,6 +12,8 @@
 // "rotate" moves this server to its next key; "stolen" revokes its key
 // and rotates ("stolen none": without the next key, every pairing ends);
 // "confirm <id>" accepts a peer's new key after comparing fingerprints.
+// "address <url>" moves this server (listen there too, so it reaches
+// itself); "uncallable on|off" says whether it can be called.
 package main
 
 import (
@@ -86,6 +88,10 @@ func main() {
 		case "confirm":
 			p, err := eng.ConfirmRotation(ctx, arg)
 			show("new key confirmed: "+p.Fingerprint, err)
+		case "address":
+			show("moving; peers are told once this server answers there", eng.SetAddress(ctx, arg))
+		case "uncallable":
+			show("can't be called: "+arg, eng.SetUncallable(ctx, arg == "on"))
 		case "peers":
 			eng.PanelOpen()
 			peers, err := eng.Peers(ctx)
@@ -98,7 +104,7 @@ func main() {
 			}
 			show("", err)
 		default:
-			fmt.Println("code [note] | redeem <code> | accept <id> | end <id> | peers | rotate [key] | stolen [key|none] | confirm <id>")
+			fmt.Println("code [note] | redeem <code> | accept <id> | end <id> | peers | rotate [key] | stolen [key|none] | confirm <id> | address <url> | uncallable on|off")
 		}
 	}
 }
