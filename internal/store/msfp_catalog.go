@@ -256,6 +256,9 @@ func (s *Store) titlesIn(ctx context.Context, libraries, keys []string, after st
 	if err := s.addOtherIDs(ctx, videos); err != nil {
 		return nil, false, err
 	}
+	if err := s.addTMDBPlaces(ctx, videos); err != nil {
+		return nil, false, err
+	}
 	for _, v := range videos {
 		out = append(out, v)
 	}
@@ -304,6 +307,38 @@ func (s *Store) addWith(ctx context.Context, titles []*msfp.VideoTitle, libs str
 		}
 	}
 	return nil
+}
+
+// addTMDBPlaces gives each episode keyed by its TMDB ID its place in TMDB's
+// numbering (MSFP video section 4.1): own_episodes holds TMDB's own order,
+// whatever order an admin chose to show the series in. An episode not found
+// there gets none, and the engine leaves it out.
+func (s *Store) addTMDBPlaces(ctx context.Context, titles []*msfp.VideoTitle) error {
+	at := map[string]*msfp.VideoTitle{}
+	var keys [][]any
+	for _, t := range titles {
+		if k, ok := wire.ParseVideoKey(t.Key); ok && k.Kind == "episode" && k.EpisodeID > 0 {
+			keys = append(keys, []any{t.Key, strconv.FormatInt(k.TMDB, 10), k.EpisodeID})
+			at[t.Key] = t
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(keys)
+	if err != nil {
+		return err
+	}
+	return s.each(ctx, func(rows *sql.Rows) error {
+		var key string
+		var p msfp.Place
+		if err := rows.Scan(&key, &p.Season, &p.Episode); err != nil {
+			return err
+		}
+		at[key].Place = &p
+		return nil
+	}, `SELECT j.value ->> 0, e.season, e.episode FROM json_each(?) j
+		JOIN own_episodes e ON e.series = j.value ->> 1 AND e.tmdb_id = j.value ->> 2`, string(b))
 }
 
 // addOtherIDs gives films, series and episodes their other IDs, as TMDB

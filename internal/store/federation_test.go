@@ -395,6 +395,16 @@ func TestPeerTitlesVideoMembers(t *testing.T) {
 	if ids := byKey["series/tmdb/1399/e63056"].IDs; len(ids) != 1 || ids["imdb"] != "tt1480055" {
 		t.Errorf("episode ids %v", ids)
 	}
+	// Each episode keyed by its TMDB ID has its place in TMDB's order
+	// (MSFP video section 4.1); nothing else has one.
+	for key, want := range map[string]msfp.Place{"series/tmdb/1399/e63056": {Season: 1, Episode: 1}, "series/tmdb/1399/e63057": {Season: 1, Episode: 2}} {
+		if p := byKey[key].Place; p == nil || *p != want {
+			t.Errorf("%s place %v, want %v", key, p, want)
+		}
+	}
+	if p := byKey["movie/tmdb/603"].Place; p != nil {
+		t.Errorf("a film has a place: %v", p)
+	}
 	if ids := byKey["series/tmdb/1399/e63057"].IDs; ids != nil {
 		t.Errorf("an IMDb ID not in its form sent: %v", ids)
 	}
