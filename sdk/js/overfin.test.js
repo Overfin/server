@@ -123,6 +123,19 @@ test('discovery asks for its list and filters', async () => {
   assert.deepEqual((await overfin.title('title_movie_tmdb_949')).genres, ['Crime']);
 });
 
+test('recommendations come page by page', async () => {
+  const calls = fakeServer({
+    'GET /api/v1/titles/recommended': () => [200, { items: [{ id: 'title_movie_tmdb_949' }], nextCursor: 'c2' }],
+  });
+  const overfin = new Overfin();
+  const page = await overfin.recommendedPage('recent', { limit: 40, cursor: 'c1' });
+  assert.equal(page.items[0].id, 'title_movie_tmdb_949');
+  assert.equal(page.nextCursor, 'c2');
+  assert.match(calls[0].url, /scope=recent/);
+  assert.match(calls[0].url, /limit=40/);
+  assert.match(calls[0].url, /cursor=c1/);
+});
+
 test('marks are PUT or DELETE on the title', async () => {
   const calls = fakeServer({
     'PUT /api/v1/titles/title_movie_tmdb_1/played': () => [200, { played: true }],

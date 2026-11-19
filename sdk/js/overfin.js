@@ -200,6 +200,8 @@ export class Overfin {
   title(id) { return this.request('GET', `/titles/${enc(id)}`); }
   /** The titles that fit the profile best, among all or the newest (since 0.6). */
   async recommended(scope = 'all', limit = 20) { return (await this.request('GET', `/titles/recommended${toQuery({ scope, limit })}`)).items; }
+  /** A page of them, for the whole list: { items, nextCursor? }, nextCursor saying whether there are more (since 0.10). */
+  recommendedPage(scope = 'all', { limit, cursor } = {}) { return this.request('GET', `/titles/recommended${toQuery({ scope, limit, cursor })}`); }
   /** Titles like this one: those the server has first (since 0.6). */
   async similar(id, limit = 20) { return (await this.request('GET', `/titles/${enc(id)}/similar${toQuery({ limit })}`)).items; }
   /** The collections of films (TMDB's series of films) the profile has films of, without their films (since 0.7). */

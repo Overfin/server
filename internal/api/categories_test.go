@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -250,6 +251,71 @@ func TestRecommended(t *testing.T) {
 	}
 	if code := get(t, srv, "/api/v1/titles/recommended?scope=x", nil); code != 400 {
 		t.Errorf("bad scope: %d", code)
+	}
+}
+
+// Recommendations come page by page, as long as the list goes: each
+// title once, in the order of the whole list, the cursor bound to its
+// query.
+func TestRecommendedPages(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{store: &st})
+	ctx := context.Background()
+	now := time.Now()
+	lib := fmt.Sprintf("%032x", 0xf2)
+	var items []store.CatalogItem
+	for i := range 7 {
+		name := fmt.Sprintf("Film %d", i)
+		items = append(items, store.CatalogItem{ID: fmt.Sprintf("%032x", i+1), Kind: "movie", Name: name, SortName: name, TMDB: strconv.Itoa(i + 1), LibraryID: lib})
+	}
+	st.PutCatalog(ctx, items, 1)
+	st.RefreshTitleKeys(ctx)
+	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
+	for _, it := range items {
+		st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: it.TMDB, Name: it.Name, Genres: []store.TitleGenre{{ID: 18, Name: "g"}}}, []byte(`{}`), now)
+		st.SetTitleRatings(ctx, store.RatedTitle{Kind: "movie", TMDB: it.TMDB}, map[string][]string{"US": {"R"}}, "2000-01-01", "2000-01-01", now)
+	}
+	type page struct {
+		Items      []struct{ Name string }
+		NextCursor string
+	}
+	var whole page
+	if code := get(t, srv, "/api/v1/titles/recommended?limit=50", &whole); code != 200 || len(whole.Items) != 7 || whole.NextCursor != "" {
+		t.Fatalf("whole list: %d %+v", code, whole)
+	}
+	var paged []string
+	path := "/api/v1/titles/recommended?limit=3"
+	for pages := 0; ; pages++ {
+		if pages > 5 {
+			t.Fatal("no end to the pages")
+		}
+		var p page
+		if code := get(t, srv, path, &p); code != 200 || len(p.Items) > 3 {
+			t.Fatalf("%s: %d %+v", path, code, p)
+		}
+		for _, it := range p.Items {
+			paged = append(paged, it.Name)
+		}
+		if p.NextCursor == "" {
+			break
+		}
+		path = "/api/v1/titles/recommended?limit=3&cursor=" + url.QueryEscape(p.NextCursor)
+	}
+	var want []string
+	for _, it := range whole.Items {
+		want = append(want, it.Name)
+	}
+	if !slices.Equal(paged, want) {
+		t.Errorf("pages %v, whole list %v", paged, want)
+	}
+	// A cursor goes with its own query only.
+	var first page
+	get(t, srv, "/api/v1/titles/recommended?limit=3", &first)
+	if code := get(t, srv, "/api/v1/titles/recommended?scope=recent&limit=3&cursor="+url.QueryEscape(first.NextCursor), nil); code != 400 {
+		t.Errorf("a cursor of another query: %d", code)
+	}
+	if code := get(t, srv, "/api/v1/titles/recommended?cursor=nonsense", nil); code != 400 {
+		t.Errorf("a made-up cursor: %d", code)
 	}
 }
 

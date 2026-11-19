@@ -582,6 +582,8 @@ export class Overfin {
   title(id: string): Promise<Title>;
   /** The titles that fit the profile best, among all or the newest (since 0.6). */
   recommended(scope?: 'all' | 'recent', limit?: number): Promise<TitleSummary[]>;
+  /** A page of them, for the whole list (300 at most): nextCursor says whether there are more (since 0.10). */
+  recommendedPage(scope?: 'all' | 'recent', options?: { limit?: number; cursor?: string }): Promise<TitlePage>;
   /** Titles like this one: those the server has first, then others when the operator shows them (since 0.6). */
   similar(id: string, limit?: number): Promise<TitleSummary[]>;
   /** The collections of films the profile has films of, without their films (since 0.7). */

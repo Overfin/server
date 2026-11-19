@@ -17,6 +17,10 @@ import (
 // shown, from the profile's own viewing and its account's tastes, and kept
 // nowhere (rule 58).
 
+// recommendedMost is how many titles the whole list holds at most, page
+// after page; a page holds 50 at most.
+const recommendedMost = 300
+
 // recentPool is how many of the newest titles "recent" recommendations
 // choose among.
 const recentPool = 200
@@ -28,7 +32,7 @@ var kidsGenres = []int{10751, 10762, 16}
 const kidsAge = 8
 
 func (l Library) recommended(w http.ResponseWriter, r *http.Request) {
-	if !onlyParams(w, r, "scope", "limit") {
+	if !onlyParams(w, r, "scope", "limit", "cursor") {
 		return
 	}
 	q := r.URL.Query()
@@ -38,28 +42,43 @@ func (l Library) recommended(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
+	limit = min(limit, 50)
 	p := l.active(w, r)
 	if p == nil {
 		return
 	}
-	ctx := r.Context()
-	out := []library.TitleSummary{}
-	if !l.indexReady(r) {
-		writeOK(w, map[string]any{"items": out})
+	start, _, ok := l.pageStart(w, r, p, false)
+	if !ok {
 		return
 	}
-	keys, err := l.recommend(ctx, p, scope == "recent", min(limit, 50))
+	ctx := r.Context()
+	out := titlePage{Items: []library.TitleSummary{}}
+	if !l.indexReady(r) {
+		writeOK(w, out)
+		return
+	}
+	// The whole list each time, worked out anew, and the page asked for
+	// cut from it (one more title than the page, to know whether there
+	// are more).
+	keys, err := l.recommend(ctx, p, scope == "recent", min(start+limit+1, recommendedMost))
 	if err != nil {
 		l.storeError(w, err)
 		return
 	}
-	if len(keys) > 0 {
-		if out, err = l.titleSummaries(ctx, p, keys); err != nil {
-			l.storeError(w, err)
-			return
-		}
+	if start >= len(keys) {
+		writeOK(w, out)
+		return
 	}
-	writeOK(w, map[string]any{"items": out})
+	keys = keys[start:]
+	if len(keys) > limit {
+		keys = keys[:limit]
+		out.NextCursor = l.nextCursor(r, p, start+limit, "")
+	}
+	if out.Items, err = l.titleSummaries(ctx, p, keys); err != nil {
+		l.storeError(w, err)
+		return
+	}
+	writeOK(w, out)
 }
 
 func cmpOr(a, b string) string {
