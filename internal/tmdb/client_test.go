@@ -127,6 +127,17 @@ func fakeTMDB(t *testing.T) *Client {
 			}
 			io.WriteString(w, `{"movie_results":[],"tv_results":[{"id":1399,"name":"Le Trône de fer","first_air_date":"2011-04-17",
 				"poster_path":"/gotposter1.jpg","genre_ids":[18]}]}`)
+		case "/3/find/tt1480055":
+			io.WriteString(w, `{"movie_results":[],"tv_results":[{"id":-1}],"tv_episode_results":[{"id":63056,"show_id":1399,
+				"season_number":1,"episode_number":1,"name":"Winter Is Coming"},{"id":5,"show_id":0}]}`)
+		case "/3/find/81189":
+			if r.URL.Query().Get("external_source") != "tvdb_id" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			io.WriteString(w, `{"movie_results":[],"tv_results":[{"id":1396}],"tv_episode_results":[]}`)
+		case "/3/find/tt0000404":
+			io.WriteString(w, `{"movie_results":[],"tv_results":[],"tv_episode_results":[]}`)
 		case "/3/tv/1400":
 			if r.URL.Query().Get("append_to_response") != "aggregate_credits,images,alternative_titles,translations,content_ratings,external_ids,recommendations,keywords" {
 				w.WriteHeader(http.StatusBadRequest)
@@ -284,6 +295,23 @@ func TestClient(t *testing.T) {
 	}
 	if _, err := c.Find(ctx, "movie", "imdb", "../x"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a bad ID: %v", err)
+	}
+	// Everything an ID names: an episode, by its series and numbers; what
+	// isn't a title TMDB can name is left out.
+	if named, err := c.FindAll(ctx, "imdb", "tt1480055"); err != nil ||
+		!slices.Equal(named, []Named{{Kind: "episode", TMDB: 1399, Episode: 63056, Season: 1, Number: 1}}) {
+		t.Errorf("find an episode: %+v %v", named, err)
+	}
+	if named, err := c.FindAll(ctx, "tvdb", "81189"); err != nil || !slices.Equal(named, []Named{{Kind: "series", TMDB: 1396}}) {
+		t.Errorf("find by TVDB: %+v %v", named, err)
+	}
+	if named, err := c.FindAll(ctx, "imdb", "tt0000404"); err != nil || len(named) != 0 {
+		t.Errorf("an ID TMDB doesn't know: %+v %v", named, err)
+	}
+	for _, bad := range [][2]string{{"imdb", "../x"}, {"tmdb", "603"}, {"tvdb", "1/2"}} {
+		if _, err := c.FindAll(ctx, bad[0], bad[1]); !errors.Is(err, ErrNotFound) {
+			t.Errorf("FindAll(%q, %q): %v", bad[0], bad[1], err)
+		}
 	}
 	season, err := c.Season(ctx, 1399, 1)
 	if err != nil || season.Poster != "/season1abc.jpg" || season.Name != "Saison 1" || season.AirDate != "2011-04-17" || len(season.Episodes) != 3 {

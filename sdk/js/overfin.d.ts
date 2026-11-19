@@ -232,6 +232,21 @@ export interface Segment {
 }
 
 /** A title, in a library or not: a film, a series, a season, an episode. */
+/** What a search found. */
+export interface SearchResults {
+  titles: TitleSummary[];
+  people: { id: string; name: string; department?: string; image?: ImageRef }[];
+  peopleFirst?: boolean;
+  /**
+   * Present when the terms were a title's ID or a link to one (since
+   * 0.10). id is the ID as read (imdb:tt0133093, tmdb:movie/603…; for
+   * terms that look like an ID but aren't, its source alone, imdb:);
+   * invalid: none could be read, nothing was searched; seriesInstead: the
+   * ID names an episode the server can't show alone, its series is given.
+   */
+  byId?: { id: string; invalid?: boolean; seriesInstead?: boolean };
+}
+
 export interface TitleSummary {
   id: string;
   kind: 'movie' | 'series' | 'season' | 'episode' | 'other' | (string & {});
@@ -581,7 +596,12 @@ export class Overfin {
    * At most 20; images, streams and logins can't be batched.
    */
   batch(calls: Array<string | [string, Record<string, string | number | boolean | string[] | undefined>]>): Promise<Array<any | OverfinError>>;
-  search(query: string): Promise<{ titles: TitleSummary[]; people: { id: string; name: string; department?: string; image?: ImageRef }[]; peopleFirst?: boolean }>;
+  /**
+   * Titles and people; a title's ID or a link to it (imdb:tt0133093,
+   * tmdb:movie/603, tvdb:81189…) finds that title, and byId says what was
+   * read (since 0.10).
+   */
+  search(query: string): Promise<SearchResults>;
   /** A library's titles; kind is required. */
   titles(query?: TitleQuery): Promise<TitlePage>;
   pages(query?: TitleQuery): AsyncGenerator<TitlePage>;

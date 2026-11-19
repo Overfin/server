@@ -33,6 +33,9 @@ type searchResults struct {
 	// person first, or someone has that very name, and no library title
 	// has it), so people are best shown before titles.
 	PeopleFirst bool `json:"peopleFirst,omitempty"`
+	// ByID is set when the words were a title's ID, or a link to one
+	// (searchid.go): the titles are those it names, and no people.
+	ByID *searchByID `json:"byId,omitempty"`
 }
 
 // AccountLimiter allows each account a number of actions a minute
@@ -96,6 +99,10 @@ func (l Library) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	if q, ok := parseID(query); ok {
+		l.searchID(w, r, p, q, out)
+		return
+	}
 	keys, err := l.Provisioner.Store.SearchLibrary(ctx, query, 30)
 	if err != nil {
 		l.storeError(w, err)
@@ -140,5 +147,50 @@ func (l Library) search(w http.ResponseWriter, r *http.Request) {
 			out.Titles = append(out.Titles, t)
 		}
 	}
+	writeOK(w, out)
+}
+
+// searchID answers a search by ID: the titles it names, as a profile may
+// see them (its libraries, its ceilings), the library's first.
+func (l Library) searchID(w http.ResponseWriter, r *http.Request, p *store.Profile, q idQuery, out searchResults) {
+	out.ByID = &searchByID{ID: q.String(), Invalid: !q.Valid}
+	if !q.Valid {
+		writeOK(w, out)
+		return
+	}
+	ctx := r.Context()
+	keys, instead, err := l.idKeys(ctx, p.AccountID, q)
+	if err != nil {
+		l.Logger.Warn("searching by ID failed", "err", err)
+		keys = nil
+	}
+	// Only titles known here or on TMDB: an ID nothing knows names none.
+	infos, err := l.Provisioner.Store.TitleInfos(ctx, keys, today(), p.TextLanguage)
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	var known []string
+	for _, k := range keys {
+		if t := infos[k]; t != nil && (t.Known || len(t.Items) > 0) {
+			known = append(known, k)
+		}
+	}
+	all, err := l.titleSummaries(ctx, p, known)
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	for _, t := range all {
+		if t.Availability != "missing" {
+			out.Titles = append(out.Titles, t)
+		}
+	}
+	for _, t := range all {
+		if t.Availability == "missing" {
+			out.Titles = append(out.Titles, t)
+		}
+	}
+	out.ByID.SeriesInstead = instead && len(out.Titles) > 0
 	writeOK(w, out)
 }

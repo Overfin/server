@@ -18,8 +18,10 @@
   can also keep any profile to some categories or libraries, or hide tags
   from it.
 - **A catalog that looks the part**: posters, logos and backdrops from
-  TMDB, cast pages, users' scores, search, trending and upcoming titles. A
-  title your libraries don't have can be wished for (Wishlists, below).
+  TMDB, cast pages, users' scores, search (by name, or by a title's IMDb,
+  TMDB or TheTVDB ID or a link to its page there), trending and upcoming
+  titles. A title your libraries don't have can be wished for (Wishlists,
+  below).
 - **Watching in the browser**: played as is whenever the browser can,
   subtitles, audio tracks, quality choice, seek previews, skipping intros
   and credits (with Intro Skipper, which the setup offers to install), the

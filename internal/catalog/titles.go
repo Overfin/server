@@ -49,6 +49,87 @@ type Titles struct {
 
 	wake chan struct{}
 	now  func() time.Time
+
+	// answers are TMDB's recent answers about IDs (FindByID, and the
+	// titles FetchTitle found TMDB doesn't have), by "imdb:tt0133093",
+	// "tvdb:81189" or "movie/603": a search or a page asked again soon
+	// doesn't ask TMDB again.
+	mu      sync.Mutex
+	answers map[string]answer
+}
+
+// answer is what TMDB said of an ID, and when.
+type answer struct {
+	named []tmdb.Named
+	at    time.Time
+}
+
+// answersFor is how long TMDB's answers about IDs are kept; answersMost,
+// how many at most.
+const (
+	answersFor  = 24 * time.Hour
+	answersMost = 5000
+)
+
+// recalled is TMDB's recent answer about id, when there's one.
+func (a *Titles) recalled(id string) ([]tmdb.Named, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	got, ok := a.answers[id]
+	if !ok || a.clock().Sub(got.at) >= answersFor {
+		return nil, false
+	}
+	return got.named, true
+}
+
+// remember keeps TMDB's answer about id.
+func (a *Titles) remember(id string, named []tmdb.Named) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := a.clock()
+	if a.answers == nil {
+		a.answers = map[string]answer{}
+	}
+	if len(a.answers) >= answersMost {
+		for k, v := range a.answers {
+			if now.Sub(v.at) >= answersFor {
+				delete(a.answers, k)
+			}
+		}
+		if len(a.answers) >= answersMost {
+			clear(a.answers)
+		}
+	}
+	a.answers[id] = answer{named: named, at: now}
+}
+
+// Finder is TMDB, asked what an IMDb or TVDB ID names.
+type Finder interface {
+	FindAll(ctx context.Context, source, id string) ([]tmdb.Named, error)
+}
+
+// FindByID returns what an IMDb ("imdb") or TVDB ("tvdb") ID names on
+// TMDB: asked once, then the answer is kept a day, none included. may,
+// when set, says whether TMDB may be asked now (an account's limit); when
+// it may not, or without TMDB, ErrNotFound.
+func (a *Titles) FindByID(ctx context.Context, source, id string, may func() bool) ([]tmdb.Named, error) {
+	key := source + ":" + id
+	if named, ok := a.recalled(key); ok {
+		return named, nil
+	}
+	src, ok := a.Source().(Finder)
+	if !ok || src == nil || (may != nil && !may()) {
+		return nil, tmdb.ErrNotFound
+	}
+	named, err := src.FindAll(ctx, source, id)
+	if errors.Is(err, tmdb.ErrNotFound) {
+		named, err = nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	a.remember(key, named)
+	return named, nil
 }
 
 // searchReleases is how many releases a search asks TMDB for at the same
@@ -392,8 +473,16 @@ func (a *Titles) FetchTitle(ctx context.Context, kind, tmdbID string) error {
 	if src == nil || err != nil {
 		return tmdb.ErrNotFound
 	}
+	// One TMDB said it doesn't have, a moment ago, isn't asked again.
+	missing := kind + "/" + tmdbID
+	if _, ok := a.recalled(missing); ok {
+		return tmdb.ErrNotFound
+	}
 	images := map[string]map[string]string{}
 	if _, err := a.page(ctx, src, kind, id, images); err != nil {
+		if errors.Is(err, tmdb.ErrNotFound) {
+			a.remember(missing, nil)
+		}
 		return err
 	}
 	// One a library or a paired server has: the keeper keeps its images,

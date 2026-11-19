@@ -206,7 +206,12 @@ export class Overfin {
   async collections() { return (await this.request('GET', '/collections')).items; }
   /** A collection with its films, in release order (since 0.7). */
   collection(id) { return this.request('GET', `/collections/${enc(id)}`); }
-  /** Searches titles (in a library or not) and people; the terms travel in the body. */
+  /**
+   * Searches titles (in a library or not) and people; the terms travel in
+   * the body. A title's ID or a link to it (imdb:tt0133093, tt0133093,
+   * tmdb:movie/603, tmdb:tv/1399, tvdb:81189, an imdb.com, themoviedb.org
+   * or thetvdb.com page) finds that title instead, with byId (since 0.10).
+   */
   search(query) { return this.request('POST', '/search', { query }); }
   /** A person's page, from TMDB, with the titles they're in. */
   person(id) { return this.request('GET', `/people/${enc(id)}`); }

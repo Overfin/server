@@ -3066,6 +3066,20 @@ paths:
         (what the profile may see, the titles shown); those a library has
         come first. Fewer than two letters find nothing. Rate-limited per
         account (`rate-limited`).
+
+        A title's ID searches for that title, not for words: an IMDb ID
+        (`imdb:tt0133093`, or `tt0133093` alone), a TMDB ID
+        (`tmdb:movie/603`, `tmdb:tv/1399`, `tmdb:m603`, `tmdb:s1399`; an
+        episode as `tmdb:tv/1399/s1/e1` or, kept here only, `tmdb:e63056`;
+        `tmdb:603` alone for a film or a series, whichever exists), a
+        TheTVDB ID (`tvdb:81189`), or a link to the title's page on
+        imdb.com, themoviedb.org or thetvdb.com. Case and spaces around
+        don't count. What the server keeps is looked at first (its
+        libraries, its paired servers' titles, what TMDB said before); TMDB
+        only when none has it, once: its answers, none included, are kept a
+        day. An IMDb or TheTVDB ID of an episode gives the episode, or its
+        series when the episode can't be shown alone. The titles follow
+        the same rules; `byId` says what was read, and there are no people.
       tags: [titles]
       requestBody:
         required: true
@@ -5491,6 +5505,29 @@ components:
             person above every title, or someone has that very name, and no
             library title has it), so people are best shown before titles.
             Absent when false.
+        byId:
+          type: object
+          description: Present when the terms were a title's ID or a link to
+            one; the titles are those it names (none when it names nothing
+            this profile may see).
+          required: [id]
+          properties:
+            id:
+              type: string
+              description: The ID as read, written one way (`imdb:tt0133093`,
+                `tmdb:movie/603`, `tmdb:tv/1399/s1/e1`, `tvdb:81189`,
+                `tvdb:series/81189` for a link to a series); for terms that
+                look like an ID but aren't one, its source alone (`imdb:`).
+              examples: ["imdb:tt0133093"]
+            invalid:
+              type: boolean
+              description: The terms looked like an ID (a source, or a link
+                to one of the three sites) but none could be read; nothing
+                was searched. Absent when false.
+            seriesInstead:
+              type: boolean
+              description: The ID names an episode this server can't show on
+                its own; its series is the title given. Absent when false.
 
     CatalogList:
       description: A list defined by the operator, such as "Christmas

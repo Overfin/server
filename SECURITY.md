@@ -454,7 +454,8 @@ anyone. Paired servers are not trusted at all (rule 94).
       the folders Jellyfin can read, to choose them.
 79. Overfin asks TMDB, never the browser: what's trending, popular or
     upcoming, titles' details and ratings, search words, titles found by
-    IMDb ID, and posters from TMDB's image server. Nothing about who's
+    IMDb or TheTVDB ID (a search by ID too), and posters from TMDB's image
+    server. Nothing about who's
     asking is sent. Without TMDB, it asks Seerr, which asks TMDB.
 80. No TMDB token is shipped: each server uses its own, kept sealed (or
     given in the environment) and sent only to TMDB, as a bearer header,

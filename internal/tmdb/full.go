@@ -551,6 +551,59 @@ func (c *Client) Find(ctx context.Context, kind, source, id string) (int, error)
 	return results[0].ID, nil
 }
 
+// Named is something an IMDb or TVDB ID names on TMDB: a film ("movie"),
+// a series ("series") or an episode ("episode", of the series TMDB). An
+// episode's Episode is TMDB's ID of it, Season and Number where TMDB's
+// own order puts it.
+type Named struct {
+	Kind           string
+	TMDB           int
+	Episode        int
+	Season, Number int
+}
+
+// FindAll returns everything an IMDb ("imdb") or TVDB ("tvdb") ID names on
+// TMDB, in one request: films, series and episodes (an ID may name more
+// than one, TVDB's IDs of series and episodes being apart). None, and no
+// error, when TMDB knows nothing of it.
+func (c *Client) FindAll(ctx context.Context, source, id string) ([]Named, error) {
+	param := map[string]string{"imdb": "imdb_id", "tvdb": "tvdb_id"}[source]
+	if param == "" || !externalID.MatchString(id) {
+		return nil, ErrNotFound
+	}
+	var raw struct {
+		MovieResults   []struct{ ID int } `json:"movie_results"`
+		TVResults      []struct{ ID int } `json:"tv_results"`
+		EpisodeResults []struct {
+			ID            int `json:"id"`
+			ShowID        int `json:"show_id"`
+			SeasonNumber  int `json:"season_number"`
+			EpisodeNumber int `json:"episode_number"`
+		} `json:"tv_episode_results"`
+	}
+	if err := c.get(ctx, "/find/"+id, url.Values{"external_source": {param}}, &raw); err != nil {
+		return nil, err
+	}
+	var out []Named
+	for _, r := range raw.MovieResults {
+		if ValidID(r.ID) && len(out) < 5 {
+			out = append(out, Named{Kind: "movie", TMDB: r.ID})
+		}
+	}
+	for _, r := range raw.TVResults {
+		if ValidID(r.ID) && len(out) < 5 {
+			out = append(out, Named{Kind: "series", TMDB: r.ID})
+		}
+	}
+	for _, r := range raw.EpisodeResults {
+		if ValidID(r.ID) && ValidID(r.ShowID) && r.SeasonNumber >= 0 && r.SeasonNumber <= 1000 &&
+			r.EpisodeNumber >= 0 && r.EpisodeNumber <= 100000 && len(out) < 5 {
+			out = append(out, Named{Kind: "episode", TMDB: r.ShowID, Episode: r.ID, Season: r.SeasonNumber, Number: r.EpisodeNumber})
+		}
+	}
+	return out, nil
+}
+
 // externalID is what an IMDb or a TVDB ID looks like.
 var externalID = regexp.MustCompile(`^(tt)?[0-9]{1,12}$`)
 
