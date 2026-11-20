@@ -210,9 +210,18 @@ func TestPeerKeyFollows(t *testing.T) {
 	if w, _ := s.Wishes(ctx, p.ID); len(w) != 1 || w[0].Title != "movie/tmdb/200" {
 		t.Fatalf("wish: %v", wishTitles(w))
 	}
+	// Read before the library had it: still found, at any pass.
+	if n, err := s.RefetchIMDbConflicts(ctx, at.Add(time.Second)); err != nil || n != 1 {
+		t.Fatalf("refetched: %d %v", n, err)
+	}
 	var fetched int
 	s.read.QueryRowContext(ctx, `SELECT count(*) FROM artwork_fetched WHERE key = 'movie/tmdb/300'`).Scan(&fetched)
 	if fetched != 0 {
 		t.Fatal("the library's title isn't fetched again")
+	}
+	// Fetched since: left alone.
+	s.db.ExecContext(ctx, `INSERT INTO artwork_fetched (key, fetched_at) VALUES ('movie/tmdb/300', ?)`, at.Add(time.Hour).Unix())
+	if n, _ := s.RefetchIMDbConflicts(ctx, at.Add(time.Second)); n != 0 {
+		t.Fatalf("fetched lately, refetched again: %d", n)
 	}
 }

@@ -201,6 +201,14 @@ func (a *Titles) Once(ctx context.Context) error {
 	if err := a.match(ctx, src); err != nil {
 		return err
 	}
+	// A title a paired server has under another TMDB ID than the
+	// library's, with the same IMDb ID: the library's page is fetched
+	// again, whose 404 says TMDB merged it (retire).
+	if n, err := a.Store.RefetchIMDbConflicts(ctx, a.clock().Add(-24*time.Hour)); err != nil {
+		return err
+	} else if n > 0 {
+		a.Logger.Info("catalog: titles a paired server has under another TMDB ID, fetched again", "titles", n)
+	}
 	fetched, streak := 0, 0
 	failed := map[string]bool{}
 	defer func() {

@@ -459,17 +459,7 @@ func (t *msfpTx) PutPeerTitles(peer string, reading int64, titles []msfp.Title) 
 			return err
 		}
 	}
-	// A library title with the IMDb ID of one of these under another TMDB
-	// ID may be under an ID TMDB removed, merged into the peer's: its page
-	// is fetched again soon, which tells (catalog.Titles retires it). Not
-	// more than once a day, for two TMDB titles that share an IMDb ID.
-	return t.exec(`DELETE FROM artwork_fetched WHERE fetched_at < ? AND key IN (
-			SELECT i.kind || '/tmdb/' || i.tmdb FROM peer_titles p
-			JOIN catalog_items i ON i.imdb = json_extract(p.ids, '$.imdb') AND i.kind = p.kind
-			WHERE p.peer_id = ? AND p.seen = ? AND p.kind IN ('movie', 'series') AND p.ids IS NOT NULL
-				AND p.title_key LIKE p.kind || '/tmdb/%' AND i.tmdb IS NOT NULL
-				AND p.title_key != i.kind || '/tmdb/' || i.tmdb)`,
-		t.now().Add(-24*time.Hour).Unix(), peer, reading)
+	return nil
 }
 
 // EndReading drops the titles the reading didn't mark. Readings are

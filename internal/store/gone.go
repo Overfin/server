@@ -229,3 +229,24 @@ func (s *Store) currentKeyList(ctx context.Context, titles []string) []string {
 func (s *Store) GoneItems(ctx context.Context, kind, tmdb string) ([]MatchTarget, error) {
 	return s.matchTargets(ctx, `WHERE i.kind = ? AND i.tmdb = ? ORDER BY i.id`, kind, tmdb)
 }
+
+// RefetchIMDbConflicts marks for a fetch soon the library's films and
+// series whose IMDb ID a paired server's title has under another TMDB ID:
+// the library's may be under an ID TMDB removed, merged into the other's,
+// and its page fetched again tells (catalog.Titles retires it). One
+// fetched since before (a day ago) only, for two TMDB titles that do
+// share an IMDb ID; it says how many. All the paired servers' titles are
+// looked at, those read before as well: a reading of changes only brings
+// what changed.
+func (s *Store) RefetchIMDbConflicts(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM artwork_fetched WHERE fetched_at < ? AND key IN (
+			SELECT i.kind || '/tmdb/' || i.tmdb FROM peer_titles p
+			JOIN catalog_items i ON i.imdb = json_extract(p.ids, '$.imdb') AND i.kind = p.kind
+			WHERE p.kind IN ('movie', 'series') AND p.ids IS NOT NULL
+				AND p.title_key LIKE p.kind || '/tmdb/%' AND i.tmdb IS NOT NULL
+				AND p.title_key != i.kind || '/tmdb/' || i.tmdb)`, before.Unix())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
