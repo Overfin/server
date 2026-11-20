@@ -44,7 +44,7 @@ Overfin doesn't tie your friends to Overfin.
 - **Never your people.** A browser never connects to the other server: a
   paired server's title plays through yours, which fetches it with a
   ticket the browser never sees. The other server sees your server only
-  (its gateway), never a viewer's address, browser, account or name.
+  (its remote gateway, if it has one), never a viewer's address, browser, account or name.
 - **Titles, not files.** Servers tell each other their titles by their
   TMDB ID, with their audio and subtitle languages, the IMDb and TheTVDB
   IDs TMDB gives them, and, for a file holding two episodes, that it holds
@@ -290,11 +290,12 @@ IPv4 address. Private ranges (`10.0.0.0/8`, `192.168.0.0/16`, `fd00::/8`…)
 are fine: two servers on a LAN pair as usual. A name is looked up once per
 connection, every address it has must pass (one refused refuses the name),
 and Overfin connects to the address it checked, never looking the name up
-again. With a gateway, the gateway makes these connections and checks the
-same way. Redirects are never followed.
+again. With a remote gateway, the gateway makes these connections and
+checks the same way; without one, the backend makes them from its own
+machine. Redirects are never followed.
 
-To pair with a server on the same machine, allow loopback (on the gateway,
-if you run one). Link-local addresses stay refused either way:
+To pair with a server on the same machine, allow loopback (also on the
+remote gateway, if you run one). Link-local addresses stay refused either way:
 
 ```toml
 [federation]
@@ -399,7 +400,7 @@ Overfin's federation is the MSFP engine for Go,
 with `wire`, the protocol's toolkit): Overfin
 hosts it, with its records in Overfin's database, its own libraries and
 titles, its playback and media, and its connections to other servers
-(through the gateway when it runs split). Each copy of a title is one of
+(through the remote gateway, when there's one). Each copy of a title is one of
 its versions to a paired server's viewer, named by its video ("2160p HDR
 · HEVC").
 

@@ -43,8 +43,9 @@ proxies and more media folders.
 
 Overfin runs as two parts: a small **gateway**, the only part the internet
 reaches, and a **backend** with your data, the control panel and Jellyfin,
-next to your media. They can share a machine, or the gateway can sit on a
-VPS while nothing is opened at home. Nothing worth taking faces the
+next to your media. Every backend has a gateway beside it, which keeps the
+site on your LAN even when the internet is down; another can sit on a VPS,
+facing the internet while nothing is opened at home. Nothing worth taking faces the
 internet: [how it's built, and why](docs/architecture.md).
 
 ## What you get

@@ -177,6 +177,9 @@ anyone. Paired servers are not trusted at all (rule 94).
     refuse both). A cookie set without HTTPS is never read over HTTPS, nor
     the reverse, and a site whose address is `https://` always gets HTTPS
     cookies.
+    - Exception: the LAN's own plain-http site, beside the backend (rule
+      119), has plain-http cookies, its own: they never stand in for the
+      HTTPS site's.
     - Exception: with an identity provider, the invitation's cookie is
       `Lax`, so it survives the trip there; it holds only the invitation.
     - Why pages reload once: a Strict cookie doesn't come along with a link
@@ -592,7 +595,8 @@ anyone. Paired servers are not trusted at all (rule 94).
     plays through the viewer's own server, which asks the other with a
     ticket the browser never sees. The other server sees that server only,
     never the viewer's address, browser or identity; and of that server,
-    only its gateway (rule 132).
+    only its remote gateway when it has one, its own machine's address
+    otherwise (rule 132).
 98. A server never acts for another beyond what was shared, and never
     hands one paired server's data to another.
 99. Servers pair over `https://` only; a plain `http://` address is

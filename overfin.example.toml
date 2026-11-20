@@ -29,8 +29,9 @@
 # -config flag wins).
 
 # There's no listen address and no HTTPS here: the gateway serves the site
-# (and gets its certificate, with OVERFIN_DOMAIN), and the backend reaches it
-# over the link it opens. Jellyfin is the one inside the backend's
+# (and gets its certificate, with OVERFIN_DOMAIN). The one beside the backend
+# reaches it through a socket (OVERFIN_LOCAL_SOCKET); a remote one, over the
+# link the backend opens to it. Jellyfin is the one inside the backend's
 # container, which the backend runs and sets up itself: nothing to set.
 
 [identity]
@@ -157,6 +158,8 @@ serve = "builtin"
 spa_fallback = false
 # The site's public address, for the links in emails (confirming an
 # address, a new password, invitations): emails with a link need it.
+# OVERFIN_DOMAIN gives it; without a domain, the LAN address
+# (http://<the machine>). Never the LAN site of a server with a domain.
 # url = "https://example.org"
 # Paired servers accept the site's HTTPS certificate when a public authority
 # issued it, or when this server named it to them. Overfin names the one its

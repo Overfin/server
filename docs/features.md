@@ -70,7 +70,9 @@
 - **Overfin and its own Jellyfin, in one compose file**: Overfin sets
   Jellyfin up and keeps its settings, and nothing else talks to it. HTTPS
   by itself (Let's Encrypt) when you give it a domain, behind your own
-  reverse proxy, or plain http on a LAN.
+  reverse proxy, or plain http on a LAN. The LAN keeps a site of its own
+  when the internet is down, and a second gateway can face the internet
+  from a VPS while nothing is opened at home.
 - **A setup wizard**, one step at a time: the default language, TMDB,
   Intro Skipper, Seerr, and you, its first admin.
 - **Categories** of your own (Films, Series, Anime, Kids…), made from

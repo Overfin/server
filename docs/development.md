@@ -14,7 +14,8 @@ OVERFIN_SECRET_KEY=$(openssl rand -hex 32) go run ./cmd/overfin -config dev/over
 Your own build in the compose stack: in the repository,
 `docker build -t overfin-gateway:dev .` and
 `docker build -f backend/Dockerfile -t overfin-backend:dev .` (the same
-`--build-arg VERSION=…` for both: the link refuses two versions), then
+`--build-arg VERSION=…` for both: the backend and its gateways refuse two
+versions), then
 `OVERFIN_GATEWAY_IMAGE=overfin-gateway:dev` and
 `OVERFIN_BACKEND_IMAGE=overfin-backend:dev` in the .env beside compose.yaml,
 and `docker compose up -d`.

@@ -137,7 +137,7 @@ site says it's being updated.
 The backend's volumes: `secrets` holds Overfin's secret key, `data`
 everything else; `jellyfin-config` is Jellyfin's. `jellyfin-cache` needs no
 backup: Jellyfin makes it again. The gateway has nothing to back up (its
-certificates come again, its pairing is made again). Keep the secret key
+certificates come again; a remote one's pairing is made again). Keep the secret key
 apart from the rest: with it, anyone can read the tokens sealed in
 Overfin's database.
 

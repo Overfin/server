@@ -12,10 +12,17 @@ internet ──▶ reverse proxy ──▶ gateway ◀══ link ══ backend
  untrusted     operator's,      the first   (opened   the        trusted code,
                optional         boundary    by the    boundary   untrusted data
                (TLS, identity)              backend)
+                                                        ▲
+LAN ─────────────────────────▶ gateway beside it ═ socket ═╝
+ private addresses              (same machine,
+                                 shared volume)
 ```
 
 The gateway faces the internet and holds nothing worth taking; the backend
 holds the data and the secrets, and checks everything itself [119, 123, 127].
+Every backend has a gateway beside it, on its machine, reached through a
+socket; the one facing the internet is that one (with a domain or a proxy
+in front) or a remote one, over the link [119, 120].
 
 | Party | Trusted? |
 |---|---|
@@ -144,6 +151,10 @@ server the operator doesn't fully trust. Suppose an attacker controls it.
 - **Getting in at home:** the backend opens no port; the link only lets
   the gateway ask what visitors may ask [119, 124]. Once the gateway is
   cleaned and paired again, nothing has to change elsewhere [120].
+- **The gateway beside the backend** is on the backend's machine: an
+  attacker controlling it has that machine's network, and can send the
+  backend anything a visitor could, without the session pre-check [125];
+  the backend still checks every session [123].
 
 ## Identity edge cases
 

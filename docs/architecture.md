@@ -28,11 +28,14 @@ it, and reaches paired servers through it.
   key, its backend's, its certificates, and a cache of images; its logs say
   nothing about visitors. A gateway on a rented server you don't fully
   trust exposes none of your users' data.
-- **Nothing at home is opened.** The backend connects out to its gateway
-  and keeps that connection open; the gateway sends visitors' requests
-  back over it. No port forwarding, and it works behind CGNAT. Paired
-  servers (federation) talk to your gateway only, and the backend reaches
-  them through it.
+- **Nothing at home has to be opened.** With a remote gateway, the backend
+  connects out to it and keeps that connection open; the gateway sends
+  visitors' requests back over it. No port forwarding, and it works behind
+  CGNAT. Paired servers (federation) talk to that gateway only, and the
+  backend reaches them through it. (Without one, the gateway beside the
+  backend faces the internet, on the ports you open for it.)
+- **The LAN keeps its site.** The gateway beside the backend serves it
+  over plain http to private addresses, also when the internet is down.
 - **The heavy work stays next to the media.** Video, images, subtitles and
   Jellyfin run where the disks and the GPU are; the gateway only passes
   bytes along, and keeps the images many people ask for.

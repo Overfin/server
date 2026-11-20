@@ -55,7 +55,14 @@ Canada); change it, and the languages offered, in the control panel
 **3. Add your libraries** in the control panel (`http://<the machine>:8081`,
 Libraries), with folders under `/media`.
 
-That's all: the site is at `http://<the machine>`, or your domain. People
+That's all: the site is at `http://<the machine>`, or your domain. Without a
+domain (or a proxy in front, below), it answers private addresses only:
+your LAN, a VPN, never the internet. Set the site's address to
+`http://<the machine>` then (`site.url`, below), for invitations and
+emails. With a domain, the LAN keeps a site of its own, plain http on port
+8090, for when the internet is down: publish it on the machine's LAN
+address (the commented line in `compose.yaml`); its sign-in is apart from
+the domain's. People
 sign in with their email and a password. In the control panel: add people
 (People: their email; Overfin emails them a setup link to choose their
 password, or you copy it and hand it over), connect an email server
@@ -78,8 +85,10 @@ control panel (Server, Jellyfin): its own pages are then at
 `http://<the machine>:8082` from your LAN, until you close access again.
 Changes made there may break Overfin, or be undone by it.
 
-**On two machines**, the gateway facing the internet (a VPS) and the
-backend at home: see [On two machines](../deploy/README.md#on-two-machines).
+**A gateway on another machine** (a VPS) facing the internet, with the
+backend at home and nothing opened there: see
+[A gateway on another machine](../deploy/README.md#a-gateway-on-another-machine).
+The gateway beside the backend stays, for the LAN.
 
 ## On the internet, with HTTPS
 
@@ -94,7 +103,9 @@ certificate still works: it's checked over 443 itself.
 everything to the gateway on port 8080. Tell the gateway the proxy's
 address, so the visitor's address comes from it: `OVERFIN_TRUSTED_PROXIES`
 for an HTTP proxy (its `X-Forwarded-For`), `OVERFIN_PROXY_PROTOCOL_FROM`
-for a TCP proxy that sends the PROXY protocol. On the same machine, with
+for a TCP proxy that sends the PROXY protocol. Either one also tells it the
+site faces the internet: the LAN's own site is then on port 8090, as with a
+domain. On the same machine, with
 the gateway's ports published by Docker, the proxy's connections arrive
 from the Docker network's own address (its gateway, such as 172.18.0.1),
 not from 127.0.0.1: name that one, or give the network a fixed subnet in
