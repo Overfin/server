@@ -122,6 +122,26 @@ func (b *Backend) State() (paired, pending bool, err error) {
 	return p.Gateway != "", p.Code != "", err
 }
 
+// Unpair forgets the gateway paired (or waiting to be), and says at which
+// address it was, "" for none. The running backend stops reaching it at
+// its next attempt; a gateway beside it, on the socket, isn't concerned.
+func (b *Backend) Unpair() (string, error) {
+	p, err := b.load()
+	if err != nil || p.Address == "" {
+		return "", err
+	}
+	if err := os.Remove(b.pairingPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	return p.Address, nil
+}
+
+// Address is the paired (or pairing) gateway's address, "" for none.
+func (b *Backend) Address() (string, error) {
+	p, err := b.load()
+	return p.Address, err
+}
+
 // errRefused is the gateway's refusal: no point trying again soon.
 type errRefused struct{ reason string }
 
@@ -138,7 +158,7 @@ func (b *Backend) Run(ctx context.Context) {
 			b.logger.Error("link: the pairing file can't be read", "err", err)
 		case p.Address == "":
 			if said != "unpaired" {
-				b.logger.Info("link: not paired with a gateway yet (overfin-backend -pair <gateway address>)")
+				b.logger.Info("link: no remote gateway (overfin-backend -pair <its address> pairs one)")
 				said = "unpaired"
 			}
 		default:

@@ -31,7 +31,9 @@ type Backend interface {
 
 // Handler passes visitors' requests to the backend: the API's routes the
 // specification lists, and GET for the site's pages; every other request
-// gets a plain 404 here, without reaching the backend.
+// gets a plain 404 here, without reaching the backend. Beside its backend
+// (a Socket), requests needing a session go on unchecked: the backend
+// checks them, and its gateway has no key to check them with.
 func Handler(b Backend, version string, revoked *Revocations, cache *Cache, logger *slog.Logger) http.Handler {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -68,6 +70,7 @@ func Handler(b Backend, version string, revoked *Revocations, cache *Cache, logg
 			down(w, r, b.Status(), version)
 		},
 	}
+	_, beside := b.(*Socket)
 	mux := http.NewServeMux()
 	for _, op := range api.Operations() {
 		if op.Planned {
@@ -77,7 +80,7 @@ func Handler(b Backend, version string, revoked *Revocations, cache *Cache, logg
 		if cache != nil && strings.HasPrefix(op.Path, "/api/v1/images/") {
 			h = cache.Wrap(proxy)
 		}
-		if !op.Public {
+		if !op.Public && !beside {
 			h = requireSession(b, revoked, h)
 		}
 		mux.Handle(op.Method+" "+op.Path, h)

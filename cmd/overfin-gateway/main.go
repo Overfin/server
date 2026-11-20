@@ -1,12 +1,27 @@
 // Command overfin-gateway is Overfin's gateway, the entrypoint of the
-// overfin-gateway image: the only part the internet reaches. Its backend
-// connects out to it (internal/link); the gateway passes visitors'
-// requests to it over that link, the routes the API specification lists
-// and the site's pages only (internal/gateway). It holds no data and no
-// secret of Overfin's.
+// overfin-gateway image: the only part the internet reaches. It passes
+// visitors' requests to its backend, the routes the API specification
+// lists and the site's pages only (internal/gateway). It holds no data and
+// no secret of Overfin's.
 //
-// Settings, from the environment (all optional but the pairing, once):
+// Two ways to run it:
 //
+//   - Beside its backend, on the same machine (OVERFIN_LOCAL_SOCKET): the
+//     bundled gateway every backend has. It reaches the backend through a
+//     socket in a volume the two share. Local (the default): plain http on
+//     :8080, for private addresses only (the LAN, a VPN). Online, with
+//     OVERFIN_DOMAIN or a trusted proxy in front: the site for everyone,
+//     and its LAN site still, plain http on OVERFIN_LAN_LISTEN.
+//   - Anywhere else (a VPS, say): a remote gateway. Its backend connects
+//     out to it and they pair (internal/link): the backend has one at most.
+//
+// Settings, from the environment (all optional but the pairing of a remote
+// gateway, once):
+//
+//	OVERFIN_LOCAL_SOCKET         beside the backend: the socket it serves on
+//	OVERFIN_LAN_LISTEN           beside the backend, online: the LAN site's
+//	                             own listener (:8090), never published to
+//	                             the internet
 //	OVERFIN_DOMAIN               the site's domain: HTTPS with Let's Encrypt
 //	                             (on :8443, the link shares it; :8080 then
 //	                             answers Let's Encrypt and sends visitors to
@@ -67,26 +82,35 @@ func run(logger *slog.Logger) error {
 	if gateway.HTTPProxies, err = gateway.ParsePrefixes(os.Getenv("OVERFIN_TRUSTED_PROXIES")); err != nil {
 		return errors.New("OVERFIN_TRUSTED_PROXIES: " + err.Error())
 	}
-	g, err := link.NewGateway(filepath.Join(dir, "link"), Version, pairingCode, logger)
-	if err != nil {
-		return err
-	}
-	logger.Info("Overfin's gateway starting", "version", Version)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 	errc := make(chan error, 4)
-	revoked := &gateway.Revocations{}
-	cacheMax, err := parseBytes(cmp.Or(os.Getenv("OVERFIN_CACHE_MAX"), "10GB"))
-	if err != nil {
-		return errors.New("OVERFIN_CACHE_MAX: " + err.Error())
+	domain := strings.TrimSpace(os.Getenv("OVERFIN_DOMAIN"))
+	socket := os.Getenv("OVERFIN_LOCAL_SOCKET")
+	var g *link.Gateway
+	var site http.Handler
+	if socket != "" {
+		// Beside its backend: no link, no cache, no events.
+		logger.Info("Overfin's gateway starting, beside its backend", "version", Version)
+		site = gateway.Handler(gateway.NewSocket(socket, Version), Version, nil, nil, logger)
+	} else {
+		if g, err = link.NewGateway(filepath.Join(dir, "link"), Version, pairingCode, logger); err != nil {
+			return err
+		}
+		logger.Info("Overfin's gateway starting", "version", Version)
+		revoked := &gateway.Revocations{}
+		cacheMax, err := parseBytes(cmp.Or(os.Getenv("OVERFIN_CACHE_MAX"), "10GB"))
+		if err != nil {
+			return errors.New("OVERFIN_CACHE_MAX: " + err.Error())
+		}
+		cache := &gateway.Cache{Dir: filepath.Join(dir, "cache"), Limit: cacheMax, Margin: 0.10, Logger: logger}
+		cache.Load()
+		revoked.New = cache.Ahead
+		revoked.Access = cache.ForgetAccess
+		go cache.FetchAhead(ctx, g)
+		go revoked.Follow(ctx, g, logger)
+		site = gateway.Handler(g, Version, revoked, cache, logger)
 	}
-	cache := &gateway.Cache{Dir: filepath.Join(dir, "cache"), Limit: cacheMax, Margin: 0.10, Logger: logger}
-	cache.Load()
-	revoked.New = cache.Ahead
-	revoked.Access = cache.ForgetAccess
-	go cache.FetchAhead(ctx, g)
-	go revoked.Follow(ctx, g, logger)
-	site := gateway.Handler(g, Version, revoked, cache, logger)
 	listen := func(addr string) (net.Listener, error) {
 		ln, err := net.Listen("tcp", addr)
 		if err != nil {
@@ -98,10 +122,30 @@ func run(logger *slog.Logger) error {
 		return ln, nil
 	}
 
-	domain := strings.TrimSpace(os.Getenv("OVERFIN_DOMAIN"))
 	var servers []*http.Server
 	plain := &http.Server{Handler: site, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	linkAddr := os.Getenv("OVERFIN_LINK_LISTEN")
+	// Beside the backend, online (a domain, or a proxy in front): the LAN
+	// keeps a plain-http site of its own; local, :8080 is that site.
+	online := domain != "" || len(proxyFrom) > 0 || len(gateway.HTTPProxies) > 0
+	if socket != "" {
+		linkAddr = ""
+		if !online {
+			plain.Handler = gateway.PrivateOnly(site)
+		} else {
+			lanAddr := cmp.Or(os.Getenv("OVERFIN_LAN_LISTEN"), ":8090")
+			ln, err := net.Listen("tcp", lanAddr)
+			if err != nil {
+				return err
+			}
+			lan := &http.Server{Handler: gateway.PrivateOnly(site), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+			go func() {
+				logger.Info("listening for the LAN", "addr", lanAddr)
+				errc <- lan.Serve(ln)
+			}()
+			servers = append(servers, lan)
+		}
+	}
 	if domain != "" {
 		certs := &autocert.Manager{Prompt: autocert.AcceptTOS, HostPolicy: autocert.HostWhitelist(domain),
 			Cache: autocert.DirCache(filepath.Join(dir, "certificates")), Email: os.Getenv("OVERFIN_EMAIL")}
@@ -109,7 +153,9 @@ func run(logger *slog.Logger) error {
 			ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute,
 			ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelDebug)}
 		secure.TLSConfig.MinVersion = tls.VersionTLS12
-		g.Share(secure) // the backend's connection on the same port, by ALPN
+		if g != nil {
+			g.Share(secure) // the backend's connection on the same port, by ALPN
+		}
 		ln, err := listen(":8443")
 		if err != nil {
 			return err
@@ -121,7 +167,7 @@ func run(logger *slog.Logger) error {
 		servers = append(servers, secure)
 		// :8080: Let's Encrypt's checks, and visitors sent to HTTPS.
 		plain.Handler = certs.HTTPHandler(nil)
-	} else {
+	} else if g != nil {
 		linkAddr = cmp.Or(linkAddr, ":8444")
 	}
 	ln, err := listen(":8080")
@@ -129,7 +175,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	go func() {
-		logger.Info("listening", "addr", ":8080", "https", domain != "")
+		logger.Info("listening", "addr", ":8080", "https", domain != "", "lanOnly", socket != "" && !online)
 		errc <- plain.Serve(ln)
 	}()
 	servers = append(servers, plain)
@@ -148,7 +194,9 @@ func run(logger *slog.Logger) error {
 	logger.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	g.Close()
+	if g != nil {
+		g.Close()
+	}
 	for _, s := range servers {
 		_ = s.Shutdown(shutdownCtx)
 	}

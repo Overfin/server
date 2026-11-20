@@ -13,9 +13,13 @@ Overfin runs as two parts, from two images of the same version.
   for it, which the backend runs and keeps running. It sits next to your
   media and your GPU.
 
-On one machine, both run from one compose file and pair by themselves.
-They can also run on two machines: the gateway on a small server facing
-the internet (a VPS), the backend at home with the media.
+Every backend has a gateway beside it, on its machine, from the same
+compose file: it reaches the backend through a socket in a volume only
+the two share, and keeps the site on the LAN when the internet is down.
+Without a domain it serves the LAN only; with one, the internet too. A
+backend may also have one remote gateway, on a small server facing the
+internet (a VPS), with the backend at home: the backend connects out to
+it, and reaches paired servers through it.
 
 ## Why two parts
 
@@ -38,8 +42,13 @@ the internet (a VPS), the backend at home with the media.
 
 ## How the two talk
 
-The backend opens a TLS connection to the gateway and keeps it open: the
-**link**. Each side has its own key; they pair once with a one-time code
+The gateway beside the backend sends visitors' requests through a unix
+socket in a volume only the two share: no keys, no pairing, no cache.
+Anything that can open the socket is that gateway, so nothing else gets
+the volume. It doesn't check sessions; the backend does.
+
+A remote gateway is reached another way. The backend opens a TLS
+connection to it and keeps it open: the **link**. Each side has its own key; they pair once with a one-time code
 the backend makes, each proves it knows the code, and from then on each
 accepts only the other's key, with no certificate authority involved.
 Over the link the roles flip: the gateway sends HTTP/2 requests, the
@@ -47,10 +56,11 @@ backend answers them. The link shares the gateway's HTTPS port, told apart
 by its protocol name, so nothing else needs opening.
 
 A second kind of connection, also opened by the backend, is how it
-reaches paired servers: the gateway connects there for it and passes the
-bytes, without seeing inside (TLS runs end to end).
+reaches paired servers: the remote gateway connects there for it and
+passes the bytes, without seeing inside (TLS runs end to end). Without a
+remote gateway, the backend reaches them from its own machine.
 
-The backend also tells the gateway what it needs to know as it happens:
+The backend also tells a remote gateway what it needs to know as it happens:
 sign-ins that ended (the gateway refuses them at once), changes to what
 people may see (the gateway forgets the answers it kept), and new titles
 (the gateway fetches their pictures ahead, so the first visitor doesn't
@@ -59,14 +69,14 @@ wait). A backend restored from a backup tells the gateway to start over.
 ## Sessions
 
 Every request to the API that needs a session carries, besides the
-sign-in cookie, the backend's signature of it. The gateway checks that
+sign-in cookie, the backend's signature of it. A remote gateway checks that
 signature with the backend's key and sends nothing across without it. The
 backend still checks every session itself: the gateway's check only keeps
 noise off the link.
 
 ## The image cache
 
-The gateway keeps images on its disk, within a size you set and leaving a
+A remote gateway keeps images on its disk, within a size you set and leaving a
 tenth of the disk free. Before serving a cached image, it asks the backend
 whether this session may see it (the backend runs its usual check and
 answers without the bytes), and remembers the answer for a few minutes.

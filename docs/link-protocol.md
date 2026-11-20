@@ -115,10 +115,12 @@ don't matter; it must decode to 20 bytes.
 **Made by** `overfin-backend -pair <host:port> [-server-name <name>]`: the
 backend keeps the address, the server name (the host by default) and the
 code in `pairing.json`, prints the code, and keeps its former gateway pinned
-until the new pairing succeeds. On one machine (`OVERFIN_GATEWAY_ADDRESS`
-and `OVERFIN_PAIRING_FILE` set), the backend makes the code itself and
-writes it to a file only the two containers share; it deletes it once
-paired.
+until the new pairing succeeds; `overfin-backend -unpair` forgets it. The
+link is for a remote gateway only: the gateway beside the backend reaches
+it through a unix socket instead (`OVERFIN_LOCAL_SOCKET`), with no
+pairing. (Setups made before that paired the two on one machine through a
+shared file, `OVERFIN_GATEWAY_ADDRESS` and `OVERFIN_PAIRING_FILE`; that
+still works.)
 
 **The proof**, each side's:
 

@@ -6,9 +6,9 @@
 # http://<this machine>:8081 from your LAN to set it up; the site is at
 # http://<this machine> (or your domain). See README.md.
 #
-# The two pair by themselves, through a volume only they share. Nothing
-# reaches the backend from the internet: it connects out to the gateway.
-# Nothing gets the Docker socket.
+# The gateway reaches the backend through a socket in a volume only the two
+# share. Nothing reaches the backend from the internet. Nothing gets the
+# Docker socket.
 name: overfin
 
 services:
@@ -21,17 +21,20 @@ services:
     security_opt: ["no-new-privileges:true"]
     environment:
       # With a domain pointed at this machine, the gateway gets its own
-      # HTTPS certificate; without one, it serves plain http (keep that to
-      # your LAN).
+      # HTTPS certificate, and the LAN keeps a plain-http site on port
+      # 8090. Without one, the site is plain http on port 80, for private
+      # addresses only (your LAN, a VPN).
       OVERFIN_DOMAIN: ${OVERFIN_DOMAIN:-}
-      OVERFIN_CACHE_MAX: ${OVERFIN_CACHE_MAX:-10GB}
-      OVERFIN_PAIRING_FILE: /pairing/code
+      OVERFIN_LOCAL_SOCKET: /local/backend.sock
     volumes:
       - gateway-data:/data
-      - pairing:/pairing:ro
+      - local:/local
     ports:
       - "80:8080"
       - "443:8443"
+      # With a domain: the LAN's own site, for when the internet is down.
+      # Publish it on this machine's LAN address only.
+      # - "192.168.1.10:8090:8090"
 
   backend:
     container_name: overfin-backend
@@ -48,9 +51,8 @@ services:
       # and other servers (federation) are given. The backend serves no
       # HTTPS itself.
       OVERFIN_DOMAIN: ${OVERFIN_DOMAIN:-}
-      # The gateway beside it, and the volume they pair through.
-      OVERFIN_GATEWAY_ADDRESS: gateway:8444
-      OVERFIN_PAIRING_FILE: /pairing/code
+      # Where it serves the gateway beside it.
+      OVERFIN_LOCAL_SOCKET: /local/backend.sock
       # Optional: TMDB's read access token here, or in the setup wizard.
       OVERFIN_TMDB_TOKEN: ${OVERFIN_TMDB_TOKEN:-}
     volumes:
@@ -60,7 +62,7 @@ services:
       # Jellyfin's own data and cache.
       - jellyfin-config:/config
       - jellyfin-cache:/cache
-      - pairing:/pairing
+      - local:/local
       # Your films and series, read only: change /srv/media to where they
       # are on this machine. In the control panel, add libraries with
       # folders under /media.
@@ -90,7 +92,7 @@ services:
 
 volumes:
   gateway-data:
-  pairing:
+  local:
   data:
   secrets:
   jellyfin-config:

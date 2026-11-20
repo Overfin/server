@@ -10,7 +10,8 @@ plugin. [How it's built, and why](../docs/architecture.md).
 - A machine with Docker and Docker Compose, with your films and series on
   it (or mounted on it).
 - For the internet: a domain pointing to the machine, and ports **80 and
-  443** open to it. Without one, the site is plain http, for your LAN.
+  443** open to it, or a gateway on another machine (below). Without
+  either, the site is plain http, for your LAN only.
 
 ## Starting it
 
@@ -32,7 +33,8 @@ On Fedora, RHEL and other SELinux systems, the container can't read the
 media folder until it's labeled for containers: add `,z` after `:ro` on the
 media line.
 
-The two containers pair by themselves, through a volume only they share.
+The gateway reaches the backend through a socket in a volume only the two
+share: nothing to pair.
 
 ## Setting it up
 
@@ -52,7 +54,15 @@ Then, in the control panel (`http://<the machine>:8081`):
 - **Server, Transcoding**: your GPU, once Jellyfin has it (below).
 - **People**: add them, or send invitations.
 
-The site is at `http://<the machine>`, or your domain.
+The site is at `http://<the machine>`, or your domain. With a domain,
+the LAN keeps a site of its own at `http://<the machine>:8090` once you
+publish that port (the commented line in `compose.yaml`): it answers
+private addresses only, and works when the internet is down. Its sign-in
+is apart from the domain's (plain http has its own cookies).
+
+Without a domain, set the site's address in the control panel to the
+machine's LAN address (`http://<the machine>`): invitations and emails
+give it.
 
 A forgotten control panel password:
 
@@ -75,14 +85,19 @@ there a new password, shown once, and Jellyfin's own pages are at
 `http://<the machine>:8082`, from your LAN, until you close access again.
 Changes made there may break Overfin, or be undone by it.
 
-## On two machines
+## A gateway on another machine
 
-The gateway can run on another machine, a small server facing the
-internet (a VPS, say), with the backend at home: no port to open at home,
-the backend connects out to its gateway. Run the `gateway` service there,
-and the `backend` service at home, each without the `pairing` volume and
-the settings that name it (`OVERFIN_PAIRING_FILE`, `OVERFIN_GATEWAY_ADDRESS`),
-then pair them once:
+A second gateway can run on another machine, a small server facing the
+internet (a VPS, say): no port to open at home, the backend connects out
+to it. The gateway beside the backend stays, for the LAN (without a
+domain). A backend has one such remote gateway at most: pairing another
+replaces it (a move to a new server). Paired servers (federation) are
+then reached through it, so they never see your home's address.
+
+On the other machine, run the `gateway` service without
+`OVERFIN_LOCAL_SOCKET` and the `local` volume, with `OVERFIN_DOMAIN`. At
+home, keep `OVERFIN_DOMAIN` on the backend (it's the site's address), and
+take it off the `gateway` service, which stays the LAN's. Pair them once:
 
 ```sh
 docker exec overfin-backend /overfin-backend -pair <gateway's host:port>
@@ -90,7 +105,7 @@ docker exec overfin-backend /overfin-backend -pair <gateway's host:port>
 
 and set the code it prints as `OVERFIN_PAIRING` on the gateway: the backend
 pairs at its next attempt, and the code is used up (remove it from the
-gateway's settings). Pair with the address the backend
+gateway's settings). `-unpair` forgets it. Pair with the address the backend
 will reach the gateway at, by the site's name when a proxy in front of the
 gateway routes TLS by name (or add `-server-name <the site's domain>`).
 
@@ -110,7 +125,10 @@ backup is the way back.
 
 Set the new `OVERFIN_VERSION` (or take the release's `compose.yaml`,
 copying over your media lines and your GPU), then
-`docker compose pull && docker compose up -d`. Both images come at that
+`docker compose pull && docker compose up -d`. A `compose.yaml` that still
+has the `pairing` volume keeps working; the new one's socket replaces it
+(the backend then forgets that pairing by itself, and the `pairing` volume
+can go: `docker volume rm overfin_pairing`). Both images come at that
 version: there's no Jellyfin version to choose. Until both run it, the
 site says it's being updated.
 

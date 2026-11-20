@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -108,6 +109,47 @@ func pairBackend(dir, address, serverName string) error {
 	return nil
 }
 
+// unpairBackend forgets the remote gateway.
+func unpairBackend(dir string) error {
+	b, err := link.NewBackend(dir, Version, http.NotFoundHandler(), slog.New(slog.DiscardHandler))
+	if err != nil {
+		return err
+	}
+	addr, err := b.Unpair()
+	if err != nil {
+		return err
+	}
+	if addr == "" {
+		fmt.Println("No remote gateway was paired.")
+		return nil
+	}
+	fmt.Printf("The gateway at %s is forgotten; the running backend stops reaching it at its next attempt.\n", addr)
+	return nil
+}
+
+// oldLocalGateway is where the one-machine compose file of earlier
+// versions had the backend reach the gateway beside it, over the link.
+const oldLocalGateway = "gateway:8444"
+
+// dropOldLocalPairing forgets that pairing once the gateway beside the
+// backend is on the socket (OVERFIN_LOCAL_SOCKET, without
+// OVERFIN_GATEWAY_ADDRESS): that gateway no longer listens for the link,
+// and the backend would otherwise keep trying it, its federation sent
+// there in vain.
+func dropOldLocalPairing(lb *link.Backend, logger *slog.Logger) error {
+	if os.Getenv("OVERFIN_LOCAL_SOCKET") == "" || os.Getenv("OVERFIN_GATEWAY_ADDRESS") != "" {
+		return nil
+	}
+	if addr, err := lb.Address(); err != nil || addr != oldLocalGateway {
+		return err
+	}
+	if _, err := lb.Unpair(); err != nil {
+		return err
+	}
+	logger.Info("link: the gateway beside the backend is now on the socket: its former pairing is forgotten", "address", oldLocalGateway)
+	return nil
+}
+
 // autoPair pairs the backend with the gateway beside it, on one machine
 // (the one-machine compose file): OVERFIN_GATEWAY_ADDRESS names the gateway,
 // OVERFIN_PAIRING_FILE a file on a volume only the two share. Unpaired and
@@ -190,12 +232,14 @@ func run(logger *slog.Logger) error {
 	check := flag.Bool("check", false,
 		"test the configuration, the secret key, Jellyfin and the identity provider, say what's wrong, then exit; changes nothing")
 	var pair, serverName *string
+	unpair := new(bool)
 	panelPassword := new(bool)
 	if backendMode {
 		panelPassword = flag.Bool("set-panel-password", false,
 			"make or change the control panel's own login (a username and a password, read from the terminal), then exit")
 		pair = flag.String("pair", "", "pair with the gateway at this host:port: prints a one-time code to set on the gateway (OVERFIN_PAIRING), then exits")
 		serverName = flag.String("server-name", "", "with -pair: the name sent to the gateway in TLS, when a proxy in front of it routes on names (default: the address's host)")
+		unpair = flag.Bool("unpair", false, "forget the remote gateway (the one paired with -pair), then exit; the gateway beside the backend stays")
 	}
 	flag.Parse()
 
@@ -249,6 +293,9 @@ func run(logger *slog.Logger) error {
 		}
 		if *pair != "" {
 			return pairBackend(linkDir, *pair, *serverName)
+		}
+		if *unpair {
+			return unpairBackend(linkDir)
 		}
 	}
 	if cfg.Secrets.Key == nil {
@@ -362,12 +409,39 @@ func run(logger *slog.Logger) error {
 		if err := autoPair(lb, logger); err != nil {
 			return err
 		}
+		if err := dropOldLocalPairing(lb, logger); err != nil {
+			return err
+		}
 		edgeSigner = lb.SignEdge
 		lb.Handle("GET "+eventsPath, eventsHandler(db))
 		lb.Handle("GET /link/v1/artwork/{id}", http.HandlerFunc(prefetchHandler))
-		// Paired servers are reached through the gateway only: peers see
-		// the gateway, never this machine (internal/outbound).
-		outbound.Through(lb.DialEgress)
+		// Paired servers are reached through the remote gateway, when
+		// there's one: peers then see it, never this machine
+		// (internal/outbound). Without one, straight from here: the
+		// gateway beside it is on this machine anyway.
+		outbound.Through(func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if paired, _, err := lb.State(); err == nil && paired {
+				return lb.DialEgress(ctx, network, addr)
+			}
+			return outbound.Direct(ctx, network, addr)
+		})
+		// The gateway beside it (every backend has one): the site on a
+		// socket in the volume they share, plain http for the LAN, so
+		// without HTTPS's cookies (internal/gateway, Socket).
+		if path := os.Getenv("OVERFIN_LOCAL_SOCKET"); path != "" {
+			ln, err := listenSocket(path)
+			if err != nil {
+				return err
+			}
+			local := &http.Server{Handler: link.Local(Version, site), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+			go func() {
+				logger.Info("serving the gateway beside it", "socket", path)
+				errc <- local.Serve(ln)
+			}()
+			defer local.Close()
+		} else {
+			logger.Warn("no gateway beside the backend (OVERFIN_LOCAL_SOCKET): the LAN has no site while the internet is down")
+		}
 		version, err := jf.InstallPlugin()
 		if err != nil {
 			return err
@@ -1217,4 +1291,22 @@ func backendIdentity(cfg *config.Config) error {
 		return errors.New(`identity.mode "forwardauth" isn't for a backend behind its gateway: visitors' headers come through the gateway; use "managed" (the default) or "oidc"`)
 	}
 	return nil
+}
+
+// listenSocket listens on a unix socket at path, for the gateway beside the
+// backend: one left by a former run goes first. Only this user (the
+// gateway's too, in the official images) may connect.
+func listenSocket(path string) (net.Listener, error) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		ln.Close()
+		return nil, err
+	}
+	return ln, nil
 }

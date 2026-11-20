@@ -29,10 +29,11 @@ network security expert. So the rules come in two kinds:
     (`site.certificates`).
   - **Cookies** (rule 26) follow HTTPS: `__Host-` and `Secure` with it,
     without both without it, since browsers refuse them there.
-  - **Where the gateway runs** (rule 119): beside the backend, by
-    default, or on another machine; its settings are environment
-    variables: its domain, the proxies in front of it (rule 126), its
-    cache's size (rule 128).
+  - **Where the gateway runs** (rule 119): beside the backend, always,
+    for the LAN or the internet, and optionally one more on another
+    machine; its settings are environment variables: its domain, the
+    proxies in front of it (rule 126), a remote one's cache size (rule
+    128).
   - **Access to Jellyfin itself** (rule 112): closed; an admin can open it
     from the control panel, and close it again.
   - **What the operator may share or allow**, each off or at its strictest
@@ -737,14 +738,23 @@ anyone. Paired servers are not trusted at all (rule 94).
 
 119. Overfin runs as a gateway, the only part the internet reaches, and a
      backend, with Overfin's data and secrets, its control panel and its
-     own Jellyfin. The backend opens no port to the gateway: it connects
-     out to it, and that connection, the link, is the only way in from
-     outside.
+     own Jellyfin. Every backend has a gateway beside it, on its machine,
+     which reaches it through a unix socket in a volume only the two
+     share, open to their user only. A backend may also have one remote
+     gateway, on another machine: it connects out to it, and that
+     connection, the link, is the only way in from another machine. The
+     backend opens no port for either.
+     - The gateway beside the backend, without a domain or a proxy in
+       front, answers only private addresses (as rule 129). With one, its
+       plain-http site for the LAN has a port of its own, answering only
+       private addresses, without HSTS; its cookies are plain-http ones
+       (rule 26), apart from the domain's.
 120. The backend and the gateway pair once, with a one-time code the
      backend makes (160 random bits): each side proves it knows the code,
      bound to both sides' keys, then keeps the other's key and accepts no
-     other. A code pairs once. On one machine, the code goes through a
-     volume only the two containers share, and is deleted once used.
+     other. A code pairs once. A backend has one remote gateway at most:
+     pairing another replaces it, and `-unpair` forgets it. The gateway
+     beside the backend doesn't pair: the socket's volume is its trust.
 121. The link is TLS 1.3, each side's Ed25519 key checked against the
      pinned one on every connection, with no certificate authority; over
      it, the gateway asks and the backend answers. It shares the gateway's
@@ -752,7 +762,8 @@ anyone. Paired servers are not trusted at all (rule 94).
      reach the link's code.
 122. The gateway refuses a backend of another release before anything
      else, pairing included, and shows visitors the server is being
-     updated.
+     updated. Beside its backend, the backend refuses a gateway of another
+     release, naming its own, and that gateway does the same.
 123. The backend checks every request's session itself, as if the gateway
      weren't there: the gateway never tells the backend who a request
      comes from, the session cookie does. A compromised gateway can only
@@ -769,11 +780,13 @@ anyone. Paired servers are not trusted at all (rule 94).
      backend's link key, which the gateway pinned), and refuses a login the
      backend tells it, over the link, has ended. A visitor without the
      signature gets it from the backend on their next page.
+     - Exception: the gateway beside the backend has no key and checks no
+       session; the backend does (rule 123), on its own machine.
 126. The gateway passes each request's address in a header only it sets:
      from the connection, the PROXY protocol of a TCP proxy named in its
      settings, or the `X-Forwarded-For` of an HTTP proxy named there; it
      drops whatever a visitor sends in its own name. The backend trusts
-     that header only on the link.
+     that header only on the link and on its socket.
      - Exception: a compromised gateway could lie about addresses; the
        backend's per-account and per-email limits don't depend on them.
 127. Nothing personal at the gateway. Its disk holds its key, its
@@ -807,11 +820,13 @@ anyone. Paired servers are not trusted at all (rule 94).
      Looking inside goes through the backend's listener (rule 129) while
      access is open (rule 112), never a published port.
 132. The backend's connections to paired servers (federation's calls,
-     their streams) go through its gateway, which connects only to an
-     address the backend asked for in the last minute and passes the
-     bytes; TLS runs end to end between the backend and the other server.
-     The gateway never dials, for its backend, an address rule 136
-     refuses. Paired servers see the gateway only.
+     their streams) go through its remote gateway when it has one, which
+     connects only to an address the backend asked for in the last minute
+     and passes the bytes; TLS runs end to end between the backend and the
+     other server. The gateway never dials, for its backend, an address
+     rule 136 refuses. Paired servers then see that gateway only. Without
+     one, they leave from the backend's machine, where the gateway beside
+     it is, under the same checks (rule 136).
      The federation key stays at the backend.
 133. With an identity provider, its callback reaches the gateway and
      passes over the link; the code exchange, the client secret and the

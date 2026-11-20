@@ -13,8 +13,9 @@ COPY . .
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o /overfin-gateway ./cmd/overfin-gateway
 # The final image has no shell, so its folders are prepared here: its data,
-# and the one-machine setup's pairing volume.
-RUN mkdir /data /pairing
+# the volume it shares with its backend beside it, and the pairing volume
+# of setups made before it (two machines pair by hand).
+RUN mkdir /data /local /pairing
 
 # distroless/static: no shell, no package manager, runs as a non-root user.
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
@@ -25,10 +26,12 @@ COPY --from=build /overfin-gateway /overfin-gateway
 # 65532 is the distroless "nonroot" user the container runs as. Its folder:
 # its own key, its backend's, its certificates (nothing personal).
 COPY --from=build --chown=65532:65532 /data /data
+COPY --from=build --chown=65532:65532 /local /local
 COPY --from=build --chown=65532:65532 /pairing /pairing
 VOLUME /data
 # 8080: the site (plain http, or Let's Encrypt's checks and a redirect with
-# OVERFIN_DOMAIN); 8443: the site over HTTPS, the backend's link sharing
-# it; 8444: the link's own listener, without a domain.
-EXPOSE 8080 8443 8444
+# OVERFIN_DOMAIN); 8443: the site over HTTPS, a remote backend's link
+# sharing it; 8444: the link's own listener, without a domain; 8090: beside
+# its backend and online, the LAN's own site.
+EXPOSE 8080 8443 8444 8090
 ENTRYPOINT ["/overfin-gateway"]
