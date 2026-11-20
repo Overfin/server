@@ -413,6 +413,3 @@ MSFP; none does yet. Not done yet:
 
 - watched and in-progress filters for series only a paired server has;
 - one server numbering a series' episodes differently from the other.
-
-Networks of many servers, run by a host, are being thought about
-([ROADMAP.md](../ROADMAP.md), milestone 6); nothing is decided.
