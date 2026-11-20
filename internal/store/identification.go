@@ -34,6 +34,9 @@ type LibraryTitle struct {
 	Details  TitleDetails
 	// Episodes counts a series' episodes the libraries have, by season.
 	Episodes map[int]int
+	// Gone are the TMDB IDs TMDB removed, by kind and ID ("movie/1628448"),
+	// and the ID that took over ("" while unknown): shared by every title.
+	Gone map[string]string
 }
 
 // LibraryTitles lists every film and series of the libraries, for
@@ -54,10 +57,15 @@ func (s *Store) LibraryTitles(ctx context.Context) ([]LibraryTitle, error) {
 	if err != nil {
 		return nil, err
 	}
+	gone, err := s.Gone(ctx)
+	if err != nil {
+		rows.Close()
+		return nil, err
+	}
 	var out []LibraryTitle
 	bySeries := map[string]*LibraryTitle{}
 	for rows.Next() {
-		var t LibraryTitle
+		t := LibraryTitle{Gone: gone}
 		var details sql.NullString
 		var unsure bool
 		var reasons, candidates string

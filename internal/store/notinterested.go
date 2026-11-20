@@ -8,6 +8,7 @@ import (
 // SetNotInterested records that a profile isn't interested in a film or a
 // series (on), or takes that back.
 func (s *Store) SetNotInterested(ctx context.Context, profileID, title string, on bool, at time.Time) error {
+	title = s.CurrentKey(ctx, title)
 	if !on {
 		_, err := s.db.ExecContext(ctx, `DELETE FROM not_interested WHERE profile_id = ? AND title = ?`, profileID, title)
 		return err
@@ -38,6 +39,7 @@ func (s *Store) NotInterested(ctx context.Context, profileID string) (map[string
 // IsNotInterested says whether a profile said it isn't interested in a
 // title.
 func (s *Store) IsNotInterested(ctx context.Context, profileID, title string) (bool, error) {
+	title = s.CurrentKey(ctx, title)
 	var n int
 	err := s.read.QueryRowContext(ctx, `SELECT count(*) FROM not_interested WHERE profile_id = ? AND title = ?`, profileID, title).Scan(&n)
 	return n > 0, err

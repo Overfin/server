@@ -109,7 +109,7 @@ func (s *Store) SeriesUpNext(ctx context.Context, profileID string, series Title
 // next episode stays out until the profile watches the series again.
 func (s *Store) DismissContinue(ctx context.Context, profileID string, series TitleRef, at time.Time) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO continue_dismissed (profile_id, series, dismissed_at) VALUES (?, ?, ?)
-		ON CONFLICT (profile_id, series) DO UPDATE SET dismissed_at = excluded.dismissed_at`, profileID, series.Key(), at.Unix())
+		ON CONFLICT (profile_id, series) DO UPDATE SET dismissed_at = excluded.dismissed_at`, profileID, s.CurrentKey(ctx, series.Key()), at.Unix())
 	return err
 }
 

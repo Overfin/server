@@ -18,6 +18,7 @@ type testPeer struct{ ID string }
 type PeerTitle struct {
 	Key, Kind, Library     string
 	Audio, Subtitles, With []string
+	IDs                    map[string]string
 }
 
 // PeerLibrary is one of a paired server's libraries we want.
@@ -105,7 +106,7 @@ func (s *Store) PutPeerTitles(ctx context.Context, id string, reading int64, tit
 				p.Wants = append(p.Wants, msfp.WantedLibrary{ID: t.Library, Name: t.Library, Kind: "movies", Wanted: true})
 			}
 			page = append(page, &msfp.VideoTitle{TitleCommon: msfp.TitleCommon{Key: t.Key, Kind: t.Kind, Libraries: []string{t.Library}},
-				Audio: t.Audio, Subtitles: t.Subtitles, With: t.With})
+				Audio: t.Audio, Subtitles: t.Subtitles, With: t.With, IDs: t.IDs})
 		}
 		if err := tx.PutPeer(*p); err != nil {
 			return err

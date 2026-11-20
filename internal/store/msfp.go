@@ -459,13 +459,26 @@ func (t *msfpTx) PutPeerTitles(peer string, reading int64, titles []msfp.Title) 
 			return err
 		}
 	}
-	return nil
+	// A library title with the IMDb ID of one of these under another TMDB
+	// ID may be under an ID TMDB removed, merged into the peer's: its page
+	// is fetched again soon, which tells (catalog.Titles retires it). Not
+	// more than once a day, for two TMDB titles that share an IMDb ID.
+	return t.exec(`DELETE FROM artwork_fetched WHERE fetched_at < ? AND key IN (
+			SELECT i.kind || '/tmdb/' || i.tmdb FROM peer_titles p
+			JOIN catalog_items i ON i.imdb = json_extract(p.ids, '$.imdb') AND i.kind = p.kind
+			WHERE p.peer_id = ? AND p.seen = ? AND p.kind IN ('movie', 'series') AND p.ids IS NOT NULL
+				AND p.title_key LIKE p.kind || '/tmdb/%' AND i.tmdb IS NOT NULL
+				AND p.title_key != i.kind || '/tmdb/' || i.tmdb)`,
+		t.now().Add(-24*time.Hour).Unix(), peer, reading)
 }
 
 // EndReading drops the titles the reading didn't mark. Readings are
 // numbered upwards (and one at a time for a peer): a title marked by a
 // later one is never dropped.
 func (t *msfpTx) EndReading(peer string, reading int64) error {
+	if err := t.followPeerKeys(peer, `d.seen < ?`, `k.seen >= ?`, reading, reading); err != nil {
+		return err
+	}
 	return t.exec(`DELETE FROM peer_titles WHERE peer_id = ? AND seen < ?`, peer, reading)
 }
 
@@ -473,7 +486,50 @@ func (t *msfpTx) DropPeerTitles(peer string, keys []string) error {
 	if len(keys) == 0 {
 		return nil
 	}
-	return t.exec(`DELETE FROM peer_titles WHERE peer_id = ? AND title_key IN (SELECT value FROM json_each(?))`, peer, jsonOrEmpty(keys))
+	list := jsonOrEmpty(keys)
+	if err := t.followPeerKeys(peer, `d.title_key IN (SELECT value FROM json_each(?))`,
+		`k.title_key NOT IN (SELECT value FROM json_each(?))`, list, list); err != nil {
+		return err
+	}
+	return t.exec(`DELETE FROM peer_titles WHERE peer_id = ? AND title_key IN (SELECT value FROM json_each(?))`, peer, list)
+}
+
+// followPeerKeys moves what profiles did with a peer's films and series
+// about to go (dropped, of peer_titles d) to the peer's title of the same
+// kind with the same IMDb ID that stays (kept, of peer_titles k): the
+// peer's copy under a new key, TMDB having merged its entry into another.
+// Its history follows, as for a library title (MoveGone); one that would
+// go to two titles stays, and so does one the library or another peer
+// still has (the library's is retired by its own refresh).
+func (t *msfpTx) followPeerKeys(peer, dropped, kept string, droppedArg, keptArg any) error {
+	type move struct{ from, to string }
+	var moves []move
+	err := t.each(func(rows *sql.Rows) error {
+		var m move
+		if err := rows.Scan(&m.from, &m.to); err != nil {
+			return err
+		}
+		moves = append(moves, m)
+		return nil
+	}, `SELECT d.title_key, min(k.title_key) FROM peer_titles d
+		JOIN peer_titles k ON k.peer_id = d.peer_id AND k.kind = d.kind AND k.title_key != d.title_key
+			AND json_extract(k.ids, '$.imdb') = json_extract(d.ids, '$.imdb')
+		WHERE d.peer_id = ? AND d.kind IN ('movie', 'series') AND d.ids IS NOT NULL AND `+dropped+` AND `+kept+`
+			AND NOT EXISTS (SELECT 1 FROM catalog_items i WHERE i.title_key = d.title_key)
+			AND NOT EXISTS (SELECT 1 FROM peer_titles o WHERE o.title_key = d.title_key AND o.peer_id != d.peer_id)
+		GROUP BY d.title_key HAVING count(DISTINCT k.title_key) = 1`, peer, droppedArg, keptArg)
+	if err != nil {
+		return err
+	}
+	for _, m := range moves {
+		if err := moveKeys(t.ctx, t.tx, m.from, m.to); err != nil {
+			return err
+		}
+		if err := moveIn(t.ctx, t.tx, titleTables, m.from, m.to); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (t *msfpTx) peerTitles(query string, args ...any) ([]msfp.Title, error) {

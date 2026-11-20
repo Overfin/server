@@ -18,6 +18,7 @@ type TitleTracks struct {
 // TitleTracks returns what a profile chose for a title (a film's, a
 // series' or an item's key); nothing chosen, the zero value.
 func (s *Store) TitleTracks(ctx context.Context, profileID, title string) (TitleTracks, error) {
+	title = s.CurrentKey(ctx, title)
 	var audio, subtitles sql.NullString
 	err := s.db.QueryRowContext(ctx, `SELECT audio, subtitles FROM title_tracks WHERE profile_id = ? AND title = ?`,
 		profileID, title).Scan(&audio, &subtitles)
@@ -36,6 +37,7 @@ func (s *Store) TitleTracks(ctx context.Context, profileID, title string) (Title
 
 // SetTitleAudio keeps the audio language a profile chose for a title.
 func (s *Store) SetTitleAudio(ctx context.Context, profileID, title, language string) error {
+	title = s.CurrentKey(ctx, title)
 	_, err := s.db.ExecContext(ctx, `INSERT INTO title_tracks (profile_id, title, audio, updated_at) VALUES (?, ?, ?, ?)
 		ON CONFLICT (profile_id, title) DO UPDATE SET audio = excluded.audio, updated_at = excluded.updated_at`,
 		profileID, title, language, time.Now().Unix())
@@ -45,6 +47,7 @@ func (s *Store) SetTitleAudio(ctx context.Context, profileID, title, language st
 // SetTitleSubtitles keeps the subtitle language a profile chose for a
 // title, "" for none.
 func (s *Store) SetTitleSubtitles(ctx context.Context, profileID, title, language string) error {
+	title = s.CurrentKey(ctx, title)
 	_, err := s.db.ExecContext(ctx, `INSERT INTO title_tracks (profile_id, title, subtitles, updated_at) VALUES (?, ?, ?, ?)
 		ON CONFLICT (profile_id, title) DO UPDATE SET subtitles = excluded.subtitles, updated_at = excluded.updated_at`,
 		profileID, title, language, time.Now().Unix())

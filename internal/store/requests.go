@@ -51,6 +51,7 @@ type Request struct {
 
 // AddRequest keeps a new request, and gives it its ID.
 func (s *Store) AddRequest(ctx context.Context, r *Request) error {
+	r.Title = s.CurrentKey(ctx, r.Title)
 	r.ID = ids.New(ids.Request)
 	var seasons any
 	if len(r.Seasons) > 0 {

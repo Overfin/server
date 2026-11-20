@@ -68,6 +68,7 @@ func (s *Store) wishes(ctx context.Context, where string, args ...any) ([]Wish, 
 // AddWish puts a title at the end of a profile's wishlist; one already on
 // it stays where it is.
 func (s *Store) AddWish(ctx context.Context, profileID, title string) error {
+	title = s.CurrentKey(ctx, title)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -94,6 +95,7 @@ func (s *Store) AddWish(ctx context.Context, profileID, title string) error {
 // RemoveWish takes a title off a profile's wishlist; the ones after it
 // move up.
 func (s *Store) RemoveWish(ctx context.Context, profileID, title string) error {
+	title = s.CurrentKey(ctx, title)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -173,6 +175,7 @@ func GroupedWishes(titles []string) []string {
 // a genre left out) keep their places; the ones named take the places
 // they held between them, in the order given.
 func (s *Store) OrderWishes(ctx context.Context, profileID string, titles []string) error {
+	titles = s.currentKeyList(ctx, titles)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

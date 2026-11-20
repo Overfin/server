@@ -316,7 +316,12 @@ func (a *Titles) fetch(ctx context.Context, src TitleSource, t store.ArtworkTarg
 	}
 	seasons, err := a.page(ctx, src, t.Kind, id, out)
 	if errors.Is(err, tmdb.ErrNotFound) {
-		return out, nil // TMDB doesn't know it: nothing to show but its file
+		// TMDB doesn't know it (any more): merged into another entry, its
+		// items move there; else nothing to show but its file.
+		if err := a.retire(ctx, src, t.Kind, t.TMDB); err != nil {
+			return nil, err
+		}
+		return out, nil
 	}
 	if err != nil {
 		return nil, err
@@ -482,6 +487,7 @@ func (a *Titles) FetchTitle(ctx context.Context, kind, tmdbID string) error {
 	if _, err := a.page(ctx, src, kind, id, images); err != nil {
 		if errors.Is(err, tmdb.ErrNotFound) {
 			a.remember(missing, nil)
+			a.retired(ctx, src, kind, tmdbID)
 		}
 		return err
 	}
@@ -578,10 +584,16 @@ func (a *Titles) match(ctx context.Context, src TitleSource) error {
 	if err != nil {
 		return err
 	}
+	var gone map[string]string
+	if len(todo) > 0 {
+		if gone, err = a.Store.Gone(ctx); err != nil {
+			return err
+		}
+	}
 	matched, unsure := 0, 0
 	for _, t := range todo {
 		r, err := identify.Match(ctx, src, identify.Files{Kind: t.Kind, Folder: t.FolderName, File: t.FileName,
-			RuntimeMs: t.RuntimeMs, Episodes: t.Episodes, Audio: t.Audio})
+			RuntimeMs: t.RuntimeMs, Episodes: t.Episodes, Audio: t.Audio, Gone: gone})
 		if err != nil {
 			// TMDB unreachable, or failing: tried again next pass.
 			return err

@@ -13,11 +13,12 @@ import (
 // the choice; Jellyfin isn't told, and its scans can't undo it.
 
 // SetOverride makes a film or a series (by Jellyfin item ID) the TMDB
-// title tmdb. What profiles did with it (watched, where they stopped, the
-// watchlist) moves to the title it really is, unless another copy is still
-// the old title: then it's that one's. Requests stay: they say what Seerr
-// was asked for. ErrNotFound when the item isn't a film or a series of the
-// index.
+// title tmdb. What profiles did with its files (watched, where they
+// stopped, favourites, their tracks) moves to the title it really is,
+// added up with what they did there already (moveKeys), unless another
+// copy is still the old title: then it's that one's. What they asked of
+// the old title (wishes, requests, "not interested") stays with it.
+// ErrNotFound when the item isn't a film or a series of the index.
 func (s *Store) SetOverride(ctx context.Context, itemID, tmdb string, at time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -111,9 +112,7 @@ func (s *Store) retitle(ctx context.Context, tx *sql.Tx, itemID, kind, tmdb, old
 			return err
 		}
 	}
-	lo, hi := keyRange(oldKey + "/")
-	if _, err := tx.ExecContext(ctx, `UPDATE OR IGNORE profile_titles SET title = ? || substr(title, ?)
-		WHERE title = ? OR (title >= ? AND title < ?)`, newKey, len(oldKey)+1, oldKey, lo, hi); err != nil {
+	if err := moveKeys(ctx, tx, oldKey, newKey); err != nil {
 		return err
 	}
 	if kind == "series" {

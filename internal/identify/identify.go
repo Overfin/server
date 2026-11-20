@@ -15,14 +15,19 @@ import (
 
 // Reason is why a title may be wrong, as a code and in words.
 type Reason struct {
-	Code string `json:"code"` // no-tmdb, no-name, tmdb-tag, name, year, seasons, runtime, unsure, several
+	Code string `json:"code"` // no-tmdb, no-name, tmdb-tag, tmdb-gone, name, year, seasons, runtime, unsure, several
 	Text string `json:"text"`
 }
 
 // Reasons says why t may not be the TMDB title it's taken for; none when
 // nothing suggests it, when an admin chose or confirmed it, or when its
-// folder names its TMDB ID.
+// folder names its TMDB ID (or one TMDB merged into it). A title taken
+// for an ID TMDB removed, with none known to take over, is said to be,
+// an admin's choice included.
 func Reasons(t store.LibraryTitle) []Reason {
+	if now, gone := t.Gone[t.Kind+"/"+t.TMDB]; gone && now == "" && t.TMDB != "" {
+		return []Reason{{"tmdb-gone", fmt.Sprintf("TMDB removed TMDB %s, the title it's taken for.", t.TMDB)}}
+	}
 	if t.Overridden {
 		return nil
 	}
@@ -35,7 +40,7 @@ func Reasons(t store.LibraryTitle) []Reason {
 	}
 	if tags := tagsOf(t); len(tags) > 0 {
 		for _, tag := range tags {
-			if tag == t.TMDB {
+			if tag == t.TMDB || t.Gone[t.Kind+"/"+tag] == t.TMDB {
 				return nil
 			}
 		}

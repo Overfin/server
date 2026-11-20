@@ -38,6 +38,10 @@ type Files struct {
 	Audio []string
 	// Episodes counts a series' episodes, by season.
 	Episodes map[int]int
+	// Gone are the TMDB IDs TMDB removed, by kind and ID ("movie/1628448"),
+	// and the ID that took over ("" while unknown): a name carrying one
+	// stands for the new ID, or for none.
+	Gone map[string]string
 }
 
 // Candidate is a TMDB title weighed for a film or a series.
@@ -90,6 +94,9 @@ func Match(ctx context.Context, src Source, f Files) (Result, error) {
 			n.name, n.year = file.name, file.year
 		}
 		n.tmdb, n.imdb, n.tvdb = or(n.tmdb, file.tmdb), or(n.imdb, file.imdb), or(n.tvdb, file.tvdb)
+	}
+	if now, gone := f.Gone[f.Kind+"/"+n.tmdb]; gone && n.tmdb != "" {
+		n.tmdb = now
 	}
 	id, err := byID(ctx, src, f.Kind, n)
 	if err != nil {

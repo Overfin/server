@@ -45,6 +45,8 @@ type Store struct {
 	related relatedCache
 	// details are titles' details, decoded (detailsCache).
 	details detailsCache
+	// gone is the keys of TMDB IDs TMDB removed (gone.go).
+	gone goneCache
 }
 
 // Open opens (or creates) the database at path and applies any pending

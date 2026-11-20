@@ -22,6 +22,10 @@ type MatchTarget struct {
 	// Audio are the languages of its audio (a series', of its episodes'),
 	// two letters each.
 	Audio []string
+	// IMDb is its IMDb ID, as Jellyfin has it ("" for none); Overridden,
+	// whether an admin chose its title.
+	IMDb       string
+	Overridden bool
 }
 
 // MatchReason is why a match isn't sure, as identify says it.
@@ -52,13 +56,19 @@ type Match struct {
 // chose a title for, never matched, or whose folder or file name changed
 // since.
 func (s *Store) ToMatch(ctx context.Context, limit int) ([]MatchTarget, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT i.id, i.kind, coalesce(i.folder_name, ''), coalesce(i.file_name, ''),
-			coalesce(i.runtime_ms, 0), i.audio_languages
-		FROM catalog_items i LEFT JOIN title_matches m ON m.item_id = i.id
-		WHERE i.kind IN ('movie', 'series')
+	return s.matchTargets(ctx, `WHERE i.kind IN ('movie', 'series')
 			AND NOT EXISTS (SELECT 1 FROM title_overrides o WHERE o.item_id = i.id)
 			AND (m.item_id IS NULL OR m.folder_name IS NOT i.folder_name OR (i.kind = 'movie' AND m.file_name IS NOT i.file_name))
 		ORDER BY i.id LIMIT ?`, limit)
+}
+
+// matchTargets reads the films and series where selects, from catalog_items
+// i and title_matches m.
+func (s *Store) matchTargets(ctx context.Context, where string, args ...any) ([]MatchTarget, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT i.id, i.kind, coalesce(i.folder_name, ''), coalesce(i.file_name, ''),
+			coalesce(i.runtime_ms, 0), i.audio_languages, coalesce(i.imdb, ''),
+			EXISTS (SELECT 1 FROM title_overrides o WHERE o.item_id = i.id)
+		FROM catalog_items i LEFT JOIN title_matches m ON m.item_id = i.id `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +76,7 @@ func (s *Store) ToMatch(ctx context.Context, limit int) ([]MatchTarget, error) {
 	for rows.Next() {
 		var t MatchTarget
 		var audio *string
-		if err := rows.Scan(&t.ItemID, &t.Kind, &t.FolderName, &t.FileName, &t.RuntimeMs, &audio); err != nil {
+		if err := rows.Scan(&t.ItemID, &t.Kind, &t.FolderName, &t.FileName, &t.RuntimeMs, &audio, &t.IMDb, &t.Overridden); err != nil {
 			rows.Close()
 			return nil, err
 		}

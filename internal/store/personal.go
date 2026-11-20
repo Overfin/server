@@ -126,6 +126,9 @@ func (s *Store) showOrderedFiles(ctx context.Context) error {
 // way two copies of one title add up: watched if either is, the furthest
 // position, the most plays, the latest play, a favorite if either is.
 func (s *Store) MergePersonal(ctx context.Context, profileID string, states []Personal) error {
+	for i := range states {
+		states[i].Title = s.CurrentKey(ctx, states[i].Title)
+	}
 	// What's brought in names episodes by their numbers.
 	for i, p := range states {
 		if r, ok := ParseTitleKey(p.Title); ok && r.Kind == "episode" {
@@ -174,6 +177,18 @@ func (s *Store) MergePersonal(ctx context.Context, profileID string, states []Pe
 // one query each.
 func (s *Store) PersonalStates(ctx context.Context, profileID string, titles []string) (map[string]Personal, error) {
 	out := map[string]Personal{}
+	// A key under a TMDB ID TMDB removed is read under the new one's, and
+	// answered under the key asked.
+	asked := map[string][]string{}
+	current := make([]string, 0, len(titles))
+	for _, t := range titles {
+		if c := s.CurrentKey(ctx, t); c != t {
+			asked[c] = append(asked[c], t)
+			t = c
+		}
+		current = append(current, t)
+	}
+	titles = current
 	for start := 0; start < len(titles); start += batchChunk {
 		chunk := titles[start:min(start+batchChunk, len(titles))]
 		rows, err := s.read.QueryContext(ctx, `SELECT title, item_id, position_ms, played, play_count, last_played_at, favorite
@@ -195,6 +210,11 @@ func (s *Store) PersonalStates(ctx context.Context, profileID string, titles []s
 				p.LastPlayedAt = time.Unix(last.Int64, 0)
 			}
 			out[p.Title] = p
+			for _, t := range asked[p.Title] {
+				q := p
+				q.Title = t
+				out[t] = q
+			}
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
@@ -259,6 +279,7 @@ func (s *Store) AllPersonal(ctx context.Context, profileID string) ([]Personal, 
 // RecordPlay records where a profile is in a title: at positionMs, or
 // finished (watched once more: its position goes back to the start).
 func (s *Store) RecordPlay(ctx context.Context, profileID, title, itemID string, positionMs int64, finished bool, at time.Time) error {
+	title = s.CurrentKey(ctx, title)
 	if finished {
 		_, err := s.db.ExecContext(ctx, `INSERT INTO profile_titles (profile_id, title, item_id, position_ms,
 			played, play_count, last_played_at, updated_at) VALUES (?, ?, ?, 0, 1, 1, ?, ?)
@@ -280,6 +301,7 @@ func (s *Store) RecordPlay(ctx context.Context, profileID, title, itemID string,
 // title's position goes back to the start and it counts as played at
 // least once; not watched, its position and count start over.
 func (s *Store) SetPlayed(ctx context.Context, profileID string, titles map[string]string, played bool, at time.Time) error {
+	titles = s.currentKeyMap(ctx, titles)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -310,6 +332,7 @@ func (s *Store) SetPlayed(ctx context.Context, profileID string, titles map[stri
 
 // SetFavorite marks a title a favorite of the profile, or not.
 func (s *Store) SetFavorite(ctx context.Context, profileID, title, itemID string, favorite bool, at time.Time) error {
+	title = s.CurrentKey(ctx, title)
 	_, err := s.db.ExecContext(ctx, `INSERT INTO profile_titles (profile_id, title, item_id, favorite, updated_at)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT (profile_id, title) DO UPDATE SET item_id = coalesce(excluded.item_id, item_id), favorite = excluded.favorite,
@@ -455,6 +478,7 @@ func marks(n int) string {
 // ForgetProgress forgets where a profile stopped in a title, which takes it
 // out of Continue Watching; whether it watched it is kept.
 func (s *Store) ForgetProgress(ctx context.Context, profileID, title string) error {
+	title = s.CurrentKey(ctx, title)
 	_, err := s.db.ExecContext(ctx, `UPDATE profile_titles SET position_ms = 0, updated_at = ?
 		WHERE profile_id = ? AND title = ?`, time.Now().Unix(), profileID, title)
 	return err

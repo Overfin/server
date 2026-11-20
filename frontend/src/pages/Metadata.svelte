@@ -13,7 +13,7 @@
 
   route.wide = true;
 
-  const reasonNames: Record<string, string> = { 'no-tmdb': 'No TMDB title', 'tmdb-tag': 'Tagged', name: 'Name differs', year: 'Year differs', seasons: 'Seasons differ', runtime: 'Length differs', 'no-name': 'No name', unsure: 'Unsure match', several: 'Several fit' };
+  const reasonNames: Record<string, string> = { 'no-tmdb': 'No TMDB title', 'tmdb-tag': 'Tagged', 'tmdb-gone': 'Removed by TMDB', name: 'Name differs', year: 'Year differs', seasons: 'Seasons differ', runtime: 'Length differs', 'no-name': 'No name', unsure: 'Unsure match', several: 'Several fit' };
   const reasonName = (code: string) => reasonNames[code] || code;
 
   let items = $state<Identified[] | null>(null);
