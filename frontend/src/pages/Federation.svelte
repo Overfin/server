@@ -518,7 +518,6 @@
 
   const attention = $derived((s?.peers ?? []).filter((p) => p.suspendedAt || p.pending || p.refused || p.ourKey === 'lost' || p.moving?.warn || p.moveLate || (p.callsFailed && !s?.uncallable)));
 
-  const kinds: Record<string, string> = { movies: 'Films', tvshows: 'Series', music: 'Music', musicvideos: 'Music videos', homevideos: 'Home videos', boxsets: 'Collections', books: 'Books', photos: 'Photos', mixed: 'Mixed' };
 
   const limitsText = (l: Limits) =>
     `${plural(l.streams, 'stream')} at once, ${plural(l.transcodes, 'transcode')} among them, ${l.bitrateKbps ? `${l.bitrateKbps} kbps at most` : 'no bitrate cap'}`;
@@ -527,7 +526,6 @@
     `Offers ${plural(p.offers, 'library', 'libraries')} · wants ${p.wants}${p.wants ? ` (${plural(p.titles, 'title')})` : ''}` +
     (p.wantsGone ? ` · ${p.wantsGone} no longer offered: choose again in Sharing` : '');
   // The kind, unless the name already says it ("Films").
-  const kindOf = (l: Lib) => (kinds[l.kind] && kinds[l.kind].toLowerCase() !== l.name.toLowerCase() ? kinds[l.kind] : '');
 
   function stateText(p: Peer): string {
     if (p.otherVersion) return "It speaks another version of the federation protocol: the two servers can't share until one of them is updated";
@@ -661,7 +659,7 @@
   <Card title="Individual" description="Servers you share with one by one.">
     {#snippet foot()}
       <span class="grow"></span>
-      {#if !s?.uncallable}<button type="button" class="primary" onclick={() => newCode()}>Invite a server</button>{/if}
+      {#if !s?.uncallable}<button type="button" onclick={() => newCode()}>Invite a server</button>{/if}
     {/snippet}
     <div class="table-wrap">
       <table>
@@ -836,7 +834,7 @@
     <div class="setting stack">
       <div><div class="label">You offer</div><div class="hint">Your libraries {sharingWith.name} may take. You only ever offer your own.</div></div>
       <div class="checks all">
-        {#each sharing.ours as l (l.id)}<label class="inline"><input type="checkbox" value={l.id} bind:group={offer} /> {l.name}{#if kindOf(l)} <span class="hint">({kindOf(l)})</span>{/if}</label>
+        {#each sharing.ours as l (l.id)}<label class="inline"><input type="checkbox" value={l.id} bind:group={offer} /> {l.name}</label>
         {:else}<span class="hint">This server has no library yet.</span>{/each}
       </div>
     </div>
@@ -847,7 +845,7 @@
       {:else if sharing.notSupported}<Notice warn>{sharingWith.name} doesn't share libraries with this server: it speaks another version of the federation protocol, or hasn't said which yet (Check asks it). What you want can't be changed until it does.</Notice>
       {:else if !sharing.reachable}<Notice warn>{sharingWith.name} can't be reached now: what you want can't be changed until it can.</Notice>{/if}
       <div class="checks all">
-        {#each sharing.theirs as l (l.id)}<label class="inline"><input type="checkbox" value={l.id} bind:group={want} disabled={!sharing.reachable} /> {l.name}{#if kindOf(l)} <span class="hint">({kindOf(l)})</span>{/if}{#if l.gone} <span class="hint">· no longer offered</span>{/if}</label>
+        {#each sharing.theirs as l (l.id)}<label class="inline"><input type="checkbox" value={l.id} bind:group={want} disabled={!sharing.reachable} /> {l.name}{#if l.gone} <span class="hint">· no longer offered</span>{/if}</label>
         {:else}<span class="hint">{sharing.reachable ? `${sharingWith.name} offers you nothing yet.` : ''}</span>{/each}
       </div>
       {#if sharing.theirLimits}<div class="hint">{sharingWith.name} lets you use {limitsText(sharing.theirLimits)}.</div>{/if}

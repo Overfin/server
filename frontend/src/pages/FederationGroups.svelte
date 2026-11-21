@@ -312,10 +312,6 @@
     return 'Not paired';
   }
 
-  const limitsText = (l: Limits) =>
-    `${plural(l.streams, 'stream')} at once, ${plural(l.transcodes, 'transcode')} among them, ${l.bitrateKbps ? `${l.bitrateKbps} kbps at most` : 'no bitrate cap'}`;
-  const kinds: Record<string, string> = { movies: 'Films', tvshows: 'Series', mixed: 'Mixed' };
-  const kindOf = (l: Lib) => (kinds[l.kind] && kinds[l.kind].toLowerCase() !== l.name.toLowerCase() ? kinds[l.kind] : '');
   const others = (g: Group) => g.members.filter((m) => !m.me);
   const joiningOf = (g: Group) => joining.filter((p) => p.joiningGroup === g.id);
   const invitesOf = (g: Group) => invites.filter((c) => c.group === g.id);
@@ -356,22 +352,16 @@
 </Card>
 
 {#if open}
-  <Modal size="wide" title={open.name || 'A group'} description={`${roleName[open.role]} · ${plural(open.members.length, 'server')} · ${open.accept ? 'new members accepted automatically' : 'you confirm each new member'}`} close={() => (openID = '')}>
+  <Modal size="wide" title={open.name || 'A group'} description={`${roleName[open.role]} · ${plural(open.members.length, 'server')}`} close={() => (openID = '')}>
     {#if open.dissolved}<Notice warn>The owner dissolved this group. It goes from this server at once.</Notice>{/if}
     {#if open.noWayIn}<Notice warn>No way in: this server has no pairing through this group any more. Nothing from the other members reaches it, and nothing it does reaches them, so what you see here may be out of date. To get back in, ask a member for a new code for this group, and use it under Federation, "Use a code".</Notice>{/if}
     {#if open.joining}<Notice>Joining: the group's list comes from the server that invited you, once its owner accepts. Without an answer within 30 days, this server gives up.</Notice>{/if}
-    <div class="summary">
-      <div class="line"><div><div class="label">You share with it</div><div class="hint">{plural(open.offers, 'library', 'libraries')} · {limitsText(open.pool)}, for all its members together</div></div></div>
-      <div class="line"><div><div class="label">You show from it</div><div class="hint">What its members share with it, but what you hide</div></div></div>
-      <div class="line"><div><div class="label">New members</div><div class="hint">{open.accept ? 'Accepted automatically' : 'Each waits for you to confirm it'}</div></div></div>
-      {#if invitesOf(open).length}
-        <div class="label">Invites not used yet</div>
-        {#each invitesOf(open) as c (c.id)}
-          <div class="line"><div><div>{c.note || 'No note'}</div><div class="hint">{c.uses > 1 ? `${c.uses} uses left · ` : ''}works until {when(c.expiresAt)}</div></div><div class="buttons"><button type="button" class="small" onclick={() => copyInvite(c)}>Copy</button>{#if sendInvite}<button type="button" class="small" onclick={() => sendInvite?.(c)}>Send by email</button>{/if}<button type="button" class="small danger" onclick={() => withdraw(c)}>Withdraw</button></div></div>
-        {/each}
-      {/if}
+    <div class="facts" role="group" aria-label="Your settings for this group">
+      <button type="button" class="fact" onclick={() => open && settings(open)} title="Settings">{#if open.offers}<Badge kind="plain">Shares {plural(open.offers, 'library', 'libraries')}</Badge>{:else}<Badge kind="warn">Shares nothing</Badge>{/if}</button>
+      <button type="button" class="fact" onclick={() => open && settings(open)} title="Settings"><Badge kind="plain">{plural(open.pool.streams, 'stream')}</Badge></button>
+      <button type="button" class="fact" onclick={() => open && settings(open)} title="Settings"><Badge kind="plain">{open.accept ? 'Accepts new members automatically' : 'Confirms new members'}</Badge></button>
     </div>
-    <Tabs label="The group" bind:current={tab} tabs={[{ id: 'members', label: 'Members' }, { id: 'requests', label: `Waiting for you${waiting(open) ? ` (${waiting(open)})` : ''}` }, { id: 'banned', label: `Banned${open.banned.length ? ` (${open.banned.length})` : ''}` }]}>
+    <Tabs label="The group" bind:current={tab} tabs={[{ id: 'members', label: 'Members' }, { id: 'requests', label: `Waiting for you${waiting(open) ? ` (${waiting(open)})` : ''}` }, { id: 'invites', label: `Invites${invitesOf(open).length ? ` (${invitesOf(open).length})` : ''}` }, { id: 'banned', label: `Banned${open.banned.length ? ` (${open.banned.length})` : ''}` }]}>
       {#snippet children(at)}
         {#if at === 'members'}
           <div class="table-wrap">
@@ -433,6 +423,28 @@
           {:else}
             <Empty>Nothing waiting. A server that joins asks every member to pair; {open.accept ? 'this server accepts new members automatically.' : 'its request then waits here for you.'}</Empty>
           {/if}
+        {:else if at === 'invites'}
+          {#if invitesOf(open).length}
+            <div class="table-wrap">
+              <table class="stack-rows">
+                <thead><tr><th>Invite</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+                <tbody>
+                  {#each invitesOf(open) as c (c.id)}
+                    <tr>
+                      <td><div class="name">{c.note || 'No note'}</div><div class="hint">{c.uses > 1 ? `${c.uses} uses left · ` : ''}works until {when(c.expiresAt)}</div></td>
+                      <td class="row-actions">
+                        <button type="button" class="small" onclick={() => copyInvite(c)}>Copy</button>
+                        {#if sendInvite}<button type="button" class="small" onclick={() => sendInvite?.(c)}>Send by email</button>{/if}
+                        <button type="button" class="small danger" onclick={() => withdraw(c)}>Withdraw</button>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {:else}
+            <Empty>No invite waiting to be used.{#if canInvite(open)} Invite a server with the Invite button below.{/if}</Empty>
+          {/if}
         {:else}
           {#if open.banned.length}
             <div class="table-wrap">
@@ -487,11 +499,11 @@
       {#if isOwner(open) && open.heir !== member.id}<button type="button" onclick={() => open && member && setHeir(open, member)}>Name heir</button>{/if}
       {#if isOwner(open) && open.heir === member.id}<button type="button" onclick={() => open && setHeir(open, null)}>No heir</button>{/if}
       {#if isOwner(open)}<button type="button" onclick={() => member && (giving = { to: member.id })}>Give the group to it</button>{/if}
-      {#if canBan(open, member)}<button type="button" class="danger" onclick={() => member && (banning = { member, reason: '' })}>Ban</button>{/if}
       {#if member.paired && member.peer && !member.individual}<button type="button" onclick={() => member && pairDirectly(member.peer ?? '')}>Invite individually</button>{/if}
       <button type="button" class="danger" onclick={() => member && (blocking = { member, invitees: false })}>Block</button>
+      {#if canBan(open, member)}<button type="button" class="danger" onclick={() => member && (banning = { member, reason: '' })}>Ban</button>{/if}
     </div>
-    <div class="hint">Ban puts it out of the group, for everyone, and tells it why. Block is yours alone, and nobody is told: this server ends its pairing with it, whatever made it, and ignores it in all your groups.</div>
+    <div class="hint">Block is yours alone, and nobody is told: this server ends its pairing with it, whatever made it, and ignores it in all your groups. Ban puts it out of the group, for everyone, and tells it why.</div>
     {#snippet foot()}
       <span class="grow"></span>
       <button type="button" onclick={() => (memberID = '')}>Close</button>
@@ -508,7 +520,7 @@
       <div class="setting stack">
         <div><div class="label">You share with it</div><div class="hint">Your libraries, for all the group's members.</div></div>
         <div class="checks all">
-          {#each editing.ours as l (l.id)}<label class="inline"><input type="checkbox" value={l.id} bind:group={editing.offer} /> {l.name}{#if kindOf(l)} <span class="hint">({kindOf(l)})</span>{/if}</label>
+          {#each editing.ours as l (l.id)}<label class="inline"><input type="checkbox" value={l.id} bind:group={editing.offer} /> {l.name}</label>
           {:else}<span class="hint">This server has no library yet.</span>{/each}
         </div>
       </div>
@@ -594,30 +606,26 @@
 {/if}
 
 <style>
-  .summary {
+  .facts {
     display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
+    flex-wrap: wrap;
+    gap: 0.4rem;
     margin-bottom: 1rem;
   }
-  .summary .line {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
+  .fact {
+    padding: 0;
+    border: 0;
+    background: none;
+    min-height: 0;
+    border-radius: 999px;
+    cursor: pointer;
   }
-  .summary .buttons {
-    display: flex;
-    gap: 0.4rem;
-    flex-wrap: wrap;
-    justify-content: flex-end;
+  .fact:hover :global(.badge) {
+    filter: brightness(1.15);
   }
   .member-name {
     font-weight: 600;
     margin-top: 0.4rem;
-  }
-  .summary .label {
-    font-weight: 600;
   }
   .fingerprint {
     white-space: nowrap;
