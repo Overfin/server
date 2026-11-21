@@ -343,7 +343,9 @@ func TestFederationRelations(t *testing.T) {
 	if rec := a.do("POST", "/admin/api/federation/peers/"+bOnA+"/accept", "{}", nil); rec.Code != 200 {
 		t.Fatalf("accept: %d %s", rec.Code, rec.Body)
 	}
-	sb := waitFor(t, b, "B joins", func(s groupState) bool { return len(s.Groups) == 1 && len(s.Groups[0].Members) == 2 && len(s.Peers) == 1 && s.Peers[0].State == "paired" })
+	sb := waitFor(t, b, "B joins", func(s groupState) bool {
+		return len(s.Groups) == 1 && len(s.Groups[0].Members) == 2 && len(s.Peers) == 1 && s.Peers[0].State == "paired"
+	})
 	if p := sb.Peers[0]; p.Individual || len(p.Groups) != 1 {
 		t.Fatalf("B's A, through the group only: %+v", p)
 	}
