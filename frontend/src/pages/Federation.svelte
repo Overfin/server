@@ -530,7 +530,7 @@
   load();
 </script>
 
-<PageHead title="Federation" description="Pair this server with other Overfin servers. One operator makes a code and sends it to the other, who pastes it here; the first then accepts, after you both compared fingerprints. Then each picks, library by library, what it offers the other and what it wants: only what one offers and the other wants is shared. Its titles then show on your site beside yours, and play straight from it.">
+<PageHead title="Federation" description="Share with other servers: one by one, or in groups that share with each other as one. Invite a server or create a group, and send the invite to the other server's owner; a server that uses it waits for you to accept it, after you both compared fingerprints. What they share then shows on your site beside your titles, and plays straight from them.">
   {#snippet actions()}
     {#if s?.available}
       <button type="button" class={s.uncallable ? 'primary' : ''} onclick={useCode}>Use a code</button>
@@ -552,10 +552,10 @@
 {:else}
   <Card title="This server">
     {#if s.canSet}{@render uncallableSetting()}{/if}
-    <Setting label="Address" hint={s.uncallable ? "One that leads nowhere, made for this server: nothing connects to it. Other servers know this server by its key." : 'Where other servers reach this one, as codes give it.'}>
+    <Setting label="Address" hint={s.uncallable ? "One that leads nowhere, made for this server: nothing connects to it. Other servers know this server by its key." : 'Where other servers reach this one, as your invites give it.'}>
       {#snippet children()}<code>{s?.address}</code>{/snippet}
     </Setting>
-    <Setting stack label="Fingerprint" hint="What the other operator compares, to be sure the code is really this server's.">
+    <Setting stack label="Fingerprint" hint="What the other server's owner compares, to be sure the invite is really this server's.">
       {#snippet children()}<code class="fingerprint">{s?.fingerprint}</code>{/snippet}
     </Setting>
     {#if s.nextKey}
