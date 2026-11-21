@@ -37,6 +37,9 @@ type groupJSON struct {
 	Members   []groupMemberJSON `json:"members"`
 	Banned    []groupBanJSON    `json:"banned"`
 	Requests  []groupRequest    `json:"requests"`
+	// Joins are servers already paired with this one that used its code
+	// for the group, waiting for you to accept them in.
+	Joins []groupJoinJSON `json:"joins"`
 	// Links are the pairings made or kept through this group: Only when
 	// nothing else holds them (no other group, no pairing by hand).
 	Links []groupLinkJSON `json:"links"`
@@ -77,6 +80,13 @@ type groupRequest struct {
 	Waited bool `json:"waited"`
 }
 
+type groupJoinJSON struct {
+	Peer        string `json:"peer"`
+	Name        string `json:"name"`
+	Fingerprint string `json:"fingerprint"`
+	ReceivedAt  string `json:"receivedAt"`
+}
+
 type groupLinkJSON struct {
 	Peer string `json:"peer"`
 	Name string `json:"name"`
@@ -97,7 +107,7 @@ func groupOf(v msfp.GroupView, peers []msfp.PeerView) groupJSON {
 	j := groupJSON{ID: v.ID, Name: v.Name, WaitDays: v.Settings.WaitDays, CapPerDay: v.Settings.CapPerDay,
 		Role: v.Role, Me: v.Me, Owner: v.Owner, Heir: v.Heir, Accept: v.Accept, Offers: len(v.Offers),
 		Pool: limitsOf(v.Pool), Dissolved: v.Dissolved, Joining: v.Joining,
-		Members: []groupMemberJSON{}, Banned: []groupBanJSON{}, Requests: []groupRequest{}, Links: []groupLinkJSON{}}
+		Members: []groupMemberJSON{}, Banned: []groupBanJSON{}, Requests: []groupRequest{}, Joins: []groupJoinJSON{}, Links: []groupLinkJSON{}}
 	for _, m := range v.Members {
 		mj := groupMemberJSON{ID: m.ID, Name: m.Name, Fingerprint: m.Fingerprint, Role: m.Role,
 			InvitedBy: names[m.InvitedBy], JoinedAt: stamp(m.Joined), Peer: m.Peer, Refused: m.Refused, Asked: m.Asked,
@@ -113,6 +123,9 @@ func groupOf(v msfp.GroupView, peers []msfp.PeerView) groupJSON {
 	for _, r := range v.Requests {
 		j.Requests = append(j.Requests, groupRequest{Mail: r.Mail, From: r.From, Name: r.Name,
 			Fingerprint: r.Fingerprint, ReceivedAt: stamp(r.Received), Waited: r.Waited})
+	}
+	for _, jn := range v.Joins {
+		j.Joins = append(j.Joins, groupJoinJSON{Peer: jn.Peer, Name: jn.Name, Fingerprint: jn.Fingerprint, ReceivedAt: stamp(jn.Received)})
 	}
 	for _, p := range peers {
 		if slices.Contains(p.Groups, v.ID) {
@@ -359,6 +372,18 @@ func (p *Panel) blockGroupMember(w http.ResponseWriter, r *http.Request, s *sess
 func (p *Panel) acceptGroupRequest(w http.ResponseWriter, r *http.Request, s *session) {
 	p.groupAction(w, r, s, "accepting a request", func(eng *msfp.Engine, id string) error {
 		return eng.AcceptRequest(r.Context(), id, r.PathValue("mail"))
+	})
+}
+
+func (p *Panel) acceptGroupJoin(w http.ResponseWriter, r *http.Request, s *session) {
+	p.groupAction(w, r, s, "accepting a server into a group", func(eng *msfp.Engine, id string) error {
+		return eng.AcceptJoin(r.Context(), id, r.PathValue("peer"))
+	})
+}
+
+func (p *Panel) refuseGroupJoin(w http.ResponseWriter, r *http.Request, s *session) {
+	p.groupAction(w, r, s, "refusing a server into a group", func(eng *msfp.Engine, id string) error {
+		return eng.RefuseJoin(r.Context(), id, r.PathValue("peer"))
 	})
 }
 

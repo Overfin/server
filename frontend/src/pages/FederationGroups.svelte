@@ -38,6 +38,9 @@
     members: Member[];
     banned: { id: string; name: string; fingerprint: string; reason?: string }[];
     requests: { mail: string; from: string; name: string; fingerprint: string; receivedAt: string; waited: boolean }[];
+    // Servers already paired with this one that used its code for the
+    // group, waiting for you.
+    joins: { peer: string; name: string; fingerprint: string; receivedAt: string }[];
     links: { peer: string; name: string; only: boolean }[];
   }
   interface Limits {
@@ -154,6 +157,23 @@
     if (yes) await act(() => api('POST', `/admin/api/federation/groups/${g.id}/requests/${encodeURIComponent(r.mail)}/refuse`, {}), 'Refused.');
   }
 
+  async function acceptJoin(g: Group, j: Group['joins'][number]) {
+    const yes = await ask(`Accept ${j.name} into "${g.name}"? You're already paired with it; it used your code. Its fingerprint: ${j.fingerprint}.`, { yes: 'Accept' });
+    if (yes) await act(() => api('POST', `/admin/api/federation/groups/${g.id}/joins/${encodeURIComponent(j.peer)}/accept`, {}), `${j.name} joins "${g.name}".`);
+  }
+
+  async function refuseJoin(g: Group, j: Group['joins'][number]) {
+    const yes = await ask(`Refuse ${j.name} into "${g.name}"? It isn't told; your pairing with it stays.`, { yes: 'Refuse', danger: true });
+    if (yes) await act(() => api('POST', `/admin/api/federation/groups/${g.id}/joins/${encodeURIComponent(j.peer)}/refuse`, {}), 'Refused.');
+  }
+
+  async function giveUp(g: Group) {
+    const yes = await ask(`Give up joining "${g.name}"? Your pairings stay.`, { yes: 'Give up', danger: true });
+    if (!yes) return;
+    await act(() => api('POST', `/admin/api/federation/groups/${g.id}/leave`, { end: [] }), '');
+    openID = '';
+  }
+
   async function askMember(g: Group, m: Member) {
     await act(() => api('POST', `/admin/api/federation/groups/${g.id}/asks/${encodeURIComponent(m.id)}`, {}), `Asked ${m.name}. Its operator answers.`);
   }
@@ -232,6 +252,7 @@
   const kinds: Record<string, string> = { movies: 'Films', tvshows: 'Series', mixed: 'Mixed' };
   const kindOf = (l: Lib) => (kinds[l.kind] && kinds[l.kind].toLowerCase() !== l.name.toLowerCase() ? kinds[l.kind] : '');
   const others = (g: Group) => g.members.filter((m) => !m.me);
+  const waiting = (g: Group) => g.requests.length + g.joins.length;
   const requested = (m: Member) => !!open?.requests.some((r) => r.from === m.id);
 </script>
 
@@ -249,11 +270,11 @@
             <td>
               <div class="name">{g.name || 'A group'}</div>
               <div class="hint">{roleName[g.role]}{g.dissolved ? ' · dissolved' : ''}{g.joining ? ' · joining: waiting for the list' : ''}</div>
-              {#if g.requests.length}<div><Badge kind="warn">{plural(g.requests.length, 'request')} waiting</Badge></div>{/if}
+              {#if waiting(g)}<div><Badge kind="warn">{plural(waiting(g), 'request')} waiting</Badge></div>{/if}
             </td>
             <td class="hide-narrow"><div>{plural(g.members.length, 'server')}</div><div class="hint">paired with {g.members.filter((m) => m.paired).length} of {others(g).length}</div></td>
             <td class="row-actions">
-              {#if g.requests.length}<button type="button" class="small primary" onclick={() => openGroup(g, 'requests')}>Requests</button>{/if}
+              {#if waiting(g)}<button type="button" class="small primary" onclick={() => openGroup(g, 'requests')}>Requests</button>{/if}
               {#if canInvite(g)}<button type="button" class="small" onclick={() => invite(g)}>Invite</button>{/if}
               <button type="button" class="small" onclick={() => openGroup(g)}>Open</button>
             </td>
@@ -269,8 +290,8 @@
 {#if open}
   <Modal size="wide" title={open.name || 'A group'} description={`${roleName[open.role]} · ${plural(open.members.length, 'server')} · automatic acceptance after ${plural(open.waitDays, 'day')} in the group · ${plural(open.capPerDay, 'invitation')} a day for each inviter`} close={() => (openID = '')}>
     {#if open.dissolved}<Notice warn>The owner dissolved this group. It goes from this server at once.</Notice>{/if}
-    {#if open.joining}<Notice>Joining: the group's list comes from the server that invited you, once its operator accepted.</Notice>{/if}
-    <Tabs label="The group" bind:current={tab} tabs={[{ id: 'members', label: 'Members' }, { id: 'requests', label: `Requests${open.requests.length ? ` (${open.requests.length})` : ''}` }, { id: 'banned', label: `Banned${open.banned.length ? ` (${open.banned.length})` : ''}` }]}>
+    {#if open.joining}<Notice>Joining: the group's list comes from the server that invited you, once its operator accepts. Without an answer within 30 days, this server gives up.</Notice>{/if}
+    <Tabs label="The group" bind:current={tab} tabs={[{ id: 'members', label: 'Members' }, { id: 'requests', label: `Requests${waiting(open) ? ` (${waiting(open)})` : ''}` }, { id: 'banned', label: `Banned${open.banned.length ? ` (${open.banned.length})` : ''}` }]}>
       {#snippet children(at)}
         {#if at === 'members'}
           <div class="table-wrap">
@@ -294,11 +315,20 @@
             </table>
           </div>
         {:else if at === 'requests'}
-          {#if open.requests.length}
+          {#if waiting(open)}
             <div class="table-wrap">
-              <table>
+              <table class="stack-rows">
                 <thead><tr><th>Server</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
                 <tbody>
+                  {#each open.joins as j (j.peer)}
+                    <tr>
+                      <td><div class="name">{j.name || 'A server'}</div><div class="hint">already paired with you, used your code to join the group, {ago(j.receivedAt)}</div><div><code class="fingerprint">{j.fingerprint}</code></div></td>
+                      <td class="row-actions">
+                        <button type="button" class="small primary" onclick={() => open && acceptJoin(open, j)}>Accept</button>
+                        <button type="button" class="small danger" onclick={() => open && refuseJoin(open, j)}>Refuse</button>
+                      </td>
+                    </tr>
+                  {/each}
                   {#each open.requests as r (r.mail)}
                     <tr>
                       <td><div class="name">{r.name || 'A server'}</div><div class="hint">asked {ago(r.receivedAt)}{r.waited ? '' : ` · in the group for less than ${plural(open.waitDays, 'day')}`}</div><div><code class="fingerprint">{r.fingerprint}</code></div></td>
@@ -317,7 +347,7 @@
         {:else}
           {#if open.banned.length}
             <div class="table-wrap">
-              <table>
+              <table class="stack-rows">
                 <thead><tr><th>Server</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
                 <tbody>
                   {#each open.banned as b (b.id)}
@@ -340,7 +370,11 @@
         <button type="button" class="danger" onclick={() => (dissolving = { keep: true })}>Dissolve</button>
         <button type="button" onclick={() => (giving = { to: '' })} disabled={!others(open).length}>Give the group</button>
       {:else}
-        <button type="button" class="danger" onclick={() => (leaving = { end: [] })}>Leave</button>
+        {#if open.joining}
+          <button type="button" class="danger" onclick={() => open && giveUp(open)}>Give up</button>
+        {:else}
+          <button type="button" class="danger" onclick={() => (leaving = { end: [] })}>Leave</button>
+        {/if}
       {/if}
       <span class="grow"></span>
       {#if isOwner(open)}<button type="button" onclick={() => open && settings(open)}>Settings</button>{/if}
@@ -479,6 +513,21 @@
   @media (max-width: 860px) {
     .only-narrow {
       display: block;
+    }
+    /* Requests and bans: the buttons under the server, so a phone shows
+       them whole. */
+    .stack-rows tr {
+      display: flex;
+      flex-direction: column;
+    }
+    .stack-rows thead th:last-child {
+      display: none;
+    }
+    .stack-rows td.row-actions {
+      border-top: 0;
+      padding-top: 0;
+      justify-content: flex-start;
+      text-align: left;
     }
   }
 </style>

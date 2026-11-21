@@ -504,6 +504,10 @@ func (p *Panel) pairingProblem(w http.ResponseWriter, err error) {
 		detail = "That's this server's own code: send it to the other server's operator instead."
 	case errors.Is(err, msfp.ErrAlreadyPeer):
 		detail = "That server is already in the list."
+	case errors.Is(err, msfp.ErrAlreadyMember):
+		detail = "This server is already in that group, banned from it, or waiting to join it (under Groups)."
+	case errors.Is(err, msfp.ErrNotSupported):
+		detail = "The server that made the code doesn't speak groups with this one (another version of the protocol, or it hasn't said yet). Try Check on it, then again."
 	case errors.Is(err, msfp.ErrCodeExpired):
 		detail = "That code stopped working: its time is up. Ask for a new one."
 	case errors.Is(err, msfp.ErrCodeRefused):

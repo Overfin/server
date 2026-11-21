@@ -406,6 +406,8 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("POST /admin/api/federation/groups/{id}/requests/{mail}/accept", p.signedIn(p.acceptGroupRequest))
 	mux.HandleFunc("POST /admin/api/federation/groups/{id}/requests/{mail}/refuse", p.signedIn(p.refuseGroupRequest))
 	mux.HandleFunc("DELETE /admin/api/federation/groups/{id}/refusals/{member}", p.signedIn(p.liftGroupRefusal))
+	mux.HandleFunc("POST /admin/api/federation/groups/{id}/joins/{peer}/accept", p.signedIn(p.acceptGroupJoin))
+	mux.HandleFunc("POST /admin/api/federation/groups/{id}/joins/{peer}/refuse", p.signedIn(p.refuseGroupJoin))
 	mux.HandleFunc("POST /admin/api/federation/groups/{id}/asks/{member}", p.signedIn(p.askGroupMember))
 	mux.HandleFunc("POST /admin/api/federation/groups/{id}/leave", p.signedIn(p.leaveGroup))
 	mux.HandleFunc("POST /admin/api/federation/groups/{id}/dissolve", p.signedIn(p.dissolveGroup))

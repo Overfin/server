@@ -169,3 +169,51 @@ func TestFederationGroupsPanel(t *testing.T) {
 	}
 	waitFor(t, a, "A dissolved", func(s groupState) bool { return len(s.Groups) == 0 })
 }
+
+// A server already paired with A uses A's group code: it waits under the
+// group's joins, A accepts it from the panel, and it's a member.
+func TestFederationGroupJoinWhenPaired(t *testing.T) {
+	a, _, _ := fedPanel(t, "A")
+	b, _, _ := fedPanel(t, "B")
+	// Paired by hand first.
+	rec := a.do("POST", "/admin/api/federation/codes", `{"note":"for B"}`, nil)
+	var made struct{ Code string }
+	json.Unmarshal(rec.Body.Bytes(), &made)
+	body, _ := json.Marshal(map[string]string{"code": made.Code})
+	if rec := b.do("POST", "/admin/api/federation/peers", string(body), nil); rec.Code != 201 {
+		t.Fatalf("use: %d %s", rec.Code, rec.Body)
+	}
+	sa := readGroups(t, a)
+	if rec := a.do("POST", "/admin/api/federation/peers/"+sa.Peers[0].ID+"/accept", "{}", nil); rec.Code != 200 {
+		t.Fatalf("accept: %d %s", rec.Code, rec.Body)
+	}
+	waitFor(t, b, "B paired", func(s groupState) bool { return len(s.Peers) == 1 && s.Peers[0].State == "paired" })
+	rec = a.do("POST", "/admin/api/federation/groups", `{"name":"Family","waitDays":3,"capPerDay":5}`, nil)
+	var g struct{ ID string }
+	json.Unmarshal(rec.Body.Bytes(), &g)
+	rec = a.do("POST", "/admin/api/federation/codes", `{"note":"for B","group":"`+g.ID+`"}`, nil)
+	json.Unmarshal(rec.Body.Bytes(), &made)
+	body, _ = json.Marshal(map[string]string{"code": made.Code})
+	if rec := b.do("POST", "/admin/api/federation/preview", string(body), nil); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"groupName":"Family"`) {
+		t.Fatalf("preview: %d %s", rec.Code, rec.Body)
+	}
+	if rec := b.do("POST", "/admin/api/federation/peers", string(body), nil); rec.Code != 201 {
+		t.Fatalf("join: %d %s", rec.Code, rec.Body)
+	}
+	rec = a.do("GET", "/admin/api/federation", "", nil)
+	var st struct {
+		Groups []struct {
+			Joins []struct{ Peer, Name string }
+		}
+	}
+	json.Unmarshal(rec.Body.Bytes(), &st)
+	if len(st.Groups) != 1 || len(st.Groups[0].Joins) != 1 || st.Groups[0].Joins[0].Name != "B" {
+		t.Fatalf("A's joins: %s", rec.Body)
+	}
+	if rec := a.do("POST", "/admin/api/federation/groups/"+g.ID+"/joins/"+st.Groups[0].Joins[0].Peer+"/accept", "{}", nil); rec.Code != 204 {
+		t.Fatalf("accept join: %d %s", rec.Code, rec.Body)
+	}
+	waitFor(t, b, "B a member", func(s groupState) bool {
+		return len(s.Groups) == 1 && len(s.Groups[0].Members) == 2 && s.Groups[0].Role == "member"
+	})
+}

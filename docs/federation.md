@@ -293,8 +293,12 @@ member's **More**):
 Nothing about a group lives anywhere but on its members' servers: each
 keeps its own copy of the group's signed list and passes changes on.
 There is no central server, and a group needs none of its members to stay
-up. A server that's already paired with yours can't join through your
-code yet: the protocol doesn't cover it.
+up.
+
+A server already paired with yours uses your group's code the same way:
+it joins through your pairing, and waits under the group's **Requests**
+for you to **Accept** it (or **Refuse**: nothing is sent, and it gives up
+on its side, or after 30 days).
 
 ## Limits
 
