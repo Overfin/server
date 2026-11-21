@@ -17,7 +17,6 @@ import (
 type groupJSON struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
-	WaitDays  int64  `json:"waitDays"`
 	CapPerDay int64  `json:"capPerDay"`
 	// Role is this server's: "owner", "admin" or "member"; Me its member
 	// ID in the group.
@@ -25,8 +24,8 @@ type groupJSON struct {
 	Me    string `json:"me"`
 	Owner string `json:"owner"`
 	Heir  string `json:"heir,omitempty"`
-	// Accept: this server accepts a member's request itself once the
-	// member has been in the group WaitDays; false: you answer each.
+	// Accept: this server automatically accepts new members, at once;
+	// false: you confirm each.
 	Accept bool `json:"accept"`
 	// Offers counts the libraries offered to the group; Pool is what
 	// this server lends the group's members, together.
@@ -109,7 +108,7 @@ func groupOf(v msfp.GroupView, peers []msfp.PeerView) groupJSON {
 	for _, m := range v.Members {
 		names[m.ID] = m.Name
 	}
-	j := groupJSON{ID: v.ID, Name: v.Name, WaitDays: v.Settings.WaitDays, CapPerDay: v.Settings.CapPerDay,
+	j := groupJSON{ID: v.ID, Name: v.Name, CapPerDay: v.Settings.CapPerDay,
 		Role: v.Role, Me: v.Me, Owner: v.Owner, Heir: v.Heir, Accept: v.Accept, Offers: len(v.Offers),
 		Pool: limitsOf(v.Pool), Dissolved: v.Dissolved, Joining: v.Joining, NoWayIn: v.NoWayIn,
 		Members: []groupMemberJSON{}, Banned: []groupBanJSON{}, Requests: []groupRequest{}, Joins: []groupJoinJSON{}, Links: []groupLinkJSON{}}
@@ -200,8 +199,11 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 // them.
 type groupSettingsReq struct {
 	Name      string `json:"name"`
-	WaitDays  int64  `json:"waitDays"`
 	CapPerDay int64  `json:"capPerDay"`
+	// On creation only: what this server shares with the group, and the
+	// limits it lends it.
+	Offer  []string    `json:"offer"`
+	Limits *limitsJSON `json:"limits"`
 }
 
 func (p *Panel) createGroup(w http.ResponseWriter, r *http.Request, s *session) {
@@ -214,10 +216,26 @@ func (p *Panel) createGroup(w http.ResponseWriter, r *http.Request, s *session) 
 		return
 	}
 	ctx := r.Context()
-	g, err := eng.CreateGroup(ctx, req.Name, msfp.GroupSettings{WaitDays: req.WaitDays, CapPerDay: req.CapPerDay})
+	g, err := eng.CreateGroup(ctx, req.Name, msfp.GroupSettings{CapPerDay: req.CapPerDay})
 	if err != nil {
 		p.groupProblem(w, "creating a group", err)
 		return
+	}
+	if req.Limits != nil {
+		l := msfp.Limits{Streams: req.Limits.Streams, Transcodes: req.Limits.Transcodes, BitrateKbps: req.Limits.BitrateKbps}
+		if err := eng.SetGroupPool(ctx, g.ID, l); err != nil {
+			p.groupProblem(w, "setting a new group's limits", err)
+			return
+		}
+	}
+	if len(req.Offer) > 0 {
+		if err := eng.SetGroupOffers(ctx, g.ID, req.Offer); err != nil {
+			p.groupProblem(w, "setting what a new group is offered", err)
+			return
+		}
+	}
+	if v, err := eng.Group(ctx, g.ID); err == nil {
+		g = v
 	}
 	p.Logger.Info("a group was created in the control panel", "group", g.ID, "by", s.logID)
 	writeJSON(w, http.StatusCreated, groupOf(g, nil))
@@ -244,7 +262,7 @@ func (p *Panel) setGroupSettings(w http.ResponseWriter, r *http.Request, s *sess
 		return
 	}
 	p.groupAction(w, r, s, "changing a group's settings", func(eng *msfp.Engine, id string) error {
-		return eng.SetGroupSettings(r.Context(), id, req.Name, msfp.GroupSettings{WaitDays: req.WaitDays, CapPerDay: req.CapPerDay})
+		return eng.SetGroupSettings(r.Context(), id, req.Name, msfp.GroupSettings{CapPerDay: req.CapPerDay})
 	})
 }
 
@@ -289,6 +307,59 @@ func (p *Panel) groupSharing(w http.ResponseWriter, r *http.Request, _ *session)
 		ours = append(ours, lib{ID: l.ID, Name: l.Name, Kind: l.Kind, Picked: l.Offered})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ours": ours, "limits": limitsOf(g.Pool)})
+}
+
+// groupShows is what this server shows from a group: each member's
+// libraries offered to it, and whether each is shown (all by default).
+func (p *Panel) groupShows(w http.ResponseWriter, r *http.Request, _ *session) {
+	eng := p.fed(w)
+	if eng == nil {
+		return
+	}
+	v, err := eng.GroupShows(r.Context(), r.PathValue("id"))
+	if err != nil {
+		p.groupProblem(w, "reading what a group shows", err)
+		return
+	}
+	type lib struct {
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		Kind  string `json:"kind"`
+		Shown bool   `json:"shown"`
+	}
+	type member struct {
+		Member    string `json:"member"`
+		Name      string `json:"name"`
+		Libraries []lib  `json:"libraries"`
+	}
+	out := []member{}
+	for _, m := range v.Members {
+		mm := member{Member: m.Member, Name: m.Name, Libraries: []lib{}}
+		for _, l := range m.Libraries {
+			mm.Libraries = append(mm.Libraries, lib{ID: l.ID, Name: l.Name, Kind: l.Kind, Shown: l.Shown})
+		}
+		out = append(out, mm)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (p *Panel) setGroupShows(w http.ResponseWriter, r *http.Request, s *session) {
+	var req struct {
+		Hidden []struct {
+			Member  string `json:"member"`
+			Library string `json:"library"`
+		} `json:"hidden"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	p.groupAction(w, r, s, "changing what a group shows", func(eng *msfp.Engine, id string) error {
+		hidden := make([]msfp.HiddenLibrary, 0, len(req.Hidden))
+		for _, h := range req.Hidden {
+			hidden = append(hidden, msfp.HiddenLibrary{Member: h.Member, Library: h.Library})
+		}
+		return eng.SetGroupShows(r.Context(), id, hidden)
+	})
 }
 
 func (p *Panel) setGroupSharing(w http.ResponseWriter, r *http.Request, s *session) {

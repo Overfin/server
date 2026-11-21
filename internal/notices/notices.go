@@ -2,7 +2,8 @@
 // made, one whose access ends soon, one whose access ended. By email to the
 // admins, by a webhook, and, before their access ends, by email to the
 // person. Never what anyone watches (SECURITY.md rule 68). All off until
-// the operator switches them on (control panel, Notices).
+// the operator switches them on (control panel, Notices), but the admins'
+// email when a server asks to pair or to join a group (Request).
 package notices
 
 import (
@@ -72,6 +73,32 @@ func CheckWebhook(raw string) error {
 		return errors.New("the webhook must be an http:// or https:// address, without a user name or password")
 	}
 	return nil
+}
+
+// Request tells the admins, by email and in the background, that a server
+// asks something: "pair" (with this server), "join" (group) or "member"
+// (new in group, to pair with this server). Only who asks for what: no
+// link, no button (the panel is where it's answered). Sent unless turned
+// off (QuietRequests), whatever the other notices.
+func (n *Notifier) Request(asks, server, group string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		set, err := n.Store.NoticeSettings(ctx)
+		if err != nil || set.QuietRequests {
+			return
+		}
+		_, lang, _, err := n.Store.Languages(ctx)
+		if err != nil {
+			return
+		}
+		msg, err := n.Emails.Write(ctx, "request", lang, emails.Vars{Asks: asks, Name: server, Group: group})
+		if err != nil {
+			n.Logger.Error("notices: writing a request notice failed", "err", err)
+			return
+		}
+		n.toAdmins(ctx, "request", msg)
+	}()
 }
 
 // Joined tells, in the background, that an account was made.

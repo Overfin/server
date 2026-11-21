@@ -73,3 +73,12 @@ groupIntro = "The operator of {site} invites your server to the group {group}. P
 check = "Before accepting your server, the operator of {site} will compare fingerprints with you: by phone or another way you trust, never by email."
 expires = "This code works until {date}."
 why = "You got this email because an admin of {site} sent this code to this address."
+
+[request]
+pairSubject = "{name} asks to pair with {site}"
+pair = "The server {name} asks to pair with {site}."
+joinSubject = "{name} asks to join {group}"
+join = "The server {name} asks to join the group {group}."
+memberSubject = "{name}, new in {group}, asks to pair with {site}"
+member = "The server {name}, new in the group {group}, asks to pair with {site}."
+why = "You got this email because you're an admin of {site}. The control panel's Notices turn these emails off."

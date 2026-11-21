@@ -6,7 +6,7 @@
 <script lang="ts">
   import { Card, Field, FormModal, Modal, Setting, Badge, Empty, Notice, Tabs, ask, toast } from '@overfin/ui';
   import { api } from '../lib/api';
-  import { ago, day, message, plural } from '../lib/format';
+  import { ago, day, message, plural, when } from '../lib/format';
 
   export interface Member {
     id: string;
@@ -26,7 +26,6 @@
   export interface Group {
     id: string;
     name: string;
-    waitDays: number;
     capPerDay: number;
     role: 'owner' | 'admin' | 'member';
     me: string;
@@ -40,7 +39,7 @@
     noWayIn?: boolean;
     members: Member[];
     banned: { id: string; name: string; fingerprint: string; reason?: string }[];
-    requests: { mail: string; from: string; name: string; fingerprint: string; receivedAt: string; waited: boolean }[];
+    requests: { mail: string; from: string; name: string; fingerprint: string; receivedAt: string }[];
     // Servers already paired with this one that used its code for the
     // group, waiting for you.
     joins: { peer: string; name: string; fingerprint: string; receivedAt: string }[];
@@ -57,24 +56,55 @@
     kind: string;
     picked: boolean;
   }
+  // A server that used one of this server's invites to a group, waiting
+  // for you; an invite not used yet.
+  export interface JoinWaiting {
+    id: string;
+    name: string;
+    address: string;
+    fingerprint: string;
+    joiningGroup?: string;
+  }
+  export interface Invite {
+    id: string;
+    note: string;
+    createdAt: string;
+    expiresAt: string;
+    uses: number;
+    group?: string;
+  }
+  interface Shows {
+    member: string;
+    name: string;
+    libraries: { id: string; name: string; kind: string; shown: boolean }[];
+  }
 
   let {
     groups,
     uncallable = false,
     reload,
     invite,
-    manage,
     pairDirectly,
+    joining = [],
+    invites = [],
+    acceptJoining,
+    refuseJoining,
+    withdraw,
   }: {
     groups: Group[];
     uncallable?: boolean;
     reload: () => Promise<void>;
-    /** invite opens the New code window for a group. */
+    /** invite opens the Invite window for a group. */
     invite: (g: Group) => void;
-    /** manage opens a paired server's window, by its pairing's ID. */
-    manage: (peer: string) => void;
-    /** pairDirectly asks a server known through a group to pair directly. */
+    /** pairDirectly asks a server known through a group to pair individually. */
     pairDirectly: (peer: string) => void;
+    /** joining are the servers that used an invite to a group, waiting for you. */
+    joining?: JoinWaiting[];
+    /** invites are the invites not used yet (each group's are shown in it). */
+    invites?: Invite[];
+    acceptJoining: (p: JoinWaiting) => void;
+    refuseJoining: (p: JoinWaiting) => void;
+    withdraw: (c: Invite) => void;
   } = $props();
 
   // The group whose window is open, by ID: the list reloads under it.
@@ -83,8 +113,9 @@
   let tab = $state('members');
   // Forms: creating a group or changing its settings; what you offer it;
   // a member's actions; banning; blocking; leaving; dissolving; giving.
-  let editing = $state<{ group?: Group; name: string; waitDays: number; capPerDay: number } | null>(null);
-  let sharing = $state<{ ours: Lib[]; offer: string[]; limits: Limits; accept: boolean } | null>(null);
+  let editing = $state<{ group?: Group; name: string; capPerDay: number; accept: boolean; ours: Lib[]; offer: string[]; limits: Limits; more: boolean } | null>(null);
+  let sharing = $state<{ ours: Lib[]; offer: string[]; limits: Limits } | null>(null);
+  let showing = $state<{ members: Shows[]; hidden: string[] } | null>(null);
   let memberID = $state('');
   const member = $derived(open?.members.find((m) => m.id === memberID) ?? null);
   let banning = $state<{ member: Member; reason: string } | null>(null);
@@ -114,23 +145,37 @@
     openID = g.id;
   }
 
-  function create() {
-    editing = { name: '', waitDays: 3, capPerDay: 5 };
+  const n = (v: unknown) => Number(v) || 0;
+  const limitsOut = (l: Limits) => ({ streams: n(l.streams), transcodes: n(l.transcodes), bitrateKbps: n(l.bitrateKbps) });
+
+  async function create() {
+    try {
+      const ours = await api<Lib[]>('GET', '/admin/api/federation/libraries');
+      editing = { name: '', capPerDay: 5, accept: false, ours, offer: [], limits: { streams: 2, transcodes: 1, bitrateKbps: 0 }, more: false };
+    } catch (err) {
+      toast(message(err), true);
+    }
   }
 
   function settings(g: Group) {
-    editing = { group: g, name: g.name, waitDays: g.waitDays, capPerDay: g.capPerDay };
+    editing = { group: g, name: g.name, capPerDay: g.capPerDay, accept: g.accept, ours: [], offer: [], limits: g.pool, more: true };
   }
 
   async function saveEditing() {
     if (!editing) return;
-    const body = { name: editing.name, waitDays: Number(editing.waitDays) || 0, capPerDay: Number(editing.capPerDay) || 0 };
-    if (editing.group) {
-      await api('PUT', `/admin/api/federation/groups/${editing.group.id}`, body);
-      toast('Settings saved. The members are told.');
+    const g = editing.group;
+    if (g) {
+      if (isOwner(g) && (editing.name !== g.name || Number(editing.capPerDay) !== g.capPerDay)) {
+        await api('PUT', `/admin/api/federation/groups/${g.id}`, { name: editing.name, capPerDay: n(editing.capPerDay) });
+      }
+      if (editing.accept !== g.accept) await api('PUT', `/admin/api/federation/groups/${g.id}/answer`, { accept: editing.accept });
+      toast('Saved.');
     } else {
-      const g = await api<Group>('POST', '/admin/api/federation/groups', body);
-      toast(`Group "${g.name}" created. Invite servers with a code.`);
+      const made = await api<Group>('POST', '/admin/api/federation/groups', {
+        name: editing.name, capPerDay: n(editing.capPerDay) || 5, offer: editing.offer, limits: limitsOut(editing.limits),
+      });
+      if (editing.accept) await api('PUT', `/admin/api/federation/groups/${made.id}/answer`, { accept: true });
+      toast(`Group "${made.name}" created. Invite servers to it.`);
     }
     await reload();
   }
@@ -138,7 +183,7 @@
   async function openSharing(g: Group) {
     try {
       const sh = await api<{ ours: Lib[]; limits: Limits }>('GET', `/admin/api/federation/groups/${g.id}/sharing`);
-      sharing = { ours: sh.ours, offer: sh.ours.filter((l) => l.picked).map((l) => l.id), limits: { ...sh.limits }, accept: g.accept };
+      sharing = { ours: sh.ours, offer: sh.ours.filter((l) => l.picked).map((l) => l.id), limits: { ...sh.limits } };
     } catch (err) {
       toast(message(err), true);
     }
@@ -146,13 +191,34 @@
 
   async function saveSharing() {
     if (!open || !sharing) return;
-    const n = (v: unknown) => Number(v) || 0;
-    await api('PUT', `/admin/api/federation/groups/${open.id}/sharing`, {
-      offer: sharing.offer,
-      limits: { streams: n(sharing.limits.streams), transcodes: n(sharing.limits.transcodes), bitrateKbps: n(sharing.limits.bitrateKbps) },
-    });
-    if (sharing.accept !== open.accept) await api('PUT', `/admin/api/federation/groups/${open.id}/answer`, { accept: sharing.accept });
-    toast('Saved.');
+    await api('PUT', `/admin/api/federation/groups/${open.id}/sharing`, { offer: sharing.offer, limits: limitsOut(sharing.limits) });
+    toast('Saved. The group gets it from now on.');
+    await reload();
+  }
+
+  // What you show from the group: each member's libraries, all shown
+  // unless unticked. A key is member + library.
+  const showKey = (m: string, l: string) => `${m} ${l}`;
+  async function openShows(g: Group) {
+    try {
+      const members = await api<Shows[]>('GET', `/admin/api/federation/groups/${g.id}/shows`);
+      showing = { members, hidden: members.flatMap((m) => m.libraries.filter((l) => !l.shown).map((l) => showKey(m.member, l.id))) };
+    } catch (err) {
+      toast(message(err), true);
+    }
+  }
+
+  function toggleShown(m: string, l: string, shown: boolean) {
+    if (!showing) return;
+    const k = showKey(m, l);
+    showing.hidden = shown ? showing.hidden.filter((x) => x !== k) : [...showing.hidden, k];
+  }
+
+  async function saveShows() {
+    if (!open || !showing) return;
+    const hidden = showing.hidden.map((k) => ({ member: k.split(' ')[0], library: k.split(' ').slice(1).join(' ') }));
+    await api('PUT', `/admin/api/federation/groups/${open.id}/shows`, { hidden });
+    toast('Saved. What you show is read again.');
     await reload();
   }
 
@@ -248,7 +314,7 @@
   // A member's pairing with this server, in a few words.
   function linkText(m: Member): string {
     if (m.me) return 'This server';
-    if (m.paired) return m.individual ? 'Paired, also directly' : 'Paired';
+    if (m.paired) return m.individual ? 'Paired, also individually' : 'Paired';
     if (m.peer) return 'Pairing';
     if (requested(m)) return 'Asks to pair: see Requests';
     if (m.refused) return 'You refused it';
@@ -261,11 +327,13 @@
   const kinds: Record<string, string> = { movies: 'Films', tvshows: 'Series', mixed: 'Mixed' };
   const kindOf = (l: Lib) => (kinds[l.kind] && kinds[l.kind].toLowerCase() !== l.name.toLowerCase() ? kinds[l.kind] : '');
   const others = (g: Group) => g.members.filter((m) => !m.me);
-  const waiting = (g: Group) => g.requests.length + g.joins.length;
+  const joiningOf = (g: Group) => joining.filter((p) => p.joiningGroup === g.id);
+  const invitesOf = (g: Group) => invites.filter((c) => c.group === g.id);
+  const waiting = (g: Group) => g.requests.length + g.joins.length + joiningOf(g).length;
   const requested = (m: Member) => !!open?.requests.some((r) => r.from === m.id);
 </script>
 
-<Card title="Groups">
+<Card title="Groups" description="Groups of servers that share with each other as one.">
   {#snippet foot()}
     <span class="grow"></span>
     <button type="button" onclick={create}>Create a group</button>
@@ -284,13 +352,13 @@
             </td>
             <td class="hide-narrow"><div>{plural(g.members.length, 'server')}</div><div class="hint">paired with {g.members.filter((m) => m.paired).length} of {others(g).length}</div></td>
             <td class="row-actions">
-              {#if waiting(g)}<button type="button" class="small primary" onclick={() => openGroup(g, 'requests')}>Requests</button>{/if}
+              {#if waiting(g)}<button type="button" class="small primary" onclick={() => openGroup(g, 'requests')}>Answer</button>{/if}
               {#if canInvite(g)}<button type="button" class="small" onclick={() => invite(g)}>Invite</button>{/if}
               <button type="button" class="small" onclick={() => openGroup(g)}>Open</button>
             </td>
           </tr>
         {:else}
-          <tr><td colspan="3"><Empty>No group yet. In a group, every server pairs with the others without a code for each pair: create one, then invite servers with a code. Or use a group's code another operator sent you.</Empty></td></tr>
+          <tr><td colspan="3"><Empty>No group yet. Create one and invite servers to it, or use a group invite another server's owner sent you (Use a code, at the top).</Empty></td></tr>
         {/each}
       </tbody>
     </table>
@@ -298,11 +366,22 @@
 </Card>
 
 {#if open}
-  <Modal size="wide" title={open.name || 'A group'} description={`${roleName[open.role]} · ${plural(open.members.length, 'server')} · automatic acceptance after ${plural(open.waitDays, 'day')} in the group · ${plural(open.capPerDay, 'invitation')} a day for each inviter`} close={() => (openID = '')}>
+  <Modal size="wide" title={open.name || 'A group'} description={`${roleName[open.role]} · ${plural(open.members.length, 'server')} · ${open.accept ? 'new members accepted automatically' : 'you confirm each new member'}`} close={() => (openID = '')}>
     {#if open.dissolved}<Notice warn>The owner dissolved this group. It goes from this server at once.</Notice>{/if}
     {#if open.noWayIn}<Notice warn>No way in: this server has no pairing through this group any more. Nothing from the other members reaches it, and nothing it does reaches them, so what you see here may be out of date. To get back in, ask a member for a new code for this group, and use it under Federation, "Use a code".</Notice>{/if}
-    {#if open.joining}<Notice>Joining: the group's list comes from the server that invited you, once its operator accepts. Without an answer within 30 days, this server gives up.</Notice>{/if}
-    <Tabs label="The group" bind:current={tab} tabs={[{ id: 'members', label: 'Members' }, { id: 'requests', label: `Requests${waiting(open) ? ` (${waiting(open)})` : ''}` }, { id: 'banned', label: `Banned${open.banned.length ? ` (${open.banned.length})` : ''}` }]}>
+    {#if open.joining}<Notice>Joining: the group's list comes from the server that invited you, once its owner accepts. Without an answer within 30 days, this server gives up.</Notice>{/if}
+    <div class="summary">
+      <div class="line"><div><div class="label">You share with it</div><div class="hint">{plural(open.offers, 'library', 'libraries')} · {limitsText(open.pool)}, for all its members together</div></div><button type="button" class="small" onclick={() => open && openSharing(open)}>Change</button></div>
+      <div class="line"><div><div class="label">You show from it</div><div class="hint">What its members share with it, but what you hide</div></div><button type="button" class="small" onclick={() => open && openShows(open)}>Change</button></div>
+      <div class="line"><div><div class="label">New members</div><div class="hint">{open.accept ? 'Accepted automatically' : 'Each waits for you to confirm it'}</div></div><button type="button" class="small" onclick={() => open && settings(open)}>Change</button></div>
+      {#if invitesOf(open).length}
+        <div class="label">Invites not used yet</div>
+        {#each invitesOf(open) as c (c.id)}
+          <div class="line"><div><div>{c.note || 'No note'}</div><div class="hint">{c.uses > 1 ? `${c.uses} uses left · ` : ''}works until {when(c.expiresAt)}</div></div><button type="button" class="small danger" onclick={() => withdraw(c)}>Withdraw</button></div>
+        {/each}
+      {/if}
+    </div>
+    <Tabs label="The group" bind:current={tab} tabs={[{ id: 'members', label: 'Members' }, { id: 'requests', label: `Waiting for you${waiting(open) ? ` (${waiting(open)})` : ''}` }, { id: 'banned', label: `Banned${open.banned.length ? ` (${open.banned.length})` : ''}` }]}>
       {#snippet children(at)}
         {#if at === 'members'}
           <div class="table-wrap">
@@ -331,9 +410,18 @@
               <table class="stack-rows">
                 <thead><tr><th>Server</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
                 <tbody>
+                  {#each joiningOf(open) as p (p.id)}
+                    <tr>
+                      <td><div class="name">{p.name || 'A server'}</div><div class="hint">used your invite to join the group · {p.address}</div><div><code class="fingerprint">{p.fingerprint}</code></div></td>
+                      <td class="row-actions">
+                        <button type="button" class="small primary" onclick={() => acceptJoining(p)}>Accept</button>
+                        <button type="button" class="small danger" onclick={() => refuseJoining(p)}>Refuse</button>
+                      </td>
+                    </tr>
+                  {/each}
                   {#each open.joins as j (j.peer)}
                     <tr>
-                      <td><div class="name">{j.name || 'A server'}</div><div class="hint">already paired with you, used your code to join the group, {ago(j.receivedAt)}</div><div><code class="fingerprint">{j.fingerprint}</code></div></td>
+                      <td><div class="name">{j.name || 'A server'}</div><div class="hint">already paired with you individually, used your invite to join the group, {ago(j.receivedAt)}</div><div><code class="fingerprint">{j.fingerprint}</code></div></td>
                       <td class="row-actions">
                         <button type="button" class="small primary" onclick={() => open && acceptJoin(open, j)}>Accept</button>
                         <button type="button" class="small danger" onclick={() => open && refuseJoin(open, j)}>Refuse</button>
@@ -342,7 +430,7 @@
                   {/each}
                   {#each open.requests as r (r.mail)}
                     <tr>
-                      <td><div class="name">{r.name || 'A server'}</div><div class="hint">asked {ago(r.receivedAt)}{r.waited ? '' : ` · in the group for less than ${plural(open.waitDays, 'day')}`}</div><div><code class="fingerprint">{r.fingerprint}</code></div></td>
+                      <td><div class="name">{r.name || 'A server'}</div><div class="hint">new in the group, asks to pair with you, {ago(r.receivedAt)}</div><div><code class="fingerprint">{r.fingerprint}</code></div></td>
                       <td class="row-actions">
                         <button type="button" class="small primary" onclick={() => open && acceptRequest(open, r)}>Pair</button>
                         <button type="button" class="small danger" onclick={() => open && refuseRequest(open, r)}>Refuse</button>
@@ -353,7 +441,7 @@
               </table>
             </div>
           {:else}
-            <Empty>No request waiting. A server that joins asks every member to pair; {open.accept ? `this server accepts by itself once a member has been in the group ${plural(open.waitDays, 'day')}.` : 'its request then waits here for you.'}</Empty>
+            <Empty>Nothing waiting. A server that joins asks every member to pair; {open.accept ? 'this server accepts new members automatically.' : 'its request then waits here for you.'}</Empty>
           {/if}
         {:else}
           {#if open.banned.length}
@@ -388,8 +476,9 @@
         {/if}
       {/if}
       <span class="grow"></span>
-      {#if isOwner(open)}<button type="button" onclick={() => open && settings(open)}>Settings</button>{/if}
-      <button type="button" class="primary" onclick={() => open && openSharing(open)}>Sharing</button>
+      {#if canInvite(open)}<button type="button" onclick={() => open && invite(open)}>Invite</button>{/if}
+      <button type="button" onclick={() => open && settings(open)}>Settings</button>
+      <button type="button" class="primary" onclick={() => (openID = '')}>Close</button>
     {/snippet}
   </Modal>
 {/if}
@@ -397,8 +486,6 @@
 {#snippet memberActions(m: Member)}
   {#if !m.me && !m.peer && !m.refused && !m.asked && !requested(m)}<button type="button" class="small" onclick={() => open && askMember(open, m)}>Ask to pair</button>{/if}
   {#if m.refused}<button type="button" class="small" onclick={() => open && liftRefusal(open, m)}>Hear it again</button>{/if}
-  {#if m.paired && m.peer}<button type="button" class="small" onclick={() => { const id = m.peer ?? ''; openID = ''; manage(id); }}>Sharing</button>{/if}
-  {#if m.paired && m.peer && !m.individual}<button type="button" class="small" onclick={() => pairDirectly(m.peer ?? '')}>Pair directly</button>{/if}
   {#if !m.me}<button type="button" class="small" onclick={() => (memberID = m.id)}>More</button>{/if}
 {/snippet}
 
@@ -411,6 +498,7 @@
       {#if isOwner(open) && open.heir === member.id}<button type="button" onclick={() => open && setHeir(open, null)}>No heir</button>{/if}
       {#if isOwner(open)}<button type="button" onclick={() => member && (giving = { to: member.id })}>Give the group to it</button>{/if}
       {#if canBan(open, member)}<button type="button" class="danger" onclick={() => member && (banning = { member, reason: '' })}>Ban</button>{/if}
+      {#if member.paired && member.peer && !member.individual}<button type="button" onclick={() => member && pairDirectly(member.peer ?? '')}>Invite individually</button>{/if}
       <button type="button" class="danger" onclick={() => member && (blocking = { member, invitees: false })}>Block</button>
     </div>
     <div class="hint">Ban puts it out of the group, for everyone, and tells it why. Block is yours alone, and nobody is told: this server ends its pairing with it, whatever made it, and ignores it in all your groups.</div>
@@ -422,28 +510,54 @@
 {/if}
 
 {#if editing}
-  <FormModal title={editing.group ? 'Group settings' : 'Create a group'} description={editing.group ? 'Every member is told.' : "You are its owner. Invite servers with a code: each one's operator uses it, you accept, and it asks every member to pair."} saveLabel={editing.group ? 'Save' : 'Create'} save={saveEditing} close={() => (editing = null)}>
-    <Field label="Name" wide hint="What members see: the same name for everyone."><input type="text" bind:value={editing.name} maxlength="80" required /></Field>
-    <Setting label="Days before members accept by themselves" hint="A member set to accept new members by itself waits this long after one joins. Accepting by hand works at once. 0 to 30.">
-      {#snippet children(ids)}<input type="number" min="0" max="30" bind:value={editing!.waitDays} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+  <FormModal title={editing.group ? `Settings of "${editing.group.name}"` : 'Create a group'} description={editing.group ? '' : 'You are its owner. Invite servers to it; each one asks the members to pair with it.'} saveLabel={editing.group ? 'Save' : 'Create'} save={saveEditing} close={() => (editing = null)}>
+    {#if !editing.group || isOwner(editing.group)}
+      <Field label="Name" wide hint="What members see: the same name for everyone."><input type="text" bind:value={editing.name} maxlength="80" required /></Field>
+    {/if}
+    {#if !editing.group}
+      <div class="setting stack">
+        <div><div class="label">You share with it</div><div class="hint">Your libraries, for all the group's members.</div></div>
+        <div class="checks all">
+          {#each editing.ours as l (l.id)}<label class="inline"><input type="checkbox" value={l.id} bind:group={editing.offer} /> {l.name}{#if kindOf(l)} <span class="hint">({kindOf(l)})</span>{/if}</label>
+          {:else}<span class="hint">This server has no library yet.</span>{/each}
+        </div>
+      </div>
+      <Setting label="Streams at once" hint="For all the group's members together.">
+        {#snippet children(ids)}<input type="number" min="0" max="50" bind:value={editing!.limits.streams} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+      </Setting>
+      <Setting label="Transcodes among them" hint="Re-encoded video, which is what costs.">
+        {#snippet children(ids)}<input type="number" min="0" max="50" bind:value={editing!.limits.transcodes} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+      </Setting>
+      <Setting label="Bitrate cap (kbps)" hint="0: no cap.">
+        {#snippet children(ids)}<input type="number" min="0" bind:value={editing!.limits.bitrateKbps} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+      </Setting>
+    {/if}
+    <Setting label="Automatically accept new members" hint="Off: each new member waits for you to confirm it. On: this server pairs with it at once. Each member chooses for itself.">
+      {#snippet children(ids)}<input type="checkbox" bind:checked={editing!.accept} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
     </Setting>
-    <Setting label="Invitations a day, for each inviter" hint="How many servers each admin may bring in a day, so a code that leaks can't flood the group. 1 to 100.">
-      {#snippet children(ids)}<input type="number" min="1" max="100" bind:value={editing!.capPerDay} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
-    </Setting>
+    {#if !editing.group || isOwner(editing.group)}
+      {#if editing.more}
+        <Setting label="Invites a day, for each inviter" hint="How many servers each admin may bring in a day, so an invite that leaks can't flood the group. 1 to 100.">
+          {#snippet children(ids)}<input type="number" min="1" max="100" bind:value={editing!.capPerDay} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+        </Setting>
+      {:else}
+        <div><button type="button" class="small" onclick={() => editing && (editing.more = true)}>More</button></div>
+      {/if}
+    {/if}
   </FormModal>
 {/if}
 
 {#if open && sharing}
-  <FormModal title={`Sharing with "${open.name}"`} description="As if the group were one server: every member you're paired with through the group gets this, beside what you share with it by hand." saveLabel="Save" save={saveSharing} close={() => (sharing = null)}>
+  <FormModal title={`You share with "${open.name}"`} description="One choice for the whole group: every member you're paired with through it gets this." saveLabel="Save" save={saveSharing} close={() => (sharing = null)}>
     {#if uncallable}<Notice>This server can't be called: it shares nothing. What you pick here is kept for when it can be called again.</Notice>{/if}
     <div class="setting stack">
-      <div><div class="label">You offer</div><div class="hint">Your libraries the group's members may take. Each picks, on its side, what it wants of them.</div></div>
+      <div><div class="label">Your libraries</div></div>
       <div class="checks all">
         {#each sharing.ours as l (l.id)}<label class="inline"><input type="checkbox" value={l.id} bind:group={sharing.offer} /> {l.name}{#if kindOf(l)} <span class="hint">({kindOf(l)})</span>{/if}</label>
         {:else}<span class="hint">This server has no library yet.</span>{/each}
       </div>
     </div>
-    <Setting label="Streams at once" hint="For all the group's members together. Pairings by hand keep their own limits, used first.">
+    <Setting label="Streams at once" hint="For all the group's members together. Servers you share with individually keep their own limits, used first.">
       {#snippet children(ids)}<input type="number" min="0" max="50" bind:value={sharing!.limits.streams} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
     </Setting>
     <Setting label="Transcodes among them" hint="Re-encoded video, which is what costs. Your server's own reserve (Features & limits) applies too.">
@@ -452,10 +566,22 @@
     <Setting label="Bitrate cap (kbps)" hint="0: no cap.">
       {#snippet children(ids)}<input type="number" min="0" bind:value={sharing!.limits.bitrateKbps} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
     </Setting>
-    <Setting label="Accept new members by itself" hint={`Off: each request waits for you. On: this server pairs with a new member once it has been in the group ${plural(open.waitDays, 'day')}.`}>
-      {#snippet children(ids)}<input type="checkbox" bind:checked={sharing!.accept} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
-    </Setting>
-    <div class="hint">Now: {limitsText(open.pool)}; {plural(open.offers, 'library', 'libraries')} offered.</div>
+  </FormModal>
+{/if}
+
+{#if open && showing}
+  <FormModal title={`You show from "${open.name}"`} description="Everything its members share with the group shows on your site, now and later. Untick what you don't want." saveLabel="Save" save={saveShows} close={() => (showing = null)}>
+    {#each showing.members as m (m.member)}
+      <div class="setting stack">
+        <div><div class="label">{m.name || 'A server'}</div></div>
+        <div class="checks all">
+          {#each m.libraries as l (l.id)}<label class="inline"><input type="checkbox" checked={!showing.hidden.includes(showKey(m.member, l.id))} onchange={(e) => toggleShown(m.member, l.id, e.currentTarget.checked)} /> {l.name}</label>
+          {:else}<span class="hint">It shares nothing with the group yet, or you aren't paired with it yet.</span>{/each}
+        </div>
+      </div>
+    {:else}
+      <span class="hint">No other member yet.</span>
+    {/each}
   </FormModal>
 {/if}
 
@@ -504,6 +630,21 @@
 {/if}
 
 <style>
+  .summary {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-bottom: 1rem;
+  }
+  .summary .line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .summary .label {
+    font-weight: 600;
+  }
   .fingerprint {
     white-space: nowrap;
     letter-spacing: 0.02em;

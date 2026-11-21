@@ -27,6 +27,10 @@ type NoticeSettings struct {
 	Webhook string `json:"webhook"`
 	// Person emails whoever's access ends, Days before.
 	Person bool `json:"person"`
+	// QuietRequests turns off the admins' email when a server asks to
+	// pair or to join a group (on unless turned off; it needs no other
+	// notice on).
+	QuietRequests bool `json:"quietRequests,omitempty"`
 }
 
 // On reports whether any notice may be sent.

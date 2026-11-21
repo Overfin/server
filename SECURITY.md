@@ -408,6 +408,10 @@ anyone. Paired servers are not trusted at all (rule 94).
     https; signed when the operator makes a key; its address never logged),
     and, before access ends, by email to the person. A notice names the
     account by its label, or by its email with Overfin's own sign-in.
+    One notice is on by default: the admins' email when another server asks
+    to pair, to join one of this server's groups, or, new in a group, to pair
+    with it. It names that server and the group, nothing about people, and
+    carries no link; the Notices page turns it off.
 69. Overfin has no social features: no relations between people, comments,
     likes or messages. Operators who want them build them in their own
     backend, signing people in with the same identity provider.

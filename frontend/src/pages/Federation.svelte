@@ -9,7 +9,7 @@
   import { PageHead, Card, Field, FormModal, Modal, Secret, Setting, Badge, Busy, Empty, Loading, Notice, ask, toast } from '@overfin/ui';
   import { api } from '../lib/api';
   import { ago, day, when, message, plural } from '../lib/format';
-  import FederationGroups, { type Group } from './FederationGroups.svelte';
+  import FederationGroups, { type Group, type JoinWaiting } from './FederationGroups.svelte';
 
   interface Peer {
     id: string;
@@ -54,6 +54,8 @@
     asked?: boolean;
     asks?: boolean;
     keepChoice?: boolean;
+    // joiningGroup: it used an invite to that group, waiting for you.
+    joiningGroup?: string;
   }
   interface Lib {
     id: string;
@@ -131,6 +133,10 @@
   let using = $state(false);
   let pasted = $state('');
   let preview = $state<Preview | null>(null);
+  // Joining a group: what this server shares with it, and its limits.
+  let joinOffer = $state<string[]>([]);
+  let joinLibs = $state<Lib[]>([]);
+  let joinLimits = $state<Limits>({ streams: 2, transcodes: 1, bitrateKbps: 0 });
   let pairing = $state(false);
   // Sharing with a paired server: what we offer, what we want.
   let sharingWith = $state<Peer | null>(null);
@@ -226,14 +232,20 @@
 
   async function read() {
     const p = await api<Preview>('POST', '/admin/api/federation/preview', { code: pasted });
+    joinOffer = [];
+    joinLimits = { streams: 2, transcodes: 1, bitrateKbps: 0 };
+    joinLibs = p.groupName ? await api<Lib[]>('GET', '/admin/api/federation/libraries').catch(() => []) : [];
     setTimeout(() => (preview = p), 0);
   }
 
   async function pair() {
     pairing = true;
     try {
-      await api('POST', '/admin/api/federation/peers', { code: pasted });
-      toast(preview?.groupName ? `Sent. Once the other server's operator accepts, this server joins "${preview.groupName}".` : 'Sent. The other server now waits for its operator to accept.');
+      const n = (v: unknown) => Number(v) || 0;
+      await api('POST', '/admin/api/federation/peers', preview?.groupName
+        ? { code: pasted, offer: joinOffer, limits: { streams: n(joinLimits.streams), transcodes: n(joinLimits.transcodes), bitrateKbps: n(joinLimits.bitrateKbps) } }
+        : { code: pasted });
+      toast(preview?.groupName ? `Sent. Once its owner accepts, this server joins "${preview.groupName}".` : "Sent. Now waiting for the other server's owner to accept.");
       preview = null;
     } catch (err) {
       toast(message(err), true);
@@ -473,7 +485,10 @@
 
   // Servers paired directly, asked, or asking: the Servers list. Those
   // known only through a group are under that group.
-  const direct = $derived((s?.peers ?? []).filter((p) => p.state !== 'paired' || p.individual || p.asked || p.asks || p.keepChoice));
+  const direct = $derived((s?.peers ?? []).filter((p) => !p.joiningGroup && (p.state !== 'paired' || p.individual || p.asked || p.asks || p.keepChoice)));
+  // Servers that used an invite to one of your groups: shown in that group.
+  const joiningPeers = $derived((s?.peers ?? []).filter((p) => p.state === 'ours' && !!p.joiningGroup));
+  const personalInvites = $derived((s?.codes ?? []).filter((c) => !c.group));
 
   async function relation(p: Peer, path: 'individual' | 'unpair' | 'refuse' | 'block', done: string) {
     try {
@@ -519,7 +534,6 @@
   {#snippet actions()}
     {#if s?.available}
       <button type="button" class={s.uncallable ? 'primary' : ''} onclick={useCode}>Use a code</button>
-      {#if !s.uncallable}<button type="button" class="primary" onclick={() => newCode()}>New code</button>{/if}
     {/if}
   {/snippet}
 </PageHead>
@@ -581,7 +595,11 @@
     </Notice>
   {/if}
 
-  <Card title="Servers" description="Servers you paired with directly. Those you know only through a group are under Groups.">
+  <Card title="Individual" description="Servers you share with one by one.">
+    {#snippet foot()}
+      <span class="grow"></span>
+      {#if !s?.uncallable}<button type="button" class="primary" onclick={() => newCode()}>Invite a server</button>{/if}
+    {/snippet}
     <div class="table-wrap">
       <table>
         <thead><tr><th>Server</th><th class="hide-narrow">Status</th><th class="hide-narrow">Key</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
@@ -618,33 +636,35 @@
               </td>
             </tr>
           {:else}
-            <tr><td colspan="4"><Empty>{s.uncallable ? "No server yet: use another server's code." : "No server yet: make a code, or use another server's."}</Empty></td></tr>
+            <tr><td colspan="4"><Empty>{s.uncallable ? "No server yet: use another server's invite (Use a code, at the top)." : "No server yet: invite one, or use another server's invite (Use a code, at the top)."}</Empty></td></tr>
           {/each}
         </tbody>
       </table>
     </div>
-  </Card>
-
-  <FederationGroups groups={s.groups ?? []} uncallable={s.uncallable} reload={load} invite={newCode} manage={manageById} pairDirectly={(id) => { const p = (s?.peers ?? []).find((x) => x.id === id); if (p) pairDirectly(p); }} />
-
-  {#if s.codes?.length}
-    <Card title="Codes not used yet">
+    {#if personalInvites.length}
+      <div class="label invites-title">Invites not used yet</div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>For</th><th class="hide-narrow">Works until</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
           <tbody>
-            {#each s.codes as c (c.id)}
+            {#each personalInvites as c (c.id)}
               <tr>
-                <td><div class="name">{c.note || 'No note'}</div><div class="hint">{c.group ? `joins "${groupName(c.group)}" · ` : ''}{c.uses > 1 ? `${c.uses} uses left · ` : ''}made {ago(c.createdAt)}</div><div class="hint only-narrow">works until {when(c.expiresAt)}</div></td>
-                <td class="hint hide-narrow">{when(c.expiresAt)}</td>
+                <td><div class="name">{c.note || 'No note'}</div><div class="hint">made {ago(c.createdAt)} · works until {when(c.expiresAt)}</div></td>
                 <td class="row-actions"><button type="button" class="small danger" onclick={() => withdraw(c)}>Withdraw</button></td>
               </tr>
             {/each}
           </tbody>
         </table>
       </div>
-    </Card>
-  {/if}
+    {/if}
+  </Card>
+
+  <FederationGroups groups={s.groups ?? []} uncallable={s.uncallable} reload={load} invite={newCode}
+    pairDirectly={(id) => { const p = (s?.peers ?? []).find((x) => x.id === id); if (p) pairDirectly(p); }}
+    joining={joiningPeers} invites={s.codes ?? []}
+    acceptJoining={(j: JoinWaiting) => { const p = (s?.peers ?? []).find((x) => x.id === j.id); if (p) accept(p); }}
+    refuseJoining={(j: JoinWaiting) => { const p = (s?.peers ?? []).find((x) => x.id === j.id); if (p) end(p); }}
+    withdraw={withdraw} />
+
 {/if}
 
 {#if exported}
@@ -682,19 +702,13 @@
 {/if}
 
 {#if making}
-  <FormModal title="New code" description="A code pairs a server with this one, or brings it into one of your groups. You accept each server that uses it, after comparing fingerprints." saveLabel="Make the code" save={make} close={() => (making = false)}>
-    <Field label="For" wide hint="A note for you, to tell your codes apart."><input type="text" bind:value={note} placeholder="e.g. Marc's server" maxlength="80" /></Field>
-    {#if invitable.length}
-      <Field label="Leads to" wide hint="A group's code: the server joins the group once you accept it, then asks every member to pair.">
-        <select bind:value={codeGroup}>
-          <option value="">Pairing with this server</option>
-          {#each invitable as g (g.id)}<option value={g.id}>Joining the group "{g.name}"</option>{/each}
-        </select>
-      </Field>
+  <FormModal title={codeGroup ? `Invite to "${groupName(codeGroup)}"` : 'Invite a server'} description={codeGroup ? "The server's owner uses it on their server; you accept it, after comparing fingerprints, and it joins the group." : "The server's owner uses it on their server; you accept it, after comparing fingerprints, and you share with each other one by one."} saveLabel="Make the invite" save={make} close={() => (making = false)}>
+    <Field label="For" wide hint="A note for you, to tell your invites apart."><input type="text" bind:value={note} placeholder="e.g. Marc's server" maxlength="80" /></Field>
+    {#if codeGroup}
+      <Setting label="Servers that may use it" hint="1 to 100. Each one still waits for you to accept it.">
+        {#snippet children(ids)}<input type="number" min="1" max="100" bind:value={uses} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+      </Setting>
     {/if}
-    <Setting label="Servers that may use it" hint="1 to 100. Each one still waits for you to accept it.">
-      {#snippet children(ids)}<input type="number" min="1" max="100" bind:value={uses} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
-    </Setting>
     <Setting label="Works for" hint="Then it stops working, used or not.">
       {#snippet children(ids)}
         <select bind:value={hours} aria-labelledby={ids.label} aria-describedby={ids.hint}>
@@ -707,16 +721,16 @@
       {/snippet}
     </Setting>
     {#if s?.canMail}
-      <Field label="Email it to" wide hint="Optional: the other server's operator's address. The code is shown here too. Compare fingerprints by phone or another way you trust, not by email."><input type="email" bind:value={mailTo} placeholder="operator@example.org" maxlength="254" autocomplete="off" /></Field>
+      <Field label="Email it to" wide hint="Optional: the other server's owner's address. The invite is shown here too. Compare fingerprints by phone or another way you trust, not by email."><input type="email" bind:value={mailTo} placeholder="owner@example.org" maxlength="254" autocomplete="off" /></Field>
     {/if}
   </FormModal>
 {/if}
 
 {#if made}
-  <Modal title="Pairing code" close={() => (made = null)}>
+  <Modal title={made.group ? `Invite to "${groupName(made.group)}"` : 'Invite'} close={() => (made = null)}>
     {#if made.mailedTo}<Notice>Sent to {made.mailedTo}.</Notice>{/if}
     {#if made.mailProblem}<Notice warn>The email didn't go: {made.mailProblem} Copy the code below and send it another way.</Notice>{/if}
-    <Secret value={made.code} after={`Send it to the other server's operator however you like. They paste it in their panel, under Federation, "Use a code"; then their server appears here, for you to accept once you've compared fingerprints${made.group ? `, and it joins "${groupName(made.group)}"` : ''}. It works ${made.uses > 1 ? `for ${made.uses} servers` : 'once'}, until ${when(made.expiresAt)}.`}>Copy it now: it won't be shown again.</Secret>
+    <Secret value={made.code} after={`Send it to the other server's owner however you like; they use it on their server (on Overfin: Federation, "Use a code"). Their server then waits for you ${made.group ? `in "${groupName(made.group)}"` : 'under Individual'}, to accept once you've compared fingerprints. It works ${made.uses > 1 ? `for ${made.uses} servers` : 'once'}, until ${when(made.expiresAt)}.`}>Copy it now: it won't be shown again.</Secret>
     {#snippet foot()}
       <span class="grow"></span>
       <button type="button" class="primary" onclick={() => (made = null)}>Done</button>
@@ -725,7 +739,7 @@
 {/if}
 
 {#if using}
-  <FormModal title="Use a code" description="The code another server's operator sent you." saveLabel="Read the code" save={read} close={() => (using = false)}>
+  <FormModal title="Use a code" description="The invite another server's owner sent you: to pair one by one, or to join a group." saveLabel="Read the code" save={read} close={() => (using = false)}>
     <Field label="Code" wide><textarea bind:value={pasted} rows="4" spellcheck="false" autocomplete="off" placeholder="msfp-pair-0.…" required></textarea></Field>
   </FormModal>
 {/if}
@@ -780,7 +794,7 @@
 {#if preview}
   <Modal title={preview.groupName ? `Join the group "${preview.groupName}"?` : 'Pair with this server?'} close={() => (preview = null)}>
     {#if preview.groupName}
-      <Notice>This code is an invitation to the group "{preview.groupName}", from the server below. Once its operator accepts, this server joins the group and asks every member to pair; each one answers for itself. You then see the members, and their requests, under Groups.</Notice>
+      <Notice>An invite to the group "{preview.groupName}", from the server below. Once its owner accepts, this server joins the group and asks every member to pair.</Notice>
     {/if}
     <Setting label="Address">
       {#snippet children()}<code>{preview?.address}</code>{/snippet}
@@ -788,11 +802,26 @@
     {#if preview?.address?.startsWith('http://')}
       <Notice warn>That server's address is plain http, accepted only because the test setting <code>federation.test_plain_http</code> is on here. Never on a server in use.</Notice>
     {/if}
-    <Setting stack label="Fingerprint" hint="Compare it with the other operator, by phone or a message you trust: if it differs, the code was changed on the way.">
+    <Setting stack label="Fingerprint" hint="Compare it with the other server's owner, by phone or a message you trust: if it differs, the invite was changed on the way.">
       {#snippet children()}<code class="fingerprint">{preview?.fingerprint}</code>{/snippet}
     </Setting>
     {#if preview.expired}
-      <Notice warn>This code stopped working {ago(preview.expiresAt)}: ask for a new one.</Notice>
+      <Notice warn>This invite stopped working {ago(preview.expiresAt)}: ask for a new one.</Notice>
+    {/if}
+    {#if preview.groupName && !preview.expired}
+      <div class="setting stack">
+        <div><div class="label">You share with "{preview.groupName}"</div><div class="hint">Your libraries, for all the group's members. You can change it later in the group.</div></div>
+        <div class="checks all">
+          {#each joinLibs as l (l.id)}<label class="inline"><input type="checkbox" value={l.id} bind:group={joinOffer} /> {l.name}</label>
+          {:else}<span class="hint">This server has no library yet.</span>{/each}
+        </div>
+      </div>
+      <Setting label="Streams at once" hint="For all the group's members together.">
+        {#snippet children(ids)}<input type="number" min="0" max="50" bind:value={joinLimits.streams} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+      </Setting>
+      <Setting label="Transcodes among them" hint="Re-encoded video, which is what costs.">
+        {#snippet children(ids)}<input type="number" min="0" max="50" bind:value={joinLimits.transcodes} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+      </Setting>
     {/if}
     {#snippet foot()}
       <span class="grow"></span>
@@ -815,6 +844,10 @@
   }
   .only-narrow {
     display: none;
+  }
+  .invites-title {
+    font-weight: 600;
+    margin: 1rem 0 0.4rem;
   }
   .key-text {
     max-width: 28em;

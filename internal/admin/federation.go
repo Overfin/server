@@ -91,11 +91,14 @@ type peerJSON struct {
 	// pair directly and waits; Asks, the other server asks, waiting for
 	// you; KeepChoice, its group was dissolved and you choose whether to
 	// stay paired.
-	Groups     []string `json:"groups,omitempty"`
-	Individual bool     `json:"individual"`
-	Asked      bool     `json:"asked,omitempty"`
-	Asks       bool     `json:"asks,omitempty"`
-	KeepChoice bool     `json:"keepChoice,omitempty"`
+	Groups []string `json:"groups,omitempty"`
+	// JoiningGroup: it used one of this server's invites to a group and
+	// waits for you: a request to join that group, shown there.
+	JoiningGroup string `json:"joiningGroup,omitempty"`
+	Individual   bool   `json:"individual"`
+	Asked        bool   `json:"asked,omitempty"`
+	Asks         bool   `json:"asks,omitempty"`
+	KeepChoice   bool   `json:"keepChoice,omitempty"`
 }
 
 // movingJSON is a peer's new address, being checked: since when that
@@ -142,7 +145,8 @@ func peerOf(v msfp.PeerView) peerJSON {
 		Offers: v.Offers, Wants: v.Wants, WantsGone: v.WantsGone, OtherVersion: v.Core < 0,
 		Commitment: v.CommitmentFrom, SuspendedAt: stamp(v.Suspended), OurKey: v.OurKey, RotationAnswer: v.RotationAnswer,
 		NotMoved: v.NotMoved, MoveLate: v.MoveLate, CallsFailed: v.CallsFailed, Groups: v.Groups,
-		Individual: v.Individual, Asked: v.IndividualAsked, Asks: v.IndividualAsks, KeepChoice: v.KeepChoice}
+		Individual: v.Individual, Asked: v.IndividualAsked, Asks: v.IndividualAsks, KeepChoice: v.KeepChoice,
+		JoiningGroup: v.JoiningGroup}
 	if v.Pending != nil {
 		j.Pending = &pendingJSON{Fingerprint: v.Pending.Fingerprint, Date: stamp(v.Pending.At)}
 	}
@@ -450,15 +454,32 @@ func (p *Panel) usePairingCode(w http.ResponseWriter, r *http.Request, s *sessio
 	}
 	var req struct {
 		Code string `json:"code"`
+		// For a group's invite: what this server shares with the group,
+		// and the limits it lends it, set as it joins.
+		Offer  []string    `json:"offer"`
+		Limits *limitsJSON `json:"limits"`
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request"})
 		return
 	}
-	peer, err := eng.RedeemCode(r.Context(), req.Code)
+	ctx := r.Context()
+	pv, _ := eng.ReadCode(ctx, req.Code)
+	peer, err := eng.RedeemCode(ctx, req.Code)
 	if err != nil {
 		p.pairingProblem(w, err)
 		return
+	}
+	if pv.Group != "" {
+		if req.Limits != nil {
+			l := msfp.Limits{Streams: req.Limits.Streams, Transcodes: req.Limits.Transcodes, BitrateKbps: req.Limits.BitrateKbps}
+			if err := eng.SetGroupPool(ctx, pv.Group, l); err != nil {
+				p.Logger.Warn("federation: the limits for a group being joined couldn't be set", "group", pv.Group, "error", err)
+			}
+		}
+		if err := eng.SetGroupOffers(ctx, pv.Group, req.Offer); err != nil {
+			p.Logger.Warn("federation: what is shared with a group being joined couldn't be set", "group", pv.Group, "error", err)
+		}
 	}
 	p.Logger.Info("a pairing code was used in the control panel", "peer", peer.ID, "by", s.logID)
 	writeJSON(w, http.StatusCreated, peerOf(peer))
@@ -548,6 +569,30 @@ func (p *Panel) endPeer(w http.ResponseWriter, r *http.Request, s *session) {
 	}
 	p.Logger.Info("a pairing was ended in the control panel", "peer", r.PathValue("id"), "by", s.logID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ourLibraries lists this server's libraries: what it may share, before a
+// group exists (creating or joining one).
+func (p *Panel) ourLibraries(w http.ResponseWriter, r *http.Request, _ *session) {
+	eng := p.fed(w)
+	if eng == nil {
+		return
+	}
+	libs, err := eng.HostLibraries(r.Context())
+	if err != nil {
+		p.fail(w, "listing this server's libraries", err)
+		return
+	}
+	type lib struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Kind string `json:"kind"`
+	}
+	out := []lib{}
+	for _, l := range libs {
+		out = append(out, lib{ID: l.ID, Name: l.Name, Kind: l.Kind})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // pairDirectly asks a server known through a group to pair directly, or

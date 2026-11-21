@@ -14,6 +14,9 @@
     admins: boolean;
     person: boolean;
     webhook: string;
+    // quietRequests: the admins aren't emailed when a server asks to pair
+    // or to join a group (on unless turned off).
+    quietRequests?: boolean;
     signed: boolean;
     managed: boolean;
     mail: boolean;
@@ -28,6 +31,7 @@
   let admins = $state(false);
   let person = $state(false);
   let webhook = $state('');
+  let requests = $state(true);
   let status = $state<{ text: string; kind: '' | 'ok' | 'error' }>({ text: '', kind: '' });
   // key: the webhook's new key, shown once.
   let key = $state('');
@@ -36,6 +40,7 @@
     try {
       n = await api<Notices>('GET', '/admin/api/notices');
       ({ joined, expiring, expired, days, admins, person, webhook } = n);
+      requests = !n.quietRequests;
     } catch (err) {
       problem = message(err);
     }
@@ -43,10 +48,10 @@
 
   const noEmail = $derived(!n ? '' : !n.managed ? 'Only with Overfin\'s own sign-in: with an identity provider, Overfin doesn\'t know people\'s addresses.'
     : !n.mail ? 'Email isn\'t set up yet (Server, Email).' : '');
-  const values = () => ({ joined, expiring, expired, days: numberIn(days, 'Days before'), admins, webhook: webhook.trim(), person });
+  const values = () => ({ joined, expiring, expired, days: numberIn(days, 'Days before'), admins, webhook: webhook.trim(), person, quietRequests: !requests });
   // Leaving with changes not saved asks first.
   $effect(() => unsaved(() => !!n && (joined !== n.joined || expiring !== n.expiring || expired !== n.expired || String(days) !== String(n.days) ||
-    admins !== n.admins || person !== n.person || webhook.trim() !== n.webhook)));
+    admins !== n.admins || person !== n.person || webhook.trim() !== n.webhook || requests === !!n.quietRequests)));
   const failed = (err: Error) => (status = { text: err.message, kind: 'error' });
 
   async function save() {
@@ -121,6 +126,12 @@
     {#if key}
       <Secret value={key} after={'Each post carries X-Overfin-Signature: "sha256=" and the HMAC-SHA256 of its body with this key, in hex.'}>The webhook's key. Copy it now: it won't be shown again.</Secret>
     {/if}
+  </Card>
+
+  <Card title="Federation" description="When another server asks to pair with this one, or to join one of your groups.">
+    <Setting label="Email the admins when a server asks" hint={noEmail || 'Each request once, saying which server asks for what. You answer in the control panel, under Federation.'}>
+      {#snippet children(ids)}<input type="checkbox" bind:checked={requests} disabled={!n!.managed} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+    </Setting>
   </Card>
 
   <Card title="Warning the person" description="Before their access ends, the person gets an email in their language, so they can ask for more time.">

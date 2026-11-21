@@ -73,3 +73,12 @@ groupIntro = "L’opérateur de {site} invite votre serveur au groupe {group}. C
 check = "Avant d’accepter votre serveur, l’opérateur de {site} comparera les empreintes avec vous : par téléphone ou par un autre moyen de confiance, jamais par courriel."
 expires = "Ce code fonctionne jusqu’au {date}."
 why = "Vous recevez ce courriel parce qu’un administrateur de {site} a envoyé ce code à cette adresse."
+
+[request]
+pairSubject = "{name} demande à s’associer à {site}"
+pair = "Le serveur {name} demande à s’associer à {site}."
+joinSubject = "{name} demande à rejoindre {group}"
+join = "Le serveur {name} demande à rejoindre le groupe {group}."
+memberSubject = "{name}, nouveau dans {group}, demande à s’associer à {site}"
+member = "Le serveur {name}, nouveau dans le groupe {group}, demande à s’associer à {site}."
+why = "Vous recevez ce courriel parce que vous administrez {site}. Les « Notices » du panneau de contrôle désactivent ces courriels."

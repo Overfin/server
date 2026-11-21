@@ -1,0 +1,3 @@
+{{define "subject"}}{{if eq .Asks "join"}}{{t "request.joinSubject"}}{{else if eq .Asks "member"}}{{t "request.memberSubject"}}{{else}}{{t "request.pairSubject"}}{{end}}{{end}}
+{{define "content"}}{{if eq .Asks "join"}}{{t "request.join"}}{{else if eq .Asks "member"}}{{t "request.member"}}{{else}}{{t "request.pair"}}{{end}}{{end}}
+{{define "why"}}{{t "request.why"}}{{end}}

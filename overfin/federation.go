@@ -207,11 +207,79 @@ func (outboundDialer) Dial(ctx context.Context, network, addr string) (net.Conn,
 
 // fedNotifier hears the engine's events: each is logged; a paired
 // server's titles read wake what fetches TMDB's data for new titles; a
-// playback on a peer ended there stops the viewer's player here.
-type fedNotifier struct{ sh *shared }
+// playback on a peer ended there stops the viewer's player here; a server
+// asking something is emailed to the admins (notices.Request), once.
+type fedNotifier struct {
+	sh *shared
+	// asked are the requests already emailed (by peer or mail), so that a
+	// RelationsChanged repeated sends nothing more.
+	mu    sync.Mutex
+	asked map[string]bool
+}
+
+// request emails the admins about a request, once per key.
+func (n *fedNotifier) request(key, asks, server, group string) {
+	n.mu.Lock()
+	if n.asked == nil {
+		n.asked = map[string]bool{}
+	}
+	seen := n.asked[key]
+	n.asked[key] = true
+	n.mu.Unlock()
+	if !seen && n.sh.notices != nil {
+		n.sh.notices.Request(asks, server, group)
+	}
+}
+
+// requests emails the admins about what a server asks: to pair with this
+// server, to join one of its groups, as a new member to pair with it.
+func (n *fedNotifier) requests(ev msfp.Event) {
+	eng := n.sh.fed.current()
+	switch ev := ev.(type) {
+	case msfp.PeerWaiting:
+		group := ""
+		if eng != nil {
+			if p, err := eng.Peer(context.Background(), ev.Peer); err == nil && p.JoiningGroup != "" {
+				if g, err := eng.Group(context.Background(), p.JoiningGroup); err == nil {
+					group = g.Name
+				}
+			}
+		}
+		if group != "" {
+			n.request("peer:"+ev.Peer, "join", ev.Name, group)
+		} else {
+			n.request("peer:"+ev.Peer, "pair", ev.Name, "")
+		}
+	case msfp.GroupJoinWaiting:
+		n.request("join:"+ev.Group+":"+ev.Peer, "join", ev.Name, ev.GroupName)
+	case msfp.GroupRequestWaiting:
+		n.request("mail:"+ev.Mail, "member", ev.Name, ev.GroupName)
+	case msfp.RelationsChanged:
+		if eng == nil {
+			return
+		}
+		p, err := eng.Peer(context.Background(), ev.Peer)
+		if err != nil {
+			return
+		}
+		key := "individual:" + ev.Peer
+		if !p.IndividualAsks {
+			// Answered or withdrawn: a new ask later is told again.
+			n.mu.Lock()
+			delete(n.asked, key)
+			n.mu.Unlock()
+			return
+		}
+		n.request(key, "pair", p.Name, "")
+	}
+}
 
 func (n *fedNotifier) Notify(ev msfp.Event) {
 	sh := n.sh
+	switch ev.(type) {
+	case msfp.PeerWaiting, msfp.GroupJoinWaiting, msfp.GroupRequestWaiting, msfp.RelationsChanged:
+		go n.requests(ev)
+	}
 	switch ev := ev.(type) {
 	case msfp.CatalogReadEnded:
 		if ev.Err != nil {

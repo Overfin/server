@@ -48,7 +48,7 @@ var overfinLight []byte
 var overfinDark []byte
 
 // Names are the emails Overfin sends.
-var Names = []string{"verify", "reset", "setup", "exists", "invite", "test", "joined", "expiring", "expired", "ending", "code"}
+var Names = []string{"verify", "reset", "setup", "exists", "invite", "test", "joined", "expiring", "expired", "ending", "code", "request"}
 
 // texts are the built-in sentences, by language ("en", "fr") then key
 // ("poweredBy", "signin.subject"…).
@@ -113,6 +113,10 @@ type data struct {
 	// Code is a federation pairing code sent to another server's
 	// operator; Group, the group it invites to ("" for none).
 	Code, Group string
+	// Asks is the "request" email's: what a server asks the admins, "pair"
+	// (with this server), "join" (Group) or "member" (new in Group, to pair
+	// with this server); Name is that server.
+	Asks string
 }
 
 // Vars are an email's own values.
@@ -129,6 +133,9 @@ type Vars struct {
 	// and the group it invites to ("" for none). Date is when it stops
 	// working.
 	Code, Group string
+	// Asks is the "request" email's: what a server (Name) asks the admins,
+	// "pair", "join" (Group) or "member" (new in Group).
+	Asks string
 }
 
 // Write writes an email in a language (a regional tag such as "fr-CA").
@@ -149,7 +156,7 @@ func (w *Writer) write(ctx context.Context, name, lang string, v Vars) (mail.Mes
 		return mail.Message{}, err
 	}
 	d := data{Lang: lang, Site: brandName(br), Custom: br.On, Light: theme.Colors(true), Dark: theme.Colors(false),
-		Link: v.Link, Name: v.Name, Date: Day(v.Date, lang), Invitation: v.Invitation, Code: v.Code, Group: v.Group}
+		Link: v.Link, Name: v.Name, Date: Day(v.Date, lang), Invitation: v.Invitation, Code: v.Code, Group: v.Group, Asks: v.Asks}
 	var images []mail.Image
 	// The banner on the dark header: the operator's, as a picture email
 	// apps show (not SVG), else their name as text; Overfin's otherwise.

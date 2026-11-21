@@ -367,3 +367,34 @@ func TestFederationRelations(t *testing.T) {
 		t.Fatalf("block nobody: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// A group created with what it's shared and its limits; this server's
+// libraries listed for it; what it shows here, every member's libraries
+// shown unless hidden.
+func TestFederationGroupCreateAndShows(t *testing.T) {
+	a, _, _ := fedPanel(t, "A")
+	if rec := a.do("GET", "/admin/api/federation/libraries", "", nil); rec.Code != 200 || !strings.HasPrefix(strings.TrimSpace(rec.Body.String()), "[") {
+		t.Fatalf("libraries: %d %s", rec.Code, rec.Body)
+	}
+	rec := a.do("POST", "/admin/api/federation/groups", `{"name":"Family","capPerDay":5,"offer":[],"limits":{"streams":3,"transcodes":1,"bitrateKbps":0}}`, nil)
+	var g struct {
+		ID   string
+		Pool limitsJSON
+	}
+	json.Unmarshal(rec.Body.Bytes(), &g)
+	if rec.Code != 201 || g.Pool.Streams != 3 {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	if rec := a.do("GET", "/admin/api/federation/groups/"+g.ID+"/shows", "", nil); rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Fatalf("shows: %d %s", rec.Code, rec.Body)
+	}
+	if rec := a.do("PUT", "/admin/api/federation/groups/"+g.ID+"/shows", `{"hidden":[{"member":"m","library":"l"}]}`, nil); rec.Code != 204 {
+		t.Fatalf("set shows: %d %s", rec.Code, rec.Body)
+	}
+	if rec := a.do("PUT", "/admin/api/federation/groups/"+g.ID+"/answer", `{"accept":true}`, nil); rec.Code != 204 {
+		t.Fatalf("automatically accept: %d %s", rec.Code, rec.Body)
+	}
+	if s := readGroups(t, a); len(s.Groups) != 1 || !s.Groups[0].Accept {
+		t.Fatalf("A's group: %+v", s.Groups)
+	}
+}

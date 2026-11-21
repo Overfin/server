@@ -174,3 +174,22 @@ func TestPairingCode(t *testing.T) {
 		}
 	}
 }
+
+// The request notice says who asks for what, in each of its three forms,
+// and carries no link.
+func TestRequestNotice(t *testing.T) {
+	w := newWriter(t)
+	for asks, want := range map[string]string{
+		"pair":   "The server Old asks to pair with",
+		"join":   "The server Old asks to join the group Family.",
+		"member": "The server Old, new in the group Family, asks to pair with",
+	} {
+		m, err := w.write(context.Background(), "request", "en", Vars{Asks: asks, Name: "Old", Group: "Family"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(m.Text, want) || strings.Contains(m.Text, "http") {
+			t.Errorf("%s: %q", asks, m.Text)
+		}
+	}
+}
