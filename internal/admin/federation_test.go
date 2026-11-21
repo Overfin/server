@@ -27,7 +27,7 @@ func fedPanel(t *testing.T, name string) (*browser, *msfp.Engine, *store.Store) 
 	t.Cleanup(ts.Close)
 	e, err := msfp.Open(context.Background(), msfp.Config{Address: ts.URL, Store: db.MSFP(), Name: func() string { return name },
 		Pins: []string{wire.Pin(ts.Certificate())}, AllowLoopback: true, Clock: secondsClock{},
-		Parts: []string{"catalog", "playback", "media", "video"}, Catalog: store.MSFPCatalog{S: db},
+		Parts: []string{"catalog", "playback", "media", "video", "groups"}, Catalog: store.MSFPCatalog{S: db},
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +87,7 @@ func TestFederationPanel(t *testing.T) {
 	rec := a.do("POST", "/admin/api/federation/codes", `{"note":"  for   B "}`, nil)
 	var made struct{ ID, Note, Code string }
 	json.Unmarshal(rec.Body.Bytes(), &made)
-	if rec.Code != 201 || !strings.HasPrefix(made.Code, "msfp-pair-1.") || made.Note != "for B" {
+	if rec.Code != 201 || !strings.HasPrefix(made.Code, "msfp-pair-0.") || made.Note != "for B" {
 		t.Fatalf("code: %d %s", rec.Code, rec.Body)
 	}
 	sa := readState(t, a)

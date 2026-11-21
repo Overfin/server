@@ -82,6 +82,11 @@ type peerJSON struct {
 	// couldn't connect.
 	Inbound     string `json:"inbound,omitempty"`
 	CallsFailed bool   `json:"callsFailed,omitempty"`
+
+	// Groups are the IDs of the groups this pairing was made or kept
+	// through; ByHand, whether it was also paired with a code of its own.
+	Groups []string `json:"groups,omitempty"`
+	ByHand bool     `json:"byHand"`
 }
 
 // movingJSON is a peer's new address, being checked: since when that
@@ -125,9 +130,9 @@ func stamp(t time.Time) string {
 func peerOf(v msfp.PeerView) peerJSON {
 	j := peerJSON{ID: v.ID, Name: v.Name, Address: v.Address, State: string(v.State),
 		Fingerprint: v.Fingerprint, CreatedAt: stamp(v.Created), PairedAt: stamp(v.Paired), SeenAt: stamp(v.Seen),
-		Offers: v.Offers, Wants: v.Wants, WantsGone: v.WantsGone, OtherVersion: v.Core == 0,
+		Offers: v.Offers, Wants: v.Wants, WantsGone: v.WantsGone, OtherVersion: v.Core < 0,
 		Commitment: v.CommitmentFrom, SuspendedAt: stamp(v.Suspended), OurKey: v.OurKey, RotationAnswer: v.RotationAnswer,
-		NotMoved: v.NotMoved, MoveLate: v.MoveLate, CallsFailed: v.CallsFailed}
+		NotMoved: v.NotMoved, MoveLate: v.MoveLate, CallsFailed: v.CallsFailed, Groups: v.Groups, ByHand: v.ByHand}
 	if v.Pending != nil {
 		j.Pending = &pendingJSON{Fingerprint: v.Pending.Fingerprint, Date: stamp(v.Pending.At)}
 	}
@@ -156,12 +161,16 @@ type codeJSON struct {
 	Note      string `json:"note"`
 	CreatedAt string `json:"createdAt"`
 	ExpiresAt string `json:"expiresAt"`
+	// Uses is how many more servers may use it; Group the group it
+	// invites to ("" for none).
+	Uses  int    `json:"uses"`
+	Group string `json:"group,omitempty"`
 	// Code is the code itself, only in the answer that makes it.
 	Code string `json:"code,omitempty"`
 }
 
 func codeOf(c msfp.CodeView) codeJSON {
-	return codeJSON{ID: c.ID, Note: c.Note, CreatedAt: stamp(c.Created), ExpiresAt: stamp(c.Expires)}
+	return codeJSON{ID: c.ID, Note: c.Note, CreatedAt: stamp(c.Created), ExpiresAt: stamp(c.Expires), Uses: c.Uses, Group: c.Group}
 }
 
 // engine is federation now, nil without it.
@@ -230,10 +239,15 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 	for _, v := range peers {
 		outPeers = append(outPeers, peerCounted(v, counts))
 	}
+	groups, err := p.groups(r, eng, peers)
+	if err != nil {
+		p.fail(w, "listing groups", err)
+		return
+	}
 	out := map[string]any{"available": true, "address": sv.Address, "uncallable": sv.Uncallable, "canSet": p.Uncallable != nil,
 		// The test setting federation.test_plain_http, on: said so.
 		"testPlainHTTP": strings.HasPrefix(sv.Address, "http://"),
-		"fingerprint":   sv.Fingerprint, "codes": outCodes, "peers": outPeers,
+		"fingerprint":   sv.Fingerprint, "codes": outCodes, "peers": outPeers, "groups": groups,
 		"nextKey": map[string]any{"fingerprint": sv.NextKey, "onServer": sv.NextOnServer}}
 	// A change of this server's key under way: since when, until when the
 	// old key is kept.
@@ -258,12 +272,28 @@ func (p *Panel) createPairingCode(w http.ResponseWriter, r *http.Request, s *ses
 	}
 	var req struct {
 		Note string `json:"note"`
+		// Group is a group's ID, for a code that invites to it; Uses how
+		// many servers may use it (0: one); Hours how long it works (0:
+		// 24).
+		Group string `json:"group"`
+		Uses  int    `json:"uses"`
+		Hours int    `json:"hours"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request"})
 		return
 	}
-	text, c, err := eng.MakeCode(r.Context(), req.Note)
+	text, c, err := eng.MakeCodeWith(r.Context(), msfp.CodeOptions{Note: req.Note, Group: req.Group, Uses: req.Uses,
+		Lifetime: time.Duration(req.Hours) * time.Hour})
+	if errors.Is(err, msfp.ErrCodeOptions) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
+			"detail": "A code serves 1 to 100 servers, and works from 1 hour to 30 days."})
+		return
+	}
+	if req.Group != "" && (errors.Is(err, msfp.ErrNotFound) || errors.Is(err, msfp.ErrNoRight) || errors.Is(err, msfp.ErrNoGroups)) {
+		p.groupProblem(w, "making a group's code", err)
+		return
+	}
 	if errors.Is(err, msfp.ErrNoCodes) {
 		writeJSON(w, http.StatusConflict, map[string]string{"type": "no-codes",
 			"detail": "This server can't be called: it makes no codes. Ask the other server's operator for one, and use it here."})
@@ -341,15 +371,18 @@ func (p *Panel) previewPairingCode(w http.ResponseWriter, r *http.Request, _ *se
 		// Shown anyway, said to be over: which server it was for still
 		// helps its operator, who is asked for a new one.
 		if old, perr := wire.ParseCode(req.Code); perr == nil {
-			c, err, expired = msfp.CodePreview{Address: old.Address, Fingerprint: wire.Fingerprint(old.Key), Expires: old.Expires}, nil, true
+			c, err, expired = msfp.CodePreview{Address: old.Address, Fingerprint: wire.Fingerprint(old.Key), Expires: old.Expires,
+				GroupName: old.GroupName}, nil, true
 		}
 	}
 	if err != nil {
 		p.pairingProblem(w, err)
 		return
 	}
+	// A group's code: this server joins the group once the code's maker
+	// accepts it, then pairs with each member that accepts it.
 	writeJSON(w, http.StatusOK, map[string]any{"address": c.Address, "fingerprint": c.Fingerprint,
-		"expiresAt": stamp(c.Expires), "expired": expired})
+		"expiresAt": stamp(c.Expires), "expired": expired, "groupName": c.GroupName})
 }
 
 func (p *Panel) usePairingCode(w http.ResponseWriter, r *http.Request, s *session) {
@@ -464,7 +497,7 @@ func (p *Panel) pairingProblem(w http.ResponseWriter, err error) {
 	detail := ""
 	switch {
 	case errors.Is(err, msfp.ErrCodeInvalid):
-		detail = "That isn't a pairing code. Paste the whole code, starting with msfp-pair-1."
+		detail = "That isn't a pairing code. Paste the whole code, starting with msfp-pair-0."
 	case errors.Is(err, msfp.ErrPlainHTTP):
 		detail = "That code is for a server at a plain http:// address. Servers pair over HTTPS only: ask its operator to give it an https address, then a new code."
 	case errors.Is(err, msfp.ErrOwnCode):
@@ -472,9 +505,9 @@ func (p *Panel) pairingProblem(w http.ResponseWriter, err error) {
 	case errors.Is(err, msfp.ErrAlreadyPeer):
 		detail = "That server is already in the list."
 	case errors.Is(err, msfp.ErrCodeExpired):
-		detail = "That code stopped working: it's more than a day old. Ask for a new one."
+		detail = "That code stopped working: its time is up. Ask for a new one."
 	case errors.Is(err, msfp.ErrCodeRefused):
-		detail = "The other server refused the code: it was used, withdrawn, or is more than a day old. Ask for a new one."
+		detail = "The other server refused the code: it was used up, withdrawn, or its time is up. Ask for a new one."
 	case errors.Is(err, msfp.ErrRefusedDestination):
 		detail = "That code is for an address this server never connects to (a local or private one). Ask its operator for a code with its public address."
 	case errors.Is(err, msfp.ErrCertificateRefused):

@@ -9,6 +9,7 @@
   import { PageHead, Card, Field, FormModal, Modal, Secret, Setting, Badge, Busy, Empty, Loading, Notice, ask, toast } from '@overfin/ui';
   import { api } from '../lib/api';
   import { ago, day, when, message, plural } from '../lib/format';
+  import FederationGroups, { type Group } from './FederationGroups.svelte';
 
   interface Peer {
     id: string;
@@ -44,6 +45,10 @@
     // this server's last calls to it couldn't connect.
     inbound?: 'no' | 'confirming';
     callsFailed?: boolean;
+    // The groups this pairing was made or kept through; byHand, whether it
+    // was also paired with a code of its own.
+    groups?: string[];
+    byHand: boolean;
   }
   interface Lib {
     id: string;
@@ -73,6 +78,9 @@
     note: string;
     createdAt: string;
     expiresAt: string;
+    // How many more servers may use it; the group it invites to.
+    uses: number;
+    group?: string;
   }
   interface State {
     available: boolean;
@@ -85,6 +93,7 @@
     fingerprint?: string;
     codes?: Code[];
     peers?: Peer[];
+    groups?: Group[];
     nextKey?: { fingerprint: string; onServer: boolean };
     rotation?: { since: string; until: string };
     move?: { former: string; since: string; until: string; moved: number; of: number; waiting: boolean };
@@ -94,6 +103,8 @@
     fingerprint: string;
     expiresAt: string;
     expired: boolean;
+    // A group's code: the group it invites to.
+    groupName?: string;
   }
 
   let s = $state<State | null>(null);
@@ -101,7 +112,12 @@
   // Making a code: its note, then the code itself, shown once.
   let making = $state(false);
   let note = $state('');
-  let made = $state<{ note: string; code: string } | null>(null);
+  // A group's code: the group's ID; how many servers may use it, and for
+  // how many hours it works.
+  let codeGroup = $state('');
+  let uses = $state(1);
+  let hours = $state(24);
+  let made = $state<{ note: string; code: string; uses: number; group?: string; expiresAt: string } | null>(null);
   // Using another server's code: pasted, then what it says, to confirm.
   let using = $state(false);
   let pasted = $state('');
@@ -162,13 +178,21 @@
   }, 10_000);
   onDestroy(() => clearInterval(timer));
 
-  function newCode() {
+  function newCode(g?: Group) {
     note = '';
+    codeGroup = g?.id ?? '';
+    uses = 1;
+    hours = 24;
     making = true;
   }
 
   async function make() {
-    const c = await api<{ note: string; code: string }>('POST', '/admin/api/federation/codes', { note });
+    const c = await api<{ note: string; code: string; uses: number; group?: string; expiresAt: string }>('POST', '/admin/api/federation/codes', {
+      note,
+      group: codeGroup,
+      uses: Number(uses) || 1,
+      hours: Number(hours) || 24,
+    });
     await load();
     setTimeout(() => (made = c), 0);
   }
@@ -198,8 +222,8 @@
     pairing = true;
     try {
       await api('POST', '/admin/api/federation/peers', { code: pasted });
+      toast(preview?.groupName ? `Sent. Once the other server's operator accepts, this server joins "${preview.groupName}".` : 'Sent. The other server now waits for its operator to accept.');
       preview = null;
-      toast('Sent. The other server now waits for its operator to accept.');
     } catch (err) {
       toast(message(err), true);
     } finally {
@@ -422,6 +446,11 @@
     }
   }
 
+  // The groups you may invite to: as owner or admin.
+  const invitable = $derived((s?.groups ?? []).filter((g) => (g.role === 'owner' || g.role === 'admin') && !g.dissolved));
+  const groupName = (id: string) => (s?.groups ?? []).find((g) => g.id === id)?.name ?? 'a group';
+  const groupNames = (p: Peer) => (p.groups ?? []).map((id) => `"${groupName(id)}"`).join(', ');
+
   load();
 </script>
 
@@ -429,7 +458,7 @@
   {#snippet actions()}
     {#if s?.available}
       <button type="button" class={s.uncallable ? 'primary' : ''} onclick={useCode}>Use a code</button>
-      {#if !s.uncallable}<button type="button" class="primary" onclick={newCode}>New code</button>{/if}
+      {#if !s.uncallable}<button type="button" class="primary" onclick={() => newCode()}>New code</button>{/if}
     {/if}
   {/snippet}
 </PageHead>
@@ -498,7 +527,7 @@
         <tbody>
           {#each s.peers ?? [] as p (p.id)}
             <tr>
-              <td><div class="name">{p.name}</div><div class="hint address">{p.address}{#if p.address.startsWith('http://')}{' · plain http (test setting)'}{/if}</div>{#if addressText(p)}<div class="hint">{addressText(p)}</div>{/if}<div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
+              <td><div class="name">{p.name}</div><div class="hint address">{p.address}{#if p.address.startsWith('http://')}{' · plain http (test setting)'}{/if}</div>{#if p.groups?.length}<div class="hint">{p.byHand ? 'Paired by hand, and through ' : 'Through '}{groupNames(p)}</div>{/if}{#if addressText(p)}<div class="hint">{addressText(p)}</div>{/if}<div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
               <td class="hide-narrow"><div>{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint">{shareText(p)}</div>{/if}{#if p.seenAt}<div class="hint">heard from {ago(p.seenAt)}</div>{/if}</td>
               <td class="hide-narrow">{#if p.inbound === 'no'}<div><Badge kind="info">Can't be called</Badge></div>{/if}<div><Badge kind={keyState(p).kind}>{keyState(p).text}</Badge></div><div><code class="fingerprint">{p.fingerprint}</code></div>{#if keyText(p)}<div class="hint key-text">{keyText(p)}</div>{/if}</td>
               <td class="row-actions">
@@ -531,16 +560,18 @@
     </div>
   </Card>
 
+  <FederationGroups groups={s.groups ?? []} uncallable={s.uncallable} reload={load} invite={newCode} />
+
   {#if s.codes?.length}
     <Card title="Codes not used yet">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>For</th><th>Works until</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+          <thead><tr><th>For</th><th class="hide-narrow">Works until</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
           <tbody>
             {#each s.codes as c (c.id)}
               <tr>
-                <td><div class="name">{c.note || 'No note'}</div><div class="hint">made {ago(c.createdAt)}</div></td>
-                <td class="hint">{when(c.expiresAt)}</td>
+                <td><div class="name">{c.note || 'No note'}</div><div class="hint">{c.group ? `joins "${groupName(c.group)}" · ` : ''}{c.uses > 1 ? `${c.uses} uses left · ` : ''}made {ago(c.createdAt)}</div><div class="hint only-narrow">works until {when(c.expiresAt)}</div></td>
+                <td class="hint hide-narrow">{when(c.expiresAt)}</td>
                 <td class="row-actions"><button type="button" class="small danger" onclick={() => withdraw(c)}>Withdraw</button></td>
               </tr>
             {/each}
@@ -586,14 +617,36 @@
 {/if}
 
 {#if making}
-  <FormModal title="New code" description="One code pairs one server, once, within a day." saveLabel="Make the code" save={make} close={() => (making = false)}>
+  <FormModal title="New code" description="A code pairs a server with this one, or brings it into one of your groups. You accept each server that uses it, after comparing fingerprints." saveLabel="Make the code" save={make} close={() => (making = false)}>
     <Field label="For" wide hint="A note for you, to tell your codes apart."><input type="text" bind:value={note} placeholder="e.g. Marc's server" maxlength="80" /></Field>
+    {#if invitable.length}
+      <Field label="Leads to" wide hint="A group's code: the server joins the group once you accept it, then asks every member to pair.">
+        <select bind:value={codeGroup}>
+          <option value="">Pairing with this server</option>
+          {#each invitable as g (g.id)}<option value={g.id}>Joining the group "{g.name}"</option>{/each}
+        </select>
+      </Field>
+    {/if}
+    <Setting label="Servers that may use it" hint="1 to 100. Each one still waits for you to accept it.">
+      {#snippet children(ids)}<input type="number" min="1" max="100" bind:value={uses} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+    </Setting>
+    <Setting label="Works for" hint="Then it stops working, used or not.">
+      {#snippet children(ids)}
+        <select bind:value={hours} aria-labelledby={ids.label} aria-describedby={ids.hint}>
+          <option value={1}>1 hour</option>
+          <option value={24}>1 day</option>
+          <option value={72}>3 days</option>
+          <option value={168}>1 week</option>
+          <option value={720}>30 days</option>
+        </select>
+      {/snippet}
+    </Setting>
   </FormModal>
 {/if}
 
 {#if made}
   <Modal title="Pairing code" close={() => (made = null)}>
-    <Secret value={made.code} after={`Send it to the other server's operator however you like. They paste it in their panel, under Federation, "Use a code"; then their server appears here, for you to accept once you've compared fingerprints. It works once, until ${when(new Date(Date.now() + 24 * 3600 * 1000).toISOString())}.`}>Copy it now: it won't be shown again.</Secret>
+    <Secret value={made.code} after={`Send it to the other server's operator however you like. They paste it in their panel, under Federation, "Use a code"; then their server appears here, for you to accept once you've compared fingerprints${made.group ? `, and it joins "${groupName(made.group)}"` : ''}. It works ${made.uses > 1 ? `for ${made.uses} servers` : 'once'}, until ${when(made.expiresAt)}.`}>Copy it now: it won't be shown again.</Secret>
     {#snippet foot()}
       <span class="grow"></span>
       <button type="button" class="primary" onclick={() => (made = null)}>Done</button>
@@ -603,7 +656,7 @@
 
 {#if using}
   <FormModal title="Use a code" description="The code another server's operator sent you." saveLabel="Read the code" save={read} close={() => (using = false)}>
-    <Field label="Code" wide><textarea bind:value={pasted} rows="4" spellcheck="false" autocomplete="off" placeholder="msfp-pair-1.…" required></textarea></Field>
+    <Field label="Code" wide><textarea bind:value={pasted} rows="4" spellcheck="false" autocomplete="off" placeholder="msfp-pair-0.…" required></textarea></Field>
   </FormModal>
 {/if}
 
@@ -649,7 +702,10 @@
 {/if}
 
 {#if preview}
-  <Modal title="Pair with this server?" close={() => (preview = null)}>
+  <Modal title={preview.groupName ? `Join the group "${preview.groupName}"?` : 'Pair with this server?'} close={() => (preview = null)}>
+    {#if preview.groupName}
+      <Notice>This code is an invitation to the group "{preview.groupName}", from the server below. Once its operator accepts, this server joins the group and asks every member to pair; each one answers for itself. You then see the members, and their requests, under Groups.</Notice>
+    {/if}
     <Setting label="Address">
       {#snippet children()}<code>{preview?.address}</code>{/snippet}
     </Setting>
@@ -665,7 +721,7 @@
     {#snippet foot()}
       <span class="grow"></span>
       <button type="button" onclick={() => (preview = null)}>Cancel</button>
-      <button type="button" class="primary" disabled={!preview || preview.expired || pairing} onclick={pair}>Pair</button>
+      <button type="button" class="primary" disabled={!preview || preview.expired || pairing} onclick={pair}>{preview?.groupName ? 'Join' : 'Pair'}</button>
     {/snippet}
   </Modal>
 {/if}

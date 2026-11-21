@@ -453,5 +453,20 @@ func (s *Store) ReplaceLibraryID(ctx context.Context, old, new string) error {
 			return err
 		}
 	}
+	// What groups are offered (MSFP groups part), in their records and
+	// copied onto the links through them: the same, inside JSON.
+	for _, t := range []struct{ table, path string }{{"msfp_groups", "$.offers"}, {"peers", "$.groupOffers"}} {
+		drop := `UPDATE ` + t.table + ` SET record = json_set(record, '` + t.path + `',
+			json((SELECT json_group_array(j.value) FROM json_each(record, '` + t.path + `') j WHERE j.value != ?2)))
+			WHERE EXISTS (SELECT 1 FROM json_each(record, '` + t.path + `') WHERE value = ?2)`
+		swap := `UPDATE ` + t.table + ` SET record = json_set(record, '` + t.path + `',
+			json((SELECT json_group_array(CASE j.value WHEN ?1 THEN ?2 ELSE j.value END) FROM json_each(record, '` + t.path + `') j)))
+			WHERE EXISTS (SELECT 1 FROM json_each(record, '` + t.path + `') WHERE value = ?1)`
+		for _, q := range []string{drop, swap} {
+			if _, err := tx.ExecContext(ctx, q, old, new); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }

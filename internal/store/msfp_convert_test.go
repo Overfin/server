@@ -144,7 +144,9 @@ func TestFederationConverted(t *testing.T) {
 		titles, _ = tx.PeerTitles("pb", "", 10)
 		return nil
 	})
-	if err != nil || rec == nil || peer == nil || code == nil {
+	// The code is converted, then dropped by 134_msfp_groups.sql: a code
+	// of MSFP's former version 1 isn't read under version 0.
+	if err != nil || rec == nil || peer == nil || code != nil {
 		t.Fatalf("records: %v %v %v %v", rec, peer, code, err)
 	}
 	// Resealed under the engine's contexts, with the same box.
@@ -158,8 +160,7 @@ func TestFederationConverted(t *testing.T) {
 		return b
 	}
 	if !bytes.Equal(open(rec.Current, "msfp current key"), current.Seed()) || !bytes.Equal(open(rec.Next, "msfp next key"), next.Seed()) ||
-		!bytes.Equal(open(rec.Old, "msfp old key"), old.Seed()) || !bytes.Equal(open(rec.IDsSecret, "msfp ids secret"), ids) ||
-		!bytes.Equal(open(code.Secret, "msfp code secret"), secret) {
+		!bytes.Equal(open(rec.Old, "msfp old key"), old.Seed()) || !bytes.Equal(open(rec.IDsSecret, "msfp ids secret"), ids) {
 		t.Fatal("a seed or secret changed")
 	}
 	if _, err := sealer.Open(rec.Current, "federation key"); err == nil {
@@ -169,8 +170,8 @@ func TestFederationConverted(t *testing.T) {
 		!rec.MovedAt.Equal(movedAt) || rec.Uncallable || rec.UncallableAddress != "https://msfp-aaaaaaaaaaaaaaaaaaaaaaaaaa.invalid" {
 		t.Fatalf("server record: %+v", rec)
 	}
-	if code.Note != "for Marc" || code.Expires.Unix() != expires || forgotten == nil || forgotten.At.Unix() != 1789500000 {
-		t.Fatalf("code %+v, forgotten %+v", code, forgotten)
+	if forgotten == nil || forgotten.At.Unix() != 1789500000 {
+		t.Fatalf("forgotten %+v", forgotten)
 	}
 	if libIDs["films"] != "lib_AAAAAAAAAAAAAAAAAAAAAA" || !slices.Equal(sent, []string{"movie/tmdb/1"}) ||
 		len(left) != 1 || left[0] != (msfp.Leftover{Peer: "pb", PlaybackID: "play_x"}) || len(titles) != 1 {
@@ -213,7 +214,9 @@ func TestFederationConverted(t *testing.T) {
 		t.Fatalf("the engine's view: %+v %v", sv, err)
 	}
 	pv, err := eng.Peer(ctx, "pb")
-	if err != nil || pv.Fingerprint != wire.Fingerprint(peerKey.Public()) || pv.State != msfp.Paired || pv.Core != 1 || pv.Offers != 1 || pv.Wants != 1 {
+	// Its last hello said core 1, MSFP's former numbering: nothing in
+	// common with version 0 (-1) until it speaks 0.
+	if err != nil || pv.Fingerprint != wire.Fingerprint(peerKey.Public()) || pv.State != msfp.Paired || pv.Core != -1 || pv.Offers != 1 || pv.Wants != 1 {
 		t.Fatalf("the engine's peer: %+v %v", pv, err)
 	}
 	// Version IDs as Overfin made them: "ver_", HMAC of "version", the

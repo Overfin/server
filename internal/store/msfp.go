@@ -28,6 +28,7 @@ import (
 //   - peer_wants: the peer's libraries wanted, a copy of the record's,
 //     with what this server adds (its menu entry's ID, the operator's
 //     label);
+//   - msfp_groups: each group's record, JSON (groups part);
 //   - pairing_codes, forgotten_peers, federation_libraries, peer_sent,
 //     remote_playbacks and peer_titles: as their names say.
 //
@@ -292,13 +293,13 @@ func (t *msfpTx) codes(where string, args ...any) ([]msfp.CodeRecord, error) {
 	err := t.each(func(rows *sql.Rows) error {
 		var c msfp.CodeRecord
 		var created, expires int64
-		if err := rows.Scan(&c.ID, &c.Secret, &c.SecretHash, &c.Note, &created, &expires); err != nil {
+		if err := rows.Scan(&c.ID, &c.Secret, &c.SecretHash, &c.Note, &created, &expires, &c.Uses, &c.Group); err != nil {
 			return err
 		}
 		c.Created, c.Expires = fromNanos(created), fromNanos(expires)
 		out = append(out, c)
 		return nil
-	}, `SELECT id, secret, secret_hash, note, created_at, expires_at FROM pairing_codes`+where+` ORDER BY id`, args...)
+	}, `SELECT id, secret, secret_hash, note, created_at, expires_at, uses, group_id FROM pairing_codes`+where+` ORDER BY id`, args...)
 	return out, err
 }
 
@@ -313,10 +314,10 @@ func (t *msfpTx) CodeByHash(hash []byte) (*msfp.CodeRecord, error) {
 }
 
 func (t *msfpTx) PutCode(c msfp.CodeRecord) error {
-	return t.exec(`INSERT INTO pairing_codes (id, secret_hash, secret, note, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)
+	return t.exec(`INSERT INTO pairing_codes (id, secret_hash, secret, note, created_at, expires_at, uses, group_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET secret_hash = excluded.secret_hash, secret = excluded.secret, note = excluded.note,
-			created_at = excluded.created_at, expires_at = excluded.expires_at`,
-		c.ID, c.SecretHash, c.Secret, c.Note, nanos(c.Created), nanos(c.Expires))
+			created_at = excluded.created_at, expires_at = excluded.expires_at, uses = excluded.uses, group_id = excluded.group_id`,
+		c.ID, c.SecretHash, c.Secret, c.Note, nanos(c.Created), nanos(c.Expires), c.Uses, c.Group)
 }
 
 func (t *msfpTx) DeleteCode(id string) error {
@@ -557,4 +558,51 @@ func (t *msfpTx) PeerTitle(peer, key string) (msfp.Title, error) {
 		return nil, err
 	}
 	return titles[0], nil
+}
+
+// ---- Groups (msfp.GroupsTx) ---------------------------------------------------
+
+func (t *msfpTx) Groups() ([]msfp.GroupRecord, error) {
+	var out []msfp.GroupRecord
+	err := t.each(func(rows *sql.Rows) error {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return err
+		}
+		var g msfp.GroupRecord
+		if err := json.Unmarshal([]byte(raw), &g); err != nil {
+			return fmt.Errorf("store: a federation group's record: %w", err)
+		}
+		out = append(out, g)
+		return nil
+	}, `SELECT record FROM msfp_groups ORDER BY id`)
+	return out, err
+}
+
+func (t *msfpTx) Group(id string) (*msfp.GroupRecord, error) {
+	var raw string
+	err := t.tx.QueryRowContext(t.ctx, `SELECT record FROM msfp_groups WHERE id = ?`, id).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var g msfp.GroupRecord
+	if err := json.Unmarshal([]byte(raw), &g); err != nil {
+		return nil, fmt.Errorf("store: a federation group's record: %w", err)
+	}
+	return &g, nil
+}
+
+func (t *msfpTx) PutGroup(g msfp.GroupRecord) error {
+	b, err := json.Marshal(g)
+	if err != nil {
+		return err
+	}
+	return t.exec(`INSERT INTO msfp_groups (id, record) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET record = excluded.record`, g.ID, string(b))
+}
+
+func (t *msfpTx) DeleteGroup(id string) error {
+	return t.exec(`DELETE FROM msfp_groups WHERE id = ?`, id)
 }

@@ -36,9 +36,9 @@ import (
 // of a server that can't be called; a settings change gives it the new
 // address (SetAddress: a move), never a new engine.
 
-// Overfin speaks MSFP's core, catalog, playback, media and video: films
+// Overfin speaks MSFP's core, catalog, playback, media, video and groups: films
 // and series. Music is never shared nor played here.
-var federationParts = []string{wire.PartCatalog, wire.PartPlayback, wire.PartMedia, wire.PartVideo}
+var federationParts = []string{wire.PartCatalog, wire.PartPlayback, wire.PartMedia, wire.PartVideo, wire.PartGroups}
 
 // fedHost is federation on this server, for the whole run.
 type fedHost struct {
@@ -251,7 +251,7 @@ type fedRoutes struct{ engine *msfp.Engine }
 
 func (fedRoutes) Name() string { return "federation" }
 
-// The calls of MSFP version 1 (core, catalog and playback), each its own
+// The calls of MSFP version 0 (core, catalog and playback), each its own
 // route: no catch-all.
 var federationCalls = []string{
 	"POST /api/v1/federation/pair",

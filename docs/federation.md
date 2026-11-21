@@ -7,8 +7,9 @@ profiles, history and kids limits they already have. Nobody needs an
 account on the other server, and nobody has to install anything.
 
 It works between servers whose operators trust each other: each pairing is
-made by hand, one server with one other. There is no directory, no open
-network, and nothing is shared until both of you say so.
+made by hand, one server with one other, or among friends through a
+[group](#groups). There is no directory, no open network, and nothing is
+shared until both of you say so.
 
 **The other server doesn't have to be Overfin.** Federation in Overfin is
 [MSFP](https://github.com/msfp-io/msfp-spec), the Media Server Federation
@@ -68,8 +69,9 @@ called](#a-server-that-cant-be-called)). In the control panel, under
 **Federation**:
 
 1. One of you clicks **New code** and sends it to the other however you
-   like. A code starts with `msfp-pair-1.`, and works once, within 24
-   hours.
+   like. A code starts with `msfp-pair-0.`. It works once and for a day,
+   unless you choose otherwise: up to 100 servers, for up to 30 days. Each
+   server that uses it still waits for you to accept it.
 2. The other pastes it under **Use a code**.
 3. The first server now lists the second. Before accepting, compare the
    **fingerprints** both panels show, by phone or a message you trust: if
@@ -82,10 +84,15 @@ Other servers know your libraries by IDs of their own, made when you
 first offer each one; never Jellyfin's.
 
 **Pairings made before November 2026 are gone.** Overfin then spoke a
-first, test version of the protocol; it now speaks version 1 only, and
-the update removes the pairings made under the test version, with what
-was shared through them. Pair again with a new code: your own libraries,
-and the IDs other servers know them by, stay.
+first, test version of the protocol, and the update that followed removed
+the pairings made under it. Pair again with a new code: your own
+libraries, and the IDs other servers know them by, stay.
+
+**MSFP is now version 0**, a draft until version 1 (it was numbered 1
+before). Servers of the former numbering and of version 0 can't talk: a
+pairing with one shows "It speaks another version of the federation
+protocol" until it's updated too, and works again then. Codes made before
+the update no longer work: make new ones.
 
 Ending a pairing (**End**) is one click, and it ends on both servers at once.
 
@@ -226,6 +233,69 @@ your list: "it can watch what you share with it, and can share nothing
 with you". Its libraries can't be picked in **Sharing**, and **Check**
 isn't offered: it asks yours.
 
+## Groups
+
+A group lets friends' servers pair with each other without a code for
+each pair. Create one under **Federation**, **Groups**: you are its
+owner. Then:
+
+1. **Invite with a code.** **Invite** (or **New code**, choosing the
+   group under **Leads to**) makes a code for the group. A server that
+   uses it pairs with yours, and its operator's panel says what the code
+   leads to ("Join the group Friends?"). You accept it after comparing
+   fingerprints, as for any code.
+2. **It joins.** Once accepted, it's a member: it gets the group's list
+   from your server, then asks every other member to pair.
+3. **Each member answers for itself.** A request waits under the group's
+   **Requests** for its operator: **Pair** or **Refuse**. No fingerprint
+   to compare: the group vouches for its members. A refused server isn't
+   told, and its requests are dropped until you **Hear it again**; you can
+   also ask a member yourself (**Ask to pair**). In **Sharing**, **Accept
+   new members by itself** lets your server pair by itself with a member
+   that has been in the group a few days (3, a group setting).
+
+**What members see:** each member's name, fingerprint and role, who
+invited it and when, and whether you're paired with it. What a server
+offers, and its address, stay between servers paired with each other.
+
+**Sharing with a group.** In the group's **Sharing**, what you offer the
+group goes to every member you're paired with through it, as if the
+group were one server, beside what you share with a member by hand. The
+limits there are one pool, for all the group's members together: a
+playback counts against the pairing's own limits first, then against the
+pools of its groups, the first with room. Two servers in several groups
+together are paired once.
+
+**Roles.** The owner names and removes admins, names an heir, changes the
+group's name and settings, lifts bans, and may give the group away or
+dissolve it. Admins and the owner invite and ban (an admin bans members
+only). If the owner gives the group away, it goes to whom it chooses, or
+by default to its heir, else the oldest admin, else the oldest member.
+Settings: how many days before members accept a newcomer by themselves (0
+to 30), and how many servers each inviter may bring in a day (1 to 100),
+so a code that leaks can't flood the group.
+
+**Leaving, blocking, banning, dissolving** (in the group's window, and a
+member's **More**):
+
+- **Leave**: your pairings made through the group stay unless you tick
+  them; one only the group held becomes a pairing by hand, keeping what
+  the group gave it.
+- **Block** is yours alone, and nobody is told: your server ends its
+  pairing with that server, whatever made it, and ignores it in all your
+  groups. It can block the servers that one invited too, and theirs.
+- **Ban** acts for the whole group: the server is out for every member,
+  told why if a reason is given, and pairings it held only through the
+  group end. Only the owner lifts a ban.
+- **Dissolve** (the owner): every member removes the group, keeping the
+  pairings it made or ending them, as the owner chooses.
+
+Nothing about a group lives anywhere but on its members' servers: each
+keeps its own copy of the group's signed list and passes changes on.
+There is no central server, and a group needs none of its members to stay
+up. A server that's already paired with yours can't join through your
+code yet: the protocol doesn't cover it.
+
 ## Limits
 
 Each pairing has its own limits, set by the server that shares:
@@ -365,12 +435,11 @@ allow_loopback = true   # both on this machine
 ## Building a server that pairs
 
 Building your own server that pairs with Overfin? Servers speak MSFP, the
-Media Server Federation Protocol, version 1 (its core, and the parts
-catalog, playback, media and video; Overfin has no music): its
+Media Server Federation Protocol, version 0 (its core, and the parts
+catalog, playback, media, video and groups; Overfin has no music): its
 specification and test vectors are at
 [github.com/msfp-io/msfp-spec](https://github.com/msfp-io/msfp-spec).
-Overfin follows version 1 as its owner decided on 2026-11-18 (core
-section 18, items 37 to 40). It does key rotation and revocation
+Overfin follows version 0 (a draft; numbered 1 before 2026-11-20). It does key rotation and revocation
 (`rotate`, `revoke`, the next key commitment required in `pair` both
 ways; a `hello`'s is checked and ignored; the 30 days of revocation-only
 answers after a stolen key with no next key), address changes (core

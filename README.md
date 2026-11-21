@@ -97,8 +97,9 @@ speak MSFP (today, other Overfin servers do).
 - **Library by library**: each side offers some and wants some; only what
   one offers and the other wants is shared. Streams, transcodes and
   bitrate are limited per pairing, by the side that shares.
-- **Paired by hand**, with a one-time code and fingerprints compared
-  between operators. Servers talk over HTTPS only, every request between
+- **Paired by hand**, with a code and fingerprints compared between
+  operators, or **in groups**: friends' servers join a group with one
+  code each, then pair with every member that accepts. Servers talk over HTTPS only, every request between
   them signed; servers that aren't paired get a 404. Ending a pairing ends it on both sides.
 
 How to pair, and what each side sees: [docs/federation.md](docs/federation.md).
