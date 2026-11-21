@@ -64,3 +64,12 @@ subject = "Votre accès à {site} prend fin le {date}"
 intro = "Votre accès à {site} prend fin le {date}. Pour le garder, demandez-le à l’administrateur du site."
 button = "Ouvrir {site}"
 why = "Vous recevez ce courriel parce que vous avez un compte sur {site}."
+
+[code]
+subject = "Un code pour associer votre serveur à {site}"
+groupSubject = "Une invitation au groupe {group}, de la part de {site}"
+intro = "L’opérateur de {site} vous envoie un code pour associer votre serveur au sien. Collez-le là où votre serveur reçoit les codes d’association (sur Overfin : « Federation », puis « Use a code ») :"
+groupIntro = "L’opérateur de {site} invite votre serveur au groupe {group}. Collez ce code là où votre serveur reçoit les codes d’association (sur Overfin : « Federation », puis « Use a code ») :"
+check = "Avant d’accepter votre serveur, l’opérateur de {site} comparera les empreintes avec vous : par téléphone ou par un autre moyen de confiance, jamais par courriel."
+expires = "Ce code fonctionne jusqu’au {date}."
+why = "Vous recevez ce courriel parce qu’un administrateur de {site} a envoyé ce code à cette adresse."

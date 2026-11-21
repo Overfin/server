@@ -69,7 +69,8 @@ called](#a-server-that-cant-be-called)). In the control panel, under
 **Federation**:
 
 1. One of you clicks **New code** and sends it to the other however you
-   like. A code starts with `msfp-pair-0.`. It works once and for a day,
+   like, or from the panel by email (**Email it to**, once emails are set
+   up under **Server**). A code starts with `msfp-pair-0.`. It works once and for a day,
    unless you choose otherwise: up to 100 servers, for up to 30 days. Each
    server that uses it still waits for you to accept it.
 2. The other pastes it under **Use a code**.

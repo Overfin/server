@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -216,4 +218,54 @@ func TestFederationGroupJoinWhenPaired(t *testing.T) {
 	waitFor(t, b, "B a member", func(s groupState) bool {
 		return len(s.Groups) == 1 && len(s.Groups[0].Members) == 2 && s.Groups[0].Role == "member"
 	})
+}
+
+// fakeCodeMail keeps the codes the panel emails; fail, set, refuses.
+type fakeCodeMail struct {
+	to, code, group string
+	fail            error
+}
+
+func (f *fakeCodeMail) CanSendMail() bool { return true }
+
+func (f *fakeCodeMail) SendPairingCode(_ context.Context, to, code, group string, _ time.Time) error {
+	if f.fail != nil {
+		return f.fail
+	}
+	f.to, f.code, f.group = to, code, group
+	return nil
+}
+
+// A group's code emailed from the panel: sent with the group's name; a
+// failure is said beside the code, which is shown anyway; a bad address is
+// refused before any code is made.
+func TestFederationCodeByEmail(t *testing.T) {
+	p, a, _, _ := fedPanelOf(t, "A")
+	mailer := &fakeCodeMail{}
+	p.CodeMail = mailer
+	if !strings.Contains(a.do("GET", "/admin/api/federation", "", nil).Body.String(), `"canMail":true`) {
+		t.Fatal("canMail isn't said")
+	}
+	rec := a.do("POST", "/admin/api/federation/groups", `{"name":"Family","waitDays":3,"capPerDay":5}`, nil)
+	var g struct{ ID string }
+	json.Unmarshal(rec.Body.Bytes(), &g)
+	if rec := a.do("POST", "/admin/api/federation/codes", `{"note":"x","email":"not an address"}`, nil); rec.Code != 400 {
+		t.Fatalf("bad address: %d %s", rec.Code, rec.Body)
+	}
+	if s := readGroups(t, a); len(s.Codes) != 0 {
+		t.Fatalf("a code was made for a bad address: %+v", s.Codes)
+	}
+	rec = a.do("POST", "/admin/api/federation/codes", `{"note":"x","group":"`+g.ID+`","email":"op@example.org"}`, nil)
+	var made struct{ Code, MailedTo, MailProblem string }
+	json.Unmarshal(rec.Body.Bytes(), &made)
+	if rec.Code != 201 || made.MailedTo != "op@example.org" || mailer.code != made.Code || mailer.group != "Family" || mailer.to != "op@example.org" {
+		t.Fatalf("emailed: %d %s (sent %+v)", rec.Code, rec.Body, mailer)
+	}
+	mailer.fail = errors.New("It didn't go through: the server said no.")
+	rec = a.do("POST", "/admin/api/federation/codes", `{"note":"x","email":"op@example.org"}`, nil)
+	made.MailedTo, made.MailProblem = "", ""
+	json.Unmarshal(rec.Body.Bytes(), &made)
+	if rec.Code != 201 || made.Code == "" || made.MailedTo != "" || !strings.Contains(made.MailProblem, "didn't go through") {
+		t.Fatalf("failed: %d %s", rec.Code, rec.Body)
+	}
 }

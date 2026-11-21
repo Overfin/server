@@ -515,6 +515,31 @@ func (g *gateway) SendInvitation(ctx context.Context, to, link string) error {
 	return nil
 }
 
+// CanSendMail says whether emails can be sent: the SMTP server is set.
+func (g *gateway) CanSendMail() bool { return g.sh.mail.Load() != nil }
+
+// SendPairingCode emails a federation pairing code to another server's
+// operator, in the default language.
+func (g *gateway) SendPairingCode(ctx context.Context, to, code, group string, expires time.Time) error {
+	s := g.sh.mail.Load()
+	if s == nil {
+		return problem("Email is off: set it up first.")
+	}
+	// Only pairing codes go out this way.
+	if !strings.HasPrefix(code, "msfp-pair-0.") || len(code) > 1200 {
+		return problem("That isn't a pairing code.")
+	}
+	_, lang, _, _ := g.sh.db.Languages(ctx)
+	msg, err := g.sh.emails.Write(ctx, "code", lang, emails.Vars{Code: code, Group: group, Date: expires})
+	if err != nil {
+		return err
+	}
+	if err := s.SendMessage(ctx, to, msg); err != nil {
+		return problemf("It didn't go through: %s", mail.Detail(err))
+	}
+	return nil
+}
+
 // ReleaseInvitation gives back the use of an invitation held for someone
 // who registered, as the control panel removes them.
 func (g *gateway) ReleaseInvitation(ctx context.Context, subject string) error {
@@ -1259,6 +1284,9 @@ func (g *gateway) SendSample(ctx context.Context, name, to string) error {
 	}[name], Name: "Alex", Date: time.Now().AddDate(0, 0, 7)}
 	if name == "joined" {
 		v.Name, v.Invitation = "alex@example.org", "Alex" // as an invitation's account
+	}
+	if name == "code" {
+		v.Code, v.Group = "msfp-pair-0.sample", "Friends" // a code that works nowhere
 	}
 	msg, err := g.sh.emails.Write(ctx, name, lang, v)
 	if err != nil {

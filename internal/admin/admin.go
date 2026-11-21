@@ -210,6 +210,9 @@ type Panel struct {
 	People People
 	// Mail, with managed sign-in, shows and changes the SMTP server.
 	Mail Mail
+	// CodeMail, when set, emails federation pairing codes to other
+	// servers' operators.
+	CodeMail CodeMailer
 	// Playing, when set, shows what's playing now and stops it (the live
 	// view).
 	Playing Playing

@@ -48,7 +48,7 @@ var overfinLight []byte
 var overfinDark []byte
 
 // Names are the emails Overfin sends.
-var Names = []string{"verify", "reset", "setup", "exists", "invite", "test", "joined", "expiring", "expired", "ending"}
+var Names = []string{"verify", "reset", "setup", "exists", "invite", "test", "joined", "expiring", "expired", "ending", "code"}
 
 // texts are the built-in sentences, by language ("en", "fr") then key
 // ("poweredBy", "signin.subject"…).
@@ -110,6 +110,9 @@ type data struct {
 	// Invitation is the name of the invitation a new account came from
 	// ("" for none).
 	Invitation string
+	// Code is a federation pairing code sent to another server's
+	// operator; Group, the group it invites to ("" for none).
+	Code, Group string
 }
 
 // Vars are an email's own values.
@@ -122,6 +125,10 @@ type Vars struct {
 	// Invitation is the name of the invitation a new account came from,
 	// for the "joined" notice ("" when it came from none).
 	Invitation string
+	// Code and Group are the "code" email's: a federation pairing code,
+	// and the group it invites to ("" for none). Date is when it stops
+	// working.
+	Code, Group string
 }
 
 // Write writes an email in a language (a regional tag such as "fr-CA").
@@ -142,7 +149,7 @@ func (w *Writer) write(ctx context.Context, name, lang string, v Vars) (mail.Mes
 		return mail.Message{}, err
 	}
 	d := data{Lang: lang, Site: brandName(br), Custom: br.On, Light: theme.Colors(true), Dark: theme.Colors(false),
-		Link: v.Link, Name: v.Name, Date: Day(v.Date, lang), Invitation: v.Invitation}
+		Link: v.Link, Name: v.Name, Date: Day(v.Date, lang), Invitation: v.Invitation, Code: v.Code, Group: v.Group}
 	var images []mail.Image
 	// The banner on the dark header: the operator's, as a picture email
 	// apps show (not SVG), else their name as text; Overfin's otherwise.
@@ -220,7 +227,7 @@ func (w *Writer) translator(lang string, d data) func(string) string {
 			s = elide(s, "{site}", d.Site)
 			s = elide(s, "{name}", d.Name)
 		}
-		return strings.NewReplacer("{site}", d.Site, "{name}", d.Name, "{date}", d.Date, "{invitation}", d.Invitation).Replace(s)
+		return strings.NewReplacer("{site}", d.Site, "{name}", d.Name, "{date}", d.Date, "{invitation}", d.Invitation, "{group}", d.Group).Replace(s)
 	}
 }
 

@@ -140,3 +140,37 @@ func TestElide(t *testing.T) {
 		}
 	}
 }
+
+// A pairing code to another server's operator: the code whole, what it
+// leads to (a group by its name), until when it works, and never a
+// fingerprint to compare by email.
+func TestPairingCode(t *testing.T) {
+	w := newWriter(t)
+	ctx := context.Background()
+	code := "msfp-pair-0.AAAA_bbb-CCC"
+	when := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	m, err := w.Write(ctx, "code", "en", Vars{Code: code, Date: when})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Subject != "A code to pair your server with Overfin" {
+		t.Errorf("subject %q", m.Subject)
+	}
+	for _, want := range []string{code, "This code works until November 27, 2026.", "never by email"} {
+		if !strings.Contains(m.Text, want) || !strings.Contains(m.HTML, want) {
+			t.Errorf("lacks %q:\n%s", want, m.Text)
+		}
+	}
+	m, err = w.Write(ctx, "code", "fr", Vars{Code: code, Group: "Les amis", Date: when})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Subject != "Une invitation au groupe Les amis, de la part d’Overfin" {
+		t.Errorf("subject %q", m.Subject)
+	}
+	for _, want := range []string{"L’opérateur d’Overfin invite votre serveur au groupe Les amis.", code, "jusqu’au 27 novembre 2026"} {
+		if !strings.Contains(m.Text, want) {
+			t.Errorf("lacks %q:\n%s", want, m.Text)
+		}
+	}
+}

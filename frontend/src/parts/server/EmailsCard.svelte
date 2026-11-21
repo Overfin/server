@@ -10,7 +10,7 @@
 
   const emailNames: Record<string, string> = { verify: 'Confirming an address', reset: 'A new password', setup: 'A new account\'s password', exists: 'Already an account', invite: 'Invitation',
     test: 'Test', joined: 'Notice: a new account', expiring: 'Notice: access ends soon', expired: 'Notice: access ended',
-    ending: 'To the person: their access ends soon' };
+    ending: 'To the person: their access ends soon', code: 'Federation: a pairing code, to another server' };
   const on = $derived(Boolean(m && m.host));
   let st = $state<Line>({ text: '', kind: '' });
 

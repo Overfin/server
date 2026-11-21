@@ -1,0 +1,13 @@
+{{define "subject"}}{{if .Group}}{{t "code.groupSubject"}}{{else}}{{t "code.subject"}}{{end}}{{end}}
+{{define "content" -}}
+{{if .Group}}{{t "code.groupIntro"}}{{else}}{{t "code.intro"}}{{end}}
+
+{{.Code}}
+
+{{t "code.check"}}
+{{- with t "code.expires"}}
+
+{{.}}
+{{- end}}
+{{- end}}
+{{define "why"}}{{t "code.why"}}{{end}}

@@ -1,0 +1,9 @@
+{{define "content" -}}
+<p style="margin:0 0 20px;">{{if .Group}}{{t "code.groupIntro"}}{{else}}{{t "code.intro"}}{{end}}</p>
+<p style="margin:0 0 20px; padding:12px 14px; border-radius:8px; background:{{index .Light "surface"}}; font-family:ui-monospace, Menlo, Consolas, monospace; font-size:13px; word-break:break-all;">{{.Code}}</p>
+<p style="margin:0 0 16px;">{{t "code.check"}}</p>
+{{- with t "code.expires"}}
+<p style="margin:0;">{{.}}</p>
+{{- end}}
+{{- end}}
+{{define "why"}}{{t "code.why"}}{{end}}

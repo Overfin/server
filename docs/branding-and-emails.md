@@ -24,14 +24,17 @@ Overfin's are the place to start, at the release you run:
   an address), `reset` (a new password), `exists` (someone registered
   with an address that has an account), `invite`, `setup` (the link to
   choose a password, for someone an admin added), `test`, the notices to
-  admins (`joined`, `expiring`, `expired`) and the one to someone whose
-  access ends (`ending`) are each email's own (`.html` and `.txt`). The
+  admins (`joined`, `expiring`, `expired`), the one to someone whose
+  access ends (`ending`) and a federation pairing code sent to another
+  server's operator (`code`) are each email's own (`.html` and `.txt`). The
   subject is the `.txt` file's `subject` block.
 - `reset.html` replaces it in every language; `reset.fr.html`, in
   French only; `reset.fr-CA.html`, in Canadian French only. Your own
   templates' languages are yours to cover.
 - Templates are Go templates, with `.Site`, `.Lang`, `.Subject`, `.Link`,
-  `.Name` and `.Date` (a notice's account, and when its access ends),
+  `.Name` and `.Date` (a notice's account, and when its access ends; for
+  `code`, when the code stops working), `.Code` and `.Group` (`code`'s:
+  the pairing code, and the group it invites to, empty for none),
   `.Custom` (your brand is on), `.Banner` and `.Overfin` (the sizes, `.Width`
   and `.Height`, of the pictures `cid:banner` and `cid:overfin`; `.Banner` is
   empty for a brand without a banner), `.Light` and

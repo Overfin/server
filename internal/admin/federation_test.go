@@ -21,6 +21,13 @@ import (
 // test server's certificate, which the server names to its peers.
 func fedPanel(t *testing.T, name string) (*browser, *msfp.Engine, *store.Store) {
 	t.Helper()
+	_, b, e, db := fedPanelOf(t, name)
+	return b, e, db
+}
+
+// fedPanelOf is fedPanel with the panel itself, to set its fields.
+func fedPanelOf(t *testing.T, name string) (*Panel, *browser, *msfp.Engine, *store.Store) {
+	t.Helper()
 	p, b, db, _ := signedInPanel(t)
 	mux := http.NewServeMux()
 	ts := httptest.NewTLSServer(mux)
@@ -34,7 +41,7 @@ func fedPanel(t *testing.T, name string) (*browser, *msfp.Engine, *store.Store) 
 	}
 	mux.Handle("/api/v1/federation/", e.FederationHandler())
 	p.Engine = func() *msfp.Engine { return e }
-	return b, e, db
+	return p, b, e, db
 }
 
 // secondsClock is the system's time cut to the second: an engine started

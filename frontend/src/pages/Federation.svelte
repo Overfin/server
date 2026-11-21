@@ -94,6 +94,8 @@
     codes?: Code[];
     peers?: Peer[];
     groups?: Group[];
+    // Codes can be emailed (the SMTP server is set).
+    canMail?: boolean;
     nextKey?: { fingerprint: string; onServer: boolean };
     rotation?: { since: string; until: string };
     move?: { former: string; since: string; until: string; moved: number; of: number; waiting: boolean };
@@ -117,7 +119,9 @@
   let codeGroup = $state('');
   let uses = $state(1);
   let hours = $state(24);
-  let made = $state<{ note: string; code: string; uses: number; group?: string; expiresAt: string } | null>(null);
+  // Where the code is emailed too ("" for nowhere).
+  let mailTo = $state('');
+  let made = $state<{ note: string; code: string; uses: number; group?: string; expiresAt: string; mailedTo?: string; mailProblem?: string } | null>(null);
   // Using another server's code: pasted, then what it says, to confirm.
   let using = $state(false);
   let pasted = $state('');
@@ -183,15 +187,17 @@
     codeGroup = g?.id ?? '';
     uses = 1;
     hours = 24;
+    mailTo = '';
     making = true;
   }
 
   async function make() {
-    const c = await api<{ note: string; code: string; uses: number; group?: string; expiresAt: string }>('POST', '/admin/api/federation/codes', {
+    const c = await api<{ note: string; code: string; uses: number; group?: string; expiresAt: string; mailedTo?: string; mailProblem?: string }>('POST', '/admin/api/federation/codes', {
       note,
       group: codeGroup,
       uses: Number(uses) || 1,
       hours: Number(hours) || 24,
+      email: mailTo.trim(),
     });
     await load();
     setTimeout(() => (made = c), 0);
@@ -641,11 +647,16 @@
         </select>
       {/snippet}
     </Setting>
+    {#if s?.canMail}
+      <Field label="Email it to" wide hint="Optional: the other server's operator's address. The code is shown here too. Compare fingerprints by phone or another way you trust, not by email."><input type="email" bind:value={mailTo} placeholder="operator@example.org" maxlength="254" autocomplete="off" /></Field>
+    {/if}
   </FormModal>
 {/if}
 
 {#if made}
   <Modal title="Pairing code" close={() => (made = null)}>
+    {#if made.mailedTo}<Notice>Sent to {made.mailedTo}.</Notice>{/if}
+    {#if made.mailProblem}<Notice warn>The email didn't go: {made.mailProblem} Copy the code below and send it another way.</Notice>{/if}
     <Secret value={made.code} after={`Send it to the other server's operator however you like. They paste it in their panel, under Federation, "Use a code"; then their server appears here, for you to accept once you've compared fingerprints${made.group ? `, and it joins "${groupName(made.group)}"` : ''}. It works ${made.uses > 1 ? `for ${made.uses} servers` : 'once'}, until ${when(made.expiresAt)}.`}>Copy it now: it won't be shown again.</Secret>
     {#snippet foot()}
       <span class="grow"></span>

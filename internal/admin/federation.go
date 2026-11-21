@@ -1,9 +1,11 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/mail"
 	"slices"
 	"strings"
 	"time"
@@ -165,12 +167,26 @@ type codeJSON struct {
 	// invites to ("" for none).
 	Uses  int    `json:"uses"`
 	Group string `json:"group,omitempty"`
-	// Code is the code itself, only in the answer that makes it.
-	Code string `json:"code,omitempty"`
+	// Code is the code itself, only in the answer that makes it;
+	// MailedTo, where it was emailed then, or MailProblem, why it wasn't.
+	Code        string `json:"code,omitempty"`
+	MailedTo    string `json:"mailedTo,omitempty"`
+	MailProblem string `json:"mailProblem,omitempty"`
 }
 
 func codeOf(c msfp.CodeView) codeJSON {
 	return codeJSON{ID: c.ID, Note: c.Note, CreatedAt: stamp(c.Created), ExpiresAt: stamp(c.Expires), Uses: c.Uses, Group: c.Group}
+}
+
+// CodeMailer emails a federation pairing code to another server's
+// operator.
+type CodeMailer interface {
+	// CanSendMail says whether emails can be sent (the SMTP server set).
+	CanSendMail() bool
+	// SendPairingCode emails code, which invites to group ("" for a
+	// pairing) and stops working at expires. Its error says what's wrong
+	// in plain words.
+	SendPairingCode(ctx context.Context, to, code, group string, expires time.Time) error
 }
 
 // engine is federation now, nil without it.
@@ -248,6 +264,8 @@ func (p *Panel) federation(w http.ResponseWriter, r *http.Request, _ *session) {
 		// The test setting federation.test_plain_http, on: said so.
 		"testPlainHTTP": strings.HasPrefix(sv.Address, "http://"),
 		"fingerprint":   sv.Fingerprint, "codes": outCodes, "peers": outPeers, "groups": groups,
+		// Codes can be emailed.
+		"canMail": p.CodeMail != nil && p.CodeMail.CanSendMail(),
 		"nextKey": map[string]any{"fingerprint": sv.NextKey, "onServer": sv.NextOnServer}}
 	// A change of this server's key under way: since when, until when the
 	// old key is kept.
@@ -278,10 +296,24 @@ func (p *Panel) createPairingCode(w http.ResponseWriter, r *http.Request, s *ses
 		Group string `json:"group"`
 		Uses  int    `json:"uses"`
 		Hours int    `json:"hours"`
+		// Email, when set, is where the code is sent too: to the other
+		// server's operator.
+		Email string `json:"email"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request"})
 		return
+	}
+	email := strings.TrimSpace(req.Email)
+	if email != "" {
+		if a, err := mail.ParseAddress(email); err != nil || a.Address != email || len(email) > 254 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": "That isn't an email address."})
+			return
+		}
+		if p.CodeMail == nil || !p.CodeMail.CanSendMail() {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": "Email is off: set it up first (Server, Emails)."})
+			return
+		}
 	}
 	text, c, err := eng.MakeCodeWith(r.Context(), msfp.CodeOptions{Note: req.Note, Group: req.Group, Uses: req.Uses,
 		Lifetime: time.Duration(req.Hours) * time.Hour})
@@ -306,6 +338,24 @@ func (p *Panel) createPairingCode(w http.ResponseWriter, r *http.Request, s *ses
 	p.Logger.Info("a pairing code was made in the control panel", "code", c.ID, "by", s.logID)
 	j := codeOf(c)
 	j.Code = text
+	if email != "" {
+		// Sent after it's made: the code is shown anyway, and a failure
+		// is said beside it.
+		group := ""
+		if c.Group != "" {
+			if g, err := p.engine().Group(r.Context(), c.Group); err == nil {
+				group = g.Name
+			}
+		}
+		if err := p.CodeMail.SendPairingCode(r.Context(), email, text, group, c.Expires); err != nil {
+			// Said as the invitations' emails say it.
+			j.MailProblem = err.Error()
+			p.Logger.Warn("a pairing code couldn't be emailed", "code", c.ID, "error", err)
+		} else {
+			j.MailedTo = email
+			p.Logger.Info("a pairing code was emailed from the control panel", "code", c.ID, "by", s.logID)
+		}
+	}
 	writeJSON(w, http.StatusCreated, j)
 }
 

@@ -64,3 +64,12 @@ subject = "Your access to {site} ends on {date}"
 intro = "Your access to {site} ends on {date}. To keep it, ask the site's administrator."
 button = "Open {site}"
 why = "You got this email because you have an account on {site}."
+
+[code]
+subject = "A code to pair your server with {site}"
+groupSubject = "An invitation to the group {group}, from {site}"
+intro = "The operator of {site} sent you a code to pair your server with theirs. Paste it where your server takes pairing codes (on Overfin: Federation, then Use a code):"
+groupIntro = "The operator of {site} invites your server to the group {group}. Paste this code where your server takes pairing codes (on Overfin: Federation, then Use a code):"
+check = "Before accepting your server, the operator of {site} will compare fingerprints with you: by phone or another way you trust, never by email."
+expires = "This code works until {date}."
+why = "You got this email because an admin of {site} sent this code to this address."
