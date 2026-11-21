@@ -4376,6 +4376,68 @@ paths:
       responses:
         "200": {description: "Stopped, or already over. Signed."}
         "404": {description: "Not signed, or not a paired server."}
+  /federation/group-sync:
+    post:
+      operationId: federationGroupSync
+      summary: A member of a group asks for the events and mail it lacks
+      description: "Server to server, signed both ways (MSFP groups section 8.1). From a paired server that is a member of the group."
+      tags: [federation]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        "200": {description: "The events and mail the caller lacks. Signed."}
+        "404": {description: "Not signed, or not a member of that group."}
+  /federation/group-push:
+    post:
+      operationId: federationGroupPush
+      summary: A member of a group passes on events and mail
+      description: "Server to server, signed both ways (MSFP groups section 8.2)."
+      tags: [federation]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        "200": {description: "Kept what the group's rules allow. Signed."}
+        "404": {description: "Not signed, or not a member of that group."}
+  /federation/group-pair:
+    post:
+      operationId: federationGroupPair
+      summary: A member of a group pairs through it
+      description: "Server to server, signed both ways (MSFP groups section 8.3): heard from a member holding a request or answer this server can match."
+      tags: [federation]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        "200": {description: "Paired. Signed."}
+        "404": {description: "Not a member, or nothing to match."}
+        "409": {description: "That request or answer was used already."}
+  /federation/group-join:
+    post:
+      operationId: federationGroupJoin
+      summary: A paired server uses a code of this server's for a group
+      description: "Server to server, signed both ways (MSFP groups section 8.4): it waits for this server's operator."
+      tags: [federation]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        "200": {description: "Waiting for the operator. Signed."}
+        "404": {description: "Not a paired server, or no such code or proof."}
+        "409": {description: "Already a member, banned, or waiting."}
 
 components:
   securitySchemes:

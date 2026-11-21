@@ -332,7 +332,7 @@ anyone. Paired servers are not trusted at all (rule 94).
     | `theme.css`, the operator's branding | |
     | a screen's code: its start and its check | rule 116 |
     | `/api/v1/stream/…` | checks its ticket itself (rules 45, 46) |
-    | `/api/v1/federation/…` | answers only signed requests of known servers, or a live pairing code (rule 95) |
+    | `/api/v1/federation/…` | answers only signed requests of known servers (paired ones; on `group-pair`, members of one of this server's groups holding its request or answer), or a live pairing code (rule 95) |
 
 56. The API's cursors are signed and bound to the query that made them; a
     changed cursor, or one used with another query, is refused.

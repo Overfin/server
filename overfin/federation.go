@@ -251,8 +251,8 @@ type fedRoutes struct{ engine *msfp.Engine }
 
 func (fedRoutes) Name() string { return "federation" }
 
-// The calls of MSFP version 0 (core, catalog and playback), each its own
-// route: no catch-all.
+// The calls of MSFP version 0 (core, catalog, playback and groups), each
+// its own route: no catch-all.
 var federationCalls = []string{
 	"POST /api/v1/federation/pair",
 	"POST /api/v1/federation/hello",
@@ -263,6 +263,10 @@ var federationCalls = []string{
 	"POST /api/v1/federation/play",
 	"POST /api/v1/federation/progress",
 	"POST /api/v1/federation/stop",
+	"POST /api/v1/federation/group-sync",
+	"POST /api/v1/federation/group-push",
+	"POST /api/v1/federation/group-pair",
+	"POST /api/v1/federation/group-join",
 }
 
 func (f fedRoutes) Register(r *plugin.Registrar) error {
