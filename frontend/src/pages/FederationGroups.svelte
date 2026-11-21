@@ -292,7 +292,7 @@
 {#if open}
   <Modal size="wide" title={open.name || 'A group'} description={`${roleName[open.role]} · ${plural(open.members.length, 'server')} · automatic acceptance after ${plural(open.waitDays, 'day')} in the group · ${plural(open.capPerDay, 'invitation')} a day for each inviter`} close={() => (openID = '')}>
     {#if open.dissolved}<Notice warn>The owner dissolved this group. It goes from this server at once.</Notice>{/if}
-    {#if open.noWayIn}<Notice warn>No way in: this server has no pairing through this group any more. Nothing from the other members reaches it, and nothing it does reaches them, so what you see here may be out of date.</Notice>{/if}
+    {#if open.noWayIn}<Notice warn>No way in: this server has no pairing through this group any more. Nothing from the other members reaches it, and nothing it does reaches them, so what you see here may be out of date. To get back in, ask a member for a new code for this group, and use it under Federation, "Use a code".</Notice>{/if}
     {#if open.joining}<Notice>Joining: the group's list comes from the server that invited you, once its operator accepts. Without an answer within 30 days, this server gives up.</Notice>{/if}
     <Tabs label="The group" bind:current={tab} tabs={[{ id: 'members', label: 'Members' }, { id: 'requests', label: `Requests${waiting(open) ? ` (${waiting(open)})` : ''}` }, { id: 'banned', label: `Banned${open.banned.length ? ` (${open.banned.length})` : ''}` }]}>
       {#snippet children(at)}
