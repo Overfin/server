@@ -127,8 +127,10 @@
   let uses = $state(1);
   let hours = $state(24);
   // Where the code is emailed too ("" for nowhere).
-  let mailTo = $state('');
-  let made = $state<{ note: string; code: string; uses: number; group?: string; expiresAt: string; mailedTo?: string; mailProblem?: string } | null>(null);
+  let made = $state<{ id: string; note: string; code: string; uses: number; group?: string; expiresAt: string } | null>(null);
+  // An invite shown again, to copy by hand; one being sent by email.
+  let shown = $state<{ code: string; note: string } | null>(null);
+  let sending = $state<{ invite: Code; email: string } | null>(null);
   // Using another server's code: pasted, then what it says, to confirm.
   let using = $state(false);
   let pasted = $state('');
@@ -183,35 +185,96 @@
     }
   }
 
-  // The page asks again by itself every 10 seconds while it's on screen:
-  // another server using a code, the other operator accepting, what they
-  // offer, how many titles came (the server checks with the others in the
-  // background). Open windows keep what's typed in them: only the lists
-  // change.
-  const timer = setInterval(() => {
-    if (!document.hidden) load();
-  }, 10_000);
-  onDestroy(() => clearInterval(timer));
+  // The page reloads its lists as soon as anything changes in federation:
+  // another server using an invite, an owner accepting, a request, a
+  // group changed, titles read. It waits on the server for the next change
+  // (up to 25 seconds, then asks again). Open windows keep what's typed in
+  // them: only the lists change.
+  let alive = true;
+  let seen = 0;
+  onDestroy(() => (alive = false));
+  (async () => {
+    while (alive) {
+      try {
+        const r = await api<{ seq: number }>('GET', `/admin/api/federation/changes?after=${seen}`);
+        if (r.seq !== seen) {
+          const first = seen === 0;
+          seen = r.seq;
+          if (!first) await load();
+        }
+      } catch {
+        await new Promise((ok) => setTimeout(ok, 5000));
+      }
+    }
+  })();
 
   function newCode(g?: Group) {
     note = '';
     codeGroup = g?.id ?? '';
     uses = 1;
     hours = 24;
-    mailTo = '';
     making = true;
   }
 
   async function make() {
-    const c = await api<{ note: string; code: string; uses: number; group?: string; expiresAt: string; mailedTo?: string; mailProblem?: string }>('POST', '/admin/api/federation/codes', {
+    const c = await api<{ id: string; note: string; code: string; uses: number; group?: string; expiresAt: string }>('POST', '/admin/api/federation/codes', {
       note,
       group: codeGroup,
       uses: Number(uses) || 1,
       hours: Number(hours) || 24,
-      email: mailTo.trim(),
     });
     await load();
     setTimeout(() => (made = c), 0);
+  }
+
+  // Copies text: the clipboard where the browser allows it (https or
+  // localhost), else the older way, which works on plain http too.
+  async function copyText(text: string): Promise<boolean> {
+    try {
+      if (window.isSecureContext && navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      // the older way below
+    }
+    const t = document.createElement('textarea');
+    t.value = text;
+    t.setAttribute('readonly', '');
+    t.style.position = 'fixed';
+    t.style.opacity = '0';
+    document.body.appendChild(t);
+    t.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch {
+      ok = false;
+    }
+    t.remove();
+    return ok;
+  }
+
+  // Copies an invite: its code is asked for again; when the browser won't
+  // copy, it's shown, selected, to copy by hand.
+  async function copyInvite(c: Code) {
+    try {
+      const r = await api<{ code: string }>('GET', `/admin/api/federation/codes/${c.id}/text`);
+      if (await copyText(r.code)) toast('Invite copied.');
+      else shown = { code: r.code, note: c.note };
+    } catch (err) {
+      toast(message(err), true);
+    }
+  }
+
+  function sendInvite(c: Code) {
+    sending = { invite: c, email: '' };
+  }
+
+  async function saveSending() {
+    if (!sending) return;
+    await api('POST', `/admin/api/federation/codes/${sending.invite.id}/email`, { email: sending.email.trim() });
+    toast(`Sent to ${sending.email.trim()}.`);
   }
 
   async function withdraw(c: Code) {
@@ -649,7 +712,11 @@
             {#each personalInvites as c (c.id)}
               <tr>
                 <td><div class="name">{c.note || 'No note'}</div><div class="hint">made {ago(c.createdAt)} · works until {when(c.expiresAt)}</div></td>
-                <td class="row-actions"><button type="button" class="small danger" onclick={() => withdraw(c)}>Withdraw</button></td>
+                <td class="row-actions">
+                  <button type="button" class="small" onclick={() => copyInvite(c)}>Copy</button>
+                  {#if s?.canMail}<button type="button" class="small" onclick={() => sendInvite(c)}>Send by email</button>{/if}
+                  <button type="button" class="small danger" onclick={() => withdraw(c)}>Withdraw</button>
+                </td>
               </tr>
             {/each}
           </tbody>
@@ -663,7 +730,7 @@
     joining={joiningPeers} invites={s.codes ?? []}
     acceptJoining={(j: JoinWaiting) => { const p = (s?.peers ?? []).find((x) => x.id === j.id); if (p) accept(p); }}
     refuseJoining={(j: JoinWaiting) => { const p = (s?.peers ?? []).find((x) => x.id === j.id); if (p) end(p); }}
-    withdraw={withdraw} />
+    withdraw={withdraw} copyInvite={copyInvite} sendInvite={s.canMail ? sendInvite : undefined} />
 
 {/if}
 
@@ -720,22 +787,38 @@
         </select>
       {/snippet}
     </Setting>
-    {#if s?.canMail}
-      <Field label="Email it to" wide hint="Optional: the other server's owner's address. The invite is shown here too. Compare fingerprints by phone or another way you trust, not by email."><input type="email" bind:value={mailTo} placeholder="owner@example.org" maxlength="254" autocomplete="off" /></Field>
-    {/if}
+
   </FormModal>
 {/if}
 
 {#if made}
   <Modal title={made.group ? `Invite to "${groupName(made.group)}"` : 'Invite'} close={() => (made = null)}>
-    {#if made.mailedTo}<Notice>Sent to {made.mailedTo}.</Notice>{/if}
-    {#if made.mailProblem}<Notice warn>The email didn't go: {made.mailProblem} Copy the code below and send it another way.</Notice>{/if}
-    <Secret value={made.code} after={`Send it to the other server's owner however you like; they use it on their server (on Overfin: Federation, "Use a code"). Their server then waits for you ${made.group ? `in "${groupName(made.group)}"` : 'under Individual'}, to accept once you've compared fingerprints. It works ${made.uses > 1 ? `for ${made.uses} servers` : 'once'}, until ${when(made.expiresAt)}.`}>Copy it now: it won't be shown again.</Secret>
+    <div class="hint">Send it to the other server's owner however you like; they use it on their server (on Overfin: Federation, "Use a code"). Their server then waits for you {made.group ? `in "${groupName(made.group)}"` : 'under Individual'}, to accept once you've compared fingerprints. It works {made.uses > 1 ? `for ${made.uses} servers` : 'once'}, until {when(made.expiresAt)}. You find it under "Invites not used yet" until then.</div>
+    <pre class="invite-code">{made.code}</pre>
     {#snippet foot()}
       <span class="grow"></span>
+      {#if s?.canMail}<button type="button" onclick={() => { const c = (s?.codes ?? []).find((x) => x.id === made?.id); made = null; if (c) sendInvite(c); }}>Send by email</button>{/if}
+      <button type="button" onclick={async () => { if (made && (await copyText(made.code))) toast('Invite copied.'); }}>Copy</button>
       <button type="button" class="primary" onclick={() => (made = null)}>Done</button>
     {/snippet}
   </Modal>
+{/if}
+
+{#if shown}
+  <Modal title={shown.note || 'Invite'} close={() => (shown = null)}>
+    <div class="hint">Your browser didn't let the page copy it: select it and copy it yourself.</div>
+    <pre class="invite-code">{shown.code}</pre>
+    {#snippet foot()}
+      <span class="grow"></span>
+      <button type="button" class="primary" onclick={() => (shown = null)}>Done</button>
+    {/snippet}
+  </Modal>
+{/if}
+
+{#if sending}
+  <FormModal title="Send by email" description={`The invite "${sending.invite.note || 'No note'}", to the other server's owner. Compare fingerprints with them by phone or another way you trust, not by email.`} saveLabel="Send" save={saveSending} close={() => (sending = null)}>
+    <Field label="To" wide><input type="email" bind:value={sending.email} placeholder="owner@example.org" maxlength="254" autocomplete="off" required /></Field>
+  </FormModal>
 {/if}
 
 {#if using}
@@ -844,6 +927,18 @@
   }
   .only-narrow {
     display: none;
+  }
+  .invite-code {
+    white-space: pre-wrap;
+    word-break: break-all;
+    user-select: all;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.85rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-s);
+    background: var(--panel-2);
+    margin: 0.75rem 0 0;
   }
   .invites-title {
     font-weight: 600;

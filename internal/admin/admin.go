@@ -213,6 +213,11 @@ type Panel struct {
 	// CodeMail, when set, emails federation pairing codes to other
 	// servers' operators.
 	CodeMail CodeMailer
+	// FedChanges, when set, tells the federation page when anything
+	// changed, so it reloads at once (fedChanges).
+	FedChanges interface {
+		Wait(ctx context.Context, after uint64) uint64
+	}
 	// Playing, when set, shows what's playing now and stops it (the live
 	// view).
 	Playing Playing
@@ -381,6 +386,9 @@ func (p *Panel) handler() http.Handler {
 	mux.HandleFunc("PUT /admin/api/federation/uncallable", p.signedIn(p.setUncallable))
 	mux.HandleFunc("POST /admin/api/federation/codes", p.signedIn(p.createPairingCode))
 	mux.HandleFunc("DELETE /admin/api/federation/codes/{id}", p.signedIn(p.deletePairingCode))
+	mux.HandleFunc("GET /admin/api/federation/codes/{id}/text", p.signedIn(p.codeText))
+	mux.HandleFunc("POST /admin/api/federation/codes/{id}/email", p.signedIn(p.emailCode))
+	mux.HandleFunc("GET /admin/api/federation/changes", p.signedIn(p.fedChanges))
 	mux.HandleFunc("POST /admin/api/federation/preview", p.signedIn(p.previewPairingCode))
 	mux.HandleFunc("POST /admin/api/federation/peers", p.signedIn(p.usePairingCode))
 	mux.HandleFunc("POST /admin/api/federation/peers/{id}/accept", p.signedIn(p.acceptPeer))

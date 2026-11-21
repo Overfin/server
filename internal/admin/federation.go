@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/mail"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -569,6 +570,91 @@ func (p *Panel) endPeer(w http.ResponseWriter, r *http.Request, s *session) {
 	}
 	p.Logger.Info("a pairing was ended in the control panel", "peer", r.PathValue("id"), "by", s.logID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// codeText gives a live invite's code again, to copy.
+func (p *Panel) codeText(w http.ResponseWriter, r *http.Request, _ *session) {
+	eng := p.fed(w)
+	if eng == nil {
+		return
+	}
+	text, err := eng.CodeText(r.Context(), r.PathValue("id"))
+	switch {
+	case errors.Is(err, msfp.ErrNotFound):
+		notFound(w, "No such invite: it was used, withdrawn, or it stopped working")
+		return
+	case err != nil:
+		p.fail(w, "reading an invite", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"code": text})
+}
+
+// emailCode sends a live invite by email, as many times as wanted.
+func (p *Panel) emailCode(w http.ResponseWriter, r *http.Request, s *session) {
+	eng := p.fed(w)
+	if eng == nil {
+		return
+	}
+	var req struct {
+		Email string `json:"email"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	email := strings.TrimSpace(req.Email)
+	if a, err := mail.ParseAddress(email); err != nil || a.Address != email || len(email) > 254 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": "That isn't an email address."})
+		return
+	}
+	if p.CodeMail == nil || !p.CodeMail.CanSendMail() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": "Email is off: set it up first (Server, Emails)."})
+		return
+	}
+	ctx, id := r.Context(), r.PathValue("id")
+	text, err := eng.CodeText(ctx, id)
+	if errors.Is(err, msfp.ErrNotFound) {
+		notFound(w, "No such invite: it was used, withdrawn, or it stopped working")
+		return
+	} else if err != nil {
+		p.fail(w, "reading an invite", err)
+		return
+	}
+	var group string
+	var expires time.Time
+	if codes, err := eng.Codes(ctx); err == nil {
+		for _, c := range codes {
+			if c.ID == id {
+				expires = c.Expires
+				if c.Group != "" {
+					if g, err := eng.Group(ctx, c.Group); err == nil {
+						group = g.Name
+					}
+				}
+			}
+		}
+	}
+	if err := p.CodeMail.SendPairingCode(ctx, email, text, group, expires); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"type": "unreachable", "detail": err.Error()})
+		return
+	}
+	p.Logger.Info("an invite was emailed from the control panel", "code", id, "by", s.logID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// fedChanges waits, up to 25 seconds, for federation to change after the
+// number the page last saw, and says the number now: the page reloads its
+// lists when it moved (a server waiting, a pairing, a request, a group
+// changed, a catalog read).
+func (p *Panel) fedChanges(w http.ResponseWriter, r *http.Request, _ *session) {
+	if p.FedChanges == nil {
+		writeJSON(w, http.StatusOK, map[string]uint64{"seq": 0})
+		return
+	}
+	after, _ := strconv.ParseUint(r.URL.Query().Get("after"), 10, 64)
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, map[string]uint64{"seq": p.FedChanges.Wait(ctx, after)})
 }
 
 // ourLibraries lists this server's libraries: what it may share, before a

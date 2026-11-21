@@ -929,7 +929,8 @@ func run(logger *slog.Logger) error {
 			OnLanguage: func() { sh.titles.Wake(); sh.lists.Wake() },
 			Store:      db, Provisioner: gw.Provisioner, Interests: gw.Interests, Playing: gw, Notices: sh.notices, IMDb: imdbData,
 			// Pairing codes by email, whenever the SMTP server is set.
-			CodeMail: gw,
+			CodeMail:   gw,
+			FedChanges: &sh.fedChanges,
 			Provider: &oidc.Provider{Issuer: o.Issuer, ClientID: o.ClientID, ClientSecret: cfg.Secrets.OIDCClientSecret,
 				RedirectURL: a.RedirectURL, GroupsClaim: o.GroupsClaim, HTTP: oidc.NewClient(o.Dial)}}
 		if sh.directory != nil {

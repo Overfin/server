@@ -398,3 +398,30 @@ func TestFederationGroupCreateAndShows(t *testing.T) {
 		t.Fatalf("A's group: %+v", s.Groups)
 	}
 }
+
+// An invite's code again, to copy: the same code as when it was made; and
+// the changes call answers at once when the page is behind.
+func TestFederationInviteAgain(t *testing.T) {
+	a, _, _ := fedPanel(t, "A")
+	rec := a.do("POST", "/admin/api/federation/codes", `{"note":"for B","uses":1}`, nil)
+	var made struct{ ID, Code string }
+	json.Unmarshal(rec.Body.Bytes(), &made)
+	if rec.Code != 201 || made.Code == "" {
+		t.Fatalf("make: %d %s", rec.Code, rec.Body)
+	}
+	rec = a.do("GET", "/admin/api/federation/codes/"+made.ID+"/text", "", nil)
+	var again struct{ Code string }
+	json.Unmarshal(rec.Body.Bytes(), &again)
+	if rec.Code != 200 || again.Code != made.Code {
+		t.Fatalf("again: %d %s", rec.Code, rec.Body)
+	}
+	if rec := a.do("GET", "/admin/api/federation/codes/nope/text", "", nil); rec.Code != 404 {
+		t.Fatalf("no such invite: %d %s", rec.Code, rec.Body)
+	}
+	if rec := a.do("POST", "/admin/api/federation/codes/"+made.ID+"/email", `{"email":"not an address"}`, nil); rec.Code != 400 {
+		t.Fatalf("bad address: %d %s", rec.Code, rec.Body)
+	}
+	if rec := a.do("GET", "/admin/api/federation/changes?after=7", "", nil); rec.Code != 200 {
+		t.Fatalf("changes: %d %s", rec.Code, rec.Body)
+	}
+}

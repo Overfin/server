@@ -205,6 +205,50 @@ func (outboundDialer) Dial(ctx context.Context, network, addr string) (net.Conn,
 	return c, err
 }
 
+// fedChanges counts the engine's events, for the federation page to wait
+// on (admin.Panel.FedChanges): it reloads its lists as soon as one comes.
+type fedChanges struct {
+	mu   sync.Mutex
+	seq  uint64
+	next chan struct{}
+}
+
+func (c *fedChanges) bump() {
+	c.mu.Lock()
+	c.seq++
+	if c.next != nil {
+		close(c.next)
+		c.next = nil
+	}
+	c.mu.Unlock()
+}
+
+// Wait waits until the count is past after, or ctx ends, and says the
+// count then.
+func (c *fedChanges) Wait(ctx context.Context, after uint64) uint64 {
+	for {
+		c.mu.Lock()
+		if c.seq != after {
+			s := c.seq
+			c.mu.Unlock()
+			return s
+		}
+		if c.next == nil {
+			c.next = make(chan struct{})
+		}
+		ch := c.next
+		c.mu.Unlock()
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			c.mu.Lock()
+			s := c.seq
+			c.mu.Unlock()
+			return s
+		}
+	}
+}
+
 // fedNotifier hears the engine's events: each is logged; a paired
 // server's titles read wake what fetches TMDB's data for new titles; a
 // playback on a peer ended there stops the viewer's player here; a server
@@ -276,6 +320,7 @@ func (n *fedNotifier) requests(ev msfp.Event) {
 
 func (n *fedNotifier) Notify(ev msfp.Event) {
 	sh := n.sh
+	sh.fedChanges.bump()
 	switch ev.(type) {
 	case msfp.PeerWaiting, msfp.GroupJoinWaiting, msfp.GroupRequestWaiting, msfp.RelationsChanged:
 		go n.requests(ev)

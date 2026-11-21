@@ -78,6 +78,8 @@ type shared struct {
 	emails *emails.Writer
 	// notices tells the operator about account events.
 	notices *notices.Notifier
+	// fedChanges counts federation's events, for the panel to wait on.
+	fedChanges fedChanges
 	// proof checks the sign-in pages' forms against scripts; one for the
 	// whole run, so a check is used once whatever reloads.
 	proof *proof.Checker
