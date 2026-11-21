@@ -63,7 +63,9 @@ type groupMemberJSON struct {
 	Paired  bool   `json:"paired,omitempty"`
 	Refused bool   `json:"refused,omitempty"`
 	Asked   bool   `json:"asked,omitempty"`
-	Me      bool   `json:"me,omitempty"`
+	// Individual: also paired directly with it.
+	Individual bool `json:"individual,omitempty"`
+	Me         bool `json:"me,omitempty"`
 }
 
 type groupBanJSON struct {
@@ -117,6 +119,7 @@ func groupOf(v msfp.GroupView, peers []msfp.PeerView) groupJSON {
 			Me: m.ID == v.Me}
 		if p, ok := byID[m.Peer]; ok {
 			mj.Paired = p.State == msfp.Paired
+			mj.Individual = p.Individual
 		}
 		j.Members = append(j.Members, mj)
 	}
@@ -132,7 +135,7 @@ func groupOf(v msfp.GroupView, peers []msfp.PeerView) groupJSON {
 	}
 	for _, p := range peers {
 		if slices.Contains(p.Groups, v.ID) {
-			j.Links = append(j.Links, groupLinkJSON{Peer: p.ID, Name: p.Name, Only: !p.ByHand && len(p.Groups) == 1})
+			j.Links = append(j.Links, groupLinkJSON{Peer: p.ID, Name: p.Name, Only: !p.Individual && !p.IndividualAsked && len(p.Groups) == 1})
 		}
 	}
 	return j
@@ -413,14 +416,15 @@ func (p *Panel) askGroupMember(w http.ResponseWriter, r *http.Request, s *sessio
 
 func (p *Panel) leaveGroup(w http.ResponseWriter, r *http.Request, s *session) {
 	var req struct {
-		// End lists the pairings made through the group that end too.
-		End []string `json:"end"`
+		// Ask lists the servers only this group pairs us with, asked to
+		// stay paired directly first.
+		Ask []string `json:"ask"`
 	}
 	if !decodeBody(w, r, &req) {
 		return
 	}
 	p.groupAction(w, r, s, "leaving a group", func(eng *msfp.Engine, id string) error {
-		return eng.LeaveGroup(r.Context(), id, req.End)
+		return eng.LeaveGroup(r.Context(), id, req.Ask)
 	})
 }
 

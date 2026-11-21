@@ -45,10 +45,15 @@
     // this server's last calls to it couldn't connect.
     inbound?: 'no' | 'confirming';
     callsFailed?: boolean;
-    // The groups this pairing was made or kept through; byHand, whether it
-    // was also paired with a code of its own.
+    // Relations (MSFP core section 7.7): the groups this pairing was made
+    // or kept through; individual, also paired directly; asked, this server
+    // asked to pair directly; asks, the other server asks; keepChoice, its
+    // group was dissolved and you choose whether to stay paired.
     groups?: string[];
-    byHand: boolean;
+    individual: boolean;
+    asked?: boolean;
+    asks?: boolean;
+    keepChoice?: boolean;
   }
   interface Lib {
     id: string;
@@ -457,10 +462,49 @@
       case 'theirs':
         return 'Waiting for its operator to accept';
       case 'paired':
+        if (p.keepChoice) return 'Its group was closed: stay paired with it?';
+        if (p.asks) return `Asks to pair with you directly; you know it through ${groupNames(p)}`;
+        if (p.asked) return 'You asked to pair directly: waiting for its operator';
         return `Paired ${p.pairedAt ? day(p.pairedAt) : ''}`.trim();
       case 'gone':
         return 'It no longer knows this server';
     }
+  }
+
+  // Servers paired directly, asked, or asking: the Servers list. Those
+  // known only through a group are under that group.
+  const direct = $derived((s?.peers ?? []).filter((p) => p.state !== 'paired' || p.individual || p.asked || p.asks || p.keepChoice));
+
+  async function relation(p: Peer, path: 'individual' | 'unpair' | 'refuse' | 'block', done: string) {
+    try {
+      await api('POST', `/admin/api/federation/peers/${p.id}/${path}`, {});
+      toast(done);
+    } catch (err) {
+      toast(message(err), true);
+    }
+    await load();
+  }
+
+  async function pairDirectly(p: Peer) {
+    const yes = await ask(`${p.asks ? `Pair directly with ${p.name}?` : `Ask ${p.name} to pair directly? Its operator answers on their side.`} Its fingerprint, to compare with its operator if you like: ${p.fingerprint}`, { yes: p.asks ? 'Pair' : 'Ask' });
+    if (yes) await relation(p, 'individual', p.asks ? `Paired directly with ${p.name}.` : `${p.name} was asked.`);
+  }
+
+  async function unpair(p: Peer) {
+    const what = p.asked && !p.individual ? `Withdraw your ask to pair directly with ${p.name}?`
+      : p.groups?.length ? `Unpair from ${p.name}? You stay paired through ${groupNames(p)}, and it keeps what you share with the group.`
+      : `Unpair from ${p.name}? It ends on both servers; a new code pairs you again.`;
+    if (await ask(what, { yes: p.asked && !p.individual ? 'Withdraw' : 'Unpair', danger: true })) await relation(p, 'unpair', p.asked && !p.individual ? 'Ask withdrawn.' : 'Unpaired.');
+  }
+
+  async function block(p: Peer) {
+    const groups = p.groups?.length ? ` It is also cut off from you in ${groupNames(p)}.` : '';
+    if (await ask(`Block ${p.name}? Everything with it ends, and it is kept out of all your groups. Only a new code from you lets it back.${groups}`, { yes: 'Block', danger: true })) await relation(p, 'block', `${p.name} is blocked.`);
+  }
+
+  function manageById(id: string) {
+    const p = (s?.peers ?? []).find((x) => x.id === id);
+    if (p) openSharing(p);
   }
 
   // The groups you may invite to: as owner or admin.
@@ -537,14 +581,14 @@
     </Notice>
   {/if}
 
-  <Card title="Servers">
+  <Card title="Servers" description="Servers you paired with directly. Those you know only through a group are under Groups.">
     <div class="table-wrap">
       <table>
         <thead><tr><th>Server</th><th class="hide-narrow">Status</th><th class="hide-narrow">Key</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
-          {#each s.peers ?? [] as p (p.id)}
+          {#each direct as p (p.id)}
             <tr>
-              <td><div class="name">{p.name}</div><div class="hint address">{p.address}{#if p.address.startsWith('http://')}{' · plain http (test setting)'}{/if}</div>{#if p.groups?.length}<div class="hint">{p.byHand ? 'Paired by hand, and through ' : 'Through '}{groupNames(p)}</div>{/if}{#if addressText(p)}<div class="hint">{addressText(p)}</div>{/if}<div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
+              <td><div class="name">{p.name}</div><div class="hint address">{p.address}{#if p.address.startsWith('http://')}{' · plain http (test setting)'}{/if}</div>{#if p.groups?.length}<div class="hint">{p.individual ? 'Also in ' : 'Through '}{groupNames(p)}</div>{/if}{#if addressText(p)}<div class="hint">{addressText(p)}</div>{/if}<div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
               <td class="hide-narrow"><div>{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint">{shareText(p)}</div>{/if}{#if p.seenAt}<div class="hint">heard from {ago(p.seenAt)}</div>{/if}</td>
               <td class="hide-narrow">{#if p.inbound === 'no'}<div><Badge kind="info">Can't be called</Badge></div>{/if}<div><Badge kind={keyState(p).kind}>{keyState(p).text}</Badge></div><div><code class="fingerprint">{p.fingerprint}</code></div>{#if keyText(p)}<div class="hint key-text">{keyText(p)}</div>{/if}</td>
               <td class="row-actions">
@@ -557,10 +601,14 @@
                 {#if p.state === 'ours'}
                   <button type="button" class="small primary" onclick={() => accept(p)}>Accept</button>
                   <button type="button" class="small danger" onclick={() => end(p)}>Refuse</button>
+                {:else if p.state === 'paired' && (p.asks || p.keepChoice)}
+                  <button type="button" class="small primary" onclick={() => (p.asks ? pairDirectly(p) : relation(p, 'individual', `Still paired with ${p.name}.`))}>{p.asks ? 'Accept' : 'Keep'}</button>
+                  <button type="button" class="small danger" onclick={() => relation(p, 'refuse', p.asks ? 'Refused.' : `Unpaired from ${p.name}.`)}>{p.asks ? 'Refuse' : 'Let go'}</button>
                 {:else if p.state === 'paired' && !p.suspendedAt && p.ourKey !== 'lost'}
                   <button type="button" class="small primary" onclick={() => openSharing(p)}>Sharing</button>
                   {#if !p.inbound}<button type="button" class="small" onclick={() => check(p)}>Check</button>{/if}
-                  <button type="button" class="small danger" onclick={() => end(p)}>End</button>
+                  <button type="button" class="small danger" onclick={() => unpair(p)}>{p.asked && !p.individual ? 'Withdraw' : 'Unpair'}</button>
+                  <button type="button" class="small danger" onclick={() => block(p)}>Block</button>
                 {:else if p.suspendedAt || p.ourKey === 'lost'}
                   <button type="button" class="small danger" onclick={() => end(p)}>Remove</button>
                 {:else}
@@ -577,7 +625,7 @@
     </div>
   </Card>
 
-  <FederationGroups groups={s.groups ?? []} uncallable={s.uncallable} reload={load} invite={newCode} />
+  <FederationGroups groups={s.groups ?? []} uncallable={s.uncallable} reload={load} invite={newCode} manage={manageById} pairDirectly={(id) => { const p = (s?.peers ?? []).find((x) => x.id === id); if (p) pairDirectly(p); }} />
 
   {#if s.codes?.length}
     <Card title="Codes not used yet">
@@ -685,6 +733,9 @@
 {#if sharingWith && sharing}
   <FormModal title={`Sharing with ${sharingWith.name}`} description="Only what one server offers and the other wants is shared." saveLabel="Save" save={saveSharing} close={() => { sharingWith = null; sharing = null; }}>
     {#if s?.uncallable}<Notice>This server can't be called: it shares nothing. What you pick here is kept for when it can be called again.</Notice>{/if}
+    {#if !sharingWith.individual}
+      <Notice>{sharingWith.asked ? `You asked ${sharingWith.name} to pair directly; until its operator accepts, it gets` : `You know ${sharingWith.name} through ${groupNames(sharingWith)}: it gets`} what you share with the group, under the group's Sharing. Pair directly to share with it on its own.</Notice>
+    {:else}
     <div class="setting stack">
       <div><div class="label">You offer</div><div class="hint">Your libraries {sharingWith.name} may take. You only ever offer your own.</div></div>
       <div class="checks all">
@@ -692,6 +743,7 @@
         {:else}<span class="hint">This server has no library yet.</span>{/each}
       </div>
     </div>
+    {/if}
     <div class="setting stack">
       <div><div class="label">You want</div><div class="hint">Out of what {sharingWith.name} offers you.</div></div>
       {#if sharing.uncallable}<Notice>{sharingWith.name} can't be called: it can watch what you share with it, and can share nothing with you.</Notice>
@@ -711,6 +763,7 @@
         {/each}
       </div>
     {/if}
+    {#if sharingWith.individual}
     <Setting label="Streams at once" hint={`What ${sharingWith.name}'s people may play from this server at the same time.`}>
       {#snippet children(ids)}<input type="number" min="0" max="50" bind:value={limits.streams} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
     </Setting>
@@ -720,6 +773,7 @@
     <Setting label="Bitrate cap (kbps)" hint="0: no cap.">
       {#snippet children(ids)}<input type="number" min="0" bind:value={limits.bitrateKbps} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
     </Setting>
+    {/if}
   </FormModal>
 {/if}
 

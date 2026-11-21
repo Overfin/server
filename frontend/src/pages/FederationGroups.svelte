@@ -17,6 +17,8 @@
     joinedAt: string;
     peer?: string;
     paired?: boolean;
+    // individual: also paired directly with it.
+    individual?: boolean;
     refused?: boolean;
     asked?: boolean;
     me?: boolean;
@@ -61,12 +63,18 @@
     uncallable = false,
     reload,
     invite,
+    manage,
+    pairDirectly,
   }: {
     groups: Group[];
     uncallable?: boolean;
     reload: () => Promise<void>;
     /** invite opens the New code window for a group. */
     invite: (g: Group) => void;
+    /** manage opens a paired server's window, by its pairing's ID. */
+    manage: (peer: string) => void;
+    /** pairDirectly asks a server known through a group to pair directly. */
+    pairDirectly: (peer: string) => void;
   } = $props();
 
   // The group whose window is open, by ID: the list reloads under it.
@@ -81,7 +89,7 @@
   const member = $derived(open?.members.find((m) => m.id === memberID) ?? null);
   let banning = $state<{ member: Member; reason: string } | null>(null);
   let blocking = $state<{ member: Member; invitees: boolean } | null>(null);
-  let leaving = $state<{ end: string[] } | null>(null);
+  let leaving = $state<{ ask: string[] } | null>(null);
   let dissolving = $state<{ keep: boolean } | null>(null);
   let giving = $state<{ to: string } | null>(null);
 
@@ -171,7 +179,7 @@
   async function giveUp(g: Group) {
     const yes = await ask(`Give up joining "${g.name}"? Your pairings stay.`, { yes: 'Give up', danger: true });
     if (!yes) return;
-    await act(() => api('POST', `/admin/api/federation/groups/${g.id}/leave`, { end: [] }), '');
+    await act(() => api('POST', `/admin/api/federation/groups/${g.id}/leave`, { ask: [] }), '');
     openID = '';
   }
 
@@ -223,7 +231,7 @@
 
   async function saveLeave() {
     if (!open || !leaving) return;
-    await api('POST', `/admin/api/federation/groups/${open.id}/leave`, { end: leaving.end });
+    await api('POST', `/admin/api/federation/groups/${open.id}/leave`, { ask: leaving.ask });
     toast(`You left "${open.name}".`);
     openID = '';
     await reload();
@@ -240,7 +248,7 @@
   // A member's pairing with this server, in a few words.
   function linkText(m: Member): string {
     if (m.me) return 'This server';
-    if (m.paired) return 'Paired';
+    if (m.paired) return m.individual ? 'Paired, also directly' : 'Paired';
     if (m.peer) return 'Pairing';
     if (requested(m)) return 'Asks to pair: see Requests';
     if (m.refused) return 'You refused it';
@@ -376,7 +384,7 @@
         {#if open.joining}
           <button type="button" class="danger" onclick={() => open && giveUp(open)}>Give up</button>
         {:else}
-          <button type="button" class="danger" onclick={() => (leaving = { end: [] })}>Leave</button>
+          <button type="button" class="danger" onclick={() => (leaving = { ask: [] })}>Leave</button>
         {/if}
       {/if}
       <span class="grow"></span>
@@ -389,6 +397,8 @@
 {#snippet memberActions(m: Member)}
   {#if !m.me && !m.peer && !m.refused && !m.asked && !requested(m)}<button type="button" class="small" onclick={() => open && askMember(open, m)}>Ask to pair</button>{/if}
   {#if m.refused}<button type="button" class="small" onclick={() => open && liftRefusal(open, m)}>Hear it again</button>{/if}
+  {#if m.paired && m.peer}<button type="button" class="small" onclick={() => { const id = m.peer ?? ''; openID = ''; manage(id); }}>Sharing</button>{/if}
+  {#if m.paired && m.peer && !m.individual}<button type="button" class="small" onclick={() => pairDirectly(m.peer ?? '')}>Pair directly</button>{/if}
   {#if !m.me}<button type="button" class="small" onclick={() => (memberID = m.id)}>More</button>{/if}
 {/snippet}
 
@@ -462,14 +472,14 @@
 {/if}
 
 {#if open && leaving}
-  <FormModal danger title={`Leave "${open.name}"`} description="Pairings made through the group stay unless you tick them: one that only the group held becomes a pairing by hand, keeping what the group gave it." saveLabel="Leave" save={saveLeave} close={() => (leaving = null)}>
-    {#if open.links.length}
+  <FormModal danger title={`Leave "${open.name}"`} description={open.links.some((l) => l.only) ? 'You are paired with these servers only through the group: leaving unpairs you from them. Tick those you want to stay paired with; their operators are asked first.' : 'The servers you are also paired with directly, or through another group, stay paired.'} saveLabel="Leave" save={saveLeave} close={() => (leaving = null)}>
+    {#if open.links.some((l) => l.only)}
       <div class="setting stack">
-        <div><div class="label">End these pairings too</div></div>
+        <div><div class="label">Stay paired with</div></div>
         <div class="checks all">
-          {#each open.links as l (l.peer)}<label class="inline"><input type="checkbox" value={l.peer} bind:group={leaving.end} /> <span>{l.name}{#if !l.only}{" "}<span class="hint">(also from another group, or by hand)</span>{/if}</span></label>{/each}
+          {#each open.links.filter((l) => l.only) as l (l.peer)}<label class="inline"><input type="checkbox" value={l.peer} bind:group={leaving.ask} /> <span>{l.name}</span></label>{/each}
         </div>
-        <div><button type="button" class="small" onclick={() => leaving && open && (leaving.end = open.links.map((l) => l.peer))}>Tick all</button></div>
+        <div><button type="button" class="small" onclick={() => leaving && open && (leaving.ask = open.links.filter((l) => l.only).map((l) => l.peer))}>Tick all</button></div>
       </div>
     {/if}
   </FormModal>
@@ -477,8 +487,8 @@
 
 {#if open && dissolving}
   <FormModal danger title={`Dissolve "${open.name}"`} description="Every member removes the group. It can't be undone: make a new group to start again." saveLabel="Dissolve" save={saveDissolve} close={() => (dissolving = null)}>
-    <label class="inline"><input type="checkbox" bind:checked={dissolving.keep} /> Keep the pairings it made</label>
-    <div class="hint">Kept, each becomes a pairing by hand, with what the group gave it. Off: pairings that only this group held end, on every member (for a group that was misused, say).</div>
+    <label class="inline"><input type="checkbox" bind:checked={dissolving.keep} /> Let members choose to stay paired</label>
+    <div class="hint">On: each member chooses, for each server it knew only through the group, to stay paired or not. Off: those pairings end, on every member (for a group that was misused, say).</div>
   </FormModal>
 {/if}
 

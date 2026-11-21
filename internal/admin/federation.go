@@ -85,10 +85,17 @@ type peerJSON struct {
 	Inbound     string `json:"inbound,omitempty"`
 	CallsFailed bool   `json:"callsFailed,omitempty"`
 
-	// Groups are the IDs of the groups this pairing was made or kept
-	// through; ByHand, whether it was also paired with a code of its own.
-	Groups []string `json:"groups,omitempty"`
-	ByHand bool     `json:"byHand"`
+	// Relations (MSFP core section 7.7). Groups are the IDs of the groups
+	// this pairing was made or kept through; Individual, whether the two
+	// are also paired directly (both want it); Asked, this server asked to
+	// pair directly and waits; Asks, the other server asks, waiting for
+	// you; KeepChoice, its group was dissolved and you choose whether to
+	// stay paired.
+	Groups     []string `json:"groups,omitempty"`
+	Individual bool     `json:"individual"`
+	Asked      bool     `json:"asked,omitempty"`
+	Asks       bool     `json:"asks,omitempty"`
+	KeepChoice bool     `json:"keepChoice,omitempty"`
 }
 
 // movingJSON is a peer's new address, being checked: since when that
@@ -134,7 +141,8 @@ func peerOf(v msfp.PeerView) peerJSON {
 		Fingerprint: v.Fingerprint, CreatedAt: stamp(v.Created), PairedAt: stamp(v.Paired), SeenAt: stamp(v.Seen),
 		Offers: v.Offers, Wants: v.Wants, WantsGone: v.WantsGone, OtherVersion: v.Core < 0,
 		Commitment: v.CommitmentFrom, SuspendedAt: stamp(v.Suspended), OurKey: v.OurKey, RotationAnswer: v.RotationAnswer,
-		NotMoved: v.NotMoved, MoveLate: v.MoveLate, CallsFailed: v.CallsFailed, Groups: v.Groups, ByHand: v.ByHand}
+		NotMoved: v.NotMoved, MoveLate: v.MoveLate, CallsFailed: v.CallsFailed, Groups: v.Groups,
+		Individual: v.Individual, Asked: v.IndividualAsked, Asks: v.IndividualAsks, KeepChoice: v.KeepChoice}
 	if v.Pending != nil {
 		j.Pending = &pendingJSON{Fingerprint: v.Pending.Fingerprint, Date: stamp(v.Pending.At)}
 	}
@@ -539,6 +547,60 @@ func (p *Panel) endPeer(w http.ResponseWriter, r *http.Request, s *session) {
 		return
 	}
 	p.Logger.Info("a pairing was ended in the control panel", "peer", r.PathValue("id"), "by", s.logID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// pairDirectly asks a server known through a group to pair directly, or
+// accepts its ask, or keeps one whose group was dissolved (MSFP core
+// section 7.7).
+func (p *Panel) pairDirectly(w http.ResponseWriter, r *http.Request, s *session) {
+	p.relationAction(w, r, s, "pairing directly", func(eng *msfp.Engine, id string) error {
+		_, err := eng.AskIndividual(r.Context(), id)
+		return err
+	})
+}
+
+// unpair ends the direct pairing: a server still in a shared group stays
+// paired through it.
+func (p *Panel) unpair(w http.ResponseWriter, r *http.Request, s *session) {
+	p.relationAction(w, r, s, "unpairing", func(eng *msfp.Engine, id string) error {
+		return eng.EndIndividual(r.Context(), id)
+	})
+}
+
+// refuseDirect refuses a server's ask to pair directly, or lets go of one
+// whose group was dissolved.
+func (p *Panel) refuseDirect(w http.ResponseWriter, r *http.Request, s *session) {
+	p.relationAction(w, r, s, "refusing to pair directly", func(eng *msfp.Engine, id string) error {
+		return eng.RefuseIndividual(r.Context(), id)
+	})
+}
+
+// blockPeer ends everything with a server and keeps it out of every group.
+func (p *Panel) blockPeer(w http.ResponseWriter, r *http.Request, s *session) {
+	p.relationAction(w, r, s, "blocking a server", func(eng *msfp.Engine, id string) error {
+		return eng.BlockPeer(r.Context(), id)
+	})
+}
+
+func (p *Panel) relationAction(w http.ResponseWriter, r *http.Request, s *session, doing string, fn func(eng *msfp.Engine, id string) error) {
+	eng := p.fed(w)
+	if eng == nil {
+		return
+	}
+	id := r.PathValue("id")
+	switch err := fn(eng, id); {
+	case errors.Is(err, msfp.ErrNotFound):
+		notFound(w, "No such server")
+		return
+	case errors.Is(err, msfp.ErrNotPaired):
+		writeJSON(w, http.StatusConflict, map[string]string{"type": "not-paired", "detail": "That server isn't paired yet."})
+		return
+	case err != nil:
+		p.fail(w, doing, err)
+		return
+	}
+	p.Logger.Info("federation: "+doing+" in the control panel", "peer", id, "by", s.logID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

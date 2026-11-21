@@ -28,7 +28,8 @@ type groupState struct {
 	Peers []struct {
 		ID, Name, State string
 		Groups          []string
-		ByHand          bool
+		Individual      bool
+		Asked           bool
 	}
 	Codes []struct {
 		ID, Group string
@@ -154,12 +155,13 @@ func TestFederationGroupsPanel(t *testing.T) {
 		t.Fatalf("A's group: %+v", ag)
 	}
 
-	// B leaves, ending nothing: its pairing with A stays, by hand.
-	if rec := b.do("POST", "/admin/api/federation/groups/"+g.ID+"/leave", `{"end":[]}`, nil); rec.Code != 204 {
+	// B leaves, asking A to stay paired: the pairing waits for A's answer.
+	aOnB := readGroups(t, b).Peers[0].ID
+	if rec := b.do("POST", "/admin/api/federation/groups/"+g.ID+"/leave", `{"ask":["`+aOnB+`"]}`, nil); rec.Code != 204 {
 		t.Fatalf("leave: %d %s", rec.Code, rec.Body)
 	}
 	sb = readGroups(t, b)
-	if len(sb.Groups) != 0 || len(sb.Peers) != 1 || sb.Peers[0].State != "paired" || !sb.Peers[0].ByHand || len(sb.Peers[0].Groups) != 0 {
+	if len(sb.Groups) != 0 || len(sb.Peers) != 1 || sb.Peers[0].State != "paired" || !sb.Peers[0].Asked || len(sb.Peers[0].Groups) != 0 {
 		t.Fatalf("B after leaving: %+v", sb)
 	}
 	waitFor(t, a, "A sees B leave", func(s groupState) bool { return len(s.Groups) == 1 && len(s.Groups[0].Members) == 1 })
@@ -318,5 +320,48 @@ func TestFederationGroupNoWayIn(t *testing.T) {
 	}
 	if rec := a.do("GET", "/admin/api/federation/peers/"+peer+"/cuts", "", nil); rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != "[]" {
 		t.Fatalf("cuts after: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// Relations from the panels (MSFP core section 7.7): B joins A's group by
+// its code, paired through the group only; B asks to pair directly, A
+// accepts; B unpairs, and the group keeps them paired.
+func TestFederationRelations(t *testing.T) {
+	a, _, _ := fedPanel(t, "A")
+	b, _, _ := fedPanel(t, "B")
+	rec := a.do("POST", "/admin/api/federation/groups", `{"name":"Family","waitDays":3,"capPerDay":5}`, nil)
+	var g struct{ ID string }
+	json.Unmarshal(rec.Body.Bytes(), &g)
+	rec = a.do("POST", "/admin/api/federation/codes", `{"group":"`+g.ID+`","uses":1}`, nil)
+	var made struct{ Code string }
+	json.Unmarshal(rec.Body.Bytes(), &made)
+	body, _ := json.Marshal(map[string]string{"code": made.Code})
+	if rec := b.do("POST", "/admin/api/federation/peers", string(body), nil); rec.Code != 201 {
+		t.Fatalf("use: %d %s", rec.Code, rec.Body)
+	}
+	bOnA := readGroups(t, a).Peers[0].ID
+	if rec := a.do("POST", "/admin/api/federation/peers/"+bOnA+"/accept", "{}", nil); rec.Code != 200 {
+		t.Fatalf("accept: %d %s", rec.Code, rec.Body)
+	}
+	sb := waitFor(t, b, "B joins", func(s groupState) bool { return len(s.Groups) == 1 && len(s.Groups[0].Members) == 2 && len(s.Peers) == 1 && s.Peers[0].State == "paired" })
+	if p := sb.Peers[0]; p.Individual || len(p.Groups) != 1 {
+		t.Fatalf("B's A, through the group only: %+v", p)
+	}
+	aOnB := sb.Peers[0].ID
+	if rec := b.do("POST", "/admin/api/federation/peers/"+aOnB+"/individual", "{}", nil); rec.Code != 204 {
+		t.Fatalf("B asks: %d %s", rec.Code, rec.Body)
+	}
+	if rec := a.do("POST", "/admin/api/federation/peers/"+bOnA+"/individual", "{}", nil); rec.Code != 204 {
+		t.Fatalf("A accepts: %d %s", rec.Code, rec.Body)
+	}
+	waitFor(t, b, "B paired directly", func(s groupState) bool { return len(s.Peers) == 1 && s.Peers[0].Individual })
+	if rec := b.do("POST", "/admin/api/federation/peers/"+aOnB+"/unpair", "{}", nil); rec.Code != 204 {
+		t.Fatalf("B unpairs: %d %s", rec.Code, rec.Body)
+	}
+	waitFor(t, a, "A follows, the group keeps them", func(s groupState) bool {
+		return len(s.Peers) == 1 && !s.Peers[0].Individual && len(s.Peers[0].Groups) == 1
+	})
+	if rec := a.do("POST", "/admin/api/federation/peers/nope/block", "{}", nil); rec.Code != 404 {
+		t.Fatalf("block nobody: %d %s", rec.Code, rec.Body)
 	}
 }
