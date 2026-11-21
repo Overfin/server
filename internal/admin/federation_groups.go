@@ -30,13 +30,16 @@ type groupJSON struct {
 	Accept bool `json:"accept"`
 	// Offers counts the libraries offered to the group; Pool is what
 	// this server lends the group's members, together.
-	Offers    int               `json:"offers"`
-	Pool      limitsJSON        `json:"pool"`
-	Dissolved bool              `json:"dissolved,omitempty"`
-	Joining   bool              `json:"joining,omitempty"`
-	Members   []groupMemberJSON `json:"members"`
-	Banned    []groupBanJSON    `json:"banned"`
-	Requests  []groupRequest    `json:"requests"`
+	Offers    int        `json:"offers"`
+	Pool      limitsJSON `json:"pool"`
+	Dissolved bool       `json:"dissolved,omitempty"`
+	Joining   bool       `json:"joining,omitempty"`
+	// NoWayIn: this server has no pairing through the group, which has
+	// other members: nothing reaches them from here, nor here from them.
+	NoWayIn  bool              `json:"noWayIn,omitempty"`
+	Members  []groupMemberJSON `json:"members"`
+	Banned   []groupBanJSON    `json:"banned"`
+	Requests []groupRequest    `json:"requests"`
 	// Joins are servers already paired with this one that used its code
 	// for the group, waiting for you to accept them in.
 	Joins []groupJoinJSON `json:"joins"`
@@ -106,7 +109,7 @@ func groupOf(v msfp.GroupView, peers []msfp.PeerView) groupJSON {
 	}
 	j := groupJSON{ID: v.ID, Name: v.Name, WaitDays: v.Settings.WaitDays, CapPerDay: v.Settings.CapPerDay,
 		Role: v.Role, Me: v.Me, Owner: v.Owner, Heir: v.Heir, Accept: v.Accept, Offers: len(v.Offers),
-		Pool: limitsOf(v.Pool), Dissolved: v.Dissolved, Joining: v.Joining,
+		Pool: limitsOf(v.Pool), Dissolved: v.Dissolved, Joining: v.Joining, NoWayIn: v.NoWayIn,
 		Members: []groupMemberJSON{}, Banned: []groupBanJSON{}, Requests: []groupRequest{}, Joins: []groupJoinJSON{}, Links: []groupLinkJSON{}}
 	for _, m := range v.Members {
 		mj := groupMemberJSON{ID: m.ID, Name: m.Name, Fingerprint: m.Fingerprint, Role: m.Role,
@@ -168,6 +171,9 @@ func (p *Panel) groupProblem(w http.ResponseWriter, doing string, err error) {
 	case errors.Is(err, msfp.ErrInvalidLimits):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
 			"detail": "Streams and transcodes go from 0 to 50, with no more transcodes than streams; the bitrate cap from 0 (none) to 1,000,000 kbps."})
+	case errors.Is(err, msfp.ErrNoWayIn):
+		writeJSON(w, http.StatusConflict, map[string]string{"type": "no-way-in",
+			"detail": "This server has no pairing through this group any more: nothing it sends reaches the other members, and nothing from them reaches it."})
 	case errors.Is(err, msfp.ErrNoGroups):
 		writeJSON(w, http.StatusConflict, map[string]string{"type": "unavailable", "detail": "Groups aren't available on this server."})
 	case unreachable(err):

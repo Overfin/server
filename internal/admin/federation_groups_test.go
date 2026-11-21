@@ -13,7 +13,7 @@ type groupState struct {
 	Groups []struct {
 		ID, Name, Role, Me, Owner string
 		WaitDays, CapPerDay       int64
-		Accept                    bool
+		Accept, NoWayIn           bool
 		Offers                    int
 		Pool                      limitsJSON
 		Members                   []struct {
@@ -267,5 +267,56 @@ func TestFederationCodeByEmail(t *testing.T) {
 	json.Unmarshal(rec.Body.Bytes(), &made)
 	if rec.Code != 201 || made.Code == "" || made.MailedTo != "" || !strings.Contains(made.MailProblem, "didn't go through") {
 		t.Fatalf("failed: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// No way in (MSFP groups section 6): A's pairing with B is A's only one
+// through the group. The panel lists the group before it ends; once it
+// has, the group says so, and asking B is refused with why.
+func TestFederationGroupNoWayIn(t *testing.T) {
+	a, _, _ := fedPanel(t, "A")
+	b, _, _ := fedPanel(t, "B")
+	rec := a.do("POST", "/admin/api/federation/groups", `{"name":"Family","waitDays":3,"capPerDay":5}`, nil)
+	var g struct{ ID string }
+	json.Unmarshal(rec.Body.Bytes(), &g)
+	rec = a.do("POST", "/admin/api/federation/codes", `{"group":"`+g.ID+`","uses":1}`, nil)
+	var made struct{ Code string }
+	json.Unmarshal(rec.Body.Bytes(), &made)
+	body, _ := json.Marshal(map[string]string{"code": made.Code})
+	if rec := b.do("POST", "/admin/api/federation/peers", string(body), nil); rec.Code != 201 {
+		t.Fatalf("use: %d %s", rec.Code, rec.Body)
+	}
+	peer := readGroups(t, a).Peers[0].ID
+	if rec := a.do("POST", "/admin/api/federation/peers/"+peer+"/accept", "{}", nil); rec.Code != 200 {
+		t.Fatalf("accept: %d %s", rec.Code, rec.Body)
+	}
+	waitFor(t, b, "B joins", func(s groupState) bool { return len(s.Groups) == 1 && len(s.Groups[0].Members) == 2 })
+	sa := waitFor(t, a, "A has B", func(s groupState) bool { return len(s.Groups) == 1 && len(s.Groups[0].Members) == 2 })
+	if sa.Groups[0].NoWayIn {
+		t.Fatal("no way in before the end")
+	}
+	rec = a.do("GET", "/admin/api/federation/peers/"+peer+"/cuts", "", nil)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"name":"Family"`) || !strings.Contains(rec.Body.String(), g.ID) {
+		t.Fatalf("cuts: %d %s", rec.Code, rec.Body)
+	}
+	if rec := a.do("DELETE", "/admin/api/federation/peers/"+peer, "", nil); rec.Code != 204 {
+		t.Fatalf("end: %d %s", rec.Code, rec.Body)
+	}
+	sa = readGroups(t, a)
+	if !sa.Groups[0].NoWayIn {
+		t.Fatalf("A after the end: %+v", sa.Groups[0])
+	}
+	var bID string
+	for _, m := range sa.Groups[0].Members {
+		if !m.Me {
+			bID = m.ID
+		}
+	}
+	rec = a.do("POST", "/admin/api/federation/groups/"+g.ID+"/asks/"+bID, "{}", nil)
+	if rec.Code != 409 || !strings.Contains(rec.Body.String(), `"type":"no-way-in"`) {
+		t.Fatalf("asking B: %d %s", rec.Code, rec.Body)
+	}
+	if rec := a.do("GET", "/admin/api/federation/peers/"+peer+"/cuts", "", nil); rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Fatalf("cuts after: %d %s", rec.Code, rec.Body)
 	}
 }

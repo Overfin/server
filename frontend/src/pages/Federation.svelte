@@ -266,8 +266,19 @@
   }
 
   async function end(p: Peer) {
-    const what = p.state === 'ours' ? `Refuse ${p.name}?` : p.state === 'paired' ? `End the pairing with ${p.name}? It ends at once, on both servers.` : `Remove ${p.name}?`;
-    const yes = p.state === 'ours' ? 'Refuse' : p.state === 'paired' ? 'End' : 'Remove';
+    let what = p.state === 'ours' ? `Refuse ${p.name}?` : p.state === 'paired' ? `End the pairing with ${p.name}? It ends at once, on both servers.` : `Remove ${p.name}?`;
+    let yes = p.state === 'ours' ? 'Refuse' : p.state === 'paired' ? 'End' : 'Remove';
+    if (p.state === 'paired') {
+      // Its last pairing through a group: that group can't reach this
+      // server afterwards (MSFP groups section 6, "No way in").
+      const cuts = await api<{ id: string; name: string }[]>('GET', `/admin/api/federation/peers/${p.id}/cuts`).catch(() => []);
+      if (cuts.length) {
+        const names = cuts.map((g) => `"${g.name}"`).join(', ');
+        const one = cuts.length === 1;
+        what = `${p.name} is this server's only pairing through ${one ? 'the group' : 'the groups'} ${names}. Once it ends, nothing from ${one ? 'that group' : 'those groups'} reaches this server, and nothing from this server reaches ${one ? 'it' : 'them'}. To stop being part of ${one ? 'it' : 'them'}, leave instead: open the group under Groups and choose Leave.`;
+        yes = 'End anyway';
+      }
+    }
     if (!(await ask(what, { yes, danger: true }))) return;
     try {
       await api('DELETE', `/admin/api/federation/peers/${p.id}`);

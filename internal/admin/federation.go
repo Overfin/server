@@ -542,6 +542,26 @@ func (p *Panel) endPeer(w http.ResponseWriter, r *http.Request, s *session) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// peerCuts lists the groups that ending this pairing would cut this
+// server off from (MSFP groups section 6, "No way in"): the panel names
+// them before it ends.
+func (p *Panel) peerCuts(w http.ResponseWriter, r *http.Request, _ *session) {
+	eng := p.fed(w)
+	if eng == nil {
+		return
+	}
+	cuts, err := eng.GroupsCutBy(r.Context(), r.PathValue("id"))
+	if err != nil {
+		p.fail(w, "listing the groups a pairing's end cuts off", err)
+		return
+	}
+	out := make([]map[string]string, 0, len(cuts))
+	for _, g := range cuts {
+		out = append(out, map[string]string{"id": g.ID, "name": g.Name})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // pairingProblem explains why a code couldn't be used.
 func (p *Panel) pairingProblem(w http.ResponseWriter, err error) {
 	detail := ""
