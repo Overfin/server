@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/overfin/server/internal/catalog"
+	"github.com/overfin/server/internal/delivery"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/library"
@@ -62,6 +63,12 @@ type Library struct {
 	// Interests, when set, lists what profiles keep for later (the
 	// watchlist), by title key: who a title leaving soon is shown to.
 	Interests func(ctx context.Context) ([]store.ProfileTitle, error)
+	// Delivery carries out plays of the copy index's copies (package
+	// delivery); nil without it. Title pages say from it what the server
+	// converts to, and whether players may get a copy's file.
+	Delivery *delivery.Executor
+	// MaxBitrateKbps is the operator's cap on a play; 0 for none.
+	MaxBitrateKbps int
 }
 
 func (Library) Name() string { return "library" }

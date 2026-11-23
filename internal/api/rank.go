@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"slices"
-	"strings"
 
 	"github.com/overfin/server/internal/store"
 )
@@ -48,45 +46,4 @@ func (l Library) rankFor(ctx context.Context, p *store.Profile, key string) (*in
 		}
 	}
 	return &n, nil
-}
-
-// copyJSON is one of a title's copies as its page shows it.
-type copyJSON struct {
-	Video     string   `json:"video,omitempty"`
-	Audio     []string `json:"audio,omitempty"`
-	Subtitles []string `json:"subtitles,omitempty"`
-}
-
-// copiesFor are a title's copies (items) the profile may see, as their
-// page shows them: languages named in themselves, as the player does; a
-// copy like another shown once.
-func (l Library) copiesFor(ctx context.Context, p *store.Profile, items []string) ([]copyJSON, error) {
-	st := l.Provisioner.Store
-	a, err := l.access(ctx, p)
-	if err != nil {
-		return nil, err
-	}
-	if a != nil && len(items) > 0 {
-		allowed, _, err := st.AllowedItems(ctx, *a, items)
-		if err != nil {
-			return nil, err
-		}
-		items = slices.DeleteFunc(slices.Clone(items), func(id string) bool { return !allowed[id] })
-	}
-	copies, err := st.Copies(ctx, items)
-	if err != nil {
-		return nil, err
-	}
-	var out []copyJSON
-	seen := map[string]bool{}
-	for _, c := range copies {
-		j := copyJSON{Video: c.Video, Audio: languageNames(nil, c.Audio), Subtitles: languageNames(nil, c.Subtitles)}
-		k := j.Video + "|" + strings.Join(j.Audio, ",") + "|" + strings.Join(j.Subtitles, ",")
-		if seen[k] || (j.Video == "" && len(j.Audio) == 0 && len(j.Subtitles) == 0) {
-			continue
-		}
-		seen[k] = true
-		out = append(out, j)
-	}
-	return out, nil
 }

@@ -39,8 +39,14 @@ type playingJSON struct {
 	Method  string `json:"method"`
 	// Delivery, for a playback the executor serves: file, remux or
 	// transcode, and what it converts (video, audio).
-	Delivery    string   `json:"delivery,omitempty"`
-	Converts    []string `json:"converts,omitempty"`
+	Delivery string   `json:"delivery,omitempty"`
+	Converts []string `json:"converts,omitempty"`
+	// Reason is why the player chose that delivery, a closed code
+	// (playback.Reasons) for the panel to translate; VideoCodec and HDR,
+	// with Height, what the copy's label is made of.
+	Reason      string   `json:"reason,omitempty"`
+	VideoCodec  string   `json:"videoCodec,omitempty"`
+	HDR         bool     `json:"hdr,omitempty"`
 	Reasons     []string `json:"reasons,omitempty"`
 	Height      int      `json:"height,omitempty"`
 	BitrateKbps int      `json:"bitrateKbps,omitempty"`
@@ -111,7 +117,10 @@ func (p *Panel) playing(w http.ResponseWriter, r *http.Request, _ *session) {
 				pj.BitrateKbps = int(c.Facts.Size * 8 / c.Facts.DurationMs)
 			}
 			if v := c.Facts.Video; v != nil {
-				pj.Height = v.Height
+				pj.Height, pj.VideoCodec, pj.HDR = v.Height, v.Codec, v.HighDynamicRange()
+			}
+			if playback.KnownReason(s.Reason) {
+				pj.Reason = s.Reason
 			}
 			if d.Plan.VideoConverted {
 				pj.Converts = append(pj.Converts, "video")

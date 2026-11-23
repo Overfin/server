@@ -3224,11 +3224,22 @@ paths:
   /playback:
     post:
       operationId: startPlayback
-      summary: Start playing an item
+      summary: Start playing a copy of a title
       description: |
-        The client describes what it can play; Overfin picks the cheapest
-        way (direct play, repackaging, or transcoding) and returns a playback
-        session with the stream URL, tracks and skip markers.
+        The player chooses a copy of the title's page (`copies`), its
+        audio and its delivery, and asks for exactly that with MSFP's play
+        request (`PlayRequest`): the file itself, a remux, a transcode (a
+        stream `copy`, or converted to the targets named), or, without a
+        delivery, MSFP's baseline. Overfin makes exactly that or refuses
+        it; the answer is MSFP's playback object (`PlayAnswer`), with no
+        URL: the player builds them from its `ticket`, under
+        `/stream/{ticket}/` (`master.m3u8` for `hls`, `file` for `file`,
+        `subtitles/{trackId}/{part}`, `pictures/{trackId}/{part}`,
+        `trickplay/{sheet}`).
+
+        The older body (`PlaybackStart`, with `capabilities`: the media
+        server decides) is still taken, answered with a `PlaybackSession`;
+        it goes once every player is on the play request.
 
         If the account is at its stream limit, its oldest playback is ended
         and that device is told why (unless the operator chose to refuse new
@@ -3239,18 +3250,42 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/PlaybackStart"
+              oneOf:
+                - $ref: "#/components/schemas/PlayRequest"
+                - $ref: "#/components/schemas/PlaybackStart"
       responses:
         "201":
-          description: The playback session.
+          description: The playback, as MSFP's playback object (the play
+            request), or the older playback session (the older body).
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PlaybackSession"
+                oneOf:
+                  - $ref: "#/components/schemas/PlayAnswer"
+                  - $ref: "#/components/schemas/PlaybackSession"
+        "400":
+          description: >-
+            A body that isn't one of the two, or malformed: a
+            member neither has, `null`, a value not of its form or range
+            (`invalid-request`). Only what's malformed; what can't be made
+            is a 409.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: The account is at its stream limit and the operator
+          description: >-
+            The delivery asked for isn't made
+            (`delivery-refused`, its `detail` a closed code saying why, for
+            the player's information panel: over the bitrate cap, a codec or
+            a range the server doesn't make, a segment format that can't
+            carry the streams, a copy Overfin hasn't read (`not-read`), the
+            original file off (`original-file-off`), burned subtitles
+            (`burned-subtitles`: never for this server's players), what the
+            transcoder made differs from what was asked (`made-differs:…`));
+            or the account is at its stream limit and the operator
             refuses new streams (`stream-limit-reached`), or the item can't be
             played (`not-playable`). With a stream reserved for each profile
             (`limits.reservedStreams` in GET /me), a profile whose own stream
@@ -3264,12 +3299,66 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "503":
           description: |
-            The server is busy and no cheaper way to play exists, or the
+            Every transcode is taken and the picture would be converted
+            (a remux, or the audio alone converted, takes none), or the
             media server can't be reached (`server-busy`). Try again later.
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+
+  /previews:
+    post:
+      operationId: startPreviews
+      summary: A copy's seek-bar previews, before it plays
+      description: |
+        MSFP's previews call (video section 5.6): a ticket for the sheets
+        of one copy's previews, at `/stream/{ticket}/trickplay/{sheet}`,
+        the layout being the copy's `previewLayout`, and the copy's etag
+        now. The ticket works for ten minutes, in this session and for
+        this profile only; a session gets 30 a minute (`rate-limited`).
+        Only previews Overfin made of the copy's file: a copy without
+        them (no `previewLayout`) is `not-found`.
+      tags: [playback]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [titleId, versionId]
+              properties:
+                titleId:
+                  type: string
+                  maxLength: 126
+                versionId:
+                  type: string
+                  description: A copy's `id`, from the title's `copies`.
+                  pattern: "^[A-Za-z0-9_-]{1,64}$"
+      responses:
+        "200":
+          description: The ticket, and the copy's etag.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ticket, etag]
+                properties:
+                  ticket:
+                    type: string
+                  etag:
+                    type: string
+        "400":
+          description: Not a title's ID or a copy's (`invalid-request`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /playback/current:
     get:
@@ -3278,12 +3367,14 @@ paths:
       tags: [playback]
       responses:
         "200":
-          description: The active playback session, with its position, tracks
-            and queue.
+          description: The active playback, as it was answered when it
+            started, at its last position.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PlaybackSession"
+                oneOf:
+                  - $ref: "#/components/schemas/PlayAnswer"
+                  - $ref: "#/components/schemas/PlaybackSession"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -3321,11 +3412,14 @@ paths:
       tags: [playback]
       responses:
         "200":
-          description: The playback session.
+          description: The playback, as it was answered when it started, at
+            its last position.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PlaybackSession"
+                oneOf:
+                  - $ref: "#/components/schemas/PlayAnswer"
+                  - $ref: "#/components/schemas/PlaybackSession"
         "404":
           $ref: "#/components/responses/NotFound"
         "410":
@@ -3364,7 +3458,7 @@ paths:
       summary: Report the position, every few seconds while playing
       description: |
         Keeps the playback alive and saves progress. Report at least every
-        30 seconds, also while paused. A playback with neither progress
+        30 seconds, also while paused (`paused`: "Now playing" shows it). A playback with neither progress
         reports nor stream requests for two minutes is ended
         (`playback-expired`) and its transcode stopped; so is any playback
         24 hours after it started. Why a playback ended is answered for an
@@ -3437,7 +3531,10 @@ paths:
       summary: Stop playing; saves the final position and ends any transcode
       description: |
         Safe to call more than once. Stopping a playback that has already
-        ended, or one this profile doesn't have, still answers 204.
+        ended, or one this profile doesn't have, still answers 204. A play
+        request's playback is watched by where it stopped: past the copy's
+        final credits (its last `outro`), else past 90 % of it; `ended`
+        counts for the older body's only.
       tags: [playback]
       requestBody:
         required: true
@@ -3580,9 +3677,11 @@ paths:
       - name: name
         in: path
         required: true
-        description: A file name from the stream, e.g. `master.m3u8` or a
+        description: >-
+          A file name from the stream, e.g. `master.m3u8` or a
           segment name from the playlist. Clients only use names that appear
-          in Overfin's playlists or in `stream.url`.
+          in Overfin's playlists or in `stream.url`, or, for a play request's
+          playback, `master.m3u8` (`hls`) or `file` (`file`) under its ticket.
         schema:
           type: string
           maxLength: 64
@@ -3749,11 +3848,13 @@ paths:
     get:
       security: []
       operationId: getStreamTrickplaySheet
-      summary: One sheet of a playback's seek-bar previews, by its ticket
+      summary: One sheet of a copy's seek-bar previews, by a ticket
       description: >-
-        For a paired server's viewer's server, which gets these URLs in the
-        `trickplay.sheets` of its play answer (MSFP video, section 5.5) and relays
-        the sheets at its own playback route. A JPEG, re-encoded by
+        By a play request's playback ticket, or a previews ticket
+        (`POST /previews`), in the session and for the profile it was
+        given to, the layout the copy's `previewLayout`; and for a paired
+        server's viewer's server, by its playback's ticket (MSFP video,
+        section 5.5), which relays the sheets. A JPEG, re-encoded by
         Overfin; no query string.
       tags: [playback]
       responses:
@@ -5347,25 +5448,68 @@ components:
                     $ref: "#/components/schemas/ImageRef"
             copies:
               type: array
+              maxItems: 16
               description: >-
-                A film's or an episode's copies the profile may see: each one's
-                picture as a neutral name ("2160p HDR · HEVC") and its audio and
-                subtitle languages named in themselves, as the player names
-                them, forced subtitles aside; copies alike shown once. Since
-                0.9.
+                A film's or an episode's copies the profile may see, MSFP's
+                copy objects as they are (`Copy`), this server's first, in the
+                order it prefers: what a player chooses from and asks for
+                (`POST /playback`). Facts only: the player builds every label
+                from them. A copy Overfin hasn't read yet is a minimal one (its
+                picture's facts unknown): it plays as MSFP's baseline. Since
+                0.10 (before: neutral names and languages).
               items:
-                type: object
-                properties:
-                  video:
+                $ref: "#/components/schemas/Copy"
+            limits:
+              type: object
+              description: >-
+                What a play of this server's goes by, with `copies`: the
+                operator's bitrate cap (absent: none), and whether players may
+                get a copy's file itself (`delivery: file`). Since 0.10.
+              required: [originalFile]
+              properties:
+                maxBitrateKbps:
+                  type: integer
+                  minimum: 1
+                originalFile:
+                  type: boolean
+            wishes:
+              type: object
+              description: >-
+                The audio and subtitle languages a play starts with, with
+                `copies`: those chosen for this title (an episode's: its
+                series) while watching it, else the profile's preferences;
+                audio absent, the app's own language; subtitles absent, none.
+                Since 0.10.
+              properties:
+                audio:
+                  type: string
+                subtitles:
+                  type: string
+            encoders:
+              type: object
+              description: >-
+                What the server converts to now, with `copies` (registry
+                tokens), the ranges of a converted picture it makes (`sdr`;
+                `keep` where it keeps HDR), and whether it tone maps (an HDR
+                picture is made `sdr` only then). Absent when the server can't
+                say. Since 0.10.
+              required: [video, audio, ranges, toneMapping]
+              properties:
+                video:
+                  type: array
+                  items:
                     type: string
-                  audio:
-                    type: array
-                    items:
-                      type: string
-                  subtitles:
-                    type: array
-                    items:
-                      type: string
+                audio:
+                  type: array
+                  items:
+                    type: string
+                ranges:
+                  type: array
+                  items:
+                    type: string
+                    enum: [sdr, keep]
+                toneMapping:
+                  type: boolean
             notInterested:
               type: boolean
               description: >-
@@ -5681,6 +5825,205 @@ components:
 
     # ---- Playback -----------------------------------------------------------
 
+    Copy:
+      description: |
+        A copy of a film or an episode, exactly as MSFP's copy object (MSFP
+        video, section 3.3; msfp-go's `wire.Copy`): its ID (`versionId` in
+        a play), etag, length, media type, size, picture, audio and
+        subtitle tracks (`a<n>`, `s<n>`), chapters, skip markers and
+        seek-bar previews' layout. Only the members MSFP defines, read as
+        MSFP says (a token not known is a fact not known).
+      type: object
+      required: [id, durationMs, mediaType, size, etag, audioTracks]
+      properties:
+        id:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{1,64}$"
+        edition:
+          type: string
+        durationMs:
+          type: integer
+        startMs:
+          type: integer
+        endMs:
+          type: integer
+        mediaType:
+          type: string
+        size:
+          type: integer
+        etag:
+          type: string
+        parts:
+          type: integer
+        video:
+          type: object
+          description: The picture (codec, codecs, width, height, bit depth,
+            colour, hdr, dv, fps…), as MSFP has it.
+        audioTracks:
+          type: array
+          items:
+            type: object
+            required: [id, codec]
+        subtitleTracks:
+          type: array
+          items:
+            type: object
+            required: [id]
+        chapters:
+          type: array
+          items:
+            type: object
+            required: [startMs]
+        segments:
+          type: array
+          items:
+            type: object
+            required: [kind, startMs, endMs]
+        previewLayout:
+          type: object
+          required: [tileWidth, tileHeight, columns, rows, intervalMs, tileCount]
+        threeD:
+          type: string
+
+    PlayRequest:
+      description: |
+        MSFP's play request (MSFP playback sections 2.1 and 2.7, video
+        section 5.1), read as MSFP reads it, its `title` replaced by
+        `titleId`, with Overfin's own `device` and `reason`. Only these
+        members (no `purpose`: a play's).
+      type: object
+      additionalProperties: false
+      required: [titleId]
+      properties:
+        titleId:
+          type: string
+          maxLength: 126
+        versionId:
+          type: string
+          description: A copy's `id` from the title's `copies`; without it,
+            the first. One the title hasn't (any more) is `not-found`.
+          pattern: "^[A-Za-z0-9_-]{1,64}$"
+        audioTrack:
+          type: string
+          description: One of the copy's `audioTracks`; without it (or one
+            the copy hasn't), the file's default audio.
+          pattern: "^a(0|[1-9][0-9]{0,2})$"
+        delivery:
+          type: string
+          enum: [file, remux, transcode]
+          description: Without it, MSFP's baseline (H.264, AAC stereo, each
+            stream already within it left as it is).
+        mediaType:
+          type: string
+          description: >-
+            A remux's segments, `video/mp4` (fragmented MP4) or
+            `video/mp2t`; with `delivery: remux` only, and then required.
+        transcode:
+          type: object
+          description: >-
+            With `delivery: transcode` only. Each target left out
+            takes the baseline's value. `burnSubtitle` is refused
+            (`delivery-refused`): subtitles are never burned in for this
+            server's players.
+          properties:
+            videoCodec:
+              type: string
+              description: A codec of `encoders.video`, or `copy`.
+            audioCodec:
+              type: string
+              description: A codec of `encoders.audio`, or `copy`.
+            maxHeight:
+              type: integer
+              enum: [480, 720, 1080, 1440, 2160, 4320]
+            maxBitrateKbps:
+              type: integer
+              minimum: 1000
+              multipleOf: 1000
+            audioChannels:
+              type: integer
+              enum: [2, 6, 8]
+            range:
+              type: string
+              enum: [sdr, keep]
+            burnSubtitle:
+              type: string
+        audioRenditions:
+          type: boolean
+        startPositionMs:
+          $ref: "#/components/schemas/Milliseconds"
+        maxBitrateKbps:
+          type: integer
+          minimum: 0
+          description: The quality chosen; the lowest of this, the
+            transcode's and the operator's cap applies.
+        device:
+          type: string
+          description: A readable name for this device, shown when another
+            device takes over.
+          maxLength: 64
+          pattern: '^[\x20-\x7E]{1,64}$'
+        reason:
+          type: string
+          description: Why the player chose that delivery, for the control
+            panel's "Now playing", which translates it. A closed list.
+          enum: [as-is, container, audio-track, audio-codec, video-codec, picture-range, bitrate, fallback, quirk, in-doubt]
+
+    PlayAnswer:
+      description: |
+        MSFP's playback object (MSFP playback section 2.3, video section
+        5.3) as it is, with Overfin's `title` and `next`. No URL: the
+        player builds them from `ticket` (`/stream/{ticket}/master.m3u8`
+        or `/stream/{ticket}/file`; each of `subtitles` under
+        `subtitles/{id}/{part}` for text, `pictures/{id}/{part}` for
+        pictures; sheets under `trickplay/{sheet}`).
+      type: object
+      required: [id, ticket, protocol, method, etag, positionMs, versionId]
+      properties:
+        id:
+          type: string
+        ticket:
+          type: string
+        protocol:
+          type: string
+          enum: [hls, file]
+        method:
+          type: string
+          enum: [direct, remux, transcode]
+        etag:
+          type: string
+        positionMs:
+          $ref: "#/components/schemas/Milliseconds"
+        versionId:
+          type: string
+        audioTrack:
+          type: string
+        audioRenditions:
+          type: boolean
+          description: Absent (false) for now; switching the audio means a
+            new playback.
+        maxBitrateKbps:
+          type: integer
+        subtitles:
+          type: array
+          description: The copy's subtitle tracks served apart, and how.
+          items:
+            type: object
+            required: [id, form]
+            properties:
+              id:
+                type: string
+              form:
+                type: string
+                enum: [text, picture]
+              ass:
+                type: boolean
+        fontCount:
+          type: integer
+        title:
+          $ref: "#/components/schemas/TitleSummary"
+        next:
+          $ref: "#/components/schemas/TitleSummary"
+
     Capabilities:
       description: |
         What the playing device can handle. The JavaScript SDK fills this in
@@ -5821,7 +6164,9 @@ components:
           type: boolean
         ended:
           type: boolean
-          description: True when the item played to its end.
+          description: True when the item played to its end. The older
+            body's playbacks only; a play request's is watched by its
+            position.
 
     Track:
       type: object

@@ -71,6 +71,9 @@ func (s Stream) trickplay(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
+	if s.previewsSheet(w, r) {
+		return
+	}
 	st, _, done := s.stream(w, r)
 	defer done()
 	if st == nil {
@@ -81,6 +84,33 @@ func (s Stream) trickplay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Playback.serveSheet(w, r, st, r.PathValue("sheet"))
+}
+
+// previewsSheet serves a sheet under a previews ticket (POST /previews),
+// in the session and for the profile it was made for only, asked from
+// this server's own site; false when the ticket isn't a previews ticket.
+func (s Stream) previewsSheet(w http.ResponseWriter, r *http.Request) bool {
+	ticket := r.PathValue("ticket")
+	pb := s.Playback
+	if _, peer := r.Context().Value(peerStreamKey{}).(*playback.Stream); peer || !ticketRe.MatchString(ticket) ||
+		!pb.Tickets.IsPreviews(ticket, time.Now()) {
+		return false
+	}
+	if site := r.Header.Get("Sec-Fetch-Site"); site == "cross-site" || site == "same-site" {
+		problem.Send(w, problem.NotFound, "")
+		return true
+	}
+	c := pb.Library.Sessions.Current(w, r)
+	if c == nil {
+		return true
+	}
+	pt, ok := pb.Tickets.PreviewsByTicket(ticket, c.Session.ID, c.Profile.ID, time.Now())
+	if !ok {
+		problem.Send(w, problem.NotFound, "")
+		return true
+	}
+	pb.serveOwnSheet(w, r, pt.Previews, &pt.Trickplay, r.PathValue("sheet"))
+	return true
 }
 
 var (

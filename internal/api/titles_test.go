@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -31,10 +30,6 @@ type testTitle struct {
 	Seasons, Episodes []testTitle
 	Rank              *int
 	Crew              []struct{ ID, Name, Character string }
-	Copies            []struct {
-		Video            string
-		Audio, Subtitles []string
-	}
 }
 
 // Titles, whether a library has them or not: one page, TMDB's data only,
@@ -409,32 +404,5 @@ func TestOutsideSeriesSeasonsUnfetched(t *testing.T) {
 	if s1 := series.Seasons[0]; s1.ID != "title_series_tmdb_87108_s1" || s1.Name != "Saison 1" || s1.Availability != "missing" ||
 		s1.EpisodeCount == nil || s1.EpisodeCount.Aired != 5 {
 		t.Errorf("season 1: %+v", s1)
-	}
-}
-
-// A film's page lists its copies: each one's picture and languages named
-// in themselves, the same copy twice listed once.
-func TestTitleCopies(t *testing.T) {
-	var st *store.Store
-	srv, fake := newServerWith(t, options{store: &st})
-	fake.partnerSeesAll = true
-	ctx := context.Background()
-	id := func(n int) string { return fmt.Sprintf("%032x", n) }
-	st.PutCatalog(ctx, []store.CatalogItem{
-		{ID: id(1), Kind: "movie", Name: "Heat", SortName: "h", TMDB: "949", Video: "2160p HDR · HEVC", AudioTags: []string{"en", "fr-CA"}, SubtitleTags: []string{"fr"}},
-		{ID: id(2), Kind: "movie", Name: "Heat", SortName: "h", TMDB: "949", Video: "1080p · H.264", AudioTags: []string{"en"}},
-		{ID: id(3), Kind: "movie", Name: "Heat", SortName: "h", TMDB: "949", Video: "1080p · H.264", AudioTags: []string{"en"}},
-	}, 1)
-	st.RefreshTitleKeys(ctx)
-	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
-	det, _ := json.Marshal(store.TitleDetails{})
-	st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "949", Name: "Heat", Year: 1995}, det, time.Now())
-	var film testTitle
-	if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_949", &film); code != 200 {
-		t.Fatalf("film: %d", code)
-	}
-	if len(film.Copies) != 2 || film.Copies[0].Video != "2160p HDR · HEVC" || strings.Join(film.Copies[0].Audio, ",") != "English,Français (Canada)" ||
-		strings.Join(film.Copies[0].Subtitles, ",") != "Français" || film.Copies[1].Video != "1080p · H.264" || film.Copies[1].Subtitles != nil {
-		t.Errorf("copies: %+v", film.Copies)
 	}
 }

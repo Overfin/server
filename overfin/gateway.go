@@ -237,7 +237,16 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	}
 	// The modules switched on, filled in below; watchlists come from them.
 	on := map[string]bool{}
-	lib := api.Library{Sessions: sessions, Provisioner: prov, Jellyfin: sh.jf, Images: sh.images, Previews: sh.previews, CursorKey: k.Cursor,
+	var exec *delivery.Executor
+	if sh.delivery != nil {
+		// The operator's switch "players may get the original file", as
+		// this configuration says.
+		e := *sh.delivery
+		original := cfg.Limits.OriginalFile != "off"
+		e.OriginalFile = func() bool { return original }
+		exec = &e
+	}
+	lib := api.Library{Delivery: exec, MaxBitrateKbps: cfg.Limits.MaxBitrateKbps, Sessions: sessions, Provisioner: prov, Jellyfin: sh.jf, Images: sh.images, Previews: sh.previews, CursorKey: k.Cursor,
 		Folders: sh.folders, Service: sh.service, Titles: sh.titles, Texts: sh.texts, Searches: sh.searches, Lookups: sh.lookups, Logger: logger,
 		Interests: func(ctx context.Context) ([]store.ProfileTitle, error) { return interests(ctx, on, sh) }}
 	// The gateway's prefetch of new titles' artwork (backend only).
@@ -254,14 +263,7 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 		MaxTranscodes:   cfg.Limits.MaxTranscodesTotal,
 		RefuseOverLimit: cfg.Limits.OnLimit == "refuse", PeerTranscodeReserve: cfg.Limits.PeerTranscodeReserve,
 		Logger: logger}
-	if sh.delivery != nil {
-		// The operator's switch "players may get the original file", as
-		// this configuration says.
-		e := *sh.delivery
-		original := cfg.Limits.OriginalFile != "off"
-		e.OriginalFile = func() bool { return original }
-		pb.Delivery = &e
-	}
+	pb.Delivery = lib.Delivery
 	// Federation: paired servers' viewers play too.
 	pb.Engine = sh.fed.current
 	// The modules the operator switched on, with their control panel routes

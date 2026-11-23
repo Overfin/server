@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/library"
 	"github.com/overfin/server/internal/problem"
@@ -78,10 +79,13 @@ type titleDetail struct {
 	// Crew are who directed and wrote an episode (Character holds
 	// "Director" or "Writer"); its guest stars are in Cast.
 	Crew []titleCast `json:"crew,omitempty"`
-	// Copies are a film's or an episode's copies the profile may see: each
-	// one's picture and languages, as the player names them (forced
-	// subtitles aside).
-	Copies []copyJSON `json:"copies,omitempty"`
+	// Copies are a film's or an episode's copies the profile may see,
+	// MSFP's copy objects as they are, in Overfin's order (copies.go);
+	// Limits, Wishes and Encoders, Overfin's wrapper for a play of them.
+	Copies   []wire.Copy     `json:"copies,omitempty"`
+	Limits   *playLimitsJSON `json:"limits,omitempty"`
+	Wishes   *wishesJSON     `json:"wishes,omitempty"`
+	Encoders *encodersJSON   `json:"encoders,omitempty"`
 	// Sources are where a film or an episode plays from for the profile,
 	// in the order playing picks them (the first is Play's): this server
 	// and the paired servers holding it, each once (availability.go).
@@ -576,7 +580,7 @@ func (l Library) title(w http.ResponseWriter, r *http.Request) {
 		out.Crew = append(out.Crew, tc)
 	}
 	if ref.Kind == "movie" || ref.Kind == "episode" {
-		if out.Copies, err = l.copiesFor(ctx, p, t.Items); err != nil {
+		if err := l.copiesPage(ctx, p, t, &out); err != nil {
 			l.storeError(w, err)
 			return
 		}

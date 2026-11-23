@@ -52,7 +52,7 @@ func TestNowPlaying(t *testing.T) {
 			Decision: playback.Decision{Method: "transcode", Source: src}},
 			Title: "Free Guy (2021)", Method: "transcode", Transcodes: true, Started: time.Now(), PositionMs: 61_000},
 		// The executor's, its audio alone converted: a stream, no transcode slot.
-		{Stream: &playback.Stream{ID: "play_four", AccountID: acct.ID, ProfileID: owner.ID,
+		{Stream: &playback.Stream{ID: "play_four", AccountID: acct.ID, ProfileID: owner.ID, Reason: "audio-codec",
 			Delivery: &delivery.Started{Plan: &delivery.Plan{Kind: delivery.KindTranscode, AudioConverted: true,
 				Copy: store.IndexedCopy{Facts: wire.Copy{DurationMs: 1000, Size: 1000, Video: &wire.VideoStream{Height: 2160}}}}}},
 			Method: "transcode", Started: time.Now()},
@@ -69,7 +69,7 @@ func TestNowPlaying(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{`"name":"Main"`, `"profile":"Main"`, `"title":"Free Guy (2021)"`, `"method":"transcode"`,
 		`"height":1080`, `"bitrateKbps":8000`, `"positionMs":61000`, `"durationMs":3600000`, `"transcodes":1`,
-		`"maxTranscodes":2`, `"delivery":"transcode","converts":["audio"]`, `"height":2160`, `"name":"Deleted account"`, `"name":"Films de B (paired server)"`, `"title":"Heat (1995)"`} {
+		`"maxTranscodes":2`, `"delivery":"transcode","converts":["audio"],"reason":"audio-codec"`, `"height":2160`, `"name":"Deleted account"`, `"name":"Films de B (paired server)"`, `"title":"Heat (1995)"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("lacks %s: %s", want, body)
 		}

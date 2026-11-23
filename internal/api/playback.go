@@ -51,6 +51,7 @@ func (Playback) Name() string { return "playback" }
 func (pb Playback) Register(r *plugin.Registrar) error {
 	for pattern, h := range map[string]http.HandlerFunc{
 		"POST /api/v1/playback":                       pb.start,
+		"POST /api/v1/previews":                       pb.startPreviews,
 		"GET /api/v1/playback/current":                pb.current,
 		"GET /api/v1/playback/{id}":                   pb.get,
 		"POST /api/v1/playback/{id}/progress":         pb.progress,
@@ -362,7 +363,10 @@ func (pb Playback) stop(w http.ResponseWriter, r *http.Request) {
 	}
 	if s, ended, ok := pb.Tickets.ByID(r.PathValue("id"), p.ID, time.Now()); ok && ended == nil {
 		position := req.PositionMs
-		if req.Ended { // played to the end, whatever the last position said
+		// The older API's: played to the end, whatever the last position
+		// said. A delivery's playback is watched by where it stopped alone
+		// (past the credits, or most of it).
+		if req.Ended && s.Delivery == nil {
 			position = max(position, s.DurationMs())
 		}
 		pb.Tickets.Progress(s, position*10_000, false, time.Now())
@@ -394,13 +398,17 @@ func (pb Playback) current(w http.ResponseWriter, r *http.Request) {
 }
 
 func (pb Playback) writeView(w http.ResponseWriter, s *playback.Stream) {
-	view, ok := s.View.(sessionJSON)
-	if !ok {
+	position := pb.Tickets.Snapshot(s).PositionTicks / 10_000
+	switch view := s.View.(type) {
+	case sessionJSON:
+		view.PositionMs = position
+		writeOK(w, view)
+	case playJSON:
+		view.PositionMs = position
+		writeOK(w, view)
+	default:
 		problem.Send(w, problem.Internal, "")
-		return
 	}
-	view.PositionMs = pb.Tickets.Snapshot(s).PositionTicks / 10_000
-	writeOK(w, view)
 }
 
 type startRequest struct {
@@ -560,7 +568,10 @@ func trackIndex(id string, letter byte) (int, bool) {
 	return n, true
 }
 
-func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
+// startOld starts a playback from the older body (capabilities; Jellyfin
+// decides), still taken on this branch while players move to MSFP's play
+// request (play.go).
+func (pb Playback) startOld(w http.ResponseWriter, r *http.Request) {
 	var req startRequest
 	if !decode(r, &req) {
 		problem.Send(w, problem.InvalidRequest, "")
@@ -869,6 +880,27 @@ func (pb Playback) serveSheet(w http.ResponseWriter, r *http.Request, s *playbac
 	if err != nil {
 		if r.Context().Err() == nil {
 			pb.Logger.Warn("a seek-bar preview sheet failed", "playback", s.ID, "err", err)
+		}
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	writeSheet(w, data)
+}
+
+// serveOwnSheet serves sheet of the previews Overfin made, kept by the
+// fingerprint fp, of the layout tp: a previews ticket's.
+func (pb Playback) serveOwnSheet(w http.ResponseWriter, r *http.Request, fp string, tp *jellyfin.Trickplay, sheet string) {
+	n, ok := sheetNumber(tp, sheet)
+	if !ok || fp == "" || pb.Library.Previews == nil {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	l := pb.Library
+	data, err := l.Images.Fetched(r.Context(), fmt.Sprintf("previews/%s/%d", fp, n),
+		func(context.Context) ([]byte, error) { return l.Previews.Store.Sheet(fp, n) })
+	if err != nil {
+		if r.Context().Err() == nil {
+			pb.Logger.Warn("a seek-bar preview sheet failed", "err", err)
 		}
 		problem.Send(w, problem.NotFound, "")
 		return

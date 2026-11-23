@@ -30,6 +30,7 @@ import (
 	"github.com/overfin/server/internal/api"
 	"github.com/overfin/server/internal/catalog"
 	"github.com/overfin/server/internal/config"
+	"github.com/overfin/server/internal/delivery"
 	"github.com/overfin/server/internal/emails"
 	"github.com/overfin/server/internal/feature"
 	"github.com/overfin/server/internal/identity"
@@ -40,6 +41,7 @@ import (
 	"github.com/overfin/server/internal/pin"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/plugin"
+	"github.com/overfin/server/internal/previews"
 	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/proof"
 	"github.com/overfin/server/internal/provision"
@@ -446,6 +448,17 @@ type options struct {
 	// wrap, when set, wraps the server's handler (to stand in for a
 	// misbehaving server on some routes).
 	wrap func(http.Handler) http.Handler
+	// delivery, when set, carries out plays of the copy index's copies;
+	// maxBitrateKbps is the operator's cap.
+	delivery       *delivery.Executor
+	maxBitrateKbps int
+	// previews, when set, makes the seek-bar previews Overfin keeps.
+	previews func(*store.Store) *previews.Keeper
+	// jellyfin, when set, is a real test Jellyfin in place of the fake,
+	// played as its user jellyfinUser with jellyfinToken.
+	jellyfin, jellyfinUser, jellyfinToken string
+	// adminKey is Overfin's key for that Jellyfin ("admin" by default).
+	adminKey string
 }
 
 func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
@@ -455,6 +468,11 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 	jfSrv := httptest.NewServer(fake)
 	t.Cleanup(jfSrv.Close)
 	jf, _ := jellyfin.New(jfSrv.URL, "test")
+	jfUser, jfToken := userJF, token
+	if o.jellyfin != "" {
+		jf, _ = jellyfin.New(o.jellyfin, "test")
+		jfUser, jfToken = o.jellyfinUser, o.jellyfinToken
+	}
 
 	box, _ := seal.New(bytes.Repeat([]byte{1}, 32))
 	dbFile := filepath.Join(t.TempDir(), "t.db")
@@ -473,7 +491,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 	st.SetRatingScales(context.Background(), "series", map[string][]store.RatingLevel{"US": {
 		{Certification: "TV-Y", Meaning: "All children", Position: 1}, {Certification: "TV-PG", Position: 3}}})
 	acct, _, err := st.CreateAccount(context.Background(), subject, store.NewOwner{
-		Name: "Main", JellyfinUserID: userJF, JellyfinUsername: "of-test", JellyfinToken: token,
+		Name: "Main", JellyfinUserID: jfUser, JellyfinUsername: "of-test", JellyfinToken: jfToken,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -503,11 +521,11 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(cmp.Or[io.Writer](o.log, debugLog()), nil))
-	prov := &provision.Provisioner{Store: st, Jellyfin: jf, AdminKey: "admin", LogKey: []byte("k"), Logger: logger,
+	prov := &provision.Provisioner{Store: st, Jellyfin: jf, AdminKey: cmp.Or(o.adminKey, "admin"), LogKey: []byte("k"), Logger: logger,
 		AdminGroup: o.adminGroup}
 	// Overfin's one Jellyfin account, which serves everyone: the fake's
 	// user, with its token.
-	if err := st.SetService(context.Background(), store.ServiceAccount{UserID: userJF, Username: "overfin-service-test", Token: token}); err != nil {
+	if err := st.SetService(context.Background(), store.ServiceAccount{UserID: jfUser, Username: "overfin-service-test", Token: jfToken}); err != nil {
 		t.Fatal(err)
 	}
 	service := &provision.Service{Provisioner: func() *provision.Provisioner { return prov }}
@@ -545,10 +563,14 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 			*o.signIn = managed
 		}
 	}
-	lib := api.Library{Sessions: sessions, Provisioner: prov, Jellyfin: jf, CursorKey: []byte("cursor-key"), Service: service, Logger: logger}
+	lib := api.Library{Sessions: sessions, Provisioner: prov, Jellyfin: jf, CursorKey: []byte("cursor-key"), Service: service, Logger: logger,
+		Delivery: o.delivery, MaxBitrateKbps: o.maxBitrateKbps}
 	if o.tmdb != nil {
 		src := o.tmdb
 		lib.Titles = catalog.NewTitles(func() catalog.TitleSource { return src }, st, logger, time.Hour, 0)
+	}
+	if o.previews != nil {
+		lib.Previews = o.previews(st)
 	}
 	lib.Images = images.New(jf, 1<<20)
 	lib.Images.ArtworkDir = o.artworkDir
@@ -561,7 +583,8 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 	if o.store != nil {
 		*o.store = st
 	}
-	pb := api.Playback{Library: lib, Tickets: playback.NewTickets(time.Hour), MaxTranscodes: o.maxTranscodes, Logger: logger}
+	pb := api.Playback{Library: lib, Tickets: playback.NewTickets(time.Hour), MaxTranscodes: o.maxTranscodes, Logger: logger,
+		Delivery: o.delivery, MaxBitrateKbps: o.maxBitrateKbps}
 	if o.tickets != nil {
 		*o.tickets = pb.Tickets
 	}

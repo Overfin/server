@@ -31,6 +31,13 @@ type deliveryArgs struct {
 	// for a paired server's viewer, its site.
 	auth   jellyfin.Auth
 	origin string
+	// reason is why the player chose the delivery (playback.Reasons);
+	// trickplay and previews, the copy's seek-bar previews Overfin made
+	// (nil and "" without); creditsMs, where its final credits start.
+	reason    string
+	trickplay *jellyfin.Trickplay
+	previews  string
+	creditsMs int64
 }
 
 // openDelivery plays a copy through the executor: plans it (refusals
@@ -52,6 +59,7 @@ func (pb Playback) openDelivery(w http.ResponseWriter, r *http.Request, c store.
 	play.DeviceID = pb.Tickets.ReserveDevice("overfin-play")
 	s := &playback.Stream{AccountID: a.accountID, ProfileID: a.profileID, SessionID: a.sessionID, Device: a.device,
 		ItemID: c.ItemID, SourceID: c.SourceID, Auth: play, Origin: a.origin,
+		Reason: a.reason, Trickplay: a.trickplay, Previews: a.previews, CreditsMs: a.creditsMs,
 		// Counted by what it will make, before anything starts.
 		Delivery: &delivery.Started{Plan: plan}}
 	replaced, err := pb.Tickets.Admit(s, plan.StartMs*10_000, time.Now(), a.lim, a.device)
