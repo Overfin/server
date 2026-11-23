@@ -54,6 +54,13 @@ type Stream struct {
 	// Origin is the site of the paired server whose viewer plays it,
 	// through that server; "" for this server's own.
 	Origin string
+	// Reason, for a playback of this server's own players on the new
+	// API, is why its player chose that delivery: a closed code the
+	// control panel translates (Reasons), never the player's text.
+	Reason string
+	// CreditsMs is where the copy's final credits start (its last outro);
+	// 0 when not known: then it's watched past watchedFrom of its length.
+	CreditsMs int64
 
 	// over: see Over; made when the playback starts.
 	over chan struct{}
@@ -214,6 +221,8 @@ type Tickets struct {
 	devices map[string]bool
 	// MaxAge is a hard limit on any playback, however active.
 	MaxAge time.Duration
+	// previews are the previews tickets (previews.go).
+	previews previewTickets
 }
 
 // endedFor is how long the reason a playback ended is remembered.

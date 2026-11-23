@@ -41,17 +41,21 @@ func (pb Playback) record(ctx context.Context, s *playback.Stream, positionMs in
 	if duration <= 0 {
 		return
 	}
-	done := float64(positionMs) / float64(duration)
+	// Watched from the copy's final credits when they're known (MSFP: its
+	// last outro), else past watchedFrom of its length.
+	watched := int64(float64(duration) * watchedFrom)
+	if c := s.CreditsMs; c > 0 && c < duration {
+		watched = c
+	}
 	finished := false
 	switch {
-	case done < resumeFrom:
+	case float64(positionMs)/float64(duration) < resumeFrom && positionMs < watched:
 		return
-	case done >= watchedFrom:
+	case positionMs >= watched:
 		if !ending {
 			return
 		}
-		earliest := pb.Tickets.Snapshot(s).EarliestTicks / 10_000
-		if float64(earliest)/float64(duration) >= watchedFrom {
+		if pb.Tickets.Snapshot(s).EarliestTicks/10_000 >= watched {
 			return
 		}
 		finished = true
