@@ -392,6 +392,8 @@ func (w *recorder) refusal() error {
 
 // fileType is a file's media type by its container, as Jellyfin names it
 // ("mkv", "mp4,m4v"…): "" when unknown, the engine then sending none.
+//
+//lint:ignore U1000 unused while federation is off on this branch; phase 7 serves peers again.
 func fileType(container string) string {
 	first, _, _ := strings.Cut(strings.ToLower(container), ",")
 	switch first {
