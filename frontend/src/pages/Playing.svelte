@@ -19,6 +19,13 @@
     reasons?: string[];
     height?: number;
     bitrateKbps?: number;
+    // A playback of a copy: its delivery, what it converts, why the
+    // player chose it (a closed code), what the copy's label is made of.
+    delivery?: 'file' | 'remux' | 'transcode' | 'baseline';
+    converts?: ('video' | 'audio')[];
+    reason?: string;
+    videoCodec?: string;
+    hdr?: boolean;
   }
 
   // Jellyfin's reasons for converting, in words (as the site's player says them).
@@ -42,6 +49,28 @@
     DirectPlayError: 'playing the file as it is failed',
   };
   const methodNames: Record<string, [string, 'ok' | 'plain' | 'warn']> = { direct: ['As is', 'ok'], remux: ['Repackaged', 'plain'], transcode: ['Converted', 'warn'] };
+  // A copy's delivery, by what it converts: the picture takes a
+  // conversion slot, the sound alone doesn't.
+  const deliveryName = (pb: Playback): [string, 'ok' | 'plain' | 'warn'] => {
+    const c = pb.converts ?? [];
+    if (pb.delivery === 'file') return ['Original file', 'ok'];
+    if (c.includes('video')) return [c.includes('audio') ? 'Picture and sound converted' : 'Picture converted', 'warn'];
+    if (c.includes('audio')) return ['Sound converted', 'plain'];
+    return ['Repackaged', 'plain'];
+  };
+  // Why the player chose it, from the player's closed list.
+  const reasonNames: Record<string, string> = {
+    'as-is': 'the device plays the file as it is',
+    container: 'the device plays the streams, not their file',
+    'audio-track': 'another audio track than the one the device plays in the file',
+    'audio-codec': 'the device can\'t play the sound\'s format',
+    'video-codec': 'the device can\'t play the picture\'s format',
+    'picture-range': 'the screen can\'t show the picture\'s HDR',
+    bitrate: 'above the quality chosen or the bitrate limit',
+    fallback: 'an earlier way failed on this device',
+    quirk: 'a known quirk of the device',
+    'in-doubt': 'what the file holds isn\'t known well enough (the most common format)',
+  };
 
   let data = $state<{ items: Playback[]; transcodes: number; maxTranscodes: number } | null>(null);
   let problem = $state('');
@@ -79,8 +108,11 @@
     await load();
   }
 
-  const why = (pb: Playback) => (pb.reasons || []).map((r) => convertReasons[r] || r).join('; ');
-  const quality = (pb: Playback) => [pb.height && `${pb.height}p`, pb.bitrateKbps && `${(pb.bitrateKbps / 1000).toFixed(1)} Mb/s`].filter(Boolean).join(', ');
+  const why = (pb: Playback) => pb.delivery ? (pb.reason ? reasonNames[pb.reason] ?? '' : '')
+    : (pb.reasons || []).map((r) => convertReasons[r] || r).join('; ');
+  const codecNames: Record<string, string> = { h264: 'H.264', hevc: 'HEVC', av1: 'AV1', vp9: 'VP9' };
+  const quality = (pb: Playback) => [pb.height && `${pb.height}p`, pb.videoCodec && (codecNames[pb.videoCodec] ?? pb.videoCodec.toUpperCase()),
+    pb.hdr && 'HDR', pb.bitrateKbps && `${(pb.bitrateKbps / 1000).toFixed(1)} Mb/s`].filter(Boolean).join(', ');
 </script>
 
 <PageHead title="Now playing" description="What's playing on the server now, refreshed every few seconds. Nothing of it is kept: history stays each profile's own." />
@@ -95,7 +127,7 @@
         <thead><tr><th>Who</th><th>What</th><th>How</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {#each data.items as pb (pb.id)}
-            {@const [method, kind] = methodNames[pb.method] || [pb.method, 'plain']}
+            {@const [method, kind] = pb.delivery ? deliveryName(pb) : methodNames[pb.method] || [pb.method, 'plain']}
             <tr>
               <td><div class="name">{pb.account.name}</div><div class="hint">{[pb.profile, pb.device].filter(Boolean).join(' · ')}</div></td>
               <td>
