@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/msfp-io/msfp-go/wire"
 )
 
 // ---- Jellyfin service account ---------------------------------------------------
@@ -129,7 +131,16 @@ type CatalogItem struct {
 	// EpisodeNumberEnd is the last episode a file holding several holds
 	// (S01E01-E02: 2); nil for one.
 	EpisodeNumberEnd *int
+	// Segments are a film's or an episode's skip markers by media source,
+	// when SegmentsRead (the plugin sent them; else those kept stay).
+	Segments     map[string][]wire.CopySegment
+	SegmentsRead bool
 }
+
+// copiesRead says, in PutCatalog's upsert, that the item has a copy read
+// from its file (catalog_copies): its languages and picture are its
+// copies', not Jellyfin's.
+const copiesRead = `EXISTS (SELECT 1 FROM catalog_copies c WHERE c.item_id = catalog_items.id AND c.minimal = 0 AND c.languages IS NOT NULL)`
 
 // pictureJSON is a copy's picture as kept, stepped as paired servers are
 // told of it (BestPicture): NULL when its size isn't known.
@@ -174,9 +185,11 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 			library_id = coalesce(excluded.library_id, library_id), added_at = excluded.added_at,
 			premiere_date = excluded.premiere_date, community_rating = excluded.community_rating,
 			folder_name = excluded.folder_name, file_name = excluded.file_name, runtime_ms = excluded.runtime_ms,
-			jellyfin_tmdb = excluded.jellyfin_tmdb, audio_languages = excluded.audio_languages,
-			audio_tags = excluded.audio_tags, subtitle_tags = excluded.subtitle_tags, video = excluded.video,
-			picture = excluded.picture`)
+			jellyfin_tmdb = excluded.jellyfin_tmdb, video = excluded.video,
+			audio_languages = CASE WHEN `+copiesRead+` THEN audio_languages ELSE excluded.audio_languages END,
+			audio_tags = CASE WHEN `+copiesRead+` THEN audio_tags ELSE excluded.audio_tags END,
+			subtitle_tags = CASE WHEN `+copiesRead+` THEN subtitle_tags ELSE excluded.subtitle_tags END,
+			picture = CASE WHEN `+copiesRead+` THEN picture ELSE excluded.picture END`)
 	if err != nil {
 		return err
 	}
@@ -210,6 +223,12 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 			jsonList(it.AudioLanguages), jsonList(it.AudioTags), jsonList(it.SubtitleTags), nullString(it.Video),
 			pictureJSON(it.Height, it.HDR)); err != nil {
 			return err
+		}
+		// Its skip markers, when the plugin sent them (package copies).
+		if it.SegmentsRead && (it.Kind == "movie" || it.Kind == "episode") {
+			if err := setCopySegments(ctx, tx, it.ID, it.Segments); err != nil {
+				return err
+			}
 		}
 		if arrived {
 			at := time.Now()
