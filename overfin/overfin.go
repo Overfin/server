@@ -36,7 +36,6 @@ import (
 	"github.com/overfin/server/internal/cookie"
 	"github.com/overfin/server/internal/copies"
 	"github.com/overfin/server/internal/emails"
-	"github.com/overfin/server/internal/files"
 	"github.com/overfin/server/internal/gpu"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/imdb"
@@ -234,6 +233,9 @@ func run(logger *slog.Logger) error {
 		"set a new password for this email (managed sign-in), read from the terminal, then exit; for an admin locked out")
 	check := flag.Bool("check", false,
 		"test the configuration, the secret key, Jellyfin and the identity provider, say what's wrong, then exit; changes nothing")
+	importProbesFrom := flag.String("import-probes", "",
+		"import a header read (JSON lines, gzipped or not) into the copy index, beside the running Overfin, then exit; run it again to resume")
+	importRoot := flag.String("import-root", "/media", "with -import-probes: the folder the header read's paths are relative to")
 	var pair, serverName *string
 	unpair := new(bool)
 	panelPassword := new(bool)
@@ -366,6 +368,9 @@ func run(logger *slog.Logger) error {
 	}
 	if *passwordFor != "" {
 		return setPassword(context.Background(), cfg, db, *passwordFor, os.Stdin, os.Stdout)
+	}
+	if *importProbesFrom != "" {
+		return importProbes(cfg, db, k, *importProbesFrom, *importRoot, os.Stdout, logger)
 	}
 	if *panelPassword {
 		return setPanelPassword(context.Background(), db, os.Stdin, os.Stdout)
@@ -792,17 +797,7 @@ func run(logger *slog.Logger) error {
 	// previews): by file, not by Jellyfin's item.
 	// The libraries' folders, as Jellyfin lists them: the only files the
 	// backend reads (rule 78).
-	libraryFolders := func(ctx context.Context) (files.Libraries, error) {
-		libs, err := sh.jf.AllLibraries(ctx, gw.adminAuth())
-		if err != nil {
-			return files.Libraries{}, err
-		}
-		var folders []string
-		for _, l := range libs {
-			folders = append(folders, l.Folders...)
-		}
-		return files.NewLibraries(folders), nil
-	}
+	libraryFolders := libraryFolders(sh.jf, func() jellyfin.Auth { return gw.adminAuth() })
 	if ownPreviews() {
 		st, err := previews.NewStore(filepath.Join(filepath.Dir(cfg.Storage.Path), "previews"))
 		if err != nil {

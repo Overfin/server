@@ -987,7 +987,13 @@ anyone. Paired servers are not trusted at all (rule 94).
      look like a file name, an address or a site. The raw probe is kept
      for the identifier only, by fingerprint, without the file's name, its
      attachments or any string naming its library folder: never served,
-     never logged.
+     never logged. ffprobe runs at the lowest priority. A header read
+     imported by the operator (-import-probes, ffprobe's output made
+     before) is held to the same: a record is used only for a file
+     Jellyfin lists, that passes rule 78's checks, still has the read's
+     size and time, and whose first bytes sniff to a type that is probed;
+     it is shaped as a probe's would be, under the same output cap, its
+     error text dropped; counts only are said, never a path.
 
 ## Deployment
 
