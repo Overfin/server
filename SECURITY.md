@@ -103,23 +103,26 @@ metadata comes from the internet, and media files can be written by
 anyone. Paired servers are not trusted at all (rule 94).
 
 10. Overfin fetches no absolute URL found in upstream data. From Jellyfin it
-    takes only relative stream and playlist paths matching its known
-    streaming routes; from TMDB, only image paths in a strict format,
-    fetched from TMDB's own image host. A delivery's media playlist, as
+    takes no stream address at all (it asks Jellyfin for none: no playback
+    info, no device profile); from TMDB, only image paths in a strict
+    format, fetched from TMDB's own image host. A delivery's media playlist, as
     Overfin's plugin passes on Jellyfin's, is read under the version's one
     playlist path that Overfin builds itself (`/Videos/{item}/main.m3u8`),
     its segment addresses held to the same patterns: the plugin sends no
     path or URL of its own.
-11. Media sources Jellyfin marks remote, or not a file (`.strm`
-    included), are refused.
+11. Only files play: a copy is read, and played, only from a file inside a
+    library folder that passes rule 78's checks and sniffs to a type
+    that is probed (rule 141). Jellyfin's remote sources and `.strm`
+    files never get a copy, so they never play.
 12. Overfin follows no redirect from any server it calls: Jellyfin, Seerr,
     TMDB, IMDb, the identity provider, paired servers, the notice webhook.
 13. Answers from upstream have size and time limits.
     - Exception: media streams, Jellyfin's or a paired server's, must start
       within a minute, then have no limit, so a film is never cut off.
-14. HLS playlists are parsed, never searched and replaced. Only entries
-    matching Jellyfin's known segment addresses are kept, and unknown tags
-    are dropped. A paired server's playlists pass only when every address
+14. HLS playlists are parsed, never searched and replaced. A delivery's
+    media playlist keeps only entries matching Jellyfin's known segment
+    addresses, and drops unknown tags; the master playlist is Overfin's
+    own (rule 142). A paired server's playlists pass only when every address
     in them is the name of a file of the same stream.
 15. Metadata text is served as plain text: markup, control characters and
     bidirectional overrides removed, length capped.
@@ -131,7 +134,9 @@ anyone. Paired servers are not trusted at all (rule 94).
     refused unless each is a JPEG of at most 8 MiB, no larger than a sheet
     of the layout it announced; a layout past 1,000 sheets, or with sheets
     over 4,096 pixels a side, is dropped.
-17. Subtitles are served only as sanitized WebVTT, or, for subtitles that
+17. Subtitles are served only as WebVTT rebuilt (MSFP video section 6.3),
+    in stretches or the whole track (each stretch rebuilt, then the
+    whole, within a whole track's bounds), or, for subtitles that
     are pictures (PGS), as each stretch of the track read whole and
     refused unless every part of it is well-formed and within its limits
     (a stretch with no pictures is an empty one, served empty). A paired
@@ -144,8 +149,8 @@ anyone. Paired servers are not trusted at all (rule 94).
     default; no delivery burns any yet, so one asked is refused). DVD and
     DVB subtitle pictures are never served apart, to this server's players
     or to paired servers (whose answers list them as not served apart).
-    - Exception: a file played as it is (direct play, or the file delivery
-      Overfin serves from disk) is sent unchanged,
+    - Exception: a file played as it is (the file delivery Overfin serves
+      from disk) is sent unchanged,
       with the subtitles, attached files and tags inside it; rules 15, 16
       and 77 don't apply to its contents.
 18. Of an upstream answer's headers, only these are passed on: a checked
@@ -318,9 +323,8 @@ anyone. Paired servers are not trusted at all (rule 94).
 47. Streams are limited per account (its account template), and
     playbacks that re-encode video in total (`limits.max_transcodes_total`).
     A remux, or a delivery converting only the audio, counts as a stream,
-    not a transcode.
-    - Exception: a playback started as a copy that turns out to re-encode
-      counts once that's found, so the total can briefly be one over.
+    not a transcode. What a delivery makes is checked when it starts
+    (rule 142), so one counted as a stream never turns out to re-encode.
 48. These are rate-limited: sign-in, registration, forgotten passwords,
     PINs, search, copying history, new accounts, TMDB lookups of titles not
     kept (120 a minute per account), the apps API (120 calls a minute per
@@ -478,10 +482,10 @@ anyone. Paired servers are not trusted at all (rule 94).
 76. overfin-web loads nothing from third parties: no fonts, scripts or
     icons from elsewhere.
 77. Titles are served without file names, tags (TMDB's keywords), or
-    photos' time, place and camera; versions get neutral names (such as
-    "2160p HDR · HEVC"), never Jellyfin's, which come from file names. A
-    title's copies (MSFP's copy objects) carry facts only, no name of a
-    version or a track: players build their labels from the facts. Chapter
+    photos' time, place and camera; versions and tracks get no names from
+    the server, Jellyfin's included (they come from file names): a
+    title's copies (MSFP's copy objects) carry facts only, and players
+    build their labels from the facts. Chapter
     names come from files: plain text, cut to 64 characters, dropped when
     they look like a file name, an address or a site. No setting changes
     that.
@@ -1088,7 +1092,7 @@ anyone. Paired servers are not trusted at all (rule 94).
      server's players get it only while the operator's switch "players may
      get the original file" (`limits.original_file`) is on, the default.
      Whoever is given it can save the original through the ticket, more
-     often than with Jellyfin's direct play; a paired server's viewer goes
+     often than with the direct play of older versions; a paired server's viewer goes
      by MSFP's file delivery and the pairing's limits. A paired server's
      play goes through the same executor and the same checks, the copy the
      one its catalog gave, its handle the copy index's ID; Jellyfin is

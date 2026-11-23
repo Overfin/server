@@ -21,8 +21,10 @@ carries the behavior every client needs, so your site only handles screens:
   audio, steps down once, remembered on the device (`fallbacks`, with a
   `reset()`). `copyLabel()`, `audioLabel()` and `subtitleLabel()` name
   copies and tracks in English or French, from their facts.
-- **Playback:** `play()` chooses as above (or, for a title without copies,
-  tells Overfin what the browser can play), attaches the
+- **Playback:** `play()` chooses as above and asks for exactly that with
+  MSFP's play request (`playRequest()`; Overfin makes it or refuses it,
+  and a refused delivery steps down a level), builds the stream's
+  addresses from the answer's ticket (`streamUrls()`), attaches the
   stream (with [hls.js](https://github.com/video-dev/hls.js), which your page
   provides, as a global `Hls` or the `Hls` option, where the browser lacks
   native HLS) and subtitles, reports progress, restarts a stream the

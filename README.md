@@ -60,6 +60,8 @@ internet: [how it's built, and why](docs/architecture.md).
   turns between people, and Overtide or Seerr fetches.
 - **Watching in the browser**, phones included: subtitles, audio tracks,
   previews while seeking, skip intro, next episode, and resume on any device.
+  The player chooses the copy and how it plays on the device: the file
+  itself when it plays as it is, else only what it can't play converted.
 - **A page for every episode**, and what each copy holds: its video, audio
   and subtitle languages.
 - **Recommendations** per profile, **Not interested** to hide a title, a
@@ -95,8 +97,12 @@ speak MSFP (today, other Overfin servers do).
   other server, which never learns who watches. History, positions, lists
   and kids limits stay on yours.
 - **Library by library**: each side offers some and wants some; only what
-  one offers and the other wants is shared. Streams, transcodes and
-  bitrate are limited per pairing, by the side that shares.
+  one offers and the other wants is shared. Streams, transcodes, bitrate,
+  downloads and scans are limited per pairing, by the side that shares.
+- **Facts, not files**: each copy goes to the other server as what its
+  file holds (picture, codecs, tracks and their languages), never its
+  name or path; the viewer's side chooses how it plays, the sharing side
+  makes exactly that or says no.
 - **Paired by hand**, with a code and fingerprints compared between
   operators, or **in groups**: friends' servers join a group with one
   code each, then pair with every member that accepts. Servers talk over HTTPS only, every request between

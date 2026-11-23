@@ -29,9 +29,11 @@ Overfin doesn't tie your friends to Overfin.
   language, keywords, age. Search, genres, counts and title pages include
   them.
 - **One title, wherever it is.** A film you both have is one title, not
-  two. It plays from your copy, unless only the other server has one in
-  the person's language: Overfin never picks a version without their
-  language when another has it.
+  two, with every copy of it: yours and the other server's. The player
+  chooses among them for the device, as it does for yours: your copies
+  that play as they are first, then a paired server's that does, then
+  yours converted; never one without the person's language when another
+  has it.
 - **Playing as from your own.** The other server's titles play with
   their audio tracks, subtitles, skip markers and seek-bar previews, all
   through your server.
@@ -47,9 +49,11 @@ Overfin doesn't tie your friends to Overfin.
   ticket the browser never sees. The other server sees your server only
   (its remote gateway, if it has one), never a viewer's address, browser, account or name.
 - **Titles, not files.** Servers tell each other their titles by their
-  TMDB ID, with their audio and subtitle languages, the IMDb and TheTVDB
-  IDs TMDB gives them, and, for a file holding two episodes, that it holds
-  both: never file names, paths or people. A title known here only by
+  TMDB ID, the IMDb and TheTVDB IDs TMDB gives them, and, for a file
+  holding two episodes, that it holds both; and each title's copies as
+  facts read from the files (length, container, picture size and range,
+  codecs, audio and subtitle tracks with their languages, chapters, skip
+  markers): never file names, paths, track or version names, or people. A title known here only by
   another site's ID than TMDB's isn't shared. The IDs a server gives
   others (its libraries', its versions', its playbacks' and their
   tickets) are its own, and tell nothing of its files or of Jellyfin.
@@ -307,9 +311,19 @@ Each pairing has its own limits, set by the server that shares:
 
 - **Streams**: how many of the other server's people may play from yours
   at the same time (2 at first).
-- **Transcodes**: of those, how many may be re-encoded, which is what
-  costs (1 at first).
+- **Transcodes**: of those, how many may have their picture converted,
+  which is what costs (1 at first). A stream whose picture is copied
+  (repackaged, or only its sound converted) counts as a stream only.
 - **Bitrate**: an optional ceiling.
+- **Downloads**: how many of your files the other server may download at
+  the same time to keep (none at first), how many a day, and how fast.
+- **Scans**: how many of your files a day the other server may read for
+  its own checks (none at first).
+
+Subtitles are never burned into the picture for a paired server unless
+you turn it on in the configuration (`federation.burn_in`, off); DVD and
+DVB subtitles, which are pictures only a converted picture could carry,
+aren't served apart.
 
 Under **Features & limits**, **Transcodes kept from other servers** keeps
 some of your transcodes for your own people, whatever the pairings allow
@@ -474,9 +488,16 @@ Overfin's federation is the MSFP engine for Go,
 with `wire`, the protocol's toolkit): Overfin
 hosts it, with its records in Overfin's database, its own libraries and
 titles, its playback and media, and its connections to other servers
-(through the remote gateway, when there's one). Each copy of a title is one of
-its versions to a paired server's viewer, named by its video ("2160p HDR
-· HEVC").
+(through the remote gateway, when there's one). Each copy of a title goes
+to paired servers as MSFP's copy object, facts only; the viewer's server
+chooses one, its audio and its delivery (the file itself, a remux, a
+transcode, or MSFP's baseline), and Overfin makes exactly that through
+the same executor as for its own players, or refuses it with MSFP's
+code. Text subtitles are served in stretches and whole
+(`subtitles/<id>/whole`), PGS in stretches; ASS and SSA as ASS, and
+fonts, aren't served yet (their text comes as WebVTT). Seek-bar previews
+are Overfin's own, under a playback's ticket or, before a play, a
+previews ticket.
 
 ## Where it stands
 
@@ -486,4 +507,6 @@ over the internet. Other servers than Overfin can pair once they implement
 MSFP; none does yet. Not done yet:
 
 - watched and in-progress filters for series only a paired server has;
-- one server numbering a series' episodes differently from the other.
+- one server numbering a series' episodes differently from the other:
+  a series in TheTVDB's order is joined to TMDB's through its episodes'
+  IDs, and an episode that matches none is left out.

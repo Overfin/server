@@ -195,10 +195,12 @@ server the operator doesn't fully trust. Suppose an attacker controls it.
 
 ## Known limitations
 
-- **Direct play sends a file whole.** When the device can play a file as it
-  is, the subtitles, attached files (fonts, pictures) and tags inside it reach
-  the device unchecked, as with any media server; the device's own player
-  reads them [17].
+- **The file delivery sends a file whole.** When the player asks for the
+  file itself (the device plays it as it is, and the operator's switch
+  "players may get the original file" is on, the default), the subtitles,
+  attached files (fonts, pictures) and tags inside it reach the device
+  unchecked, as with any media server; the device's own player reads them,
+  and whoever is given it can save it [17, 142].
 - **Stream tickets appear in the reverse proxy's access logs,** because media
   players request them by URL. They work only in the session and for the
   profile that started them, and end with the playback (24 hours at most),

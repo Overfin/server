@@ -98,7 +98,7 @@ Authorization: Bearer ofapp_…
  "generatedAt": "…"}
 ```
 
-`plays` are plays to the end (a series adds up its episodes), `viewers`
+`plays` are plays watched, stopped past the copy's final credits or, without them, past 90 % of it (a series adds up its episodes), `viewers`
 the accounts that watched some of it, `favorites` the profiles that keep
 it as a favorite. Every title someone watched is listed,
 and `changedAt` is only the day (midnight UTC). With `since`, only the
