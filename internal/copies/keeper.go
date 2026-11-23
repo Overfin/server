@@ -187,7 +187,10 @@ func (k *Keeper) pass(ctx context.Context) error {
 			return err
 		}
 	}
-	return k.probe(ctx, libs, queue)
+	if err := k.probe(ctx, libs, queue); err != nil {
+		return err
+	}
+	return k.frames(ctx, libs, listed, failed)
 }
 
 // distinct keeps one version of each copy ID: a file Jellyfin lists
@@ -315,32 +318,20 @@ func (k *Keeper) probe(ctx context.Context, libs files.Libraries, queue []versio
 	if k.Prober == nil || len(queue) == 0 {
 		return nil
 	}
-	ranks, err := k.DB.ItemRanks(ctx)
-	if err != nil {
+	if err := k.order(ctx, queue); err != nil {
 		return err
 	}
-	slices.SortStableFunc(queue, func(a, b version) int {
-		if a.added != b.added {
-			if a.added {
-				return -1
-			}
-			return 1
-		}
-		ra, rb := ranks[a.f.ItemID], ranks[b.f.ItemID]
-		switch {
-		case ra == rb:
-			return 0
-		case ra == 0:
-			return 1
-		case rb == 0:
-			return -1
-		}
-		return ra - rb
-	})
 	done, failures := 0, 0
 	for _, v := range queue {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		// Read meanwhile (an import running beside the pass): shaped from
+		// it, not probed again.
+		if shaped, err := k.shapeKept(ctx, v); err != nil {
+			return err
+		} else if shaped {
+			continue
 		}
 		pr, dir, err := k.read(ctx, libs, v)
 		if errors.Is(err, errChanged) || errors.Is(err, files.ErrUnreadable) {
@@ -370,6 +361,158 @@ func (k *Keeper) probe(ctx context.Context, libs files.Libraries, queue []versio
 	}
 	if done > 0 || failures > 0 {
 		k.Logger.Info("copy index: files read", "files", done, "failed", failures)
+	}
+	return nil
+}
+
+// order sorts versions as they are read: the new arrivals first, then by
+// value (store.ItemRanks).
+func (k *Keeper) order(ctx context.Context, queue []version) error {
+	ranks, err := k.DB.ItemRanks(ctx)
+	if err != nil {
+		return err
+	}
+	slices.SortStableFunc(queue, func(a, b version) int {
+		if a.added != b.added {
+			if a.added {
+				return -1
+			}
+			return 1
+		}
+		ra, rb := ranks[a.f.ItemID], ranks[b.f.ItemID]
+		switch {
+		case ra == rb:
+			return 0
+		case ra == 0:
+			return 1
+		case rb == 0:
+			return -1
+		}
+		return ra - rb
+	})
+	return nil
+}
+
+// shapeKept shapes a version's copy from a probe of this Version kept
+// for its file since it was queued; false when there is none.
+func (k *Keeper) shapeKept(ctx context.Context, v version) (bool, error) {
+	kept, found, err := k.DB.CopyProbeOf(ctx, v.fingerprint)
+	if err != nil || !found || kept.ProbeVersion < Version {
+		return false, err
+	}
+	pr, err := parseKept(kept.Raw)
+	if err != nil {
+		return false, nil
+	}
+	var layout *wire.PreviewLayout
+	if k.Layout != nil {
+		layout, _ = k.Layout(v.fingerprint)
+	}
+	if err := k.put(ctx, v, pr, layout, kept.ProbeVersion, time.Time{}); err != nil && !errors.Is(err, store.ErrNoItem) {
+		return false, err
+	}
+	return true, nil
+}
+
+// frames makes the frame read (describe.Prober.ReadFrames: HDR10+, the
+// alternative transfer SEI) that kept probes still need, those imported
+// from a header read made without it: last, after every probe, in the
+// same order, one file at a time; the copies of its twins are shaped
+// again with it. A file whose read fails waits a week.
+func (k *Keeper) frames(ctx context.Context, libs files.Libraries, listed []version, failed map[string]bool) error {
+	if k.Prober == nil || !k.Prober.Frames {
+		return nil
+	}
+	pending, err := k.DB.CopyProbesPendingFrames(ctx)
+	if err != nil || len(pending) == 0 {
+		return err
+	}
+	twins := map[string][]version{}
+	var queue []version
+	for _, v := range listed {
+		if !pending[v.fingerprint] || failed[v.fingerprint] {
+			continue
+		}
+		if twins[v.fingerprint] == nil {
+			queue = append(queue, v)
+		}
+		twins[v.fingerprint] = append(twins[v.fingerprint], v)
+	}
+	if err := k.order(ctx, queue); err != nil {
+		return err
+	}
+	done, failures := 0, 0
+	for _, v := range queue {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		err := k.readFrames(ctx, libs, twins[v.fingerprint])
+		if errors.Is(err, errChanged) || errors.Is(err, files.ErrUnreadable) {
+			continue
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			failures++
+			k.Logger.Warn("copy index: reading a file's first frames failed; tried again in a week", "item", v.f.ItemID, "err", err)
+			if err := k.DB.CopyProbeFailed(ctx, v.fingerprint, k.clock()); err != nil {
+				return err
+			}
+			continue
+		}
+		done++
+	}
+	if done > 0 || failures > 0 {
+		k.Logger.Info("copy index: first frames read", "files", done, "failed", failures)
+	}
+	return nil
+}
+
+// readFrames makes the frame read of a file whose probe is kept without
+// it, and keeps it, with the copies of its versions (twins: the same
+// fingerprint) shaped again.
+func (k *Keeper) readFrames(ctx context.Context, libs files.Libraries, twins []version) error {
+	v := twins[0]
+	kept, found, err := k.DB.CopyProbeOf(ctx, v.fingerprint)
+	if err != nil || !found || kept.ProbeVersion < Version {
+		return err // probed again meanwhile, or by an older Version: the probe reads them
+	}
+	pr, err := parseKept(kept.Raw)
+	if err != nil {
+		return err
+	}
+	file, err := libs.Open(v.f.Path)
+	if err != nil {
+		return err
+	}
+	real := file.Real
+	dir := strings.TrimSuffix(real, "/"+file.Rel)
+	changed := file.Info.Size() != v.size || file.Info.ModTime().Unix() != v.mod
+	file.Close()
+	if changed {
+		return errChanged
+	}
+	if err := k.Prober.ReadFrames(ctx, real, pr); err != nil {
+		return err
+	}
+	b, err := keepable(pr, dir)
+	if err != nil {
+		return err
+	}
+	now := k.clock()
+	if err := k.DB.PutCopyProbe(ctx, store.CopyProbe{Fingerprint: v.fingerprint, ProbeVersion: kept.ProbeVersion,
+		MediaType: pr.MediaType, Size: pr.Size, Raw: b}, now); err != nil {
+		return err
+	}
+	for _, t := range twins {
+		var layout *wire.PreviewLayout
+		if k.Layout != nil {
+			layout, _ = k.Layout(t.fingerprint)
+		}
+		if err := k.put(ctx, t, pr, layout, kept.ProbeVersion, now); err != nil && !errors.Is(err, store.ErrNoItem) {
+			return err
+		}
 	}
 	return nil
 }
@@ -406,7 +549,7 @@ func (k *Keeper) keep(ctx context.Context, v version, pr *describe.Probe, dir st
 	}
 	now := k.clock()
 	if err := k.DB.PutCopyProbe(ctx, store.CopyProbe{Fingerprint: v.fingerprint, ProbeVersion: Version, MediaType: pr.MediaType,
-		Size: pr.Size, Raw: b}, now); err != nil {
+		Size: pr.Size, Raw: b, FramesPending: describe.NeedsFrames(pr)}, now); err != nil {
 		return err
 	}
 	var layout *wire.PreviewLayout

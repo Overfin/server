@@ -844,7 +844,8 @@ func run(logger *slog.Logger) error {
 			}
 		}
 		sh.copies = &copies.Keeper{DB: db, CopyKey: sh.keys.CopyID, EtagKey: sh.keys.Etag, Every: 30 * time.Minute, Logger: logger,
-			Prober: &describe.Prober{FFprobe: filepath.Join(filepath.Dir(os.Getenv("JELLYFIN_FFMPEG")), "ffprobe"), Frames: true},
+			Prober: &describe.Prober{FFprobe: filepath.Join(filepath.Dir(os.Getenv("JELLYFIN_FFMPEG")), "ffprobe"), Frames: true,
+				Nice: 19}, // the lowest priority
 			Files: func(ctx context.Context, each func(jellyfin.VideoFile) bool) error {
 				return sh.jf.VideoFiles(ctx, gw.adminAuth(), each)
 			},
