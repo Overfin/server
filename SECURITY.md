@@ -92,7 +92,9 @@ Every rule not named here is a hard rule.
 8. Seerr calls use Seerr's API key, acting as Overfin's own Seerr user
    (rule 70). No client ever chooses who acts for it upstream.
 9. Upstream tokens never reach a browser or an app, stream addresses and
-   playlists included.
+   playlists included. A play's answer and a previews answer carry no
+   address at all: the player builds them from the ticket, under this
+   server's own stream routes.
 
 ### Upstream data
 
@@ -289,6 +291,12 @@ anyone. Paired servers are not trusted at all (rule 94).
     requests, or after 24 hours, and is never renewed. It works only in the
     session, and for the profile, that started it, and is refused when a
     browser says another site asked.
+    - A previews ticket (`POST /previews`) opens one copy's seek-bar
+      previews only, those Overfin made of its file, never Jellyfin's or a
+      stream: given after the profile's access to the copy is checked, it
+      lasts 10 minutes, works only in that session and for that profile,
+      is refused like a stream ticket when another site asks, and a
+      session gets at most 30 a minute.
 46. A ticket given to a paired server, for its viewer, belongs to no
     account here. It works only for that server, never for a browser (any
     request saying where it comes from is refused), only while the pairing
@@ -463,8 +471,12 @@ anyone. Paired servers are not trusted at all (rule 94).
     icons from elsewhere.
 77. Titles are served without file names, tags (TMDB's keywords), or
     photos' time, place and camera; versions get neutral names (such as
-    "2160p HDR · HEVC"), never Jellyfin's, which come from file names. No
-    setting changes that.
+    "2160p HDR · HEVC"), never Jellyfin's, which come from file names. A
+    title's copies (MSFP's copy objects) carry facts only, no name of a
+    version or a track: players build their labels from the facts. Chapter
+    names come from files: plain text, cut to 64 characters, dropped when
+    they look like a file name, an address or a site. No setting changes
+    that.
     - Exception: owners see the list of the libraries' tags, to hide some
       from a profile.
 78. File paths, server internals and permission flags are never served.
@@ -1022,7 +1034,11 @@ anyone. Paired servers are not trusted at all (rule 94).
 142. A play (MSFP's play request) takes only closed values and registry
      tokens: a delivery, a media type, codecs, a height, a bitrate, a
      number of channels, a range, a track ID; never a path, a URL or an
-     argument. It never raises the profile's, the server's or the request's
+     argument. This server's players add only a title's ID, a copy's ID
+     among the copies the profile may see, a device name (printable ASCII)
+     and why the player chose that delivery, a code of a closed list that
+     the control panel translates (never the player's text); any other
+     member is refused. It never raises the profile's, the server's or the request's
      bitrate cap, nor the stream and transcode limits: a playback is
      counted before anything starts, a transcode only when its video is
      converted. Overfin's plugin is given Jellyfin's IDs and those closed
