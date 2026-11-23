@@ -75,7 +75,11 @@ Every rule not named here is a hard rule.
    is Overfin's decision (rules 41 and 42), and what each profile does is
    Overfin's to keep (rule 58).
 5. Each playback runs on a Jellyfin device of its own, so playbacks never
-   share a session or a transcode.
+   share a session or a transcode. A remux or a transcode Overfin's plugin
+   makes (a delivery, rule 142) runs on a Jellyfin device and play session
+   of its own, the plugin's; Overfin reports nothing of it to Jellyfin's
+   sessions. A file Overfin serves from disk has no Jellyfin session at
+   all.
 6. A profile brought over with a Jellyfin user of its own, from before
    Overfin's one account, keeps that user's token for one use only:
    reading that profile's history, when it's brought over and for its data
@@ -99,7 +103,11 @@ anyone. Paired servers are not trusted at all (rule 94).
 10. Overfin fetches no absolute URL found in upstream data. From Jellyfin it
     takes only relative stream and playlist paths matching its known
     streaming routes; from TMDB, only image paths in a strict format,
-    fetched from TMDB's own image host.
+    fetched from TMDB's own image host. A delivery's media playlist, as
+    Overfin's plugin passes on Jellyfin's, is read under the version's one
+    playlist path that Overfin builds itself (`/Videos/{item}/main.m3u8`),
+    its segment addresses held to the same patterns: the plugin sends no
+    path or URL of its own.
 11. Media sources Jellyfin marks remote, or not a file (`.strm`
     included), are refused.
 12. Overfin follows no redirect from any server it calls: Jellyfin, Seerr,
@@ -128,8 +136,12 @@ anyone. Paired servers are not trusted at all (rule 94).
     server's are checked again here. Fonts and other attached
     files are never served on their own. Overfin asks Jellyfin for no
     subtitle track inside remuxed and transcoded streams, and drops
-    subtitle entries from playlists.
-    - Exception: a file played as it is (direct play) is sent unchanged,
+    subtitle entries from playlists. Subtitles are never burned into the
+    picture for this server's players; for a paired server's viewer, only
+    with the operator's burn-in switch (off by default; no delivery burns
+    any yet).
+    - Exception: a file played as it is (direct play, or the file delivery
+      Overfin serves from disk) is sent unchanged,
       with the subtitles, attached files and tags inside it; rules 15, 16
       and 77 don't apply to its contents.
 18. Of an upstream answer's headers, only these are passed on: a checked
@@ -289,6 +301,8 @@ anyone. Paired servers are not trusted at all (rule 94).
 
 47. Streams are limited per account (its account template), and
     playbacks that re-encode video in total (`limits.max_transcodes_total`).
+    A remux, or a delivery converting only the audio, counts as a stream,
+    not a transcode.
     - Exception: a playback started as a copy that turns out to re-encode
       counts once that's found, so the total can briefly be one over.
 48. These are rate-limited: sign-in, registration, forgotten passwords,
@@ -302,7 +316,11 @@ anyone. Paired servers are not trusted at all (rule 94).
     never stops another account's stream: with every transcode taken, one
     that needs a transcode is refused.
 50. A transcode stops as soon as its playback stops, its ticket ends or its
-    reports go silent.
+    reports go silent. Overfin's plugin keeps a delivery alive while Overfin
+    pings it (every 30 seconds, while its playback lives) and stops it
+    after two minutes with neither a segment read nor a ping; Overfin stops
+    every one left when it starts (a run that ended without stopping
+    them).
 51. Heavy work runs a few at a time: decoding images, hashing passwords,
     reading subtitles. Caches have byte limits.
 
@@ -451,7 +469,7 @@ anyone. Paired servers are not trusted at all (rule 94).
       from a profile.
 78. File paths, server internals and permission flags are never served.
     File paths reach only the backend, next to its Jellyfin, for its
-    seek-bar previews and its copy index. A path Jellyfin gives is first
+    seek-bar previews, its copy index and the file delivery (rule 142). A path Jellyfin gives is first
     resolved to its real path, which must be under one of the folders of
     the libraries Jellyfin lists, and under none of Overfin's own
     (/data, /secrets, /config, /cache, /local, /pairing, /tmp); the file
@@ -461,9 +479,13 @@ anyone. Paired servers are not trusted at all (rule 94).
     is read for its fingerprint, previews and headers (rule 141), then
     the path is forgotten: only fingerprints, facts and raw probes without
     paths are kept, and no path is logged. A copy's ID is a keyed hash of
-    the file's library folder and its path in it, never the path. The rest of Overfin
-    never gets one: its index gets a film's file and folder names, and a
-    series' folder name, from its plugin.
+    the file's library folder and its path in it, never the path. A file
+    served from disk is checked first to be the copy's (its fingerprint
+    and size), then opened again through these checks at each request, and
+    served only while it is the very file the playback started with (its
+    real path, size and time); the path stays in that playback's memory
+    only. The rest of Overfin never gets one: its index gets a film's file
+    and folder names, and a series' folder name, from its plugin.
     - Exception, control panel only: Identification shows a film's or a
       series' folder and file names (never the whole path), to tell a title
       Jellyfin matched wrong; Libraries shows each library's folders, and
@@ -994,6 +1016,34 @@ anyone. Paired servers are not trusted at all (rule 94).
      size and time, and whose first bytes sniff to a type that is probed;
      it is shaped as a probe's would be, under the same output cap, its
      error text dropped; counts only are said, never a path.
+
+### Deliveries
+
+142. A play (MSFP's play request) takes only closed values and registry
+     tokens: a delivery, a media type, codecs, a height, a bitrate, a
+     number of channels, a range, a track ID; never a path, a URL or an
+     argument. It never raises the profile's, the server's or the request's
+     bitrate cap, nor the stream and transcode limits: a playback is
+     counted before anything starts, a transcode only when its video is
+     converted. Overfin's plugin is given Jellyfin's IDs and those closed
+     values only, and answers IDs, closed values and Jellyfin's media
+     playlist (rule 10); the ffmpeg arguments are Jellyfin's own, which the
+     plugin reads when ffmpeg starts and at each restart (a seek). What was
+     made is checked against what was asked, by the plugin and by Overfin:
+     a stream copied or converted otherwise, another codec, a picture
+     smaller or larger than asked, a bitrate above the one asked, tone
+     mapping otherwise, another audio stream, more channels, other
+     segments. Any difference stops the delivery and refuses the play
+     (409); it is never served otherwise. A refusal says why in a closed
+     code, never in upstream text. Overfin writes the master playlist
+     itself. The file delivery gives a player the copy's bytes as they are,
+     with its media type, `Content-Length`, `Content-Range`,
+     `Accept-Ranges` and its etag only, one range per request; this
+     server's players get it only while the operator's switch "players may
+     get the original file" (`limits.original_file`) is on, the default.
+     Whoever is given it can save the original through the ticket, more
+     often than with Jellyfin's direct play; a paired server's viewer goes
+     by MSFP's file delivery and the pairing's limits.
 
 ## Deployment
 
