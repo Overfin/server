@@ -53,9 +53,13 @@ type Keeper struct {
 	// Hardware are ffmpeg's options for the GPU the operator chose, asked
 	// at each pass (HardwareFor); nil decodes on the processor.
 	Hardware func(ctx context.Context) []string
-	Every    time.Duration
-	Logger   *slog.Logger
-	now      func() time.Time
+	// Made, if set, is told when sets were made or taken over (each
+	// hundred, and at a pass's end): the copy index puts their layouts on
+	// its copies, which players read.
+	Made   func()
+	Every  time.Duration
+	Logger *slog.Logger
+	now    func() time.Time
 }
 
 // Run keeps previews until ctx ends: a pass now, then every Every, or at
@@ -171,6 +175,7 @@ func (k *Keeper) pass(ctx context.Context) error {
 	}
 	if adopted > 0 {
 		k.Logger.Info("seek-bar previews taken over from Jellyfin", "sets", adopted)
+		k.made()
 	}
 	if !on || len(queue) == 0 {
 		return nil
@@ -216,12 +221,21 @@ func (k *Keeper) pass(ctx context.Context) error {
 		made++
 		if made%100 == 0 {
 			k.Logger.Info("seek-bar previews made", "files", made, "of", len(queue))
+			k.made()
 		}
 	}
 	if made > 0 {
 		k.Logger.Info("seek-bar previews made", "files", made)
+		k.made()
 	}
 	return nil
+}
+
+// made tells Made, if set.
+func (k *Keeper) made() {
+	if k.Made != nil {
+		k.Made()
+	}
 }
 
 // fingerprint is a version's fingerprint (files.Cache) and its real path,

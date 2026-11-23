@@ -822,7 +822,10 @@ func run(logger *slog.Logger) error {
 				}
 				return previews.HardwareFor(f.Mode, device)
 			},
-			Maker: previews.Maker{FFmpeg: os.Getenv("JELLYFIN_FFMPEG"), Busy: func() bool { return sh.tickets.Transcodes() > 0 }}}
+			Maker: previews.Maker{FFmpeg: os.Getenv("JELLYFIN_FFMPEG"), Busy: func() bool { return sh.tickets.Transcodes() > 0 }},
+			// New sets reach players through the copies: their layouts put
+			// on now, not at the copy index's next pass.
+			Made: func() { sh.copies.Wake() }}
 	}
 	// The copy index: every version as an MSFP copy, its file's headers
 	// read by Overfin with the image's ffprobe, in a pass of its own

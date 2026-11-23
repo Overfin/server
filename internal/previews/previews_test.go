@@ -211,10 +211,15 @@ func TestKeeperPass(t *testing.T) {
 		JellyfinData: jfData, Every: time.Hour, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		On:    func(context.Context) (bool, error) { return on, nil },
 		Maker: Maker{FFmpeg: ff, Busy: func() bool { return false }}, now: func() time.Time { return now }}
+	told := 0
+	k.Made = func() { told++ }
 
 	// Off: Jellyfin's are taken over, nothing is made.
 	if err := k.pass(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if told != 1 {
+		t.Errorf("told of sets taken over %d times, want 1", told)
 	}
 	fpOld, set, ok := k.ForVersion(ctx, old, old)
 	if !ok || set.Count != 2 {
@@ -245,6 +250,10 @@ func TestKeeperPass(t *testing.T) {
 	fpNew, set, ok := k.ForVersion(ctx, "11111111111111111111111111111111", "11111111111111111111111111111111")
 	if !ok || set.Count < 2 {
 		t.Fatalf("not made: %+v %v", set, ok)
+	}
+	// The copy index is told, so players get them now.
+	if told != 2 {
+		t.Errorf("told of sets made: %d, want 2", told)
 	}
 	if fp2, _, ok := k.ForVersion(ctx, "22222222222222222222222222222222", "22222222222222222222222222222222"); !ok || fp2 != fpNew {
 		t.Errorf("the copy: %v %v", fp2, ok)
