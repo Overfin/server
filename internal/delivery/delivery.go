@@ -94,12 +94,16 @@ type Order struct {
 // VideoOrder is an order's picture: Copy, or converted to Codec (h264,
 // hevc, av1), at most MaxHeight lines (the copy's own when lower) and
 // MaxBitrate bits a second, ToneMap mapping an HDR picture to SDR.
+// HeightAsked is whether the player or peer asked that height: when it
+// asked only a bitrate, Jellyfin's own size for that bitrate is taken,
+// so a lower picture than MaxHeight is what was asked.
 type VideoOrder struct {
-	Copy       bool
-	Codec      string
-	MaxHeight  int
-	MaxBitrate int
-	ToneMap    bool
+	Copy        bool
+	Codec       string
+	MaxHeight   int
+	MaxBitrate  int
+	ToneMap     bool
+	HeightAsked bool
 }
 
 // AudioOrder is an order's audio: Jellyfin's index of the stream, Copy,

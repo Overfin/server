@@ -216,6 +216,7 @@ func (e *Executor) convertVideo(v *VideoOrder, codec string, facts wire.Copy, se
 		height = 1080
 	}
 	v.MaxHeight = height
+	v.HeightAsked = t.MaxHeight > 0
 	kbps := t.MaxBitrateKbps
 	if kbps == 0 {
 		kbps = defaultKbps(height)
@@ -460,7 +461,7 @@ func (e *Executor) Clear(ctx context.Context) error {
 
 // Differences are what a Maker made otherwise than ordered, as closed
 // codes: a stream copied or not, another codec, a picture lower than
-// asked (Jellyfin's sizes by bitrate) or higher, a bitrate above the one
+// asked (Jellyfin's sizes by bitrate; only when a height was asked) or higher, a bitrate above the one
 // asked (below is fine: Jellyfin caps it near the copy's own), tone
 // mapped or not, another audio stream, more channels, other segments.
 func Differences(o Order, c wire.Copy, m *Made) []string {
@@ -485,7 +486,7 @@ func Differences(o Order, c wire.Copy, m *Made) []string {
 			switch {
 			case m.Height > want:
 				d = append(d, "height-over")
-			case m.Height > 0 && m.Height < want-2: // even sizes: 1 or 2 lines less
+			case v.HeightAsked && m.Height > 0 && m.Height < want-2: // even sizes: 1 or 2 lines less
 				d = append(d, "height-cap")
 			}
 			if m.VideoBitrate > v.MaxBitrate {

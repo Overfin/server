@@ -47,6 +47,8 @@ type DeliveryVideo struct {
 	MaxHeight  int    `json:",omitempty"`
 	MaxBitrate int    `json:",omitempty"`
 	ToneMap    bool
+	// HeightAsked false: only a bitrate was asked, Jellyfin's size for it taken.
+	HeightAsked bool
 }
 
 // DeliveryAudio is a delivery's audio stream (Jellyfin's index): Copy,

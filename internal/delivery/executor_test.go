@@ -262,6 +262,24 @@ func TestPlanRefusals(t *testing.T) {
 	refusedWith(t, err, 503, "encoders-unknown")
 }
 
+// A player asking only a bitrate (a lower quality) takes Jellyfin's own
+// size for it: a picture lower than the copy's isn't a difference.
+func TestBitrateOnlyTakesJellyfinsSize(t *testing.T) {
+	ctx := context.Background()
+	m := &fakeMaker{enc: allEncoders}
+	e := &Executor{Maker: m}
+	ask := Request{Play: wire.PlayRequest{Delivery: wire.DeliveryTranscode, MaxBitrateKbps: 1500,
+		Transcode: &wire.TranscodeTargets{VideoCodec: "h264", MaxBitrateKbps: 1000}}}
+	m.made = func(o Order) *Made {
+		made := exactly(o)
+		made.Height, made.Width = 720, 1280 // Jellyfin's size for 1 Mbit/s
+		return made
+	}
+	if _, err := e.Start(ctx, plan(t, e, sdrCopy(), ask)); err != nil {
+		t.Fatalf("a bitrate-only play refused: %v", err)
+	}
+}
+
 // What's made is checked: a difference stops the delivery and refuses
 // the play; a bitrate below the one asked is fine.
 func TestStartChecksWhatWasMade(t *testing.T) {

@@ -80,7 +80,7 @@ func (p *PluginMaker) Encoders(ctx context.Context) (Encoders, error) {
 func (p *PluginMaker) Start(ctx context.Context, o Order) (*Made, error) {
 	jo := jellyfin.DeliveryOrder{ItemId: o.ItemID, SourceId: o.SourceID, Segments: o.Segments, StartTicks: o.StartMs * 10_000}
 	if v := o.Video; v != nil {
-		jo.Video = &jellyfin.DeliveryVideo{Copy: v.Copy, Codec: v.Codec, MaxHeight: v.MaxHeight, MaxBitrate: v.MaxBitrate, ToneMap: v.ToneMap}
+		jo.Video = &jellyfin.DeliveryVideo{Copy: v.Copy, Codec: v.Codec, MaxHeight: v.MaxHeight, MaxBitrate: v.MaxBitrate, ToneMap: v.ToneMap, HeightAsked: v.HeightAsked}
 	}
 	if a := o.Audio; a != nil {
 		jo.Audio = &jellyfin.DeliveryAudio{Index: a.Index, Copy: a.Copy, Codec: a.Codec, Channels: a.Channels}
