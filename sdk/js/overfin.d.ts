@@ -219,10 +219,95 @@ export interface Track {
   default?: boolean;
   forced?: boolean;
   hearingImpaired?: boolean;
+  /** A copy's track (a play of a copy): its facts, as MSFP gives them. */
+  codec?: string;
+  objects?: string;
+  original?: boolean;
+  format?: string;
   /** Subtitles that are pictures (PGS), drawn over the video (PictureSubtitles). */
   pictures?: boolean;
   /** Subtitles, in stretches at `url` + "/n" (see subtitleStretchSeconds): WebVTT for text, PGS for pictures. */
   url?: string;
+}
+
+/** A copy of a film or an episode: MSFP's copy object (MSFP video, section 3.3). */
+export interface Copy {
+  id: string;
+  etag: string;
+  edition?: string;
+  durationMs: number;
+  startMs?: number;
+  endMs?: number;
+  mediaType: string;
+  size: number;
+  parts?: number;
+  video?: CopyVideo;
+  audioTracks: CopyAudio[];
+  subtitleTracks?: CopySubtitle[];
+  chapters?: { startMs: number; name?: string }[];
+  segments?: Segment[];
+  previewLayout?: PreviewLayout;
+  threeD?: string;
+}
+
+export interface CopyVideo {
+  codec: string;
+  codecs?: string;
+  width: number;
+  height: number;
+  sampleAspect?: string;
+  rotation?: number;
+  bitDepth?: number;
+  colour?: { primaries?: number; transfer?: number; matrix?: number; fullRange?: boolean };
+  hdr?: string[];
+  dv?: { profile: number; level: number; compatibility: number; el?: boolean };
+  fps?: string;
+  refFrames?: number;
+  interlaced?: boolean;
+}
+
+export interface CopyAudio {
+  id: string;
+  codec: string;
+  codecs?: string;
+  language?: string;
+  channels?: number;
+  role?: string;
+  default?: boolean;
+  forced?: boolean;
+  objects?: string;
+  sampleRate?: number;
+  bitDepth?: number;
+  original?: boolean;
+  external?: boolean;
+}
+
+export interface CopySubtitle {
+  id: string;
+  language?: string;
+  role?: string;
+  default?: boolean;
+  forced?: boolean;
+  hearingImpaired?: boolean;
+  format?: string;
+  external?: boolean;
+}
+
+export interface PreviewLayout {
+  tileWidth: number;
+  tileHeight: number;
+  columns: number;
+  rows: number;
+  intervalMs: number;
+  tileCount: number;
+}
+
+/** What the server converts to: registry tokens, the ranges a converted picture comes in, whether it tone maps. */
+export interface Encoders {
+  video: string[];
+  audio: string[];
+  ranges: ('sdr' | 'keep')[];
+  toneMapping: boolean;
 }
 
 export interface Segment {
@@ -301,8 +386,19 @@ export interface TitleSource {
 export interface Title extends TitleSummary {
   /** Who directed and wrote an episode, the job as character ("Director", "Writer"); its guest stars are in cast (since 0.9). */
   crew?: { id?: string; name: string; character?: string; image?: ImageRef }[];
-  /** A film's or an episode's copies the profile may see: picture and languages as the player names them, forced subtitles aside (since 0.9). */
-  copies?: { video?: string; audio?: string[]; subtitles?: string[] }[];
+  /**
+   * A film's or an episode's copies the profile may see, MSFP's copy
+   * objects as they are, the server's own first: facts only, labels built
+   * by copyLabel(), audioLabel(), subtitleLabel() (since 0.10; before: a
+   * picture's name and languages).
+   */
+  copies?: Copy[];
+  /** What a play of copies goes by: the operator's bitrate cap, whether players may get the file itself (since 0.10). */
+  limits?: { maxBitrateKbps?: number; originalFile: boolean };
+  /** The audio and subtitle languages a play starts with: the title's choice, else the profile's (since 0.10). */
+  wishes?: { audio?: string; subtitles?: string };
+  /** What the server converts to now (since 0.10); absent when it can't say. */
+  encoders?: Encoders;
   /** Where a film or an episode plays from for the profile, in the order Play picks them (the first is Play's): this server (local, by its brand's name) and the paired servers holding it, each once, by the names the server's menu gives them; each with its best copy's picture and its languages, named in themselves. With showAvailability off, only the first, without its name (since 0.9). */
   sources?: TitleSource[];
   /** Whether the page lists sources: the control panel's setting, on by default (since 0.9). */
@@ -359,6 +455,12 @@ export interface TitlePage {
 
 export interface Playback {
   id: string;
+  /** A play of a copy: its ticket, the addresses built from it (streamUrls). */
+  ticket?: string;
+  protocol?: 'hls' | 'file';
+  /** The copy playing (a play of a copy), and how it plays. */
+  copy?: Copy;
+  delivery?: PlaybackDelivery;
   /** What plays; absent when the server has no title for the item yet. */
   title?: TitleSummary;
   method: 'direct' | 'remux' | 'transcode' | string;
@@ -386,6 +488,35 @@ export interface Playback {
   /** How it's served: why the server converts it (no reasons: played as it is), and what the file holds. */
   info?: PlaybackInfo;
 }
+
+/** How a play of a copy plays: chooseDelivery()'s decision, as the information panel shows it. */
+export interface PlaybackDelivery {
+  /** file, remux, transcode, or baseline (MSFP's: the server converts what isn't within it). */
+  kind: 'file' | 'remux' | 'transcode' | 'baseline';
+  mediaType: string;
+  transcode?: TranscodeTargets;
+  reason: Reason;
+  /** Its level of LEVELS. */
+  level: number;
+  converts: { video: boolean; audio: boolean };
+  /** The QUIRKS that applied on this device. */
+  quirks: string[];
+  /** Why the ladder stepped down to it (no-picture, no-audio, media-error), when it did. */
+  fallback: string;
+}
+
+export interface TranscodeTargets {
+  videoCodec?: string;
+  audioCodec?: string;
+  maxHeight?: number;
+  maxBitrateKbps?: number;
+  audioChannels?: number;
+  range?: 'sdr' | 'keep';
+}
+
+/** Why a player chose its delivery: a closed list. */
+export type Reason = 'as-is' | 'container' | 'audio-track' | 'audio-codec' | 'video-codec' | 'picture-range' | 'bitrate'
+  | 'fallback' | 'quirk' | 'in-doubt';
 
 export interface PlaybackInfo {
   /** The media server's reasons, such as 'AudioCodecNotSupported' or 'VideoRangeTypeNotSupported'. */
@@ -425,6 +556,16 @@ export interface PlaybackRequest {
 export interface PlayerOptions {
   /** Where to start; by default where the profile left off. */
   startMs?: number;
+  /** The copy to play; by default the one chooseDelivery() picks. */
+  versionId?: string;
+  /** The language labels are in (fr, en); by default audioLanguage's, else English. */
+  language?: string;
+  /** What the device plays; deviceEnv() by default. */
+  env?: DeviceEnv;
+  /** The fallback ladder's memory (fallbacks by default); null: none. */
+  fallbacks?: typeof fallbacks | null;
+  /** IDs of copies on paired servers. */
+  peers?: string[];
   audioTrack?: string;
   subtitleTrack?: string;
   /** The language to start in (the app's), when the video has it and no audioTrack is given. */
@@ -458,10 +599,15 @@ export class Player {
   /** The forced subtitles shown (none chosen), or null. */
   readonly forcedTrack: string | null;
   setAudioTrack(id: string): Promise<unknown>;
+  /** Plays another copy of the title at the same place (a play of a copy). */
+  setVersion(id: string): Promise<Playback | null>;
+  /** The decision the playback plays by, or null for a title without copies. */
+  readonly delivery: Decision | null;
   setSubtitleTrack(id: string | null): Promise<unknown>;
   segmentAt(ms?: number): Segment | null;
   continueHere(): Promise<unknown>;
-  close(): Promise<void>;
+  /** Stops for good; ended: the title counts as watched to its end. */
+  close(options?: { ended?: boolean }): Promise<void>;
   /**
    * Starts at startMs: by default the options' startMs, else where the
    * profile left off. Resolves with the playback, or null when close() or
@@ -475,6 +621,88 @@ export class Player {
 }
 
 export function capabilities(): Capabilities;
+
+/** What a device plays, as deviceEnv() reads it once per page. */
+export interface DeviceEnv {
+  family: { firefox: boolean; chromium: boolean; safari: boolean; mac: boolean; android: boolean; webos: boolean; mobile: boolean };
+  /** What Overfin's app says the screen shows in HDR, or null outside it. */
+  app: string[] | null;
+  hdrScreen: boolean;
+  hls: 'hls.js' | 'native' | '';
+  audioTracks: boolean;
+  canPlay(type: string): string;
+  mse(type: string): boolean;
+  decode(config: MediaDecodingConfiguration): Promise<MediaCapabilitiesDecodingInfo | null>;
+  /** The QUIRKS that apply. */
+  quirks: string[];
+  rules: { noFile: string[]; audioNever: string[]; hdrMapped: boolean; hdrFromApp: boolean };
+}
+
+export interface Decision {
+  copy: Copy;
+  audioTrack: string;
+  /** '' for MSFP's baseline. */
+  delivery: 'file' | 'remux' | 'transcode' | '';
+  mediaType?: string;
+  transcode?: TranscodeTargets;
+  reason: Reason;
+  level: number;
+  converts: { video: boolean; audio: boolean };
+  /** Nothing converted. */
+  asIs: boolean;
+  quirks: string[];
+}
+
+export interface Quirk {
+  id: string;
+  test(env: DeviceEnv): boolean;
+  override: { noFile?: string[]; hdrMapped?: boolean; hdrFromApp?: boolean; audioNever?: string[] };
+  date: string;
+  found: string;
+}
+
+export const QUIRKS: Quirk[];
+export const LEVELS: ['file', 'remux', 'audio', 'video', 'baseline'];
+export const REASONS: Reason[];
+export const BROWSER_TYPES: Record<string, string>;
+export function deviceEnv(options?: { Hls?: unknown }): DeviceEnv;
+/**
+ * Chooses the copy, its audio and its delivery for this device: own copies
+ * that play as they are first (the best picture), then a paired server's,
+ * then own ones converted; the cheapest delivery that plays.
+ */
+export function chooseDelivery(copies: Copy[], env: DeviceEnv, wishes?: {
+  versionId?: string; audioTrack?: string; audioLanguage?: string; audio?: string; language?: string;
+  limits?: Title['limits']; encoders?: Encoders; maxBitrateKbps?: number; peers?: string[]; minLevel?: number;
+  memory?: typeof fallbacks | null;
+}): Promise<Decision | null>;
+export function playRequest(decision: Decision, options?: { titleId: string; startPositionMs?: number; maxBitrateKbps?: number; device?: string }): Record<string, unknown>;
+export function streamUrls(base: string, answer: { ticket: string; protocol?: string }): {
+  stream: string; subtitles(id: string): string; pictures(id: string): string; sheet(n: number): string;
+};
+export function previewSheets(layout: PreviewLayout | undefined, sheet: (n: number) => string): Trickplay | undefined;
+export function dolbyVisionCodecs(codecs: string, dv?: CopyVideo['dv']): string;
+export function audioMenu(copy: Copy, env?: DeviceEnv): CopyAudio[];
+export function subtitleMenu(copy: Copy, served?: { id: string; form: string }[]): { tracks: CopySubtitle[]; forced: CopySubtitle[] };
+export function forcedFor(copy: Copy, audioTrack: string, served?: { id: string; form: string }[]): CopySubtitle | null;
+export function subtitlesFor(copy: Copy, language?: string, served?: { id: string; form: string }[]): CopySubtitle | null;
+export function pictureSubtitle(track: CopySubtitle): boolean;
+/** The fallback ladder's memory, on this device (localStorage). */
+export const fallbacks: {
+  key(copy: Copy, audioTrack: string): string;
+  level(copy: Copy, audioTrack: string): number;
+  remember(copy: Copy, audioTrack: string, level: number): void;
+  count(): number;
+  reset(): void;
+};
+/** Labels from facts, in French or English. */
+export function copyLabel(copy: Copy, lang?: string, copies?: Copy[]): string;
+export function audioLabel(track: CopyAudio, lang?: string): string;
+export function subtitleLabel(track: CopySubtitle, lang?: string): string;
+export function languageName(tag: string | undefined, lang?: string): string;
+export function codecName(token: string): string;
+export function channelsName(n: number | undefined, lang?: string): string;
+export function rangeName(video?: CopyVideo): string;
 
 /** A picture of a PGS track, as it comes compressed; pgsPixels() draws it. */
 export interface PGSPicture {
@@ -645,7 +873,9 @@ export class Overfin {
   profileWishing(profileId: string): Promise<{ on: boolean }>;
   setProfileWishing(profileId: string, on: boolean): Promise<{ on: boolean }>;
 
-  startPlayback(request: PlaybackRequest): Promise<Playback>;
+  startPlayback(request: PlaybackRequest | Record<string, unknown>): Promise<Playback>;
+  /** A copy's seek-bar previews before it plays (since 0.10). */
+  previews(titleId: string, versionId: string): Promise<{ ticket: string; etag: string }>;
   playback(id: string): Promise<Playback>;
   currentPlayback(): Promise<Playback>;
   reportProgress(id: string, report: { positionMs: number; paused?: boolean; ended?: boolean }): Promise<null>;

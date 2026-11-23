@@ -10,7 +10,19 @@ carries the behavior every client needs, so your site only handles screens:
   request that doesn't complete (no network, an answer cut short) rejects
   with the browser's own error instead: never an empty answer.
 - **Paging:** `pages()` follows cursors for you, and keeps a shuffle's seed.
-- **Playback:** `play()` tells Overfin what the browser can play, attaches the
+- **Choosing how to play:** a title's page gives its copies as MSFP's copy
+  objects (facts only). `deviceEnv()` reads what the device plays (Media
+  Source, `canPlayType`, `mediaCapabilities`, the screen's range) and
+  `chooseDelivery()` picks the copy, its audio track and the cheapest
+  delivery: the file itself, a remux, the audio alone converted, the
+  picture converted, or MSFP's baseline when in doubt. `QUIRKS` lists the
+  devices that play otherwise than they say (each with its date and how it
+  was found); a play that fails in its first seconds, or plays with no
+  audio, steps down once, remembered on the device (`fallbacks`, with a
+  `reset()`). `copyLabel()`, `audioLabel()` and `subtitleLabel()` name
+  copies and tracks in English or French, from their facts.
+- **Playback:** `play()` chooses as above (or, for a title without copies,
+  tells Overfin what the browser can play), attaches the
   stream (with [hls.js](https://github.com/video-dev/hls.js), which your page
   provides, as a global `Hls` or the `Hls` option, where the browser lacks
   native HLS) and subtitles, reports progress, restarts a stream the

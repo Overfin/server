@@ -2,7 +2,10 @@
 //   node --test sdk/js/overfin.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Overfin, OverfinError, Player, capabilities } from './overfin.js';
+import {
+  Overfin, OverfinError, Player, capabilities, deviceEnv, chooseDelivery, audioMenu, subtitleMenu, forcedFor, subtitlesFor,
+  copyLabel, audioLabel, subtitleLabel, playRequest, streamUrls, previewSheets, fallbacks, dolbyVisionCodecs,
+} from './overfin.js';
 
 // fakeServer answers fetch() from a table of handlers, and records calls.
 function fakeServer(handlers) {
@@ -372,9 +375,17 @@ test('two quick changes leave one playback: the overtaken one is stopped', async
 test('closed while starting: what the start gets is stopped, nothing plays', async () => {
   const { calls } = playbackServer();
   const player = new Player(new Overfin(), fakeVideo(), 'title_movie_tmdb_1', { startMs: 0, capabilities: {} });
+  // Closed while the server starts it (the title's page read first).
+  const ask = globalThis.fetch;
+  let closing;
+  globalThis.fetch = (url, init) => {
+    if (url === '/api/v1/playback' && !closing) closing = player.close();
+    return ask(url, init);
+  };
   const starting = player.start();
-  await player.close();
   assert.equal(await starting, null);
+  await closing;
+  globalThis.fetch = ask;
   await settle();
   assert.equal(player.playback, null);
   assert.ok(calls.some((c) => c.url === '/api/v1/playback/pb1/stop'));
@@ -710,5 +721,458 @@ test('a direct stream cut short is not the end of the title: it starts over at t
   video.emit('ended');
   await settle();
   assert.deepEqual(ended, [true]);
+  await player.close();
+});
+
+// ---- Choosing a copy and how it plays -----------------------------------------
+
+// A browser of a family, faked from what it answers: the containers its
+// video element plays, the codecs it decodes (MSE and canPlayType alike),
+// the screen's range, Overfin's app or not, audioTracks or not.
+function browser({ ua, containers, video, audio, hdr = false, app = null, audioTracks = false, hls = 'hls.js', decode }) {
+  const decodes = (codecs) => codecs.split(',').map((c) => c.trim()).every((c) => video.some((p) => c.startsWith(p)) || audio.includes(c));
+  const parse = (type) => {
+    const [container, rest] = type.split(';');
+    const m = /codecs="([^"]*)"/.exec(rest || '');
+    return { container: container.trim(), codecs: m ? m[1] : '' };
+  };
+  const canPlayType = (type) => {
+    if (type === 'application/vnd.apple.mpegurl') return hls === 'native' ? 'maybe' : '';
+    const { container, codecs } = parse(type);
+    if (container.startsWith('audio/mp4') && codecs) return decodes(codecs) ? 'probably' : '';
+    if (!containers.includes(container)) return '';
+    if (!codecs) return 'maybe';
+    return decodes(codecs) ? 'probably' : '';
+  };
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { userAgent: ua, mediaCapabilities: { decodingInfo: async (c) => (decode ? decode(c) : { supported: decodes(parse(c.video.contentType).codecs) }) } },
+    configurable: true,
+  });
+  globalThis.document = { createElement: () => (audioTracks ? { canPlayType, audioTracks: [] } : { canPlayType }) };
+  globalThis.MediaSource = { isTypeSupported: (type) => { const { container, codecs } = parse(type); return (container === 'video/mp4' || container === 'audio/mp4') && !!codecs && decodes(codecs); } };
+  globalThis.matchMedia = (q) => ({ matches: q === '(dynamic-range: high)' && hdr });
+  globalThis.OverfinApp = app ? { hdr: () => JSON.stringify(app) } : undefined;
+  return deviceEnv({ Hls: hls === 'hls.js' ? { isSupported: () => true } : { isSupported: () => false } });
+}
+
+const UA = {
+  chrome: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+  firefox: 'Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0',
+  safari: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15',
+  android: 'Mozilla/5.0 (Linux; Android 14; Pixel 8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/142.0.0.0 Mobile Safari/537.36',
+};
+const chrome = (more = {}) => browser({ ua: UA.chrome, containers: ['video/mp4', 'video/webm', 'video/x-matroska'],
+  video: ['avc1', 'hvc1', 'hev1', 'av01', 'vp09'], audio: ['mp4a.40.2', 'mp4a.40.5', 'mp4a.40.34', 'Opus', 'opus', 'fLaC', 'flac'], ...more });
+const firefox = (more = {}) => browser({ ua: UA.firefox, containers: ['video/mp4', 'video/webm', 'video/x-matroska'],
+  video: ['avc1', 'av01', 'vp09'], audio: ['mp4a.40.2', 'mp4a.40.34', 'Opus', 'opus', 'fLaC', 'flac', 'vorbis'], ...more });
+const safari = (more = {}) => browser({ ua: UA.safari, containers: ['video/mp4', 'video/quicktime'], hls: 'hls.js', audioTracks: true,
+  video: ['avc1', 'hvc1', 'dvh1', 'av01'], audio: ['mp4a.40.2', 'mp4a.40.34', 'ac-3', 'ec-3', 'fLaC', 'Opus', 'alac'], ...more });
+const androidApp = (more = {}) => browser({ ua: UA.android, containers: ['video/mp4', 'video/webm', 'video/x-matroska'], app: ['hdr10'],
+  video: ['avc1', 'hvc1', 'hev1', 'vp09'], audio: ['mp4a.40.2', 'mp4a.40.34', 'ac-3', 'ec-3', 'Opus', 'fLaC'], ...more });
+
+// Copies as a title's page gives them.
+let copyN = 0;
+function copy({ mediaType = 'video/matroska', video = {}, audio = [{ codec: 'aac', codecs: 'mp4a.40.2', channels: 2, language: 'en', default: true }],
+  subtitles = [], minutes = 120, mbps = 8, ...more } = {}) {
+  const id = more.id || `c${++copyN}`;
+  return {
+    id, etag: `e${id}`, durationMs: minutes * 60_000, mediaType, size: Math.round((mbps * 1e6 / 8) * minutes * 60),
+    video: video === null ? undefined : { codec: 'h264', codecs: 'avc1.640028', width: 1920, height: 1080, bitDepth: 8, fps: '24000/1001', ...video },
+    audioTracks: audio.map((a, i) => ({ id: `a${i + 1}`, ...a })),
+    subtitleTracks: subtitles.map((s, i) => ({ id: `s${i + 1 + audio.length}`, ...s })),
+    ...more,
+  };
+}
+const hevcHDR10 = { codec: 'hevc', codecs: 'hev1.2.4.L153.90', width: 3840, height: 2160, bitDepth: 10, colour: { primaries: 9, transfer: 16, matrix: 9 } };
+const encoders = { video: ['h264', 'hevc'], audio: ['aac', 'ac3'], ranges: ['sdr', 'keep'], toneMapping: true };
+const noMemory = { memory: null };
+
+test('an H.264 and AAC file plays as it is in every browser', async () => {
+  const c = copy({ mediaType: 'video/mp4' });
+  for (const env of [chrome(), firefox(), safari(), androidApp()]) {
+    const d = await chooseDelivery([c], env, { encoders, ...noMemory });
+    assert.equal(d.delivery, 'file', env.family);
+    assert.equal(d.reason, 'as-is');
+    assert.deepEqual(d.converts, { video: false, audio: false });
+  }
+});
+
+test('Matroska: the file in Chrome, a remux in Firefox (its quirk), in fragmented MP4', async () => {
+  const c = copy();
+  assert.equal((await chooseDelivery([c], chrome(), noMemory)).delivery, 'file');
+  const env = firefox();
+  assert.ok(env.quirks.includes('firefox-matroska'));
+  const d = await chooseDelivery([c], env, noMemory);
+  assert.deepEqual([d.delivery, d.mediaType, d.reason], ['remux', 'video/mp4', 'quirk']);
+  // A container no browser knows is remuxed, never tried as a file.
+  const flv = await chooseDelivery([copy({ mediaType: 'video/x-flv' })], chrome(), noMemory);
+  assert.deepEqual([flv.delivery, flv.reason], ['remux', 'container']);
+});
+
+test('audio a browser can\'t play is converted alone, the picture kept; TrueHD and DTS never as they are', async () => {
+  const c = copy({ video: hevcHDR10, audio: [{ codec: 'eac3', channels: 6, language: 'en', default: true }] });
+  const d = await chooseDelivery([c], chrome(), { encoders, ...noMemory });
+  assert.deepEqual([d.delivery, d.transcode, d.reason], ['transcode', { videoCodec: 'copy', audioCodec: 'aac' }, 'audio-codec']);
+  assert.deepEqual(d.converts, { video: false, audio: true });
+  // Safari plays E-AC-3 and maps HDR itself: a remux (Matroska it doesn't read).
+  const s = await chooseDelivery([c], safari(), { encoders, ...noMemory });
+  assert.deepEqual([s.delivery, s.mediaType, s.reason], ['remux', 'video/mp4', 'container']);
+  // TrueHD: whatever the browser claims.
+  const env = safari({ audio: ['mp4a.40.2', 'mlpa', 'dtsh'] });
+  for (const codec of [{ codec: 'truehd', codecs: 'mlpa' }, { codec: 'dts', codecs: 'dtsh' }, { codec: 'pcm_s24le' }]) {
+    const t = await chooseDelivery([copy({ audio: [{ ...codec, channels: 8, default: true }] })], env, { encoders, ...noMemory });
+    assert.equal(t.reason, 'audio-codec', codec.codec);
+    assert.equal(t.transcode?.audioCodec, 'aac');
+  }
+});
+
+test('a picture the browser can\'t decode is converted; HDR kept on an HDR screen, else made SDR', async () => {
+  const c = copy({ video: hevcHDR10 });
+  // Firefox on Linux: no HEVC, no HDR mapping, a standard screen.
+  const d = await chooseDelivery([c], firefox(), { encoders, ...noMemory });
+  assert.deepEqual([d.delivery, d.transcode.videoCodec, d.transcode.range, d.reason], ['transcode', 'h264', 'sdr', 'video-codec']);
+  assert.equal(d.converts.video, true);
+  // On an HDR screen, with AV1 encoded by the server: HDR kept in AV1.
+  const hdr = await chooseDelivery([c], firefox({ hdr: true }), { encoders: { ...encoders, video: ['h264', 'av1'] }, ...noMemory });
+  assert.deepEqual([hdr.transcode.videoCodec, hdr.transcode.range], ['av1', 'keep']);
+  // Without encoders known: the baseline.
+  const base = await chooseDelivery([c], firefox(), noMemory);
+  assert.deepEqual([base.delivery, base.reason, base.level], ['', 'in-doubt', 4]);
+  // No tone mapping and an SDR screen that decodes HEVC: played as it is.
+  const noMap = await chooseDelivery([copy({ video: hevcHDR10, mediaType: 'video/mp4' })], androidApp({ app: [] }), { encoders: { ...encoders, toneMapping: false }, ...noMemory });
+  assert.equal(noMap.delivery, 'file');
+});
+
+test('HDR shown by the screen: Overfin\'s app says it; elsewhere the media query, or the browser maps it', async () => {
+  const c = copy({ mediaType: 'video/mp4', video: { ...hevcHDR10, codecs: 'hvc1.2.4.L153.90' } });
+  assert.equal((await chooseDelivery([c], androidApp(), { encoders, ...noMemory })).delivery, 'file');
+  const sdrApp = await chooseDelivery([c], androidApp({ app: [] }), { encoders, ...noMemory });
+  assert.deepEqual([sdrApp.reason, sdrApp.transcode.range], ['picture-range', 'sdr']);
+  // HLG in an app that says hdr10 only.
+  const hlg = copy({ mediaType: 'video/mp4', video: { ...hevcHDR10, codecs: 'hvc1.2.4.L153.90', colour: { transfer: 18 } } });
+  assert.equal((await chooseDelivery([hlg], androidApp(), { encoders, ...noMemory })).reason, 'picture-range');
+  // Chrome on a desktop maps HDR itself; decodingInfo saying no wins.
+  assert.equal((await chooseDelivery([c], chrome(), { encoders, ...noMemory })).delivery, 'file');
+  const refused = chrome({ decode: (cfg) => ({ supported: !cfg.video.transferFunction }) });
+  assert.equal((await chooseDelivery([c], refused, { encoders, ...noMemory })).reason, 'picture-range');
+});
+
+test('Dolby Vision: profile 5 only where the browser takes its dvh1 string; profile 8 by its base layer', async () => {
+  const dv5 = copy({ mediaType: 'video/mp4', video: { ...hevcHDR10, codecs: 'hvc1.2.4.L153.90', dv: { profile: 5, level: 6, compatibility: 0 } } });
+  assert.equal(dolbyVisionCodecs('hvc1.2.4.L153.90', { profile: 5, level: 6 }), 'dvh1.05.06');
+  assert.equal(dolbyVisionCodecs('hev1.2.4.L153.90', { profile: 8, level: 9 }), 'dvhe.08.09');
+  assert.equal(dolbyVisionCodecs('av01.0.13M.10', { profile: 10, level: 9 }), 'dav1.10.09');
+  const s = await chooseDelivery([dv5], safari(), { encoders, ...noMemory });
+  assert.equal(s.delivery, 'file');
+  const c = await chooseDelivery([dv5], chrome(), { encoders, ...noMemory });
+  assert.deepEqual([c.reason, c.transcode?.range], ['picture-range', 'sdr']);
+  // Overfin's app never says Dolby Vision.
+  assert.equal((await chooseDelivery([dv5], androidApp({ video: ['avc1', 'hvc1', 'dvh1'] }), { encoders, ...noMemory })).reason, 'picture-range');
+  // Profile 8.1 in Chrome: its HDR10 base, in segments (the file keeps its Dolby Vision entry).
+  const dv8 = copy({ video: { ...hevcHDR10, dv: { profile: 8, level: 6, compatibility: 1 } } });
+  const d8 = await chooseDelivery([dv8], chrome(), { encoders, ...noMemory });
+  assert.deepEqual([d8.delivery, d8.mediaType], ['remux', 'video/mp4']);
+});
+
+test('the audio-track rule: a file only when the browser plays the chosen track, else a remux', async () => {
+  const c = copy({ mediaType: 'video/mp4', audio: [
+    { codec: 'aac', codecs: 'mp4a.40.2', channels: 2, language: 'en', default: true, original: true },
+    { codec: 'aac', codecs: 'mp4a.40.2', channels: 2, language: 'fr' }] });
+  const en = await chooseDelivery([c], chrome(), { language: 'en', ...noMemory });
+  assert.deepEqual([en.delivery, en.audioTrack], ['file', 'a1']);
+  const fr = await chooseDelivery([c], chrome(), { audio: 'fr', ...noMemory });
+  assert.deepEqual([fr.delivery, fr.audioTrack, fr.reason], ['remux', 'a2', 'audio-track']);
+  // Safari switches a file's tracks itself (audioTracks).
+  assert.equal((await chooseDelivery([c], safari(), { audio: 'fr', ...noMemory })).delivery, 'file');
+  // No track marked default: the first is the one the browser plays.
+  const unmarked = copy({ mediaType: 'video/mp4', audio: [{ codec: 'aac', codecs: 'mp4a.40.2', language: 'en' }, { codec: 'aac', codecs: 'mp4a.40.2', language: 'fr' }] });
+  assert.equal((await chooseDelivery([unmarked], chrome(), { audio: 'en', ...noMemory })).delivery, 'file');
+  // No wish found: the original, else the default.
+  assert.equal((await chooseDelivery([c], chrome(), { audio: 'de', language: 'ja', ...noMemory })).audioTrack, 'a1');
+  // A region variant, else the language.
+  assert.equal((await chooseDelivery([c], chrome(), { audio: 'fr-CA', ...noMemory })).audioTrack, 'a2');
+});
+
+test('a copy over the quality chosen or the operator\'s cap is converted, the cap passed on', async () => {
+  const c = copy({ mediaType: 'video/mp4', mbps: 30 });
+  const d = await chooseDelivery([c], chrome(), { encoders, maxBitrateKbps: 8500, ...noMemory });
+  assert.deepEqual([d.delivery, d.transcode, d.reason], ['transcode', { videoCodec: 'h264', maxBitrateKbps: 8000, audioCodec: 'copy' }, 'bitrate']);
+  const op = await chooseDelivery([c], chrome(), { encoders, limits: { maxBitrateKbps: 20000, originalFile: true }, ...noMemory });
+  assert.equal(op.transcode.maxBitrateKbps, 20000);
+  // The operator's switch off: never the file.
+  const off = await chooseDelivery([copy({ mediaType: 'video/mp4' })], chrome(), { limits: { originalFile: false }, ...noMemory });
+  assert.equal(off.delivery, 'remux');
+});
+
+test('conservative: an unknown token, a missing codecs string, a minimal copy are never played as they are', async () => {
+  const vvc = await chooseDelivery([copy({ video: { codec: 'vvc', codecs: 'vvc1.1.L51.CQA' } })], chrome(), { encoders, ...noMemory });
+  assert.deepEqual([vvc.delivery, vvc.transcode.videoCodec, vvc.reason], ['transcode', 'h264', 'video-codec']);
+  const noCodecs = await chooseDelivery([copy({ video: { codecs: undefined } })], chrome(), { encoders, ...noMemory });
+  assert.deepEqual([noCodecs.delivery, noCodecs.reason], ['transcode', 'video-codec']);
+  const minimal = await chooseDelivery([copy({ video: null, audio: [] })], chrome(), { encoders, ...noMemory });
+  assert.deepEqual([minimal.delivery, minimal.reason], ['', 'in-doubt']);
+  const strange = await chooseDelivery([copy({ audio: [{ codec: 'wmapro', default: true }] })], chrome(), { encoders, ...noMemory });
+  assert.equal(strange.reason, 'audio-codec');
+  for (const video of [{ refFrames: 16 }, { interlaced: true }, { fps: '120/1' }]) {
+    assert.equal((await chooseDelivery([copy({ mediaType: 'video/mp4', video })], chrome(), { encoders, ...noMemory })).delivery,
+      video.refFrames ? 'file' : 'transcode', JSON.stringify(video));
+  }
+});
+
+test('D11: own copies that play as they are first, the best picture; then a paired server\'s; then own, converted', async () => {
+  const hd = copy({ mediaType: 'video/mp4' });
+  const uhd = copy({ mediaType: 'video/mp4', video: { ...hevcHDR10, codecs: 'hvc1.2.4.L153.90' }, mbps: 40 });
+  assert.equal((await chooseDelivery([hd, uhd], chrome(), { encoders, ...noMemory })).copy.id, uhd.id);
+  // Firefox can't play the 4K one: the 1080p as it is.
+  assert.equal((await chooseDelivery([uhd, hd], firefox(), { encoders, ...noMemory })).copy.id, hd.id);
+  // Only a paired server's plays as it is: that one.
+  const peer = copy({ mediaType: 'video/mp4' });
+  const d = await chooseDelivery([uhd, peer], firefox(), { encoders, peers: [peer.id], ...noMemory });
+  assert.equal(d.copy.id, peer.id);
+  // Both play: own first.
+  const own = copy({ mediaType: 'video/mp4' });
+  assert.equal((await chooseDelivery([peer, own], chrome(), { peers: [peer.id], ...noMemory })).copy.id, own.id);
+  // Nothing plays as it is: own first, converted.
+  assert.equal((await chooseDelivery([uhd, { ...uhd, id: 'peer4k' }], firefox(), { encoders, peers: ['peer4k'], ...noMemory })).copy.id, uhd.id);
+  // The audio wished for wins over the picture.
+  const french = copy({ mediaType: 'video/mp4', audio: [{ codec: 'aac', codecs: 'mp4a.40.2', language: 'fr', default: true }] });
+  assert.equal((await chooseDelivery([uhd, french], chrome(), { audio: 'fr', ...noMemory })).copy.id, french.id);
+  // A version chosen is that one.
+  assert.equal((await chooseDelivery([hd, uhd], chrome(), { versionId: hd.id, ...noMemory })).copy.id, hd.id);
+});
+
+function memoryStorage() {
+  const m = new Map();
+  return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) };
+}
+
+test('the fallback ladder\'s memory: by the copy\'s facts, per device, with a reset; nothing breaks without storage', async () => {
+  globalThis.localStorage = memoryStorage();
+  const c = copy({ mediaType: 'video/mp4' });
+  assert.equal((await chooseDelivery([c], chrome())).delivery, 'file');
+  fallbacks.remember(c, 'a1', 2);
+  // Another copy with the same facts: the same memory (never by ID).
+  const twin = { ...c, id: 'twin', etag: 'other' };
+  const d = await chooseDelivery([twin], chrome(), { encoders });
+  assert.deepEqual([d.delivery, d.transcode, d.reason, d.level], ['transcode', { videoCodec: 'copy', audioCodec: 'aac' }, 'fallback', 2]);
+  assert.equal(fallbacks.count(), 1);
+  fallbacks.reset();
+  assert.equal(fallbacks.count(), 0);
+  assert.equal((await chooseDelivery([c], chrome())).delivery, 'file');
+  // Storage that throws (private browsing, blocked): nothing remembered, nothing fails.
+  globalThis.localStorage = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
+  fallbacks.remember(c, 'a1', 3);
+  assert.equal(fallbacks.level(c, 'a1'), 0);
+  fallbacks.reset();
+  delete globalThis.localStorage;
+});
+
+test('tracks offered: one per language and role, the one that plays first, then the most channels; forced subtitles paired with the audio', () => {
+  const c = copy({ audio: [
+    { codec: 'truehd', codecs: 'mlpa', channels: 8, language: 'en', objects: 'dolby-atmos', default: true },
+    { codec: 'ac3', codecs: 'ac-3', channels: 6, language: 'en' },
+    { codec: 'aac', codecs: 'mp4a.40.2', channels: 2, language: 'en' },
+    { codec: 'aac', codecs: 'mp4a.40.2', channels: 2, language: 'en', role: 'commentary' },
+    { codec: 'ac3', codecs: 'ac-3', channels: 6, language: 'fr' }],
+  subtitles: [
+    { language: 'fr', format: 'hdmv_pgs_subtitle' }, { language: 'fr', format: 'subrip' },
+    { language: 'en', format: 'subrip', hearingImpaired: true }, { language: 'en', format: 'subrip' },
+    { language: 'fr', format: 'subrip', forced: true }, { language: 'de', format: 'dvd_subtitle' }] });
+  // Without a device: the most channels.
+  assert.deepEqual(audioMenu(c).map((t) => t.id), ['a1', 'a4', 'a5']);
+  // Safari plays AC-3, not TrueHD: the 5.1 AC-3 beside the 7.1.
+  assert.deepEqual(audioMenu(c, safari()).map((t) => t.id), ['a2', 'a4', 'a5']);
+  const subs = subtitleMenu(c);
+  assert.deepEqual(subs.tracks.map((t) => t.id), ['s7', 's9']);
+  assert.deepEqual(subs.forced.map((t) => t.id), ['s10']);
+  assert.equal(forcedFor(c, 'a5')?.id, 's10');
+  assert.equal(forcedFor(c, 'a1'), null);
+  assert.equal(subtitlesFor(c, 'en')?.id, 's9');
+  // Only what the playback serves.
+  assert.deepEqual(subtitleMenu(c, [{ id: 's6', form: 'picture' }]).tracks.map((t) => t.id), ['s6']);
+});
+
+test('labels in English and French, from facts only', () => {
+  const uhd = copy({ video: { ...hevcHDR10, hdr: ['hdr10plus'] }, edition: 'directors' });
+  assert.equal(copyLabel(uhd, 'en'), '4K · HDR10+ · Director\'s cut');
+  assert.equal(copyLabel(uhd, 'fr'), '4K · HDR10+ · Version du réalisateur');
+  assert.equal(copyLabel(copy({ video: { ...hevcHDR10, dv: { profile: 8, level: 6, compatibility: 1 } } }), 'en'), '4K · Dolby Vision');
+  assert.equal(copyLabel(copy({ video: { width: 1920, height: 800 }, threeD: 'sbs', edition: 'fan-edit' }), 'en'), '1080p · 3D');
+  assert.equal(copyLabel(copy({ video: { width: 720, height: 576 } }), 'fr'), 'SD');
+  assert.equal(copyLabel(copy({ video: null }), 'fr'), 'Version');
+  // The codec only where two copies differ in nothing else.
+  const a = copy(), b = copy({ video: { codec: 'hevc', codecs: 'hvc1.1.6.L120.90' } }), cc = copy({ video: hevcHDR10 });
+  assert.deepEqual([a, b, cc].map((x) => copyLabel(x, 'en', [a, b, cc])), ['1080p · H.264', '1080p · HEVC', '4K · HDR10']);
+  const fr = new Intl.DisplayNames(['fr-CA'], { type: 'language' }).of('fr-CA');
+  const name = fr.charAt(0).toLocaleUpperCase('fr-CA') + fr.slice(1);
+  assert.equal(audioLabel({ language: 'fr-CA', channels: 6, objects: 'dolby-atmos', original: true }, 'en'), `${name} · 5.1 · Atmos · original`);
+  assert.equal(audioLabel({ language: 'en', channels: 2, role: 'commentary' }, 'fr'), 'English · stéréo · commentaire');
+  assert.equal(audioLabel({ channels: 8, objects: 'dts-x' }, 'fr'), 'Langue inconnue · 7.1 · DTS:X');
+  assert.equal(audioLabel({ language: 'ja', channels: 1, role: 'description' }, 'en'), '日本語 · mono · audio description');
+  assert.equal(subtitleLabel({ language: 'en', forced: true }, 'fr'), 'English · forcés');
+  assert.equal(subtitleLabel({ language: 'en', hearingImpaired: true }, 'en'), 'English · SDH');
+  assert.equal(subtitleLabel({ language: 'en', hearingImpaired: true, role: 'easyreader' }, 'fr'), 'English · SME · lecture facile');
+  assert.equal(subtitleLabel({ language: 'xx-invalid-' }, 'en'), 'Unknown language');
+});
+
+test('the play request carries the decision and the reason; the addresses come from the ticket', async () => {
+  const c = copy({ video: hevcHDR10, audio: [{ codec: 'eac3', channels: 6, language: 'en', default: true }], previewLayout: { tileWidth: 320, tileHeight: 180, columns: 10, rows: 10, intervalMs: 10000, tileCount: 250 } });
+  const d = await chooseDelivery([c], chrome(), { encoders, ...noMemory });
+  assert.deepEqual(playRequest(d, { titleId: 'title_movie_tmdb_1', startPositionMs: 1234.4, maxBitrateKbps: 0 }), {
+    titleId: 'title_movie_tmdb_1', versionId: c.id, startPositionMs: 1234, audioTrack: 'a1', delivery: 'transcode',
+    transcode: { videoCodec: 'copy', audioCodec: 'aac' }, reason: 'audio-codec' });
+  const base = playRequest({ copy: c, audioTrack: '', delivery: '', reason: 'in-doubt' }, { titleId: 't' });
+  assert.deepEqual(base, { titleId: 't', versionId: c.id, startPositionMs: 0, reason: 'in-doubt' });
+  const urls = streamUrls('/api/v1', { ticket: 'tk_1', protocol: 'hls' });
+  assert.equal(urls.stream, '/api/v1/stream/tk_1/master.m3u8');
+  assert.equal(streamUrls('/api/v1', { ticket: 'tk_1', protocol: 'file' }).stream, '/api/v1/stream/tk_1/file');
+  assert.equal(urls.subtitles('s3'), '/api/v1/stream/tk_1/subtitles/s3');
+  assert.equal(urls.pictures('s4'), '/api/v1/stream/tk_1/pictures/s4');
+  const sheets = previewSheets(c.previewLayout, urls.sheet);
+  assert.deepEqual(sheets.sheets, ['/api/v1/stream/tk_1/trickplay/0', '/api/v1/stream/tk_1/trickplay/1', '/api/v1/stream/tk_1/trickplay/2']);
+  assert.equal(previewSheets(undefined, urls.sheet), undefined);
+});
+
+// A server with a title's page (its copies) and the play request.
+function copyServer(page, { refuse = () => null } = {}) {
+  let n = 0;
+  const calls = fakeServer({
+    'GET /api/v1/playback/pb1': () => [200, {}],
+    [`GET /api/v1/titles/${page.id}`]: () => [200, page],
+    'POST /api/v1/playback': (_, body) => refuse(body) || [201, {
+      id: `pb${++n}`, ticket: `tk${n}`, protocol: body.delivery === 'file' ? 'file' : 'hls', method: 'direct', etag: 'e',
+      positionMs: body.startPositionMs, versionId: body.versionId, audioTrack: body.audioTrack || 'a1',
+      subtitles: [{ id: 's2', form: 'text' }], title: { id: page.id, name: 'Film' } }],
+    'POST /api/v1/playback/pb1/stop': () => [204, null],
+    'POST /api/v1/playback/pb2/stop': () => [204, null],
+    'POST /api/v1/playback/pb3/stop': () => [204, null],
+    'POST /api/v1/playback/pb1/progress': () => [204, null],
+    'PUT /api/v1/playback/pb1/tracks': () => [204, null],
+  });
+  return calls;
+}
+
+test('the player plays a copy it chose: MSFP\'s play request, the stream from the ticket, labels and tracks from the copy', async () => {
+  const env = chrome();
+  globalThis.localStorage = memoryStorage();
+  const c = copy({ mediaType: 'video/mp4', audio: [{ codec: 'aac', codecs: 'mp4a.40.2', channels: 6, language: 'en', default: true }],
+    subtitles: [{ language: 'fr', format: 'subrip' }], segments: [{ kind: 'intro', startMs: 1000, endMs: 20000 }] });
+  const page = { id: 'title_movie_tmdb_1', copies: [c], limits: { originalFile: true }, wishes: { subtitles: 'fr' }, userState: { positionMs: 5000 } };
+  const calls = copyServer(page);
+  globalThis.document = { createElement: () => ({ dataset: {}, track: { mode: 'disabled', cues: [], addCue() {} }, dispatchEvent() {} }) };
+  globalThis.fetch = ((api) => (url, init) => (url.includes('/subtitles/') ? Promise.reject(new Error('later')) : api(url, init)))(globalThis.fetch);
+  const player = await new Overfin().play(fakeVideo(), page.id, { env, language: 'fr' });
+  const body = calls.find((x) => x.url === '/api/v1/playback').body;
+  assert.deepEqual(body, { titleId: page.id, versionId: c.id, startPositionMs: 5000, audioTrack: 'a1', delivery: 'file', reason: 'as-is' });
+  const pb = player.playback;
+  assert.equal(pb.stream.url, '/api/v1/stream/tk1/file');
+  assert.equal(pb.audioTracks[0].label, 'English · 5.1');
+  assert.equal(pb.subtitleTracks[0].url, '/api/v1/stream/tk1/subtitles/s2');
+  assert.equal(pb.subtitleTrack, 's2');
+  assert.equal(pb.versions[0].name, '1080p');
+  assert.equal(pb.delivery.kind, 'file');
+  assert.equal(pb.durationMs, c.durationMs);
+  assert.equal(player.segmentAt(2000).kind, 'intro');
+  await player.close();
+  delete globalThis.localStorage;
+});
+
+test('refused as asked (409 delivery-refused): the player steps down a level and asks again', async () => {
+  const c = copy({ mediaType: 'video/mp4' });
+  const page = { id: 'title_movie_tmdb_2', copies: [c], encoders };
+  const calls = copyServer(page, { refuse: (b) => (b.delivery === 'file' ? [409, { type: 'delivery-refused', status: 409, detail: 'original-file-off' }] : null) });
+  const v = fakeVideo();
+  const player = await new Overfin().play(v, page.id, { env: chrome(), startMs: 0, fallbacks: null, Hls: fakeHls(v, []) });
+  const asked = calls.filter((x) => x.url === '/api/v1/playback').map((x) => x.body.delivery);
+  assert.deepEqual(asked, ['file', 'remux']);
+  assert.equal(player.playback.delivery.reason, 'fallback');
+  await player.close();
+});
+
+test('the ladder: a play with no audio heard in its first seconds steps down once, remembered for this device', async () => {
+  globalThis.localStorage = memoryStorage();
+  const c = copy({ mediaType: 'video/mp4' });
+  const page = { id: 'title_movie_tmdb_3', copies: [c], encoders };
+  const calls = copyServer(page);
+  const video = fakeVideo();
+  const player = await new Overfin().play(video, page.id, { env: chrome(), startMs: 0, Hls: fakeHls(video, []) });
+  assert.equal(player.playback.delivery.kind, 'file');
+  // It plays, a picture shows, but nothing of its audio was decoded.
+  Object.assign(video, { currentTime: 4, videoWidth: 1920, webkitAudioDecodedByteCount: 0 });
+  video.emit('timeupdate');
+  await settle();
+  const asked = calls.filter((x) => x.url === '/api/v1/playback').map((x) => x.body);
+  assert.deepEqual(asked.map((b) => b.delivery), ['file', 'remux']);
+  assert.equal(asked[1].reason, 'fallback');
+  assert.equal(asked[1].startPositionMs, 4000);
+  assert.equal(player.playback.delivery.fallback, 'no-audio');
+  assert.equal(fallbacks.level(c, 'a1'), 1);
+  // Heard this time: no further step.
+  Object.assign(video, { currentTime: 9, webkitAudioDecodedByteCount: 50_000 });
+  video.emit('timeupdate');
+  await settle();
+  assert.equal(calls.filter((x) => x.url === '/api/v1/playback').length, 2);
+  await player.close();
+  delete globalThis.localStorage;
+});
+
+test('the ladder: a media error in a play\'s first seconds steps down; later, it starts over as before', async () => {
+  const c = copy({ mediaType: 'video/mp4' });
+  const page = { id: 'title_movie_tmdb_4', copies: [c], encoders };
+  const calls = copyServer(page);
+  const video = fakeVideo();
+  const player = await new Overfin().play(video, page.id, { env: chrome(), startMs: 0, fallbacks: null, Hls: fakeHls(video, []) });
+  video.error = { code: 3 }; // a decode error
+  video.emit('error');
+  await settle();
+  assert.deepEqual(calls.filter((x) => x.url === '/api/v1/playback').map((x) => x.body.delivery), ['file', 'remux']);
+  assert.equal(player.playback.delivery.fallback, 'media-error');
+  await player.close();
+});
+
+test('the ladder: a play that never gets going steps down; a file\'s chosen audio is turned on in the video', async (t) => {
+  const c = copy({ mediaType: 'video/mp4', audio: [
+    { codec: 'aac', codecs: 'mp4a.40.2', language: 'en', default: true }, { codec: 'aac', codecs: 'mp4a.40.2', language: 'fr' }] });
+  const page = { id: 'title_movie_tmdb_5', copies: [c], encoders, wishes: { audio: 'fr' } };
+  const calls = copyServer(page);
+  // Safari: audioTracks, so the French track plays from the file itself.
+  const video = fakeVideo();
+  video.audioTracks = [{ enabled: true }, { enabled: false }];
+  const player = await new Overfin().play(video, page.id, { env: safari(), startMs: 0, fallbacks: null, Hls: fakeHls(video, []) });
+  assert.equal(player.playback.delivery.kind, 'file');
+  video.emit('loadedmetadata');
+  assert.deepEqual(video.audioTracks.map((a) => a.enabled), [false, true]);
+  await player.close();
+  // A file that plays nothing, not paused, steps down after a while.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const stuck = fakeVideo();
+  const p2 = await new Overfin().play(stuck, 'title_movie_tmdb_5', { env: chrome(), startMs: 0, fallbacks: null, Hls: fakeHls(stuck, []), audioTrack: 'a1' });
+  assert.equal(p2.playback.delivery.kind, 'file');
+  t.mock.timers.tick(15_000);
+  t.mock.timers.reset();
+  await settle();
+  const asked = calls.filter((x) => x.url === '/api/v1/playback').map((x) => x.body.delivery);
+  assert.deepEqual(asked.slice(-2), ['file', 'remux']);
+  assert.equal(p2.playback.delivery.fallback, 'stalled');
+  await p2.close();
+});
+
+test('the ladder leaves alone what isn\'t the device\'s failure: a network error, a playback taken over', async () => {
+  const c = copy({ mediaType: 'video/mp4' });
+  const page = { id: 'title_movie_tmdb_6', copies: [c], encoders };
+  const calls = copyServer(page);
+  const video = fakeVideo();
+  const player = await new Overfin().play(video, page.id, { env: chrome(), startMs: 0, fallbacks: null, Hls: fakeHls(video, []), onTakenOver: () => {} });
+  video.error = { code: 2 }; // the network
+  video.emit('error');
+  await settle();
+  assert.ok(calls.filter((x) => x.url === '/api/v1/playback').every((x) => x.body.delivery === 'file'));
+  // Taken over: a decode error then is the takeover's, never a step down.
+  globalThis.fetch = ((api) => (url, init) => (url === '/api/v1/playback/pb1' || url === '/api/v1/playback/pb2'
+    ? Promise.resolve({ status: 410, ok: false, json: async () => ({ type: 'playback-taken-over', status: 410 }) }) : api(url, init)))(globalThis.fetch);
+  video.error = { code: 3 };
+  video.emit('error');
+  await settle();
+  assert.ok(calls.filter((x) => x.url === '/api/v1/playback').every((x) => x.body.delivery === 'file'));
   await player.close();
 });

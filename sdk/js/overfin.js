@@ -320,8 +320,20 @@ export class Overfin {
 
   // ---- Playback ----------------------------------------------------------
 
-  /** Starts a playback. Most clients want play() instead, which does the rest. */
+  /**
+   * Starts a playback: MSFP's play request (playRequest() builds it from
+   * chooseDelivery()'s decision), or, for a title without copies, the
+   * older body with capabilities. Most clients want play() instead, which
+   * does the rest.
+   */
   startPlayback(request) { return this.request('POST', '/playback', request); }
+
+  /**
+   * A copy's seek-bar previews before it plays: { ticket, etag }, the
+   * sheets at streamUrls(base, { ticket }).sheet(n) (previewSheets() with
+   * the copy's previewLayout), for ten minutes (since 0.10).
+   */
+  previews(titleId, versionId) { return this.request('POST', '/previews', { titleId, versionId }); }
 
   /**
    * Sets the subtitles the active profile prefers, a language ('' for
@@ -428,6 +440,792 @@ function browserFamily() {
   return { firefox, chromium, safari, mac: /Mac OS X|Macintosh/.test(ua) };
 }
 
+// ---- Choosing a copy and how it plays -------------------------------------
+//
+// A title's page gives its copies as MSFP's copy objects: facts only (MSFP
+// video, section 3). The player chooses among them for this device: the
+// copy, its audio track, and the cheapest delivery the device plays
+// (Overfin's plan, section 7.1): the file itself, a remux (the streams as
+// they are, in segments), a transcode (the audio alone converted, or the
+// picture too), or, when in doubt, MSFP's baseline (H.264, AAC stereo).
+// The server makes exactly what is asked, or refuses it.
+
+/** MSFP's media types, as browsers name them; any other: not played as it is. */
+export const BROWSER_TYPES = {
+  'video/mp4': 'video/mp4',
+  'video/quicktime': 'video/quicktime',
+  'video/webm': 'video/webm',
+  'video/matroska': 'video/x-matroska',
+  'video/mp2t': 'video/mp2t',
+};
+
+// The video codecs a browser may decode as they are (registry tokens), and
+// the audio ones; any other is converted.
+const VIDEO_CODECS = ['h264', 'hevc', 'av1', 'vp9', 'vp8'];
+const AUDIO_CODECS = ['aac', 'mp3', 'ac3', 'eac3', 'opus', 'flac', 'vorbis', 'alac'];
+// The codecs string of an audio codec whose copy may leave it out (MSFP
+// video, section 3.5: the registry's fixed codes).
+const FIXED_AUDIO = { ac3: 'ac-3', eac3: 'ec-3', flac: 'fLaC', opus: 'Opus', alac: 'alac', mp3: 'mp4a.40.34', vorbis: 'vorbis' };
+// What segments carry as they are (MSFP's default segment formats, msfp-go
+// wire.DefaultSegments): fragmented MP4, and MPEG-TS.
+const MP4_CARRIES = ['h264', 'hevc', 'av1', 'vp9', 'aac', 'ac3', 'eac3', 'opus', 'flac', 'alac', 'mp3'];
+const TS_CARRIES = ['h264', 'hevc', 'aac', 'ac3', 'eac3', 'mp3'];
+// Dolby Vision's sample entries, from the base codec's (registry, section 1).
+const DV_ENTRIES = { hvc1: 'dvh1', hev1: 'dvhe', av01: 'dav1', avc1: 'dva1', avc3: 'dvav' };
+
+/**
+ * The deliveries, cheapest first: each play starts at the first that fits
+ * the copy and the device, and the fallback ladder steps down from there.
+ */
+export const LEVELS = ['file', 'remux', 'audio', 'video', 'baseline'];
+
+/**
+ * The reasons a player gives for the delivery it chose (the play request's
+ * `reason`, shown in the control panel's "Now playing"): a closed list.
+ */
+export const REASONS = ['as-is', 'container', 'audio-track', 'audio-codec', 'video-codec', 'picture-range', 'bitrate',
+  'fallback', 'quirk', 'in-doubt'];
+
+/**
+ * Devices that play otherwise than they say. Each entry: the device test,
+ * what it overrides, the date it was added and how it was found. New
+ * entries only after a failure seen on a real device.
+ *
+ * Overrides: noFile (media types never played as a file), hdrMapped (the
+ * browser maps HDR onto any screen itself), hdrFromApp (HDR is what
+ * Overfin's app says the screen shows), audioNever (audio codecs never
+ * played as they are; a name ending in _ covers its family).
+ */
+export const QUIRKS = [
+  {
+    id: 'firefox-matroska',
+    test: (env) => env.family.firefox,
+    override: { noFile: ['video/matroska'] },
+    date: '2026-11-22',
+    found: 'Firefox says it plays Matroska, then reads the whole file before the first picture (the site\'s player, before 0.10)',
+  },
+  {
+    id: 'browser-maps-hdr',
+    test: (env) => !env.app && ((env.family.chromium && !env.family.mobile) || (env.family.safari && env.family.mac) || (env.family.firefox && env.family.mac)),
+    override: { hdrMapped: true },
+    date: '2026-11-22',
+    found: 'desktop Chromium browsers and Apple\'s Safari (Firefox on macOS only) map HDR video onto any screen themselves (the site\'s player, before 0.10); WebKit on Linux doesn\'t (its colours washed out in a test, 2026-11-22)',
+  },
+  {
+    id: 'app-hdr',
+    test: (env) => !!env.app,
+    override: { hdrFromApp: true },
+    date: '2026-11-22',
+    found: 'Android\'s WebView doesn\'t tell pages what the screen shows; Overfin\'s app does (OverfinApp.hdr(): hdr10, hlg; never Dolby Vision)',
+  },
+  {
+    id: 'lossless-audio',
+    test: () => true,
+    override: { audioNever: ['truehd', 'mlp', 'dts', 'dtsuhd', 'pcm_'] },
+    date: '2026-11-22',
+    found: 'no browser plays TrueHD, DTS or PCM in a video, whatever it says (Overfin\'s plan, section 7.1)',
+  },
+  {
+    id: 'webos-browser',
+    test: (env) => env.family.webos,
+    override: {},
+    date: '2026-11-22',
+    found: 'LG webOS\'s browser: to measure on a real TV; nothing overridden until a failure is seen',
+  },
+];
+
+/**
+ * What this device plays, read once per page: the browser's own answers
+ * (MediaSource.isTypeSupported or ManagedMediaSource's, canPlayType,
+ * mediaCapabilities.decodingInfo), the screen's range (the
+ * dynamic-range media query, or Overfin's app), whether HLS plays (hls.js,
+ * or natively), whether a file's audio tracks can be switched
+ * (audioTracks), and the quirks that apply.
+ * @param {{ Hls?: any }} [options] the hls.js constructor (globalThis.Hls by default)
+ */
+export function deviceEnv({ Hls } = {}) {
+  const g = globalThis;
+  let video = null;
+  try { video = g.document?.createElement?.('video') || null; } catch { video = null; }
+  const MSE = g.ManagedMediaSource || g.MediaSource;
+  const caps = g.navigator?.mediaCapabilities;
+  const hlsjs = Hls || g.Hls;
+  const decoded = new Map();
+  let hdrScreen = false;
+  try { hdrScreen = !!g.matchMedia?.('(dynamic-range: high)')?.matches; } catch { hdrScreen = false; }
+  const canPlay = (type) => {
+    try { return video?.canPlayType?.(type) || ''; } catch { return ''; }
+  };
+  let hls = '';
+  try {
+    if (hlsjs?.isSupported?.()) hls = 'hls.js';
+    else if (canPlay('application/vnd.apple.mpegurl')) hls = 'native';
+  } catch { hls = ''; }
+  const env = {
+    family: familyOf(g.navigator?.userAgent || ''),
+    app: appHdr(),
+    hdrScreen,
+    hls,
+    audioTracks: !!video && 'audioTracks' in video,
+    canPlay,
+    mse: (type) => {
+      try { return !!MSE?.isTypeSupported?.(type); } catch { return false; }
+    },
+    // decodingInfo's answer ({ supported, smooth, powerEfficient }), or
+    // null when the browser can't say: each configuration asked once.
+    decode: (config) => {
+      const key = JSON.stringify(config);
+      if (!decoded.has(key)) {
+        let answer;
+        try {
+          answer = caps?.decodingInfo ? Promise.resolve(caps.decodingInfo(config)).then((r) => r || null, () => null) : Promise.resolve(null);
+        } catch {
+          answer = Promise.resolve(null);
+        }
+        decoded.set(key, answer);
+      }
+      return decoded.get(key);
+    },
+    quirks: [],
+    rules: { noFile: [], audioNever: [], hdrMapped: false, hdrFromApp: false },
+  };
+  for (const q of QUIRKS) {
+    let applies = false;
+    try { applies = !!q.test(env); } catch { applies = false; }
+    if (!applies) continue;
+    env.quirks.push(q.id);
+    const o = q.override || {};
+    env.rules.noFile.push(...(o.noFile || []));
+    env.rules.audioNever.push(...(o.audioNever || []));
+    env.rules.hdrMapped ||= !!o.hdrMapped;
+    env.rules.hdrFromApp ||= !!o.hdrFromApp;
+  }
+  return env;
+}
+
+// familyOf tells browsers apart where what they say isn't enough.
+function familyOf(ua) {
+  const firefox = /Firefox\//.test(ua);
+  const chromish = /Chrom(e|ium)\//.test(ua);
+  const mobile = /Mobile|Android/.test(ua);
+  return {
+    firefox,
+    chromium: !firefox && chromish,
+    safari: !firefox && !chromish && /Safari\//.test(ua),
+    mac: /Mac OS X|Macintosh/.test(ua),
+    android: /Android/.test(ua),
+    webos: /Web0S|webOS/.test(ua),
+    mobile,
+  };
+}
+
+/**
+ * Chooses the copy of a title, its audio track and its delivery for this
+ * device (Overfin's plan, section 7.1). copies: the title page's copies;
+ * env: deviceEnv(); wishes: the title page's wrapper (limits, encoders,
+ * wishes.audio as `audio`), the app's `language`, and the player's own
+ * choices (versionId, audioTrack, audioLanguage, maxBitrateKbps: the
+ * quality chosen), `peers` (IDs of copies on paired servers), `minLevel`
+ * (a level of LEVELS to start from at least), `memory` (the fallback
+ * memory; fallbacks by default; null for none).
+ *
+ * Resolves with the decision, or null when there is no copy: { copy,
+ * audioTrack, delivery ('file', 'remux', 'transcode' or '' for MSFP's
+ * baseline), mediaType, transcode, reason, level, converts: { video,
+ * audio }, asIs (nothing converted), quirks (those that applied) }.
+ */
+export async function chooseDelivery(copies, env, wishes = {}) {
+  let list = (copies || []).filter((c) => c && typeof c.id === 'string');
+  if (wishes.versionId) {
+    const asked = list.filter((c) => c.id === wishes.versionId);
+    if (asked.length) list = asked;
+  }
+  if (!list.length) return null;
+  const memory = wishes.memory === undefined ? fallbacks : wishes.memory;
+  const peers = new Set(wishes.peers || []);
+  const plans = [];
+  for (const [order, copy] of list.entries()) {
+    const audio = chooseAudio(copy, env, wishes);
+    const remembered = memory ? memory.level(copy, audio.id) : 0;
+    const plan = await planCopy(copy, audio.id, env, wishes, Math.max(remembered, wishes.minLevel || 0));
+    // Started lower than it would: the ladder stepped down before.
+    if (plan.level > plan.natural) plan.reason = 'fallback';
+    plans.push({ ...plan, matched: audio.matched, peer: peers.has(copy.id), order, picture: pictureScore(copy, env) });
+  }
+  // D11: own copies that play as they are, the best picture first; else a
+  // paired server's that does; else own copies first, converted. Within
+  // each, the one with the audio wished for first.
+  const tier = (p) => (p.asIs ? (p.peer ? 1 : 0) : (p.peer ? 3 : 2));
+  plans.sort((a, b) => tier(a) - tier(b) || Number(b.matched) - Number(a.matched)
+    || (a.asIs ? b.picture - a.picture : 0) || a.order - b.order);
+  const { matched, peer, order, picture, natural, ...decision } = plans[0];
+  return { ...decision, quirks: [...env.quirks] };
+}
+
+// chooseAudio is the audio track a play of copy asks for: the player's
+// choice, else the language wished (the player's, the title's or the
+// profile's, then the app's), else the original, else the file's default.
+// matched: a wished language was found.
+function chooseAudio(copy, env, wishes) {
+  const tracks = copy.audioTracks || [];
+  if (wishes.audioTrack && tracks.some((t) => t.id === wishes.audioTrack)) return { id: wishes.audioTrack, matched: true };
+  const menu = audioMenu(copy, env);
+  for (const language of [wishes.audioLanguage, wishes.audio, wishes.language]) {
+    const t = pickLanguage(menu.filter((m) => roleClass(m.role) === 'main'), language);
+    if (t) return { id: t.id, matched: true };
+  }
+  const original = menu.find((t) => t.original && roleClass(t.role) === 'main');
+  if (original) return { id: original.id, matched: false };
+  const d = defaultAudio(copy);
+  return { id: d?.id || '', matched: false };
+}
+
+// defaultAudio is the audio track the file plays by itself: the
+// default-marked one, else the first (MSFP's DefaultAudio).
+function defaultAudio(copy) {
+  const tracks = copy.audioTracks || [];
+  return tracks.find((t) => t.default) || tracks[0] || null;
+}
+
+// pickLanguage is the track in a language (a tag): the same variant, else
+// the same language from anywhere.
+function pickLanguage(tracks, language) {
+  if (!language) return null;
+  const want = String(language).toLowerCase();
+  const base = want.split('-')[0];
+  return tracks.find((t) => (t.language || '').toLowerCase() === want)
+    || tracks.find((t) => t.language && t.language.toLowerCase().split('-')[0] === base) || null;
+}
+
+// roleClass groups audio and subtitle roles: the film's own sound (or
+// text), a commentary, a description, anything else.
+function roleClass(role) {
+  if (!role || ['main', 'dub', 'alternate', 'supplementary', 'subtitle'].includes(role)) return 'main';
+  return role;
+}
+
+// planCopy is the cheapest delivery of copy, its audio track audioId, on
+// the device, from level from (of LEVELS) on. natural: the level it would
+// start at with nothing remembered.
+async function planCopy(copy, audioId, env, wishes, from) {
+  const track = (copy.audioTracks || []).find((t) => t.id === audioId) || null;
+  const limits = wishes.limits || {};
+  const encoders = wishes.encoders || null;
+  const cap = Math.min(...[limits.maxBitrateKbps, wishes.maxBitrateKbps].filter((k) => k > 0), Infinity);
+  const kbps = copy.durationMs > 0 ? (copy.size * 8) / copy.durationMs : 0;
+  const overCap = Number.isFinite(cap) && kbps > cap;
+  // An HDR picture the device decodes but doesn't show, which the server
+  // can't make SDR (no tone mapping): played as it is all the same.
+  const washed = (v) => (!v.ok && v.reason === 'picture-range' && v.decodes && !encoders?.toneMapping
+    ? { ...v, ok: true, reason: '' } : v);
+  const seg = washed(await videoPlays(copy, env, 'segments'));
+  const fileVideo = washed(await videoPlays(copy, env, 'file'));
+  const a = audioPlays(track, env);
+  const out = (level, delivery, extra, reason) => ({ copy, audioTrack: audioId, delivery, level, reason, ...extra });
+  const candidates = [];
+
+  // The file itself.
+  const isDefault = !track || track.id === defaultAudio(copy)?.id;
+  let fileReason = '';
+  if (limits.originalFile === false) fileReason = 'container';
+  else if (copy.parts > 1 || !copy.video) fileReason = 'in-doubt';
+  else if (overCap) fileReason = 'bitrate';
+  else if (!fileVideo.ok) fileReason = fileVideo.reason;
+  else if (!a.ok) fileReason = a.reason;
+  else if (env.rules.noFile.includes(copy.mediaType)) fileReason = 'quirk';
+  else if (!containerPlays(copy, fileVideo, a, env)) fileReason = 'container';
+  else if (!isDefault && !env.audioTracks) fileReason = 'audio-track';
+  if (!fileReason) candidates.push(out(0, 'file', { converts: { video: false, audio: false }, asIs: true }, 'as-is'));
+
+  // A remux: the streams as they are, in segments.
+  const mediaType = !overCap && seg.ok && a.ok ? remuxType(copy, seg, a, track, env) : '';
+  const remuxReason = ['audio-track', 'quirk'].includes(fileReason) ? fileReason : 'container';
+  if (mediaType) candidates.push(out(1, 'remux', { mediaType, converts: { video: false, audio: false }, asIs: true }, remuxReason));
+
+  // The audio alone converted (AAC stereo), the picture as it is.
+  const copiedVideo = seg.ok && !overCap && (videoSegments(copy, seg, env) !== '');
+  if (copiedVideo && copy.video) {
+    candidates.push(out(2, 'transcode', { transcode: { videoCodec: 'copy', audioCodec: 'aac' }, converts: { video: false, audio: !!track }, asIs: false },
+      a.ok ? remuxReason : a.reason));
+  }
+
+  // The picture converted.
+  if (copy.video && encoders) {
+    const t = convertedVideo(copy, env, encoders, cap);
+    if (t) {
+      const audioCopy = a.ok && track && ['aac', 'mp3'].includes(track.codec) && (t.videoCodec === 'h264' || MP4_CARRIES.includes(track.codec));
+      t.audioCodec = audioCopy ? 'copy' : 'aac';
+      const why = overCap ? 'bitrate' : seg.reason && seg.reason !== 'in-doubt' ? seg.reason : 'video-codec';
+      candidates.push(out(3, 'transcode', { transcode: t, converts: { video: true, audio: !audioCopy && !!track }, asIs: false }, why));
+    }
+  }
+
+  // MSFP's baseline: the server converts what isn't within it.
+  candidates.push(out(4, '', { converts: { video: !!copy.video, audio: !!track }, asIs: false }, 'in-doubt'));
+
+  const natural = candidates[0].level;
+  const chosen = candidates.find((c) => c.level >= from) || candidates[candidates.length - 1];
+  return { ...chosen, natural };
+}
+
+// rangeOf is a picture's dynamic range: sdr, hdr10 (PQ), hlg, or dv
+// (Dolby Vision without a base layer of another range); unknown when it
+// says nothing (no colour: taken as SDR, as MSFP says nothing of it).
+function rangeOf(v) {
+  if (v.dv && v.dv.compatibility === 0) return 'dv';
+  if (v.dv) return { 1: 'hdr10', 6: 'hdr10', 4: 'hlg', 2: 'sdr' }[v.dv.compatibility] || 'dv';
+  const tr = v.colour?.transfer;
+  return tr === 16 ? 'hdr10' : tr === 18 ? 'hlg' : 'sdr';
+}
+
+// rangeShown says whether the device shows a range (or maps it onto its
+// screen itself).
+function rangeShown(range, env) {
+  if (range === 'sdr') return true;
+  if (env.rules.hdrFromApp) return range !== 'dv' && (env.app || []).includes(range);
+  return env.hdrScreen || env.rules.hdrMapped;
+}
+
+// outOfBand is a codecs string as segments carry it: parameter sets out of
+// band (hev1 → hvc1, avc3 → avc1), as the server's master playlist says.
+function outOfBand(codecs) {
+  const [four, ...rest] = codecs.split('.');
+  const to = { hev1: 'hvc1', avc3: 'avc1' }[four];
+  return to ? [to, ...rest].join('.') : codecs;
+}
+
+/**
+ * The Dolby Vision codecs string of a picture (MSFP video, section 3.5):
+ * its base codecs string's 4CC turned into the Dolby Vision entry, with
+ * the profile and level of `dv` ("dvh1.08.06"); '' without dv.
+ */
+export function dolbyVisionCodecs(codecs, dv) {
+  if (!dv || !codecs) return '';
+  const entry = DV_ENTRIES[codecs.split('.')[0]];
+  if (!entry) return '';
+  const two = (n) => String(n).padStart(2, '0');
+  return `${entry}.${two(dv.profile)}.${two(dv.level)}`;
+}
+
+// videoPlays says whether the device decodes and shows a copy's picture as
+// it is, in its file (form 'file') or in segments: { ok, reason, codecs,
+// range, dv }.
+async function videoPlays(copy, env, form) {
+  const v = copy.video;
+  if (!v) return { ok: false, reason: 'in-doubt' };
+  if (!VIDEO_CODECS.includes(v.codec)) return { ok: false, reason: 'video-codec' };
+  if (!v.codecs) return { ok: false, reason: 'in-doubt' };
+  const [num, den] = String(v.fps || '').split('/').map(Number);
+  const fps = num > 0 ? num / (den > 0 ? den : 1) : 0;
+  if (copy.threeD || v.interlaced || (v.bitDepth || 8) > 10 || v.width > 4096 || v.height > 2304 || fps > 61
+    || (v.codec === 'h264' && v.refFrames > 16)) {
+    return { ok: false, reason: 'video-codec' };
+  }
+  const codecs = form === 'file' ? v.codecs : outOfBand(v.codecs);
+  let range = rangeOf(v);
+  // Dolby Vision: played as such only where the browser takes its string;
+  // elsewhere its base layer, when it has one of another range.
+  const dvString = dolbyVisionCodecs(codecs, v.dv);
+  const dv = !!dvString && env.mse(`video/mp4; codecs="${dvString}"`) && (env.hdrScreen || (env.rules.hdrMapped && !env.rules.hdrFromApp));
+  if (v.dv && !dv) {
+    if (range === 'dv') return { ok: false, reason: 'picture-range' };
+    // A file keeps its Dolby Vision entry: only segments carry the base.
+    if (form === 'file') return { ok: false, reason: 'container' };
+  }
+  const tested = dv ? dvString : codecs;
+  const type = `video/mp4; codecs="${tested}"`;
+  if (!env.mse(type) && env.canPlay(type) !== 'probably') return { ok: false, reason: 'video-codec' };
+  if (dv) range = 'dv';
+  if (range !== 'sdr') {
+    if (!rangeShown(range, env)) return { ok: false, reason: 'picture-range', codecs: tested, range, decodes: true };
+    const kbps = copy.durationMs > 0 ? Math.round((copy.size * 8) / copy.durationMs) : 0;
+    const config = {
+      type: form === 'file' ? 'file' : 'media-source',
+      video: { contentType: type, width: v.width, height: v.height, bitrate: (kbps || 20000) * 1000, framerate: fps || 24,
+        transferFunction: range === 'hlg' ? 'hlg' : 'pq', colorGamut: 'rec2020' },
+    };
+    if (range === 'hdr10') config.video.hdrMetadataType = (v.hdr || []).includes('hdr10plus') ? 'smpteSt2094-40' : 'smpteSt2086';
+    const info = await env.decode(config);
+    if (info && info.supported === false) return { ok: false, reason: 'picture-range', codecs: tested, range, decodes: true };
+  }
+  return { ok: true, reason: '', codecs: tested, range, dv };
+}
+
+// audioPlays says whether the device decodes an audio track as it is:
+// { ok, reason, codecs }. No track: nothing to decode.
+function audioPlays(track, env) {
+  if (!track) return { ok: true, reason: '', codecs: '' };
+  const c = track.codec || '';
+  if (env.rules.audioNever.some((n) => (n.endsWith('_') ? c.startsWith(n) : c === n))) return { ok: false, reason: 'audio-codec' };
+  if (!AUDIO_CODECS.includes(c)) return { ok: false, reason: 'audio-codec' };
+  const codecs = track.codecs || FIXED_AUDIO[c];
+  if (!codecs) return { ok: false, reason: 'in-doubt' };
+  const type = `audio/mp4; codecs="${codecs}"`;
+  if (env.mse(type) || env.canPlay(type) === 'probably') return { ok: true, reason: '', codecs };
+  // Vorbis and Opus also in WebM.
+  if ((c === 'vorbis' || c === 'opus') && (env.mse(`audio/webm; codecs="${c}"`) || env.canPlay(`audio/webm; codecs="${c}"`) === 'probably')) {
+    return { ok: true, reason: '', codecs: c, webmOnly: true };
+  }
+  return { ok: false, reason: 'audio-codec' };
+}
+
+// containerPlays says whether the browser plays the copy's file with its
+// streams: its media type with their codecs strings.
+function containerPlays(copy, video, audio, env) {
+  const type = BROWSER_TYPES[copy.mediaType];
+  if (!type) return false;
+  // WebM names Opus and Vorbis in lower case (Firefox takes no other).
+  const a = type === 'video/webm' && /^(opus|vorbis)$/i.test(audio.codecs) ? audio.codecs.toLowerCase() : audio.codecs;
+  const list = [video.codecs, a].filter(Boolean).join(',');
+  if (env.canPlay(`${type}; codecs="${list}"`)) return true;
+  // Matroska's own name, for browsers that know only it.
+  return type === 'video/x-matroska' && !!env.canPlay(`video/matroska; codecs="${list}"`);
+}
+
+// remuxType is the segments a remux of the copy is asked in: fragmented MP4
+// where the device plays its streams so, else MPEG-TS where HLS plays
+// natively; '' when neither.
+function remuxType(copy, video, audio, track, env) {
+  if (!env.hls || audio.webmOnly) return '';
+  const codecs = [video.codecs, audio.codecs].filter(Boolean).join(',');
+  const streams = [copy.video?.codec, track?.codec].filter(Boolean);
+  if (streams.every((c) => MP4_CARRIES.includes(c)) && (env.mse(`video/mp4; codecs="${codecs}"`)
+    || (env.hls === 'native' && env.canPlay(`video/mp4; codecs="${codecs}"`) === 'probably'))) return 'video/mp4';
+  if (env.hls === 'native' && streams.every((c) => TS_CARRIES.includes(c))) return 'video/mp2t';
+  return '';
+}
+
+// videoSegments is the segment format a copied picture travels in ('' when
+// none the device plays): TS for H.264 (hls.js repackages it), else MP4.
+function videoSegments(copy, video, env) {
+  if (!env.hls) return '';
+  if (copy.video.codec === 'h264') return 'ts';
+  return MP4_CARRIES.includes(copy.video.codec) && (env.mse(`video/mp4; codecs="${video.codecs}"`) || env.hls === 'native') ? 'mp4' : '';
+}
+
+// convertedVideo is a transcode's targets when the picture is converted:
+// HDR kept (range keep, HEVC or AV1, when the server makes them and the
+// device shows them), else H.264, made SDR from an HDR picture when the
+// server tone maps; null when the server can't make it.
+function convertedVideo(copy, env, encoders, cap) {
+  const range = rangeOf(copy.video);
+  const t = {};
+  if (Number.isFinite(cap)) t.maxBitrateKbps = Math.max(1000, Math.floor(cap / 1000) * 1000);
+  if (range !== 'sdr') {
+    // Dolby Vision without a base layer is made SDR (its colours need its
+    // own metadata, which a re-encoding drops).
+    const keep = range !== 'dv' && (encoders.ranges || []).includes('keep') && rangeShown(range, env);
+    const tryCodec = (codec, codecs) => (encoders.video || []).includes(codec) && env.mse(`video/mp4; codecs="${codecs}"`);
+    if (keep && tryCodec('hevc', 'hvc1.2.4.L150.90')) return { videoCodec: 'hevc', range: 'keep', ...t };
+    if (keep && tryCodec('av1', 'av01.0.08M.10')) return { videoCodec: 'av1', range: 'keep', ...t };
+    if (!encoders.toneMapping) return null;
+    return { videoCodec: 'h264', range: 'sdr', ...t };
+  }
+  return { videoCodec: 'h264', ...t };
+}
+
+// pictureScore orders copies by picture: lines, then the range shown, then
+// the rate.
+function pictureScore(copy, env) {
+  const v = copy.video;
+  if (!v) return 0;
+  const range = rangeOf(v);
+  const shown = rangeShown(range, env);
+  const rangeRank = !shown ? 0 : { sdr: 0, hlg: 1, hdr10: 2, dv: 4 }[range] + ((v.hdr || []).includes('hdr10plus') ? 1 : 0) + (v.dv && shown ? 1 : 0);
+  const kbps = copy.durationMs > 0 ? (copy.size * 8) / copy.durationMs : 0;
+  return v.height * 100 + rangeRank * 10 + Math.min(kbps / 100000, 9);
+}
+
+// ---- Tracks offered -----------------------------------------------------
+
+/**
+ * A copy's audio tracks as the player offers them: one per language
+ * variant and role; of several, the one the device plays as it is (with
+ * env), then the most channels, then the file's default; in the file's
+ * order.
+ */
+export function audioMenu(copy, env) {
+  const out = [];
+  const plays = (t) => (env ? audioPlays(t, env).ok : false);
+  for (const t of copy.audioTracks || []) {
+    const i = out.findIndex((o) => t.language && o.language === t.language && roleClass(o.role) === roleClass(t.role));
+    if (i < 0) { out.push(t); continue; }
+    const o = out[i];
+    const better = Number(plays(t)) - Number(plays(o)) || (t.channels || 0) - (o.channels || 0) || Number(!!t.default) - Number(!!o.default);
+    if (better > 0) out[i] = t;
+  }
+  return out;
+}
+
+// The subtitle formats a player shows: text (served as WebVTT) and PGS
+// pictures; DVD and DVB pictures are never served apart.
+const TEXT_SUBTITLES = ['subrip', 'ass', 'ssa', 'webvtt', 'mov_text', 'ttml', 'hdmv_text_subtitle', 'microdvd', 'sami',
+  'subviewer', 'mpl2', 'realtext', 'jacosub', 'pjs', 'vplayer', 'stl'];
+const PICTURE_SUBTITLES = ['hdmv_pgs_subtitle'];
+
+/** Whether a subtitle track is pictures (PGS) rather than text. */
+export function pictureSubtitle(track) { return PICTURE_SUBTITLES.includes(track.format); }
+
+/**
+ * A copy's subtitles as the player offers them: { tracks, forced }, one
+ * per language variant each (text before pictures, then not for the hard
+ * of hearing first), forced ones apart, in the file's order. served: the
+ * playback's served subtitles ({ id, form }), to keep only those.
+ */
+export function subtitleMenu(copy, served) {
+  const ok = (t) => (served ? served.some((s) => s.id === t.id)
+    : TEXT_SUBTITLES.includes(t.format) || PICTURE_SUBTITLES.includes(t.format));
+  const score = (t) => (pictureSubtitle(t) ? 0 : 2) + (t.hearingImpaired ? 0 : 1);
+  const best = (list) => {
+    const out = [];
+    for (const t of list) {
+      const i = out.findIndex((o) => t.language && o.language === t.language && roleClass(o.role) === roleClass(t.role));
+      if (i < 0) out.push(t);
+      else if (score(t) > score(out[i])) out[i] = t;
+    }
+    return out;
+  };
+  const all = (copy.subtitleTracks || []).filter(ok);
+  return { tracks: best(all.filter((t) => !t.forced)), forced: best(all.filter((t) => t.forced)) };
+}
+
+/** The forced subtitles shown with an audio track: those in its language. */
+export function forcedFor(copy, audioTrack, served) {
+  const a = (copy.audioTracks || []).find((t) => t.id === audioTrack);
+  if (!a?.language) return null;
+  const base = a.language.toLowerCase().split('-')[0];
+  return subtitleMenu(copy, served).forced.find((t) => t.language && t.language.toLowerCase().split('-')[0] === base) || null;
+}
+
+/** The subtitles a language wish picks ('' or none: null). */
+export function subtitlesFor(copy, language, served) {
+  return pickLanguage(subtitleMenu(copy, served).tracks, language);
+}
+
+// ---- The fallback ladder's memory ------------------------------------------
+
+const FALLBACKS = 'overfin-fallbacks';
+const MAX_FALLBACKS = 300;
+
+/**
+ * What this device remembers of plays that failed (D12): by the copy's
+ * facts and its audio track (never its ID), the level of LEVELS to start
+ * from. Kept in localStorage; a browser that keeps nothing remembers
+ * nothing.
+ */
+export const fallbacks = {
+  /** The key of a copy's facts and an audio track. */
+  key(copy, audioTrack) {
+    const v = copy.video || {};
+    const a = (copy.audioTracks || []).find((t) => t.id === audioTrack) || {};
+    const facts = [copy.mediaType, v.codec, v.codecs, v.bitDepth, v.colour?.transfer, v.dv?.profile, v.dv?.compatibility,
+      (v.hdr || []).join('+'), v.width, v.height, v.fps, a.codec, a.codecs, a.channels, a.objects,
+      a.id === defaultAudio(copy)?.id];
+    return hash(JSON.stringify(facts));
+  },
+  /** The level to start from (0: none remembered). */
+  level(copy, audioTrack) {
+    const e = readFallbacks()[this.key(copy, audioTrack)];
+    return e && Number.isInteger(e.level) ? Math.min(Math.max(e.level, 0), LEVELS.length - 1) : 0;
+  },
+  /** Remembers that plays of this copy start from level at least. */
+  remember(copy, audioTrack, level) {
+    const all = readFallbacks();
+    all[this.key(copy, audioTrack)] = { level, at: Date.now() };
+    const keys = Object.keys(all);
+    if (keys.length > MAX_FALLBACKS) {
+      keys.sort((x, y) => all[x].at - all[y].at).slice(0, keys.length - MAX_FALLBACKS).forEach((k) => delete all[k]);
+    }
+    writeFallbacks(all);
+  },
+  /** How many copies' fallbacks are remembered. */
+  count() { return Object.keys(readFallbacks()).length; },
+  /** Forgets them all (the player's settings). */
+  reset() { writeFallbacks(null); },
+};
+
+function readFallbacks() {
+  try {
+    const all = JSON.parse(globalThis.localStorage?.getItem(FALLBACKS) || '{}');
+    return all && typeof all === 'object' && !Array.isArray(all) ? all : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeFallbacks(all) {
+  try {
+    if (all) globalThis.localStorage?.setItem(FALLBACKS, JSON.stringify(all));
+    else globalThis.localStorage?.removeItem(FALLBACKS);
+  } catch {
+    // nothing kept: the next play tries again
+  }
+}
+
+// hash is FNV-1a, 32 bits, in base 36.
+function hash(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(36);
+}
+
+// ---- The play request, and the addresses -----------------------------------
+
+/**
+ * The play request of a decision (POST /playback): MSFP's, its title
+ * Overfin's titleId, with the reason for "Now playing". startPositionMs,
+ * maxBitrateKbps (the quality chosen) and device as given.
+ */
+export function playRequest(decision, { titleId, startPositionMs = 0, maxBitrateKbps, device } = {}) {
+  const r = { titleId, versionId: decision.copy.id, startPositionMs: Math.max(0, Math.round(startPositionMs)) };
+  if (decision.audioTrack) r.audioTrack = decision.audioTrack;
+  if (decision.delivery) r.delivery = decision.delivery;
+  if (decision.mediaType) r.mediaType = decision.mediaType;
+  if (decision.transcode) r.transcode = { ...decision.transcode };
+  if (maxBitrateKbps > 0) r.maxBitrateKbps = Math.round(maxBitrateKbps);
+  if (REASONS.includes(decision.reason)) r.reason = decision.reason;
+  if (device) r.device = device;
+  return r;
+}
+
+/**
+ * The addresses of a playback, built from its ticket (MSFP video, section
+ * 5.3): the stream (master.m3u8 for HLS, file for the file), a text
+ * track's stretches, a picture track's, the previews' sheets.
+ */
+export function streamUrls(base, answer) {
+  const root = `${base}/stream/${enc(answer.ticket)}`;
+  return {
+    stream: answer.protocol === 'file' ? `${root}/file` : `${root}/master.m3u8`,
+    subtitles: (id) => `${root}/subtitles/${enc(id)}`,
+    pictures: (id) => `${root}/pictures/${enc(id)}`,
+    sheet: (n) => `${root}/trickplay/${n}`,
+  };
+}
+
+/**
+ * Seek-bar previews from a copy's previewLayout and a ticket's sheet
+ * address (streamUrls().sheet): the layout with every sheet's address,
+ * columns × rows tiles each, tile n at n × intervalMs.
+ */
+export function previewSheets(layout, sheet) {
+  if (!layout || !(layout.columns > 0) || !(layout.rows > 0) || !(layout.tileCount > 0)) return undefined;
+  const count = Math.ceil(layout.tileCount / (layout.columns * layout.rows));
+  return { ...layout, sheets: Array.from({ length: count }, (_, n) => sheet(n)) };
+}
+
+// ---- Labels (fr, en) -----------------------------------------------------
+
+// The words labels are made of, by language; English for any other.
+const WORDS = {
+  en: {
+    unknownLanguage: 'Unknown language', mono: 'mono', stereo: 'stereo', channels: '{n} ch', original: 'original',
+    forced: 'forced', sdh: 'SDH', version: 'Version', sd: 'SD',
+    roles: { commentary: 'commentary', description: 'audio description', dub: 'dubbed', easyreader: 'easy reader',
+      'enhanced-audio-intelligibility': 'clear dialogue', karaoke: 'karaoke' },
+    subtitleRoles: { commentary: 'commentary', description: 'described', easyreader: 'easy reader' },
+    editions: { theatrical: 'Theatrical', directors: 'Director\'s cut', extended: 'Extended', unrated: 'Unrated',
+      remastered: 'Remastered', special: 'Special edition', imax: 'IMAX' },
+  },
+  fr: {
+    unknownLanguage: 'Langue inconnue', mono: 'mono', stereo: 'stéréo', channels: '{n} canaux', original: 'VO',
+    forced: 'forcés', sdh: 'SME', version: 'Version', sd: 'SD',
+    roles: { commentary: 'commentaire', description: 'audiodescription', dub: 'doublage', easyreader: 'lecture facile',
+      'enhanced-audio-intelligibility': 'dialogues clairs', karaoke: 'karaoké' },
+    subtitleRoles: { commentary: 'commentaire', description: 'descriptifs', easyreader: 'lecture facile' },
+    editions: { theatrical: 'Version cinéma', directors: 'Version du réalisateur', extended: 'Version longue',
+      unrated: 'Non censurée', remastered: 'Remasterisée', special: 'Édition spéciale', imax: 'IMAX' },
+  },
+};
+
+function words(lang) {
+  return WORDS[String(lang || 'en').toLowerCase().split('-')[0]] || WORDS.en;
+}
+
+/** A language's name in itself ("Français (Canada)", "日本語"), from its tag. */
+export function languageName(tag, lang) {
+  const w = words(lang);
+  if (!tag || tag === 'und' || tag === 'zxx' || tag === 'mul') return w.unknownLanguage;
+  try {
+    const name = new Intl.DisplayNames([tag], { type: 'language' }).of(tag);
+    if (!name || name === tag) return w.unknownLanguage;
+    return name.charAt(0).toLocaleUpperCase(tag) + name.slice(1);
+  } catch {
+    return w.unknownLanguage;
+  }
+}
+
+/** A codec's usual name: H.264, HEVC, AV1, E-AC-3… */
+export function codecName(token) {
+  const names = { h264: 'H.264', hevc: 'HEVC', av1: 'AV1', vp9: 'VP9', vp8: 'VP8', mpeg2video: 'MPEG-2', mpeg4: 'MPEG-4',
+    vc1: 'VC-1', aac: 'AAC', ac3: 'AC-3', eac3: 'E-AC-3', truehd: 'TrueHD', dts: 'DTS', flac: 'FLAC', opus: 'Opus',
+    mp3: 'MP3', vorbis: 'Vorbis', alac: 'ALAC' };
+  return names[token] || (token || '').toUpperCase();
+}
+
+/** The channels as people say them: mono, stereo, 5.1, 7.1. */
+export function channelsName(n, lang) {
+  const w = words(lang);
+  if (!(n > 0)) return '';
+  return { 1: w.mono, 2: w.stereo, 3: '2.1', 6: '5.1', 7: '6.1', 8: '7.1' }[n] || w.channels.replace('{n}', n);
+}
+
+/** A picture's lines as people say them: 4K, 1080p, 720p, SD. */
+function linesName(v, w) {
+  if (v.width >= 3200 || v.height >= 1800) return '4K';
+  if (v.width >= 2200 || v.height >= 1300) return '1440p';
+  if (v.width >= 1700 || v.height >= 950) return '1080p';
+  if (v.width >= 1100 || v.height >= 650) return '720p';
+  return w.sd;
+}
+
+/** A picture's range: HDR10, HDR10+, Dolby Vision, HLG; '' for SDR. */
+export function rangeName(v) {
+  if (!v) return '';
+  if (v.dv) return 'Dolby Vision';
+  const tr = v.colour?.transfer;
+  if (tr === 16) return (v.hdr || []).includes('hdr10plus') ? 'HDR10+' : 'HDR10';
+  if (tr === 18) return 'HLG';
+  return '';
+}
+
+function baseLabel(copy, w) {
+  const v = copy.video;
+  return [v ? linesName(v, w) : '', rangeName(v), w.editions[copy.edition] || '', copy.threeD ? '3D' : ''].filter(Boolean);
+}
+
+/**
+ * A copy's label, from its facts: lines, range, edition (unknown ones
+ * hidden), 3D, and its codec only where another of copies differs from it
+ * in nothing else. lang: fr or en.
+ */
+export function copyLabel(copy, lang, copies = []) {
+  const w = words(lang);
+  const parts = baseLabel(copy, w);
+  const same = (copies || []).filter((o) => o.id !== copy.id && baseLabel(o, w).join() === parts.join());
+  if (copy.video && same.some((o) => o.video && o.video.codec !== copy.video.codec)) parts.push(codecName(copy.video.codec));
+  return parts.join(' · ') || w.version;
+}
+
+/** An audio track's label: language, channels, Atmos or DTS:X, role, original. */
+export function audioLabel(track, lang) {
+  const w = words(lang);
+  const objects = { 'dolby-atmos': 'Atmos', 'dts-x': 'DTS:X' }[track.objects] || '';
+  const role = roleClass(track.role) === 'main' && track.role !== 'dub' ? '' : w.roles[track.role] || '';
+  return [languageName(track.language, lang), channelsName(track.channels, lang), objects, role, track.original ? w.original : '']
+    .filter(Boolean).join(' · ');
+}
+
+/** A subtitle track's label: language, forced, SDH, role. */
+export function subtitleLabel(track, lang) {
+  const w = words(lang);
+  return [languageName(track.language, lang), track.forced ? w.forced : '', track.hearingImpaired ? w.sdh : '',
+    w.subtitleRoles[track.role] || ''].filter(Boolean).join(' · ');
+}
+
 // ---- Player ---------------------------------------------------------------
 
 /**
@@ -470,7 +1268,17 @@ export class Player {
     this.options = options;
     // What the server is asked for (audio, a bitrate), and the subtitles
     // shown: chosen ('' none), or null, the playback's own.
-    this.choice = { audioTrack: options.audioTrack };
+    this.choice = { audioTrack: options.audioTrack, versionId: options.versionId };
+    // The device's answers (deviceEnv), once; the title's page (its
+    // copies), read at the first start; the decision of the playback, the
+    // level a refused or failed play steps down to, and the watch of a
+    // play's first seconds (the fallback ladder).
+    this.env = options.env || null;
+    this.page = null;
+    this.decision = null;
+    this.minLevel = 0;
+    this.trial = null;
+    this.lastFallback = '';
     this.shown = options.subtitleTrack ?? null;
     this.pictures = null; // PictureSubtitles, once a track of pictures shows
     this.playback = null;
@@ -490,12 +1298,16 @@ export class Player {
         if (this.pausedAt && Date.now() - this.pausedAt > LONG_PAUSE) this.check();
         this.pausedAt = 0;
       },
-      timeupdate: () => { this.settled(); this.fillSubtitles(); },
+      timeupdate: () => { this.settled(); this.fillSubtitles(); this.watchTrial(); },
       seeking: () => this.fillSubtitles(),
       seeked: () => { this.settled(); this.report(); },
       // A direct stream cut short: the browser says error, or ends the
       // video where its data stopped. Not the end of the title.
-      error: () => { if (!this.hls) this.fatal({ details: 'media error' }); },
+      error: () => {
+        if (this.hls) return;
+        const code = this.video.error?.code;
+        this.mediaFailed(code === 3 || code === 4, { details: 'media error' });
+      },
       ended: () => {
         if (this.cutShort()) { this.fatal({ details: 'cut short' }); return; }
         this.report({ ended: true }); this.close(); this.options.onEnded?.();
@@ -517,12 +1329,21 @@ export class Player {
     this.teardown();
     const run = ++this.starts;
     const overtaken = () => this.closed || run !== this.starts;
-    let at = startMs;
-    if (at === undefined) {
-      const title = await this.client.title(this.titleId);
+    // The title's page: its copies, and where the profile left off. A
+    // title without copies plays the older way, the server choosing.
+    if (!this.page) {
+      let page;
+      try {
+        page = await this.client.title(this.titleId);
+      } catch (err) {
+        if (startMs === undefined) throw err;
+        page = {};
+      }
       if (overtaken()) return null;
-      at = title.userState?.positionMs || 0;
+      this.page = page;
     }
+    const at = startMs ?? (this.page.userState?.positionMs || 0);
+    if (this.page.copies?.length) return this.startCopy(at, overtaken);
     let pb;
     try {
       pb = await this.client.startPlayback({
@@ -548,6 +1369,170 @@ export class Player {
     this.timer = setInterval(() => { if (!this.video.paused) this.report(); }, PROGRESS_EVERY);
     this.options.onStart?.(pb);
     return pb;
+  }
+
+  // startCopy starts a play of one of the title's copies, chosen here
+  // (chooseDelivery): MSFP's play request, the answer's addresses built
+  // from its ticket. A delivery refused steps down a level and asks
+  // again, down to the baseline; a copy gone reads the title again, once.
+  async startCopy(at, overtaken) {
+    const page = this.page;
+    this.env ||= deviceEnv({ Hls: this.options.Hls });
+    const memory = this.options.fallbacks === undefined ? fallbacks : this.options.fallbacks;
+    const decision = await chooseDelivery(page.copies, this.env, {
+      versionId: this.choice.versionId, audioTrack: this.choice.audioTrack, audioLanguage: this.choice.audioLanguage,
+      audio: page.wishes?.audio, language: this.options.audioLanguage, limits: page.limits, encoders: page.encoders,
+      maxBitrateKbps: this.choice.maxBitrateKbps, minLevel: this.minLevel, peers: this.options.peers, memory,
+    });
+    if (overtaken()) return null;
+    let answer;
+    try {
+      answer = await this.client.startPlayback(playRequest(decision, {
+        titleId: page.id || this.titleId, startPositionMs: at, maxBitrateKbps: this.choice.maxBitrateKbps,
+      }));
+    } catch (err) {
+      if (overtaken()) return null;
+      if (err?.status === 409 && err.type === 'delivery-refused' && decision.level < LEVELS.length - 1) {
+        this.minLevel = decision.level + 1;
+        return this.start(at);
+      }
+      if (err?.status === 404 && !this.reread) {
+        this.reread = true;
+        this.page = null;
+        return this.start(at);
+      }
+      this.options.onError?.(err);
+      throw err;
+    }
+    if (overtaken()) {
+      this.client.stopPlayback(answer.id, Math.round(at)).catch(() => {});
+      return null;
+    }
+    this.reread = false;
+    this.decision = decision;
+    const pb = this.view(answer, decision);
+    this.playback = pb;
+    this.attach(pb);
+    for (const [event, fn] of Object.entries(this.handlers)) this.video.addEventListener(event, fn);
+    this.timer = setInterval(() => { if (!this.video.paused) this.report(); }, PROGRESS_EVERY);
+    this.trial = { at: Date.now(), fromMs: pb.positionMs || 0, done: decision.level >= LEVELS.length - 1 };
+    // A file whose chosen audio isn't the one it plays by itself: that
+    // track turned on in the video (audioTracks), else a step down.
+    if (decision.delivery === 'file' && decision.audioTrack && decision.audioTrack !== defaultAudio(decision.copy)?.id) {
+      this.video.addEventListener('loadedmetadata', () => {
+        if (this.playback === pb && !this.switchFileAudio(pb, decision.audioTrack)) this.stepDown('audio-track');
+      }, { once: true });
+    }
+    // A play that never gets going (no time played while it should
+    // play): a step down too. Conversions get longer to start.
+    const run = this.starts;
+    this.stall = setTimeout(() => {
+      const tr = this.trial;
+      if (run !== this.starts || !tr || tr.done || this.video.paused) return;
+      if (this.video.currentTime * 1000 - tr.fromMs < 500) this.stepDown('stalled');
+    }, decision.level <= 1 ? TRIAL_STALL : TRIAL_STALL * 3);
+    this.options.onStart?.(pb);
+    return pb;
+  }
+
+  // view is a play's answer as the player shows it: the stream's address,
+  // the copy's tracks with their labels and addresses, its skip markers
+  // and previews, the copies to choose among, and how it plays (the
+  // delivery, why, what's converted, the quirks that applied).
+  view(answer, d) {
+    const page = this.page;
+    const lang = this.options.language || this.options.audioLanguage || 'en';
+    const urls = streamUrls(this.client.base, answer);
+    const copy = d.copy;
+    const served = answer.subtitles || [];
+    const playing = answer.audioTrack || d.audioTrack;
+    const audio = audioMenu(copy, this.env);
+    const chosen = (copy.audioTracks || []).find((t) => t.id === playing);
+    if (chosen && !audio.includes(chosen)) audio.splice(audio.findIndex((t) => t.language === chosen.language && roleClass(t.role) === roleClass(chosen.role)), 1, chosen);
+    const menu = subtitleMenu(copy, served);
+    const subtitle = (t) => {
+      const pictures = pictureSubtitle(t);
+      return { ...t, label: subtitleLabel(t, lang), pictures, url: pictures ? urls.pictures(t.id) : urls.subtitles(t.id) };
+    };
+    const span = copy.endMs ? copy.endMs - (copy.startMs || 0) : copy.durationMs;
+    return {
+      ...answer,
+      stream: { url: urls.stream, protocol: answer.protocol },
+      durationMs: span || undefined,
+      segments: copy.segments || [],
+      audioTrack: playing,
+      audioTracks: audio.map((t) => ({ ...t, label: audioLabel(t, lang) })),
+      subtitleTracks: menu.tracks.map(subtitle),
+      forcedTracks: menu.forced.map(subtitle),
+      subtitleTrack: subtitlesFor(copy, page.wishes?.subtitles, served)?.id,
+      forcedTrack: forcedFor(copy, playing, served)?.id,
+      subtitleStretchSeconds: SUBTITLE_STRETCH,
+      trickplay: previewSheets(copy.previewLayout, urls.sheet),
+      versionId: copy.id,
+      versions: page.copies.map((c) => ({ id: c.id, name: copyLabel(c, lang, page.copies) })),
+      copy,
+      delivery: { kind: d.delivery || 'baseline', mediaType: d.mediaType || '', transcode: d.transcode, reason: d.reason,
+        level: d.level, converts: d.converts, quirks: d.quirks, fallback: d.reason === 'fallback' ? this.lastFallback : '' },
+    };
+  }
+
+  // watchTrial is the fallback ladder's watch of a play's first seconds:
+  // once it has played a few, a copy with a picture that shows none, or
+  // with audio that's heard nowhere (the browser decoded none of it: the
+  // silent case), steps down.
+  watchTrial() {
+    const tr = this.trial;
+    const pb = this.playback;
+    if (!tr || tr.done || !pb?.copy || this.video.currentTime * 1000 - tr.fromMs < TRIAL_PLAYED) return;
+    tr.done = true;
+    if (pb.copy.video && this.video.videoWidth === 0) this.stepDown('no-picture');
+    else if ((pb.copy.audioTracks || []).length && silent(this.video)) this.stepDown('no-audio');
+  }
+
+  // mediaFailed handles a stream that failed: one the device couldn't
+  // decode (decoding: a decode or format error, never the network) in a
+  // play's first seconds, with the playback still the server's (not taken
+  // over, ended or out of reach), steps down; anything else is fatal()'s.
+  async mediaFailed(decoding, data) {
+    const pb = this.playback;
+    const tr = this.trial;
+    if (decoding && pb && tr && !tr.done && Date.now() - tr.at <= TRIAL_TIME) {
+      let alive = true;
+      try { await this.client.playback(pb.id); } catch { alive = false; }
+      if (alive && pb === this.playback && this.stepDown('media-error')) return;
+    }
+    this.fatal(data);
+  }
+
+  // stepDown starts the play again one level lower (file, remux, the
+  // audio converted, the picture too, the baseline), remembered for this
+  // device and these facts (D12).
+  stepDown(why) {
+    const d = this.decision;
+    if (!d || !this.playback || d.level >= LEVELS.length - 1) return false;
+    this.trial = null;
+    this.minLevel = Math.max(this.minLevel, d.level + 1);
+    const memory = this.options.fallbacks === undefined ? fallbacks : this.options.fallbacks;
+    memory?.remember(d.copy, d.audioTrack, d.level + 1);
+    this.lastFallback = why;
+    this.restart(!this.video.paused || this.video.autoplay);
+    return true;
+  }
+
+  /** The decision the playback plays by (chooseDelivery's), or null for a title without copies. */
+  get delivery() { return this.decision; }
+
+  /**
+   * Plays another copy of the title, at the same place, with the audio in
+   * the same language when it has it.
+   */
+  setVersion(id) {
+    const now = this.playback?.audioTracks?.find((t) => t.id === this.playback.audioTrack);
+    this.choice.versionId = id;
+    this.choice.audioTrack = undefined;
+    this.choice.audioLanguage = now?.language || this.choice.audioLanguage;
+    this.minLevel = 0;
+    return this.restart();
   }
 
   // attach points the video element at the stream, with its subtitles.
@@ -576,7 +1561,7 @@ export class Player {
     const Hls = this.options.Hls || globalThis.Hls;
     if (pb.stream.protocol === 'hls' && Hls && Hls.isSupported()) {
       this.hls = new Hls({ startPosition: startAt });
-      this.hls.on(Hls.Events.ERROR, (_, data) => { if (data.fatal) this.fatal(data); });
+      this.hls.on(Hls.Events.ERROR, (_, data) => { if (data.fatal) this.mediaFailed(data.type === 'mediaError', data); });
       this.hls.loadSource(pb.stream.url);
       this.hls.attachMedia(video);
     } else if (pb.stream.protocol === 'hls' && !video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -594,6 +1579,18 @@ export class Player {
    */
   async setAudioTrack(id) {
     this.choice.audioTrack = id;
+    // The file playing has that track, and the browser switches tracks:
+    // no new play.
+    const now = this.playback;
+    if (now?.delivery?.kind === 'file' && this.switchFileAudio(now, id)) {
+      now.audioTrack = id;
+      now.forcedTrack = forcedFor(now.copy, id, now.subtitles || [])?.id;
+      this.showSubtitles();
+      this.client.chooseTracks(now.id, { audioTrack: id }).catch(() => {});
+      this.options.onStart?.(now);
+      return now;
+    }
+    this.minLevel = 0;
     const pb = await this.restart();
     if (pb) this.client.chooseTracks(pb.id, { audioTrack: id }).catch(() => {});
     return pb;
@@ -744,6 +1741,19 @@ export class Player {
   // restart starts over at the same place; playing: whether to play on (by
   // default, whether it plays now). Paused, it stays paused: an audio
   // track or a quality picked, or the server back, doesn't start the film.
+  // switchFileAudio turns on a file's audio track in the video itself
+  // (audioTracks, in the file's order): false where the browser can't.
+  switchFileAudio(pb, id) {
+    const list = this.video.audioTracks;
+    if (!list || !list.length) return false;
+    const inFile = (pb.copy.audioTracks || []).filter((t) => !t.external)
+      .sort((x, y) => Number(x.id.slice(1)) - Number(y.id.slice(1)));
+    const i = inFile.findIndex((t) => t.id === id);
+    if (i < 0 || i >= list.length || inFile.length !== list.length) return false;
+    for (let n = 0; n < list.length; n++) list[n].enabled = n === i;
+    return true;
+  }
+
   restart(playing = !this.video.paused) {
     const at = this.positionMs;
     this.held = at;
@@ -757,6 +1767,7 @@ export class Player {
   teardown() {
     clearInterval(this.timer);
     this.timer = null;
+    clearTimeout(this.stall);
     for (const [event, fn] of Object.entries(this.handlers)) this.video.removeEventListener(event, fn);
     if (this.hls) { this.hls.destroy(); this.hls = null; }
   }
@@ -1149,6 +2160,28 @@ function concat(parts) {
 }
 
 // ---- Helpers ---------------------------------------------------------------
+
+// How long a stretch of subtitles covers, in seconds (MSFP media section
+// 3.4).
+const SUBTITLE_STRETCH = 120;
+
+// The fallback ladder watches a play's first seconds: a failure within
+// TRIAL_TIME of its start, or no picture or no audio once TRIAL_PLAYED of
+// it played, steps down.
+const TRIAL_TIME = 30_000;
+const TRIAL_PLAYED = 3_000;
+// A file or a remux that played nothing this long after it started, while
+// it should play, failed (three times as long for a conversion).
+const TRIAL_STALL = 15_000;
+
+// silent says whether the browser decoded no audio at all of what played:
+// Firefox's mozHasAudio, Chromium's and Safari's decoded byte count; false
+// where it can't tell.
+function silent(video) {
+  if (typeof video.mozHasAudio === 'boolean') return !video.mozHasAudio;
+  if (typeof video.webkitAudioDecodedByteCount === 'number') return video.webkitAudioDecodedByteCount === 0;
+  return false;
+}
 
 // How often a player waiting for the server asks again.
 const RECONNECT_EVERY = 3_000;
