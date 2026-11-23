@@ -58,6 +58,21 @@ func TestSetUpWaitsForAStartingServer(t *testing.T) {
 	}
 }
 
+// Jellyfin 12.2 answers from a small start-up server for its first
+// seconds, saying "not set up" even when it is: not a fresh server.
+func TestStartingServerIsNotFresh(t *testing.T) {
+	f, jf := newFake(t, true)
+	f.Early = true
+	found, err := takeover.Look(context.Background(), jf, "", "")
+	var p takeover.Problem
+	if !errors.As(err, &p) {
+		t.Fatalf("Look = %+v, %v; want a problem", found, err)
+	}
+	if len(f.Writes) != 0 {
+		t.Errorf("changed: %v", f.Writes)
+	}
+}
+
 // Once set up, only the password SetUp threw away opens the server: a key
 // that fails to come is asked again, rather than leaving a server nobody
 // can get into.

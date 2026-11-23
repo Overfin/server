@@ -31,7 +31,10 @@ type Jellyfin struct {
 	// Starting is how many of the next first-run setup requests answer
 	// 503, as Jellyfin does while it's still starting.
 	Starting int
-	made     int // keys made so far
+	// Early is Jellyfin 12.2's start-up server, answering for its first
+	// seconds: "not set up" whatever the truth, 503 to the first-run setup.
+	Early bool
+	made  int // keys made so far
 }
 
 // UserID is the ID the fake gives a user.
@@ -84,6 +87,14 @@ func (f *Jellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&body)
 
 	route := r.Method + " " + r.URL.Path
+	if f.Early {
+		if route == "GET /System/Info/Public" {
+			reply(map[string]any{"version": "12.2.0", "id": "server-1", "serverName": "box", "startupWizardCompleted": false})
+			return
+		}
+		http.Error(w, "", http.StatusServiceUnavailable)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/Startup/") {
 		if f.SetUp {
 			http.Error(w, "", http.StatusUnauthorized)
@@ -92,6 +103,10 @@ func (f *Jellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if f.Starting > 0 {
 			f.Starting--
 			http.Error(w, "", http.StatusServiceUnavailable)
+			return
+		}
+		if route == "GET /Startup/Configuration" {
+			reply(map[string]string{"UICulture": "en-US"})
 			return
 		}
 		f.Writes = append(f.Writes, route)

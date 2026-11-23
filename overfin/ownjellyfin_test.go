@@ -53,6 +53,17 @@ func TestOwnJellyfin(t *testing.T) {
 	if _, again, ok, err := ownJellyfin(ctx, cfg(url), db, logger); err != nil || !ok || again != key || len(fresh.Writes) != writes {
 		t.Errorf("again: %q %v %v, writes %v", again, ok, err, fresh.Writes)
 	}
+	// Jellyfin 12.2's start-up server says "not set up" for a few seconds:
+	// never taken for a fresh server, Overfin starts with what it saved.
+	fresh.Mu.Lock()
+	fresh.Early = true
+	fresh.Mu.Unlock()
+	if _, again, ok, err := ownJellyfin(ctx, cfg(url), db, logger); err != nil || !ok || again != key || len(fresh.Writes) != writes {
+		t.Errorf("starting: %q %v %v, writes %v", again, ok, err, fresh.Writes)
+	}
+	fresh.Mu.Lock()
+	fresh.Early = false
+	fresh.Mu.Unlock()
 	// Out of reach, with a key: Overfin starts with what it saved.
 	if _, again, ok, err := ownJellyfin(ctx, cfg("http://127.0.0.1:1"), db, logger); err != nil || !ok || again != key {
 		t.Errorf("unreachable: %q %v %v", again, ok, err)

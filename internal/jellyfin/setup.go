@@ -40,6 +40,13 @@ func (c *Client) RunStartup(ctx context.Context, s Startup, name, password strin
 	return c.do(ctx, "startup complete", http.MethodPost, "/Startup/Complete", a, nil, nil)
 }
 
+// StartupOpen answers nil when the first-run setup is open: only a fresh
+// Jellyfin, fully started, lets anyone read its first-run settings (a set
+// up one answers 401; one still starting, 503 or nothing).
+func (c *Client) StartupOpen(ctx context.Context) error {
+	return c.do(ctx, "startup configuration", http.MethodGet, "/Startup/Configuration", Auth{DeviceID: "overfin-check"}, nil, &struct{}{})
+}
+
 // CreateKey makes an API key for app and returns it. Admin only. Jellyfin
 // doesn't return the key it made: it's the one in its list that wasn't
 // there before. The other keys are only compared, never kept.

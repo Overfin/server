@@ -71,6 +71,12 @@ func Look(ctx context.Context, jf *jellyfin.Client, key, serverID string) (Found
 		return Found{}, Problem(fmt.Sprintf("Jellyfin runs version %s, and Overfin needs Jellyfin 12.", s.Version))
 	}
 	if !s.SetUp {
+		// For its first seconds, Jellyfin 12.2 answers from a small start-up
+		// server that says "not set up" even when it is: fresh only if the
+		// first-run setup itself answers.
+		if err := jf.StartupOpen(ctx); err != nil {
+			return Found{}, Problem(fmt.Sprintf("Jellyfin is still starting (%v).", err))
+		}
 		return Found{Fresh, s}, nil
 	}
 	if key == "" || (serverID != "" && serverID != s.ID) {

@@ -32,6 +32,12 @@ func fakeJellyfinState(t *testing.T, version, id string, setUp bool) *httptest.S
 		switch r.URL.Path {
 		case "/System/Info/Public":
 			fmt.Fprintf(w, `{"Version":%q,"Id":%q,"StartupWizardCompleted":%t}`, version, id, setUp)
+		case "/Startup/Configuration":
+			if setUp {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			fmt.Fprint(w, `{}`)
 		case "/System/Configuration", "/System/Configuration/network", "/System/Configuration/encoding":
 			fmt.Fprint(w, `{}`)
 		case "/Library/VirtualFolders", "/ScheduledTasks":
