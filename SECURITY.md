@@ -461,7 +461,7 @@ anyone. Paired servers are not trusted at all (rule 94).
     is read for its fingerprint, previews and headers (rule 141), then
     the path is forgotten: only fingerprints, facts and raw probes without
     paths are kept, and no path is logged. A copy's ID is a keyed hash of
-    the file's path in its library, never the path. The rest of Overfin
+    the file's library folder and its path in it, never the path. The rest of Overfin
     never gets one: its index gets a film's file and folder names, and a
     series' folder name, from its plugin.
     - Exception, control panel only: Identification shows a film's or a

@@ -48,11 +48,12 @@ func mac(key []byte, parts ...string) []byte {
 }
 
 // CopyID is the ID of the copy a file is: "v" and 26 base32 characters
-// of a keyed hash (keys.CopyID) of its path in its library folder. It
-// doesn't depend on Jellyfin's IDs; a rename or a moved library folder
-// gives another.
-func CopyID(key []byte, rel string) string {
-	return "v" + strings.ToLower(idEncoding.EncodeToString(mac(key, "file", rel)[:16]))
+// of a keyed hash (keys.CopyID) of its library folder (root) and its path
+// in it (rel), so two libraries holding the same path (Films and Films
+// 4K) give two copies. It doesn't depend on Jellyfin's IDs; a rename or a
+// moved library folder gives another.
+func CopyID(key []byte, root, rel string) string {
+	return "v" + strings.ToLower(idEncoding.EncodeToString(mac(key, "file", root, rel)[:16]))
 }
 
 // EpisodeCopyID is the ID of the copy of an episode a file holds after

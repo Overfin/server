@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -146,7 +145,7 @@ func (k *Keeper) pass(ctx context.Context) error {
 			seen[key] = true
 			return true
 		}
-		v.copyID = CopyID(k.CopyKey, file.Rel)
+		v.copyID = CopyID(k.CopyKey, file.Root, file.Rel)
 		v.size, v.mod = file.Info.Size(), file.Info.ModTime().Unix()
 		v.added = start.Sub(file.Info.ModTime()) < newFor
 		listed = append(listed, v)
@@ -487,7 +486,7 @@ func (k *Keeper) readFrames(ctx context.Context, libs files.Libraries, twins []v
 		return err
 	}
 	real := file.Real
-	dir := strings.TrimSuffix(real, "/"+file.Rel)
+	dir := file.Root
 	changed := file.Info.Size() != v.size || file.Info.ModTime().Unix() != v.mod
 	file.Close()
 	if changed {
@@ -538,7 +537,7 @@ func (k *Keeper) read(ctx context.Context, libs files.Libraries, v version) (*de
 		return nil, "", err
 	}
 	// The library folder the file is in, which the kept probe mustn't name.
-	return pr, strings.TrimSuffix(real, "/"+file.Rel), nil
+	return pr, file.Root, nil
 }
 
 // keep keeps a probe (raw, without paths) and the copy it shapes.

@@ -88,6 +88,24 @@ func TestOpen(t *testing.T) {
 	}
 }
 
+// A library inside another's folder is its files' library, whichever
+// order the folders come in.
+func TestNestedLibraries(t *testing.T) {
+	dir := t.TempDir()
+	films, uhd := filepath.Join(dir, "films"), filepath.Join(dir, "films", "4k")
+	write(t, filepath.Join(uhd, "A (2001)", "a.mkv"), []byte("film"))
+	for _, order := range [][]string{{films, uhd}, {uhd, films}} {
+		f, err := NewLibraries(order).Open(filepath.Join(uhd, "A (2001)", "a.mkv"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f.Root != uhd || f.Rel != "A (2001)/a.mkv" {
+			t.Errorf("%v: root %q rel %q", order, f.Root, f.Rel)
+		}
+		f.Close()
+	}
+}
+
 // Overfin's own folders are never a library's, even when Jellyfin lists
 // one, nor is anything under them.
 func TestOwnFolders(t *testing.T) {

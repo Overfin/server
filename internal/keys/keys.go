@@ -23,7 +23,7 @@ type Keys struct {
 	// Etag hashes a file's fingerprint into its copy's etag (MSFP video
 	// section 3.2): never the federation key, so no rotation changes one.
 	Etag []byte
-	// CopyID hashes a file's path in its library into its copy's ID: the
+	// CopyID hashes a file's library folder and path in it into its copy's ID: the
 	// version ID players and peers see, never a path nor Jellyfin's ID.
 	CopyID []byte
 	// Check identifies the secret key without revealing it: stored in the

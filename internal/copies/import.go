@@ -208,7 +208,7 @@ func (im Import) one(ctx context.Context, libs files.Libraries, byPath map[strin
 	}
 	// A file Jellyfin lists twice (an alternate version) is one copy, as
 	// the keeper keeps it (distinct).
-	copyID := CopyID(im.CopyKey, file.Rel)
+	copyID := CopyID(im.CopyKey, file.Root, file.Rel)
 	for i := range listed {
 		listed[i].copyID, listed[i].size, listed[i].mod = copyID, size, mod
 	}

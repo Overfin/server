@@ -97,21 +97,27 @@ func (l Libraries) Resolve(path string) (real, root string, err error) {
 	if ownFolder(real) {
 		return "", "", ErrOutside
 	}
+	// The deepest folder holding it, so a library inside another's folder
+	// is the file's library whatever order Jellyfin lists them in.
 	for _, r := range l.roots {
-		if under(real, r) && real != r {
-			return real, r, nil
+		if under(real, r) && real != r && len(r) > len(root) {
+			root = r
 		}
 	}
-	return "", "", ErrOutside
+	if root == "" {
+		return "", "", ErrOutside
+	}
+	return real, root, nil
 }
 
 // File is a library's file, open read-only.
 type File struct {
 	*os.File
-	// Real is its real path; Rel, that path relative to its library
-	// folder: the copy ID's input. Neither is ever logged or kept.
-	Real, Rel string
-	Info      fs.FileInfo
+	// Real is its real path; Root, its library folder (real path); Rel,
+	// its path relative to Root. Root and Rel are the copy ID's input.
+	// None is ever logged or kept.
+	Real, Root, Rel string
+	Info            fs.FileInfo
 }
 
 // Open resolves path (Resolve) and opens the real file read-only, without
@@ -143,7 +149,7 @@ func (l Libraries) Open(path string) (*File, error) {
 		f.Close()
 		return nil, ErrOutside
 	}
-	return &File{File: f, Real: real, Rel: filepath.ToSlash(rel), Info: fst}, nil
+	return &File{File: f, Real: real, Root: root, Rel: filepath.ToSlash(rel), Info: fst}, nil
 }
 
 // chunk is how much of a file its fingerprint reads, at its start, middle
