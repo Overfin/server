@@ -5810,6 +5810,9 @@ components:
       properties:
         id:
           type: string
+          description: The copy's ID, from its file's content, never its
+            path. A file moved or renamed keeps it; its content replaced
+            gives another. The same file in several places is one copy.
           pattern: "^[A-Za-z0-9_-]{1,64}$"
         edition:
           type: string

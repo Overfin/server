@@ -64,11 +64,26 @@ func (c MSFPCatalog) Titles(ctx context.Context, libraries []string, after strin
 	return msfp.TitlePage{Titles: titles, More: more}, err
 }
 
-// CopyByID is the copy index's copy of that ID (a paired server's play
-// names it by the handle the catalog gave, its copy ID); ok is false when
-// the index has none.
-func (s *Store) CopyByID(ctx context.Context, id string) (c IndexedCopy, ok bool, err error) {
-	c, err = scanCopy(s.read.QueryRowContext(ctx, `SELECT `+copyColumns+` FROM catalog_copies WHERE copy_id = ? LIMIT 1`, id))
+// PeerHandle is the engine's handle of a copy as a paired server is
+// given it: its copy ID and the library of the place it is served
+// through, so that a paired server's play is served through a place of a
+// library it was offered, never through another place of the same file.
+// It never leaves: the engine sends its own version ID, a keyed hash of
+// it (stable while the file stays in that library).
+func PeerHandle(c IndexedCopy) string { return c.CopyID + "-" + c.Library }
+
+// CopyByHandle is the copy index's copy a paired server's play names by
+// the handle the catalog gave (PeerHandle): the place of that copy in
+// that library, the first by its path (Place), then by Jellyfin's IDs;
+// ok is false when the index has none.
+func (s *Store) CopyByHandle(ctx context.Context, handle string) (c IndexedCopy, ok bool, err error) {
+	id, library, found := strings.Cut(handle, "-")
+	if !found {
+		return IndexedCopy{}, false, nil
+	}
+	c, err = scanCopy(s.read.QueryRowContext(ctx, `SELECT `+copyColumns+` FROM catalog_copies
+		WHERE copy_id = ? AND coalesce((SELECT i.library_id FROM catalog_items i WHERE i.id = catalog_copies.item_id), '') = ?
+		ORDER BY place, item_id, source_id LIMIT 1`, id, library))
 	if errors.Is(err, sql.ErrNoRows) {
 		return IndexedCopy{}, false, nil
 	}
@@ -76,12 +91,12 @@ func (s *Store) CopyByID(ctx context.Context, id string) (c IndexedCopy, ok bool
 }
 
 // ShareableCopy is a copy as paired servers are given it (MSFP video
-// section 3.2): MSFP's copy object, its ID the copy index's (the
-// engine's handle of it, which never leaves: the engine sends its own
-// version ID), with its previews' layout and skip markers.
+// section 3.2): MSFP's copy object, its ID the engine's handle of it
+// (PeerHandle, which never leaves: the engine sends its own version ID),
+// with its previews' layout and skip markers.
 func (s *Store) ShareableCopy(ctx context.Context, c IndexedCopy) (wire.Copy, error) {
 	w := c.Facts
-	w.ID, w.ETag, w.PreviewLayout = c.CopyID, c.ETag, c.PreviewLayout
+	w.ID, w.ETag, w.PreviewLayout = PeerHandle(c), c.ETag, c.PreviewLayout
 	if w.AudioTracks == nil {
 		w.AudioTracks = []wire.CopyAudio{}
 	}
@@ -121,23 +136,19 @@ func (s *Store) addCopies(ctx context.Context, titles []*msfp.VideoTitle, libs s
 		if err != nil {
 			return err
 		}
-		seen := map[string]bool{}
-		for _, item := range items {
-			copies, err := s.ItemCopies(ctx, item)
+		copies, err := s.ItemsCopies(ctx, items)
+		if err != nil {
+			return err
+		}
+		for _, c := range copies {
+			if c.Parts > 1 || len(t.Copies) == wire.MaxCopies {
+				continue
+			}
+			w, err := s.ShareableCopy(ctx, c)
 			if err != nil {
 				return err
 			}
-			for _, c := range copies {
-				if c.Parts > 1 || seen[c.CopyID] || len(t.Copies) == wire.MaxCopies {
-					continue
-				}
-				seen[c.CopyID] = true
-				w, err := s.ShareableCopy(ctx, c)
-				if err != nil {
-					return err
-				}
-				t.Copies = append(t.Copies, w)
-			}
+			t.Copies = append(t.Copies, w)
 		}
 	}
 	return nil

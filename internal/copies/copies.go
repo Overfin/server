@@ -6,7 +6,7 @@
 //
 // What is Overfin's own lives here: which files may be read (package
 // files, rule 78), the copy's ID and etag (keyed hashes of the file's
-// path in its library and of its fingerprint), the subtitle files beside
+// fingerprint, under two keys), the subtitle files beside
 // a video as Jellyfin lists them, the map from MSFP's track IDs to
 // Jellyfin's stream indexes, and the raw probes, kept by fingerprint
 // without paths, for the identifier.
@@ -48,12 +48,14 @@ func mac(key []byte, parts ...string) []byte {
 }
 
 // CopyID is the ID of the copy a file is: "v" and 26 base32 characters
-// of a keyed hash (keys.CopyID) of its library folder (root) and its path
-// in it (rel), so two libraries holding the same path (Films and Films
-// 4K) give two copies. It doesn't depend on Jellyfin's IDs; a rename or a
-// moved library folder gives another.
-func CopyID(key []byte, root, rel string) string {
-	return "v" + strings.ToLower(idEncoding.EncodeToString(mac(key, "file", root, rel)[:16]))
+// of a keyed hash (keys.CopyID) of its fingerprint (files.Fingerprint:
+// its size and three pieces of it), never of its path. A file moved or
+// renamed keeps it; its bytes replaced give another. The same file in
+// two places (two libraries, two folders, hardlinked twins) is one copy:
+// the index keeps each place, players and peers see it once
+// (store.ItemsCopies). It doesn't depend on Jellyfin's IDs.
+func CopyID(key []byte, fingerprint string) string {
+	return "v" + strings.ToLower(idEncoding.EncodeToString(mac(key, "file", fingerprint)[:16]))
 }
 
 // EpisodeCopyID is the ID of the copy of an episode a file holds after

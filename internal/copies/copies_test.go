@@ -148,25 +148,17 @@ func TestMinimal(t *testing.T) {
 	}
 }
 
-// IDs: the copy's from its library and its path in it, the etag from its
-// fingerprint, each keyed; an episode's after the first, from the file's.
+// IDs: the copy's and the etag from its fingerprint, each keyed, never
+// the same; an episode's after the first, from the file's.
 func TestIDs(t *testing.T) {
 	k1, k2 := bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32)
-	id := CopyID(k1, "/media/films", "A (2001)/a.mkv")
+	fp := "1-" + strings.Repeat("a", 32)
+	id := CopyID(k1, fp)
 	if !regexp.MustCompile(`^v[a-z2-7]{26}$`).MatchString(id) || !wire.ID(id) {
 		t.Errorf("copy ID %q", id)
 	}
-	if id != CopyID(k1, "/media/films", "A (2001)/a.mkv") || id == CopyID(k1, "/media/films", "A (2001)/b.mkv") ||
-		id == CopyID(k2, "/media/films", "A (2001)/a.mkv") {
-		t.Error("copy IDs: not stable, or not by path and key")
-	}
-	// Two libraries holding the same path: two copies.
-	if id == CopyID(k1, "/media/films-4k", "A (2001)/a.mkv") {
-		t.Error("copy IDs: the same path in two libraries collides")
-	}
-	// The pieces are framed: moving a separator gives another ID.
-	if CopyID(k1, "/media/a", "b/c.mkv") == CopyID(k1, "/media/a/b", "c.mkv") {
-		t.Error("copy IDs: root and path not framed")
+	if id != CopyID(k1, fp) || id == CopyID(k1, "1-"+strings.Repeat("b", 32)) || id == CopyID(k2, fp) {
+		t.Error("copy IDs: not stable, or not by fingerprint and key")
 	}
 	e := ETag(k1, "1-"+strings.Repeat("a", 32))
 	if len(e) != 22 || !wire.ID(e) || e == ETag(k1, "1-"+strings.Repeat("b", 32)) || e == ETag(k2, "1-"+strings.Repeat("a", 32)) {
@@ -266,18 +258,23 @@ func keeperSetupN(t *testing.T, films int) (*Keeper, *store.Store, string) {
 	return k, db, media
 }
 
-// realDir is a folder's real path, as a library's root.
-func realDir(t *testing.T, dir string) string {
+// copyIDOf is the copy ID of the file at path, from its fingerprint.
+func copyIDOf(t *testing.T, k *Keeper, path string) string {
 	t.Helper()
-	r, err := filepath.EvalSymlinks(dir)
+	f, err := files.NewLibraries([]string{filepath.Dir(path)}).Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return r
+	defer f.Close()
+	fp, err := files.Fingerprint(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return CopyID(k.CopyKey, fp)
 }
 
 // Two libraries holding a file at the same path in each (Films and Films
-// 4K): two copies, neither dropped.
+// 4K), not the same bytes: two copies, neither dropped.
 func TestSamePathTwoLibraries(t *testing.T) {
 	ctx := context.Background()
 	k, db, media := keeperSetup(t)
@@ -296,6 +293,88 @@ func TestSamePathTwoLibraries(t *testing.T) {
 	b, okB, _ := db.CopyOf(ctx, id(1), id(1))
 	if !okA || !okB || a.CopyID == b.CopyID {
 		t.Errorf("two libraries, same path: %v %v %q %q", okA, okB, a.CopyID, b.CopyID)
+	}
+}
+
+// The same file in two libraries, and twice in the second (a hardlink):
+// one copy ID, a row for each place, ranked by path; players get it once,
+// through the first library in the libraries' order they may see, then
+// the first path; a profile allowed one library only gets it through
+// that library's place, and a paired server through the library its
+// handle names.
+func TestSameFileTwoLibraries(t *testing.T) {
+	ctx := context.Background()
+	k, db, media := keeperSetup(t)
+	hd, uhd := filepath.Join(media, "films"), filepath.Join(media, "more")
+	write(t, filepath.Join(hd, "A (2001)", "a.mkv"), []byte("the same film"))
+	write(t, filepath.Join(uhd, "B", "a.mkv"), []byte("the same film"))
+	if err := os.MkdirAll(filepath.Join(uhd, "A"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(filepath.Join(uhd, "B", "a.mkv"), filepath.Join(uhd, "A", "a.mkv")); err != nil {
+		t.Fatal(err)
+	}
+	// The items in their libraries: lib-more comes first in the order.
+	items := []store.CatalogItem{
+		{ID: id(0), Kind: "movie", Name: "F", SortName: "f", TMDB: "1", LibraryID: "lib-films"},
+		{ID: id(1), Kind: "movie", Name: "F", SortName: "f", TMDB: "1", LibraryID: "lib-more"},
+		{ID: id(2), Kind: "movie", Name: "F", SortName: "f", TMDB: "1", LibraryID: "lib-more"},
+	}
+	if err := db.PutCatalog(ctx, items, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetLibraries(ctx, []store.Library{{ID: "lib-more", Item: []byte("{}")}, {ID: "lib-films", Item: []byte("{}")}}); err != nil {
+		t.Fatal(err)
+	}
+	k.Libraries = func(context.Context) (files.Libraries, error) { return files.NewLibraries([]string{hd, uhd}), nil }
+	k.Files = fakeFiles{
+		{ItemID: id(0), SourceID: id(0), Path: filepath.Join(hd, "A (2001)", "a.mkv"), Container: "mkv", Parts: 1},
+		{ItemID: id(1), SourceID: id(1), Path: filepath.Join(uhd, "B", "a.mkv"), Container: "mkv", Parts: 1},
+		{ItemID: id(2), SourceID: id(2), Path: filepath.Join(uhd, "A", "a.mkv"), Container: "mkv", Parts: 1},
+	}.list
+	if err := k.pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	want := copyIDOf(t, k, filepath.Join(hd, "A (2001)", "a.mkv"))
+	places := map[string]int{}
+	for n := range 3 {
+		c, ok, _ := db.CopyOf(ctx, id(n), id(n))
+		if !ok || c.CopyID != want {
+			t.Fatalf("place %d: %+v %v, want ID %s", n, c, ok, want)
+		}
+		places[c.ItemID] = c.Place
+	}
+	// By real path: films/A (2001), more/A, more/B.
+	if places[id(0)] != 0 || places[id(2)] != 1 || places[id(1)] != 2 {
+		t.Errorf("places %v", places)
+	}
+	all := []string{id(0), id(1), id(2)}
+	cs, err := db.ItemsCopies(ctx, all)
+	if err != nil || len(cs) != 1 || cs[0].ItemID != id(2) || cs[0].Library != "lib-more" {
+		t.Fatalf("one copy, through lib-more's first path: %+v %v", cs, err)
+	}
+	for lib, item := range map[string]string{"lib-films": id(0), "lib-more": id(2)} {
+		allowed, _, err := db.AllowedItems(ctx, store.Access{Libraries: []string{lib}}, all)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mine := slices.DeleteFunc(slices.Clone(all), func(i string) bool { return !allowed[i] })
+		cs, err := db.ItemsCopies(ctx, mine)
+		if err != nil || len(cs) != 1 || cs[0].ItemID != item || cs[0].CopyID != want {
+			t.Errorf("allowed %s only: %+v %v", lib, cs, err)
+		}
+		c, ok, err := db.CopyByHandle(ctx, store.PeerHandle(cs[0]))
+		if err != nil || !ok || c.ItemID != item {
+			t.Errorf("handle through %s: %+v %v %v", lib, c, ok, err)
+		}
+	}
+	// The same pass again: nothing changes.
+	head := changes(t, db)
+	if err := k.pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if changes(t, db) != head {
+		t.Error("a pass with nothing new told changes")
 	}
 }
 
@@ -356,7 +435,7 @@ func TestKeeperPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, ok, _ := db.CopyOf(ctx, id(0), id(0))
-	if !ok || !a.Minimal || a.CopyID != CopyID(k.CopyKey, realDir(t, media), "a.mkv") || a.ETag == "" || a.Facts.MediaType != "video/matroska" {
+	if !ok || !a.Minimal || a.CopyID != copyIDOf(t, k, filepath.Join(media, "a.mkv")) || a.ETag == "" || a.Facts.MediaType != "video/matroska" {
 		t.Errorf("a's minimal copy: %+v %v", a, ok)
 	}
 	if _, ok, _ := db.CopyOf(ctx, id(3), id(3)); ok {
@@ -365,7 +444,7 @@ func TestKeeperPass(t *testing.T) {
 	if _, ok, _ := db.CopyOf(ctx, id(0), id(2)); ok {
 		t.Error("an alternate version kept under its film too")
 	}
-	if alt, ok, _ := db.CopyOf(ctx, id(2), id(2)); !ok || alt.CopyID != CopyID(k.CopyKey, realDir(t, media), "alt.mkv") {
+	if alt, ok, _ := db.CopyOf(ctx, id(2), id(2)); !ok || alt.CopyID != copyIDOf(t, k, filepath.Join(media, "alt.mkv")) {
 		t.Error("the alternate version's own copy missing")
 	}
 	b, ok, _ := db.CopyOf(ctx, id(1), id(1))
@@ -399,14 +478,37 @@ func TestKeeperPass(t *testing.T) {
 		t.Error("a subtitle file added isn't a change")
 	}
 
-	// a renamed: another copy ID, the old one gone.
-	os.Rename(filepath.Join(media, "a.mkv"), filepath.Join(media, "renamed.mkv"))
-	list[0].Path = filepath.Join(media, "renamed.mkv")
+	// a renamed and moved to another folder: the same copy ID, no change
+	// of its title.
+	head = changes(t, db)
+	moved := filepath.Join(media, "elsewhere", "renamed.mkv")
+	os.MkdirAll(filepath.Dir(moved), 0o700)
+	os.Rename(filepath.Join(media, "a.mkv"), moved)
+	list[0].Path = moved
 	if err := k.pass(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if a2, _, _ := db.CopyOf(ctx, id(0), id(0)); a2.CopyID == a.CopyID || a2.CopyID != CopyID(k.CopyKey, realDir(t, media), "renamed.mkv") {
-		t.Errorf("renamed: %s", a2.CopyID)
+	if a2, ok, _ := db.CopyOf(ctx, id(0), id(0)); !ok || a2.CopyID != a.CopyID {
+		t.Errorf("renamed: %s, was %s", a2.CopyID, a.CopyID)
+	}
+	if changes(t, db) != head {
+		t.Error("a rename told changes")
+	}
+
+	// Its bytes replaced (another size): another copy ID, the old one gone.
+	write(t, moved, []byte("film a, cut again"))
+	if err := k.pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	a3, _, _ := db.CopyOf(ctx, id(0), id(0))
+	if a3.CopyID == a.CopyID || a3.CopyID != copyIDOf(t, k, moved) || a3.ETag == a.ETag {
+		t.Errorf("replaced: %s, was %s", a3.CopyID, a.CopyID)
+	}
+	if cs, _ := db.ItemCopies(ctx, id(0)); len(cs) != 1 {
+		t.Errorf("replaced: %d copies", len(cs))
+	}
+	if changes(t, db) == head {
+		t.Error("replaced bytes aren't a change")
 	}
 
 	// The alternate version's file replaced by a link out of the
@@ -441,7 +543,7 @@ func TestRefresh(t *testing.T) {
 	k.Prober = &describe.Prober{} // never run here
 	write(t, filepath.Join(media, "a.mkv"), []byte("film a"))
 	v := version{f: jellyfin.VideoFile{ItemID: id(0), SourceID: id(0), Container: "mkv", Parts: 1}, fingerprint: "6-" + strings.Repeat("a", 32),
-		copyID: CopyID(k.CopyKey, realDir(t, media), "a.mkv"), size: 6, mod: 1}
+		copyID: CopyID(k.CopyKey, "6-"+strings.Repeat("a", 32)), size: 6, mod: 1}
 	need := func(failed map[string]bool) bool {
 		t.Helper()
 		n, err := k.refresh(ctx, v, failed)

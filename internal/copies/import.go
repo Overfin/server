@@ -206,11 +206,10 @@ func (im Import) one(ctx context.Context, libs files.Libraries, byPath map[strin
 		c.Changed++
 		return nil
 	}
-	// A file Jellyfin lists twice (an alternate version) is one copy, as
-	// the keeper keeps it (distinct).
-	copyID := CopyID(im.CopyKey, file.Root, file.Rel)
+	// A file Jellyfin lists twice (an alternate version) is one version,
+	// as the keeper keeps it (distinct).
 	for i := range listed {
-		listed[i].copyID, listed[i].size, listed[i].mod = copyID, size, mod
+		listed[i].real, listed[i].size, listed[i].mod = file.Real, size, mod
 	}
 	v := distinct(listed)[0]
 	now := im.clock()
@@ -220,6 +219,15 @@ func (im Import) one(ctx context.Context, libs files.Libraries, byPath map[strin
 		return nil
 	} else if err != nil {
 		return err
+	}
+	// Its place among the copy's others (the same file elsewhere) is the
+	// keeper's to rank (places): the one it gave, else 0 until its next
+	// pass.
+	v.copyID = CopyID(im.CopyKey, v.fingerprint)
+	if old, ok, err := im.DB.CopyOf(ctx, v.f.ItemID, v.f.SourceID); err != nil {
+		return err
+	} else if ok && old.CopyID == v.copyID {
+		v.place = old.Place
 	}
 	var layout *wire.PreviewLayout
 	if im.Layout != nil {

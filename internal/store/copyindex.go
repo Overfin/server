@@ -22,11 +22,18 @@ import (
 // copy's facts, read from the file by Overfin (package copies), or from
 // Jellyfin's data while it isn't (Minimal).
 type IndexedCopy struct {
-	// CopyID is the copy's ID players and peers see; ItemID and SourceID,
-	// Jellyfin's version, which never leave Overfin.
+	// CopyID is the copy's ID players see (a keyed hash of its file's
+	// fingerprint: the same file in two places has the same, one row
+	// each); ItemID and SourceID, Jellyfin's version, which never leave
+	// Overfin.
 	CopyID, ItemID, SourceID string
 	// Position is the copy's place among its item's (Jellyfin's order).
-	Position    int
+	Position int
+	// Place ranks the places of one copy (the same file at several paths)
+	// by their paths, 0 for the first (package copies).
+	Place int
+	// Library is its item's library (read only; "" when unknown).
+	Library     string
 	Fingerprint string
 	ETag        string
 	// Size and Modified (Unix seconds) are the file's when it was read.
@@ -64,15 +71,16 @@ type CopyLanguages struct {
 // its copies, as from Jellyfin.
 const maxCopyLanguages = 12
 
-const copyColumns = `copy_id, item_id, source_id, position, fingerprint, etag, size, modified, facts,
-	jellyfin_streams, externals, minimal, parts, languages, preview_layout, probe_version, coalesce(probed_at, 0)`
+const copyColumns = `copy_id, item_id, source_id, position, place,
+	coalesce((SELECT i.library_id FROM catalog_items i WHERE i.id = catalog_copies.item_id), ''), fingerprint, etag, size,
+	modified, facts, jellyfin_streams, externals, minimal, parts, languages, preview_layout, probe_version, coalesce(probed_at, 0)`
 
 func scanCopy(rows interface{ Scan(...any) error }) (IndexedCopy, error) {
 	var c IndexedCopy
 	var facts, streams string
 	var languages, layout sql.NullString
 	var probed int64
-	if err := rows.Scan(&c.CopyID, &c.ItemID, &c.SourceID, &c.Position, &c.Fingerprint, &c.ETag, &c.Size, &c.Modified,
+	if err := rows.Scan(&c.CopyID, &c.ItemID, &c.SourceID, &c.Position, &c.Place, &c.Library, &c.Fingerprint, &c.ETag, &c.Size, &c.Modified,
 		&facts, &streams, &c.Externals, &c.Minimal, &c.Parts, &languages, &layout, &c.ProbeVersion, &probed); err != nil {
 		return IndexedCopy{}, err
 	}
@@ -121,8 +129,66 @@ func (s *Store) ItemCopies(ctx context.Context, itemID string) ([]IndexedCopy, e
 			out = append(out, c)
 		}
 		return err
-	}, `SELECT `+copyColumns+` FROM catalog_copies WHERE item_id = ? ORDER BY position, copy_id`, itemID)
+	}, `SELECT `+copyColumns+` FROM catalog_copies WHERE item_id = ? ORDER BY position, copy_id, source_id`, itemID)
 	return out, err
+}
+
+// ItemsCopies are the copies of items (a title's, those the profile or
+// the paired server may see: the caller checked), each once, in their
+// order: the items', each item's by its place (ItemCopies). The same
+// file in several of their places (two libraries, two folders) is one
+// copy, served through one place: the first library in the operator's
+// order, then the first by its path (Place), then by Jellyfin's IDs; its
+// slot is where the copy first comes.
+func (s *Store) ItemsCopies(ctx context.Context, items []string) ([]IndexedCopy, error) {
+	libs, err := s.Libraries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	order := map[string]int{}
+	for i, l := range libs {
+		order[l.ID] = i
+	}
+	rank := func(c IndexedCopy) int {
+		if i, ok := order[c.Library]; ok {
+			return i
+		}
+		return len(libs) // a library the index doesn't know: last
+	}
+	better := func(a, b IndexedCopy) bool {
+		if ra, rb := rank(a), rank(b); ra != rb {
+			return ra < rb
+		}
+		if a.Place != b.Place {
+			return a.Place < b.Place
+		}
+		if a.ItemID != b.ItemID {
+			return a.ItemID < b.ItemID
+		}
+		return a.SourceID < b.SourceID
+	}
+	var out []IndexedCopy
+	slot := map[string]int{}
+	done := map[string]bool{}
+	for _, item := range items {
+		if done[item] {
+			continue
+		}
+		done[item] = true
+		copies, err := s.ItemCopies(ctx, item)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range copies {
+			if i, ok := slot[c.CopyID]; !ok {
+				slot[c.CopyID] = len(out)
+				out = append(out, c)
+			} else if better(c, out[i]) {
+				out[i] = c
+			}
+		}
+	}
+	return out, nil
 }
 
 // CopySegments are a version's skip markers; nil when none were read.
@@ -144,9 +210,10 @@ func (s *Store) CopySegments(ctx context.Context, itemID, sourceID string) ([]wi
 var ErrNoItem = errors.New("store: the index has no such item")
 
 // PutCopy keeps a version's copy, in place of the one it had (its ID
-// changes with its path); the copy's title changes when what's served of
-// it does (served_hash), and the item's languages and picture come from
-// its copies once one is read from its file.
+// changes when the file's bytes do); the copy's title changes when its
+// ID or what's served of it does (served_hash), and the item's
+// languages and picture come from its copies once one is read from its
+// file.
 func (s *Store) PutCopy(ctx context.Context, c IndexedCopy) error {
 	facts := c.Facts
 	facts.ID, facts.ETag, facts.PreviewLayout, facts.Segments = "", "", nil, nil
@@ -182,23 +249,19 @@ func (s *Store) PutCopy(ctx context.Context, c IndexedCopy) error {
 	} else if err != nil {
 		return err
 	}
-	// Another ID for the same version (the file renamed or moved): the old
-	// row goes, the new one comes, both noted as changes of the title.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM catalog_copies WHERE item_id = ? AND source_id = ? AND copy_id <> ?`,
-		c.ItemID, c.SourceID, c.CopyID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_copies (copy_id, item_id, source_id, position, fingerprint, etag,
-			size, modified, duration_ms, facts, jellyfin_streams, externals, minimal, parts, languages, preview_layout,
+	// One row per version; another ID for it (its file's bytes replaced)
+	// is noted as a change of the title (title_changes_copy_update).
+	if _, err := tx.ExecContext(ctx, `INSERT INTO catalog_copies (copy_id, item_id, source_id, position, place, fingerprint,
+			etag, size, modified, duration_ms, facts, jellyfin_streams, externals, minimal, parts, languages, preview_layout,
 			probe_version, probed_at, served_hash)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')
-		ON CONFLICT (copy_id) DO UPDATE SET item_id = excluded.item_id, source_id = excluded.source_id,
-			position = excluded.position, fingerprint = excluded.fingerprint, etag = excluded.etag, size = excluded.size,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')
+		ON CONFLICT (item_id, source_id) DO UPDATE SET copy_id = excluded.copy_id,
+			position = excluded.position, place = excluded.place, fingerprint = excluded.fingerprint, etag = excluded.etag, size = excluded.size,
 			modified = excluded.modified, duration_ms = excluded.duration_ms, facts = excluded.facts,
 			jellyfin_streams = excluded.jellyfin_streams, externals = excluded.externals, minimal = excluded.minimal,
 			parts = excluded.parts, languages = excluded.languages, preview_layout = excluded.preview_layout,
 			probe_version = excluded.probe_version, probed_at = excluded.probed_at`,
-		c.CopyID, c.ItemID, c.SourceID, c.Position, c.Fingerprint, c.ETag, c.Size, c.Modified, facts.DurationMs,
+		c.CopyID, c.ItemID, c.SourceID, c.Position, c.Place, c.Fingerprint, c.ETag, c.Size, c.Modified, facts.DurationMs,
 		string(factsJSON), string(streams), c.Externals, c.Minimal, max(c.Parts, 1), languages, layout,
 		c.ProbeVersion, probed); err != nil {
 		return err
@@ -300,14 +363,14 @@ func setCopySegments(ctx context.Context, tx *sql.Tx, itemID string, bySource ma
 }
 
 // rehashCopies sets the hash of each of an item's copies as served: its
-// ID, facts, etag, place, previews and segments; the trigger notes a
-// change of its title when one changes.
+// ID, facts, etag, position and place, previews and segments; the
+// trigger notes a change of its title when one changes.
 func rehashCopies(ctx context.Context, tx *sql.Tx, itemID string) error {
 	type row struct {
-		id, hash string
+		source, hash string
 	}
 	var rows []row
-	q, err := tx.QueryContext(ctx, `SELECT c.copy_id, c.facts, c.etag, c.position, coalesce(c.preview_layout, ''),
+	q, err := tx.QueryContext(ctx, `SELECT c.source_id, c.copy_id, c.facts, c.etag, c.position, c.place, coalesce(c.preview_layout, ''),
 			coalesce(g.segments, ''), c.served_hash
 		FROM catalog_copies c LEFT JOIN copy_segments g ON g.item_id = c.item_id AND g.source_id = c.source_id
 		WHERE c.item_id = ?`, itemID)
@@ -315,18 +378,18 @@ func rehashCopies(ctx context.Context, tx *sql.Tx, itemID string) error {
 		return err
 	}
 	for q.Next() {
-		var id, facts, etag, layout, segments, old string
-		var position int
-		if err := q.Scan(&id, &facts, &etag, &position, &layout, &segments, &old); err != nil {
+		var source, id, facts, etag, layout, segments, old string
+		var position, place int
+		if err := q.Scan(&source, &id, &facts, &etag, &position, &place, &layout, &segments, &old); err != nil {
 			q.Close()
 			return err
 		}
 		h := sha256.New()
-		for _, part := range []string{id, facts, etag, strconv.Itoa(position), layout, segments} {
+		for _, part := range []string{id, facts, etag, strconv.Itoa(position), strconv.Itoa(place), layout, segments} {
 			h.Write([]byte(strconv.Itoa(len(part)) + ":" + part + ";"))
 		}
 		if sum := hex.EncodeToString(h.Sum(nil))[:32]; sum != old {
-			rows = append(rows, row{id, sum})
+			rows = append(rows, row{source, sum})
 		}
 	}
 	q.Close()
@@ -334,7 +397,8 @@ func rehashCopies(ctx context.Context, tx *sql.Tx, itemID string) error {
 		return err
 	}
 	for _, r := range rows {
-		if _, err := tx.ExecContext(ctx, `UPDATE catalog_copies SET served_hash = ? WHERE copy_id = ?`, r.hash, r.id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE catalog_copies SET served_hash = ? WHERE item_id = ? AND source_id = ?`,
+			r.hash, itemID, r.source); err != nil {
 			return err
 		}
 	}

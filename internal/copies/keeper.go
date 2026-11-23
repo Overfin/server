@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -99,8 +100,13 @@ type version struct {
 	fingerprint string
 	copyID      string
 	position    int
-	size, mod   int64
-	added       bool // a new arrival
+	// real is the file's real path, in the pass's memory only: a file
+	// listed twice is one version (distinct), and the places of one copy
+	// are ranked by it (places). place is its rank among them, as kept.
+	real      string
+	place     int
+	size, mod int64
+	added     bool // a new arrival
 }
 
 // pass lists every version, keeps a copy of each (shaped from its kept
@@ -145,7 +151,7 @@ func (k *Keeper) pass(ctx context.Context) error {
 			seen[key] = true
 			return true
 		}
-		v.copyID = CopyID(k.CopyKey, file.Root, file.Rel)
+		v.copyID, v.real = CopyID(k.CopyKey, v.fingerprint), file.Real
 		v.size, v.mod = file.Info.Size(), file.Info.ModTime().Unix()
 		v.added = start.Sub(file.Info.ModTime()) < newFor
 		listed = append(listed, v)
@@ -161,7 +167,7 @@ func (k *Keeper) pass(ctx context.Context) error {
 		k.Logger.Warn("copy index: files outside the libraries' folders, or not regular files, left out", "files", refused)
 	}
 	k.refused = refused
-	listed = distinct(listed)
+	listed = places(distinct(listed))
 	for _, v := range listed {
 		seen[[2]string{v.f.ItemID, v.f.SourceID}] = true
 	}
@@ -192,25 +198,43 @@ func (k *Keeper) pass(ctx context.Context) error {
 	return k.frames(ctx, libs, listed, failed)
 }
 
-// distinct keeps one version of each copy ID: a file Jellyfin lists
-// twice (an alternate version, under its own item and its film's) is
-// one copy, kept under its own item (item and source the same), else
-// the first by IDs.
+// distinct keeps one version of each file: a file Jellyfin lists twice
+// (an alternate version, under its own item and its film's) is kept
+// under its own item (item and source the same), else the first by IDs.
+// The same bytes at two paths stay two places of one copy (places).
 func distinct(listed []version) []version {
 	best := map[string]int{}
 	for i, v := range listed {
-		j, ok := best[v.copyID]
+		j, ok := best[v.real]
 		if !ok || better(v, listed[j]) {
-			best[v.copyID] = i
+			best[v.real] = i
 		}
 	}
 	var out []version
 	for i, v := range listed {
-		if best[v.copyID] == i {
+		if best[v.real] == i {
 			out = append(out, v)
 		}
 	}
 	return out
+}
+
+// places ranks the places of each copy (the same file at several paths)
+// by their real paths: 0 for the first. Players and peers get a copy
+// through one place (store.ItemsCopies): the first library in the
+// operator's order they may see, then this rank.
+func places(listed []version) []version {
+	byCopy := map[string][]int{}
+	for i, v := range listed {
+		byCopy[v.copyID] = append(byCopy[v.copyID], i)
+	}
+	for _, at := range byCopy {
+		slices.SortFunc(at, func(a, b int) int { return strings.Compare(listed[a].real, listed[b].real) })
+		for rank, i := range at {
+			listed[i].place = rank
+		}
+	}
+	return listed
 }
 
 func better(a, b version) bool {
@@ -240,7 +264,7 @@ func (k *Keeper) refresh(ctx context.Context, v version, failed map[string]bool)
 		layout, _ = k.Layout(v.fingerprint)
 	}
 	canProbe := k.Prober != nil && !failed[v.fingerprint]
-	same := ok && old.CopyID == v.copyID && old.Fingerprint == v.fingerprint && old.Position == v.position &&
+	same := ok && old.CopyID == v.copyID && old.Fingerprint == v.fingerprint && old.Position == v.position && old.Place == v.place &&
 		old.Externals == extHash && old.Parts == max(v.f.Parts, 1)
 	if same && (!old.Minimal && old.ProbeVersion >= Version || old.Minimal && !canProbe) {
 		if !equalLayout(old.PreviewLayout, layout) {
@@ -289,7 +313,7 @@ func (k *Keeper) minimal(v version, layout *wire.PreviewLayout, extHash string) 
 	facts, streams := Minimal(v.f)
 	facts.Size = v.size
 	return store.IndexedCopy{CopyID: v.copyID, ItemID: v.f.ItemID, SourceID: v.f.SourceID, Position: v.position,
-		Fingerprint: v.fingerprint, ETag: ETag(k.EtagKey, v.fingerprint), Size: v.size, Modified: v.mod, Facts: facts,
+		Place: v.place, Fingerprint: v.fingerprint, ETag: ETag(k.EtagKey, v.fingerprint), Size: v.size, Modified: v.mod, Facts: facts,
 		Streams: streams, Externals: extHash, Minimal: true, Parts: max(v.f.Parts, 1), PreviewLayout: layout}
 }
 
@@ -306,7 +330,7 @@ func (k *Keeper) put(ctx context.Context, v version, pr *describe.Probe, layout 
 		}
 	}
 	return k.DB.PutCopy(ctx, store.IndexedCopy{CopyID: v.copyID, ItemID: v.f.ItemID, SourceID: v.f.SourceID, Position: v.position,
-		Fingerprint: v.fingerprint, ETag: ETag(k.EtagKey, v.fingerprint), Size: v.size, Modified: v.mod, Facts: facts,
+		Place: v.place, Fingerprint: v.fingerprint, ETag: ETag(k.EtagKey, v.fingerprint), Size: v.size, Modified: v.mod, Facts: facts,
 		Streams: streams, Externals: extHash, Parts: max(v.f.Parts, 1), Languages: languages, PreviewLayout: layout,
 		ProbeVersion: probeVersion, ProbedAt: probedAt})
 }

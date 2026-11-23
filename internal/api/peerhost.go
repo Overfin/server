@@ -57,10 +57,10 @@ func (h PeerHost) playback() (Playback, error) {
 	return pb, nil
 }
 
-// copyOf is the copy index's copy a handle names (the copy ID the
-// catalog gave as its handle).
+// copyOf is the copy index's copy a handle names (store.PeerHandle: the
+// copy ID and the library of the place the catalog gave it through).
 func (pb Playback) copyOf(ctx context.Context, handle string) (store.IndexedCopy, error) {
-	c, ok, err := pb.Library.Provisioner.Store.CopyByID(ctx, handle)
+	c, ok, err := pb.Library.Provisioner.Store.CopyByHandle(ctx, handle)
 	switch {
 	case err != nil:
 		return store.IndexedCopy{}, msfp.ErrServerBusy

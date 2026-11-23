@@ -51,7 +51,8 @@ func playable(ref store.TitleRef) bool {
 
 // titleCopies are the copies of t the profile may see (a title it may
 // see: the caller checked), in Overfin's order: its items' (the title's
-// own order), each item's by their place. Paired servers' come after
+// own order), each item's by their place; a file in several places
+// once, through the first the profile may see. Paired servers' come after
 // (peerCopies). A copy MSFP's bounds leave out
 // (past 16) isn't offered.
 func (l Library) titleCopies(ctx context.Context, p *store.Profile, t *store.TitleInfo) ([]store.IndexedCopy, error) {
@@ -71,19 +72,15 @@ func (l Library) titleCopies(ctx context.Context, p *store.Profile, t *store.Tit
 		}
 		items = slices.DeleteFunc(slices.Clone(items), func(id string) bool { return !allowed[id] })
 	}
-	var out []store.IndexedCopy
-	seen := map[string]bool{}
-	for _, item := range items {
-		copies, err := st.ItemCopies(ctx, item)
-		if err != nil {
-			return nil, err
-		}
-		for _, c := range copies {
-			if !seen[c.CopyID] && len(out) < wire.MaxCopies {
-				seen[c.CopyID] = true
-				out = append(out, c)
-			}
-		}
+	// The same file in several places is one copy, through the place
+	// the profile may see (store.ItemsCopies): only its allowed items are
+	// asked.
+	out, err := st.ItemsCopies(ctx, items)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) > wire.MaxCopies {
+		out = out[:wire.MaxCopies]
 	}
 	return out, nil
 }

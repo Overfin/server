@@ -503,7 +503,7 @@ anyone. Paired servers are not trusted at all (rule 94).
     is read for its fingerprint, previews and headers (rule 141), then
     the path is forgotten: only fingerprints, facts and raw probes without
     paths are kept, and no path is logged. A copy's ID is a keyed hash of
-    the file's library folder and its path in it, never the path. A file
+    the file's fingerprint, never of its path. A file
     served from disk is checked first to be the copy's (its fingerprint
     and size), then opened again through these checks at each request, and
     served only while it is the very file the playback started with (its

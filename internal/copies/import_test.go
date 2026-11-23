@@ -177,7 +177,7 @@ func TestImport(t *testing.T) {
 	}
 	for n, frames := range map[int]bool{0: false, 1: true} {
 		c, ok, _ := db.CopyOf(ctx, id(n), id(n))
-		if !ok || c.Minimal || c.ProbeVersion != Version || c.Facts.Video == nil || c.CopyID == "" {
+		if !ok || c.Minimal || c.ProbeVersion != Version || c.Facts.Video == nil || c.CopyID != CopyID(k.CopyKey, c.Fingerprint) {
 			t.Fatalf("%d not imported: %+v", n, c)
 		}
 		served(t, c.Facts)

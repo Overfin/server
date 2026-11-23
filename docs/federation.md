@@ -489,7 +489,8 @@ with `wire`, the protocol's toolkit): Overfin
 hosts it, with its records in Overfin's database, its own libraries and
 titles, its playback and media, and its connections to other servers
 (through the remote gateway, when there's one). Each copy of a title goes
-to paired servers as MSFP's copy object, facts only; the viewer's server
+to paired servers as MSFP's copy object, facts only (the same file in
+several of the libraries offered goes once); the viewer's server
 chooses one, its audio and its delivery (the file itself, a remux, a
 transcode, or MSFP's baseline), and Overfin makes exactly that through
 the same executor as for its own players, or refuses it with MSFP's
