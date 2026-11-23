@@ -7,24 +7,54 @@
 # The Go build runs on the builder's own platform and cross-compiles for the
 # target; the plugin is the same on every architecture, so it's built once,
 # on the builder's own platform too.
+#
+# Branch and test builds, before the sources they need are released, give
+# their local checkouts as named build contexts; a release build gives
+# none and uses go.mod's versions and the plugin's pinned commit:
+#
+# docker buildx build -f backend/Dockerfile -t overfin-backend:test \
+#   --build-context msfp-go-source=../msfp-go \
+#   --build-context overfin-web-source=../overfin-web \
+#   --build-context plugin-source=../overfin-jellyfin-plugin \
+#   --build-arg PLUGIN_VERSION=0.9.0 .
+
+# Empty unless given as build contexts (above).
+FROM scratch AS msfp-go-source
+FROM scratch AS overfin-web-source
+FROM scratch AS plugin-source
 
 FROM --platform=$BUILDPLATFORM golang:1.27.0@sha256:4013ae0f9e7994f8535c58c811f8f863fbed38b72e0d51e6592156f758d66146 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+# A local source given replaces its module (go.mod's own replace lines,
+# for builds outside a container, name paths of the builder's machine).
+COPY --from=msfp-go-source / /deps/msfp-go/
+COPY --from=overfin-web-source /go.mo[d] /go.su[m] /web.g[o] /deps/overfin-web/
+COPY --from=overfin-web-source /dis[t] /deps/overfin-web/dist/
+COPY --from=overfin-web-source /src/lib/sd[k] /deps/overfin-web/src/lib/sdk/
+RUN for m in msfp-io/msfp-go=msfp-go overfin/web=overfin-web; do \
+      if [ -f "/deps/${m#*=}/go.mod" ]; then go mod edit -replace "github.com/${m%=*}=/deps/${m#*=}"; fi; \
+    done && mkdir -p /deps && cp go.mod /deps/go.mod && go mod download
 COPY . .
+RUN cp /deps/go.mod go.mod
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X github.com/overfin/server/overfin.Version=${VERSION}" -o /overfin-backend ./cmd/overfin-backend
 
 # Overfin's plugin for Jellyfin (github.com/Overfin/jellyfin-plugin, GPL),
-# at the commit this Overfin was made with, built against the Jellyfin
+# at the commit this Overfin was made with (or a local checkout given as
+# plugin-source, for branch and test builds), built against the Jellyfin
 # below.
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0.404@sha256:fe0fd4e93bd2fbb47c883b7a6369e5c8d3db8bf01cdc5981f6ee35fbdf3ff4fb AS plugin
 ARG PLUGIN_COMMIT=72c2d7a6cf8a93132c6fcc16e607fe8b901920a3
 ARG PLUGIN_VERSION=0.8.0
-RUN git clone --quiet https://github.com/Overfin/jellyfin-plugin /plugin && cd /plugin && git checkout --quiet "$PLUGIN_COMMIT" \
- && test "$(git rev-parse HEAD)" = "$PLUGIN_COMMIT" \
+COPY --from=plugin-source /sr[c] /local/src/
+RUN if [ -d /local/src/Overfin.Jellyfin ]; then \
+      mkdir /plugin && cp -r /local/src /plugin/src && rm -rf /plugin/src/*/bin /plugin/src/*/obj && cd /plugin; \
+    else \
+      git clone --quiet https://github.com/Overfin/jellyfin-plugin /plugin && cd /plugin && git checkout --quiet "$PLUGIN_COMMIT" \
+      && test "$(git rev-parse HEAD)" = "$PLUGIN_COMMIT"; \
+    fi \
  && dotnet build -c Release src/Overfin.Jellyfin -o /out/$PLUGIN_VERSION \
  && find /out/$PLUGIN_VERSION -type f ! -name Overfin.Jellyfin.dll -delete
 
