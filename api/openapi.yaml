@@ -4504,6 +4504,26 @@ paths:
         "200": {description: "The ticket and the copy's etag. Signed."}
         "404": {description: "Not signed, not a paired server, or no such copy with previews."}
         "429": {description: "Too many previews tickets. Signed."}
+  /federation/image:
+    post:
+      operationId: federationImage
+      summary: A local title's image (MSFP catalog, section 4.4)
+      description: Server to server, signed both ways. Overfin shares no local titles, so it gives none.
+      tags: [federation]
+      security: []
+      responses:
+        "404": {description: "Not signed, not a paired server, or no such image (signed)."}
+
+  /federation/lyrics:
+    post:
+      operationId: federationLyrics
+      summary: A track's lyrics (MSFP music, section 6)
+      description: Server to server, signed both ways. Overfin shares no music, so it gives none.
+      tags: [federation]
+      security: []
+      responses:
+        "404": {description: "Not signed, not a paired server, or no music shared (signed)."}
+
   /federation/group-sync:
     post:
       operationId: federationGroupSync

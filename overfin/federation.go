@@ -384,8 +384,10 @@ type fedRoutes struct{ engine *msfp.Engine }
 func (fedRoutes) Name() string { return "federation" }
 
 // The calls of MSFP version 0 (core, catalog, playback and groups), each
-// its own route: no catch-all. Not image nor lyrics: Overfin shares no
-// local titles and no music.
+// its own route: no catch-all. image and lyrics are mounted for the
+// engine's signed answers: Overfin shares no local titles and no music,
+// so it gives neither (a signed not-found, as MSFP wants, never a
+// stranger's 404).
 var federationCalls = []string{
 	"POST /api/v1/federation/pair",
 	"POST /api/v1/federation/hello",
@@ -397,6 +399,8 @@ var federationCalls = []string{
 	"POST /api/v1/federation/progress",
 	"POST /api/v1/federation/stop",
 	"POST /api/v1/federation/previews",
+	"POST /api/v1/federation/image",
+	"POST /api/v1/federation/lyrics",
 	"POST /api/v1/federation/group-sync",
 	"POST /api/v1/federation/group-push",
 	"POST /api/v1/federation/group-pair",

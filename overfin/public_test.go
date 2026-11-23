@@ -37,6 +37,8 @@ var publicRoutes = map[string]string{
 	"POST /api/v1/federation/progress":                     "federation: where a viewer is",
 	"POST /api/v1/federation/stop":                         "federation: and stops",
 	"POST /api/v1/federation/previews":                     "federation: a copy's previews before a play",
+	"POST /api/v1/federation/image":                        "federation: a local title's image (none: signed not-found)",
+	"POST /api/v1/federation/lyrics":                       "federation: a track's lyrics (none: signed not-found)",
 	"POST /api/v1/federation/group-sync":                   "federation: a group's events and mail asked",
 	"POST /api/v1/federation/group-push":                   "federation: a group's events and mail passed on",
 	"POST /api/v1/federation/group-pair":                   "federation: pairing through a group",

@@ -143,7 +143,7 @@ func (h PeerHost) Start(ctx context.Context, req msfp.StartRequest) (msfp.Starte
 	mayBurn := h.MayBurn != nil && h.MayBurn()
 	s, err := pb.startDelivery(ctx, c, delivery.Request{Play: play, CapKbps: req.MaxBitrateKbps, MayBurn: mayBurn}, a)
 	if err != nil {
-		return msfp.Started{}, peerStartError(err)
+		return msfp.Started{}, pb.peerStartError(err)
 	}
 	d := s.Delivery
 	pb.Logger.Info("playback started for a paired server", "playback", s.ID, "peer", req.Peer.Name, "purpose", req.Purpose,
@@ -155,7 +155,7 @@ func (h PeerHost) Start(ctx context.Context, req msfp.StartRequest) (msfp.Starte
 }
 
 // peerStartError is a start's failure as the engine's error.
-func peerStartError(err error) error {
+func (pb Playback) peerStartError(err error) error {
 	var me *msfp.Error
 	switch {
 	case errors.As(err, &me):
@@ -168,6 +168,7 @@ func peerStartError(err error) error {
 		return msfp.ErrNotPlayable
 	}
 	if rf := delivery.AsRefusal(err); rf != nil {
+		pb.Logger.Info("a paired server's play refused", "status", rf.Status, "why", rf.Why)
 		if rf.Status == http.StatusServiceUnavailable {
 			return msfp.ErrServerBusy
 		}

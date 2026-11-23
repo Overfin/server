@@ -127,6 +127,14 @@ func securityHeaders(next http.Handler) http.Handler {
 // cross-site route (the gate).
 func sameOrigin(reg *plugin.Registrar, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A stream's path answers GET (and HEAD, this server's own
+		// players') only: any other method is 405 with Allow: GET (MSFP
+		// media section 2.2), whatever else the request says.
+		if strings.HasPrefix(r.URL.Path, "/api/v1/stream/") && r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		switch r.Header.Get("Sec-Fetch-Site") {
 		case "", "same-origin", "none":
 		default:
@@ -167,10 +175,8 @@ func isJSON(contentType string) bool {
 
 // refuse answers a request sameOrigin refuses: with t, or, for a
 // federation call, the same plain 404 as a path that doesn't exist (MSFP
-// core section 3), so that nobody learns federation is on. A stream's
-// path, where a paired server fetches media too, refuses another method
-// than GET or HEAD with a 404 (MSFP media section 2.2: 404 or 405), never
-// a 415, whatever the request's Content-Type.
+// core section 3), so that nobody learns federation is on; a stream's
+// path, the same 404.
 func refuse(w http.ResponseWriter, r *http.Request, t problem.Type) {
 	if strings.HasPrefix(r.URL.Path, "/api/v1/federation/") || strings.HasPrefix(r.URL.Path, "/api/v1/stream/") {
 		t = problem.NotFound
