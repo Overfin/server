@@ -20,6 +20,12 @@ type Keys struct {
 	EmailLink       []byte // keyed hash of the links sent by email
 	Proof           []byte // signs the pages' checks against scripts
 	Device          []byte // signs the cookie of a browser that signed in
+	// Etag hashes a file's fingerprint into its copy's etag (MSFP video
+	// section 3.2): never the federation key, so no rotation changes one.
+	Etag []byte
+	// CopyID hashes a file's path in its library into its copy's ID: the
+	// version ID players and peers see, never a path nor Jellyfin's ID.
+	CopyID []byte
 	// Check identifies the secret key without revealing it: stored in the
 	// database, it tells a wrong key at startup.
 	Check []byte
@@ -38,6 +44,8 @@ const (
 	labelProof  = "overfin proof v1"
 	labelDevice = "overfin device v1"
 	labelCheck  = "overfin key-check v1"
+	labelEtag   = "overfin msfp-etag v1"
+	labelCopyID = "overfin copy-id v1"
 )
 
 // Derive returns the working keys for the given secret key.
@@ -70,6 +78,12 @@ func Derive(secret []byte) (*Keys, error) {
 		return nil, err
 	}
 	if k.Device, err = derive(labelDevice); err != nil {
+		return nil, err
+	}
+	if k.Etag, err = derive(labelEtag); err != nil {
+		return nil, err
+	}
+	if k.CopyID, err = derive(labelCopyID); err != nil {
 		return nil, err
 	}
 	if k.Check, err = derive(labelCheck); err != nil {
