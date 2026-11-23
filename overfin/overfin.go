@@ -34,6 +34,7 @@ import (
 	"github.com/overfin/server/internal/connector"
 	"github.com/overfin/server/internal/cookie"
 	"github.com/overfin/server/internal/emails"
+	"github.com/overfin/server/internal/files"
 	"github.com/overfin/server/internal/gpu"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/imdb"
@@ -787,6 +788,19 @@ func run(logger *slog.Logger) error {
 	var gw *gateway
 	// Seek-bar previews, made by Overfin itself next to Jellyfin (package
 	// previews): by file, not by Jellyfin's item.
+	// The libraries' folders, as Jellyfin lists them: the only files the
+	// backend reads (rule 78).
+	libraryFolders := func(ctx context.Context) (files.Libraries, error) {
+		libs, err := sh.jf.AllLibraries(ctx, gw.adminAuth())
+		if err != nil {
+			return files.Libraries{}, err
+		}
+		var folders []string
+		for _, l := range libs {
+			folders = append(folders, l.Folders...)
+		}
+		return files.NewLibraries(folders), nil
+	}
 	if ownPreviews() {
 		st, err := previews.NewStore(filepath.Join(filepath.Dir(cfg.Storage.Path), "previews"))
 		if err != nil {
@@ -797,6 +811,7 @@ func run(logger *slog.Logger) error {
 			Files: func(ctx context.Context, each func(jellyfin.VideoFile) bool) error {
 				return sh.jf.VideoFiles(ctx, gw.adminAuth(), each)
 			},
+			Libraries: libraryFolders,
 			Hardware: func(ctx context.Context) []string {
 				family, device, err := db.Transcoding(ctx)
 				if err != nil {

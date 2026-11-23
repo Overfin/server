@@ -8,18 +8,16 @@
 package previews
 
 import (
-	"crypto/sha256"
-	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/overfin/server/internal/files"
 )
 
 // Set describes a file's previews: thumbnails Width x Height, on sheets of
@@ -48,44 +46,8 @@ func (s Set) valid() bool {
 		s.Rows > 0 && s.Rows <= 32 && s.Count > 0 && s.Count <= 100_000 && s.IntervalMs >= 1000
 }
 
-// chunk is how much of a file its fingerprint reads, at its start, middle
-// and end.
-const chunk = 256 << 10
-
-// Fingerprint names a file by what's in it: its size and a hash of three
-// pieces of it. The same file anywhere has the same; another encode, cut
-// or upgrade, another.
-func Fingerprint(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return "", err
-	}
-	if !st.Mode().IsRegular() {
-		return "", errors.New("previews: not a regular file")
-	}
-	size := st.Size()
-	h := sha256.New()
-	binary.Write(h, binary.BigEndian, size)
-	buf := make([]byte, chunk)
-	for _, at := range []int64{0, size/2 - chunk/2, size - chunk} {
-		if at < 0 {
-			at = 0
-		}
-		n, err := f.ReadAt(buf, at)
-		if err != nil && !errors.Is(err, io.EOF) {
-			return "", err
-		}
-		h.Write(buf[:n])
-	}
-	return strconv.FormatInt(size, 36) + "-" + hex.EncodeToString(h.Sum(nil))[:32], nil
-}
-
-var fingerprintRe = regexp.MustCompile(`^[0-9a-z]{1,14}-[0-9a-f]{32}$`)
+// fingerprintRe is what a fingerprint looks like (files.Fingerprint).
+var fingerprintRe = files.FingerprintForm
 
 // Store keeps previews by fingerprint, one folder each: set.json and the
 // sheets, 0.jpg on.

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/overfin/server/internal/files"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/seal"
 	"github.com/overfin/server/internal/store"
@@ -28,40 +29,6 @@ func writeFile(t *testing.T, path string, data []byte) {
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// A file's fingerprint follows its content: a copy elsewhere has the same,
-// a change anywhere it reads, another; a small file is read whole.
-func TestFingerprint(t *testing.T) {
-	dir := t.TempDir()
-	big := bytes.Repeat([]byte("frame "), 1<<20) // 6 MiB
-	writeFile(t, filepath.Join(dir, "a.mkv"), big)
-	writeFile(t, filepath.Join(dir, "moved", "b.mkv"), big)
-	changed := slices.Clone(big)
-	changed[len(changed)-10] = 'X'
-	writeFile(t, filepath.Join(dir, "c.mkv"), changed)
-	writeFile(t, filepath.Join(dir, "small.mkv"), []byte("tiny"))
-	fp := func(name string) string {
-		t.Helper()
-		f, err := Fingerprint(filepath.Join(dir, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !fingerprintRe.MatchString(f) {
-			t.Fatalf("%s: %q", name, f)
-		}
-		return f
-	}
-	if fp("a.mkv") != fp("moved/b.mkv") {
-		t.Error("a copy has another fingerprint")
-	}
-	if fp("a.mkv") == fp("c.mkv") {
-		t.Error("a changed end kept the fingerprint")
-	}
-	fp("small.mkv")
-	if _, err := Fingerprint(dir); err == nil {
-		t.Error("a folder fingerprinted")
 	}
 }
 
@@ -226,7 +193,7 @@ func TestKeeperPass(t *testing.T) {
 	writeFile(t, filepath.Join(media, "alt.mkv"), append(slices.Clone(data), 'y', 'z'))
 	altSets := filepath.Join(jfData, "data", "trickplay", "55", "55555555-5555-5555-5555-555555555555", "320 - 10x10")
 	writeFile(t, filepath.Join(altSets, "0.jpg"), []byte("the second version's"))
-	files := fakeFiles{
+	list := fakeFiles{
 		{ItemID: old, SourceID: old, Path: filepath.Join(media, "old.mkv"),
 			Trickplay: []jellyfin.Trickplay{{Width: 320, Height: 180, Columns: 10, Rows: 10, Count: 2, IntervalMs: 10_000}}},
 		{ItemID: old, SourceID: alt, Path: filepath.Join(media, "alt.mkv"),
@@ -240,7 +207,8 @@ func TestKeeperPass(t *testing.T) {
 	on := false
 	now := time.Now()
 	k := &Keeper{Store: st, DB: db, Format: Format{Width: 320, Columns: 10, Rows: 10, IntervalMs: 5000, Quality: 80},
-		Files: fakeFiles(files).list, JellyfinData: jfData, Every: time.Hour, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Files: fakeFiles(list).list, Libraries: func(context.Context) (files.Libraries, error) { return files.NewLibraries([]string{media}), nil },
+		JellyfinData: jfData, Every: time.Hour, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		On:    func(context.Context) (bool, error) { return on, nil },
 		Maker: Maker{FFmpeg: ff, Busy: func() bool { return false }}, now: func() time.Time { return now }}
 
@@ -290,7 +258,7 @@ func TestKeeperPass(t *testing.T) {
 	}
 
 	// The old file gone: its previews stay a week, then go.
-	k.Files, now = fakeFiles(files[1:]).list, now.Add(10*time.Minute)
+	k.Files, now = fakeFiles(list[1:]).list, now.Add(10*time.Minute)
 	if err := k.pass(ctx); err != nil {
 		t.Fatal(err)
 	}

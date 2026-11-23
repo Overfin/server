@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/overfin/server/internal/files"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/store"
 )
@@ -41,6 +42,9 @@ type Keeper struct {
 	// Files lists the libraries' files (jellyfin.Client.VideoFiles, with
 	// an administrator's key).
 	Files func(ctx context.Context, each func(jellyfin.VideoFile) bool) error
+	// Libraries are the libraries' folders (rule 78): a file whose real
+	// path isn't under one is never read.
+	Libraries func(ctx context.Context) (files.Libraries, error)
 	// JellyfinData is Jellyfin's data folder, whose data/trickplay holds the
 	// previews it made.
 	JellyfinData string
@@ -114,6 +118,10 @@ func (k *Keeper) pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	libs, err := k.Libraries(ctx)
+	if err != nil {
+		return err
+	}
 	var queue []todo
 	seen := map[string]bool{}        // fingerprints
 	versions := map[[2]string]bool{} // item and source IDs
@@ -124,9 +132,9 @@ func (k *Keeper) pass(ctx context.Context) error {
 		}
 		listed++
 		versions[[2]string{f.ItemID, f.SourceID}] = true
-		fp, newFile, err := k.fingerprint(ctx, f, start)
+		fp, real, newFile, err := k.fingerprint(ctx, libs, f, start)
 		if err != nil {
-			return true // unreadable now: next pass
+			return true // unreadable now, or not a library's: next pass
 		}
 		if seen[fp] {
 			return true // another copy of the same file
@@ -142,7 +150,7 @@ func (k *Keeper) pass(ctx context.Context) error {
 		// A file without a picture (sound only, a broken release) has
 		// nothing to show: passed over, quietly.
 		if !failed[fp] && !f.NoVideo {
-			queue = append(queue, todo{fp: fp, path: f.Path, itemID: f.ItemID, added: newFile})
+			queue = append(queue, todo{fp: fp, path: real, itemID: f.ItemID, added: newFile})
 		}
 		return true
 	})
@@ -216,28 +224,18 @@ func (k *Keeper) pass(ctx context.Context) error {
 	return nil
 }
 
-// fingerprint is a version's fingerprint: the one kept while the file's
-// size and time haven't changed, else taken again. newFile says the file
-// arrived lately.
-func (k *Keeper) fingerprint(ctx context.Context, f jellyfin.VideoFile, now time.Time) (string, bool, error) {
-	st, err := os.Stat(f.Path)
+// fingerprint is a version's fingerprint (files.Cache) and its real path,
+// for ffmpeg to read; the file must be a library's (files.Libraries.Open).
+// newFile says the file arrived lately.
+func (k *Keeper) fingerprint(ctx context.Context, libs files.Libraries, f jellyfin.VideoFile, now time.Time) (string, string, bool, error) {
+	file, err := libs.Open(f.Path)
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
-	newFile := now.Sub(st.ModTime()) < newFor
-	kept, ok, err := k.DB.PreviewFileOf(ctx, f.ItemID, f.SourceID)
-	if err != nil {
-		return "", false, err
-	}
-	if ok && kept.Size == st.Size() && kept.Modified == st.ModTime().Unix() {
-		return kept.Fingerprint, newFile, nil // unchanged: nothing written
-	}
-	fp, err := Fingerprint(f.Path)
-	if err != nil {
-		return "", false, err
-	}
-	pf := store.PreviewFile{ItemID: f.ItemID, SourceID: f.SourceID, Size: st.Size(), Modified: st.ModTime().Unix(), Fingerprint: fp}
-	return fp, newFile, k.DB.SetPreviewFile(ctx, pf, now)
+	defer file.Close()
+	newFile := now.Sub(file.Info.ModTime()) < newFor
+	fp, err := files.Cache{DB: k.DB}.Fingerprint(ctx, f.ItemID, f.SourceID, file, now)
+	return fp, file.Real, newFile, err
 }
 
 // adopt takes over the previews Jellyfin made of a version, in the format
