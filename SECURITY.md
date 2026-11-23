@@ -450,12 +450,20 @@ anyone. Paired servers are not trusted at all (rule 94).
     - Exception: owners see the list of the libraries' tags, to hide some
       from a profile.
 78. File paths, server internals and permission flags are never served.
-    File paths reach only the backend's seek-bar previews, next to its
-    Jellyfin: each file's path is used to read the file, read-only, for its
-    fingerprint and previews, then forgotten; only fingerprints are kept,
-    and no path is logged. The rest of Overfin never gets one: its index
-    gets a film's file and folder names, and a series' folder name, from
-    its plugin.
+    File paths reach only the backend, next to its Jellyfin, for its
+    seek-bar previews and its copy index. A path Jellyfin gives is first
+    resolved to its real path, which must be under one of the folders of
+    the libraries Jellyfin lists, and under none of Overfin's own
+    (/data, /secrets, /config, /cache, /local, /pairing, /tmp); the file
+    is opened read-only, without following a last link, and checked once
+    open to be the regular file that path names. Anything else (a link out
+    of the libraries, a folder, a FIFO, a device) is never read. The file
+    is read for its fingerprint, previews and headers (rule 141), then
+    the path is forgotten: only fingerprints, facts and raw probes without
+    paths are kept, and no path is logged. A copy's ID is a keyed hash of
+    the file's path in its library, never the path. The rest of Overfin
+    never gets one: its index gets a film's file and folder names, and a
+    series' folder name, from its plugin.
     - Exception, control panel only: Identification shows a film's or a
       series' folder and file names (never the whole path), to tell a title
       Jellyfin matched wrong; Libraries shows each library's folders, and
@@ -961,6 +969,25 @@ anyone. Paired servers are not trusted at all (rule 94).
      the one it knows its peer by can only pick between that peer's own
      two keys. A peer saying that its calls couldn't connect only puts a
      message on the panel.
+
+### Reading media files
+
+141. The libraries' files are untrusted: anyone with access to the
+     folders may have written them. Their headers are read (rule 78) only
+     this way: the media type is sniffed from the first bytes, and a type
+     the MSFP registry doesn't name, or a playlist or script format (HLS,
+     concat, SDP, ffconcat), isn't probed. ffprobe runs in a child process
+     given the checked file itself, with the sniffed demuxer forced, the
+     file protocol only, bounded probe size and analysis, a time limit
+     and an output cap; its JSON is parsed strictly. Only the codec
+     records of the video (and AAC) streams are read, never attachments or
+     cover art. A copy holds only the facts MSFP lists, each checked
+     against its field's form, nothing else from the tags (no title, file
+     name or encoder); chapter names are cleaned, and dropped when they
+     look like a file name, an address or a site. The raw probe is kept
+     for the identifier only, by fingerprint, without the file's name, its
+     attachments or any string naming its library folder: never served,
+     never logged.
 
 ## Deployment
 
