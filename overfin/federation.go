@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/msfp-io/msfp-go"
 	"github.com/msfp-io/msfp-go/wire"
@@ -198,23 +197,18 @@ func (sh *shared) openEngine(cfg *config.Config, address string) (*msfp.Engine, 
 	})
 }
 
-// peerEncoders are what this server converts to, for the engine to
-// refuse early a paired server's transcode it can't make (MSFP playback
-// section 2.7): the plugin's encoders when it answers as the engine
-// opens, else MSFP's baseline only. The executor checks again at each
-// play, against what the plugin can make then.
+// peerEncoders are what the engine lets paired servers ask a transcode
+// to (MSFP playback section 2.7): every codec Overfin's plugin can be
+// asked for, and HDR kept. The engine reads them once, as it opens, often
+// before Jellyfin answers; what this server can make now is checked at
+// each play by the executor, which refuses the rest (409
+// delivery-refused, as the engine would).
 func (sh *shared) peerEncoders() msfp.Encoders {
 	if sh.delivery == nil || sh.delivery.Maker == nil {
 		return msfp.Encoders{}
 	}
-	ctx, cancel := context.WithTimeout(sh.fed.runCtx(), 10*time.Second)
-	defer cancel()
-	enc, err := sh.delivery.Maker.Encoders(ctx)
-	if err != nil {
-		sh.logger.Warn("federation: what this server converts to isn't known yet; paired servers get the baseline's", "error", err)
-		return msfp.Encoders{}
-	}
-	return enc.Wire()
+	return msfp.Encoders{Video: []string{"h264", "hevc", "av1"}, Audio: []string{"aac", "ac3", "eac3", "mp3", "opus", "flac"},
+		Ranges: []string{wire.RangeKeep}}
 }
 
 // outboundDialer connects to peers the way the rest of Overfin reaches
