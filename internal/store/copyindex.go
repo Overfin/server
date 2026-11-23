@@ -460,14 +460,15 @@ func (s *Store) CopyProbeOf(ctx context.Context, fingerprint string) (p CopyProb
 	return p, true, nil
 }
 
-// ForgetCopyProbes deletes the probes and failures of files no copy has.
-func (s *Store) ForgetCopyProbes(ctx context.Context) error {
+// ForgetCopyProbes deletes the probes and failures of files no copy has,
+// noted before: a probe kept for a file not indexed yet (an import) waits.
+func (s *Store) ForgetCopyProbes(ctx context.Context, before time.Time) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM copy_probes
-		WHERE fingerprint NOT IN (SELECT fingerprint FROM catalog_copies)`); err != nil {
+		WHERE at < ? AND fingerprint NOT IN (SELECT fingerprint FROM catalog_copies)`, before.Unix()); err != nil {
 		return err
 	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM copy_probe_failed
-		WHERE fingerprint NOT IN (SELECT fingerprint FROM catalog_copies)`)
+		WHERE at < ? AND fingerprint NOT IN (SELECT fingerprint FROM catalog_copies)`, before.Unix())
 	return err
 }
 

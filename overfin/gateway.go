@@ -21,6 +21,7 @@ import (
 	"github.com/overfin/server/internal/catalog"
 	"github.com/overfin/server/internal/config"
 	"github.com/overfin/server/internal/connector"
+	"github.com/overfin/server/internal/copies"
 	"github.com/overfin/server/internal/emails"
 	"github.com/overfin/server/internal/feature"
 	"github.com/overfin/server/internal/gpu"
@@ -60,6 +61,7 @@ type shared struct {
 	jf        *jellyfin.Client
 	images    *images.Pipeline
 	previews  *previews.Keeper // nil unless Overfin makes previews itself
+	copies    *copies.Keeper   // nil unless Overfin runs next to its Jellyfin
 	tickets   *playback.Tickets
 	// folders remembers which library items the index doesn't hold are in.
 	folders *api.FolderCache

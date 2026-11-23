@@ -193,7 +193,7 @@ func TestCopyIndex(t *testing.T) {
 }
 
 // Probes are kept gzipped by fingerprint, read back whole; those of files
-// no copy has go; failures are remembered.
+// no copy has go once old enough; failures are remembered.
 func TestCopyProbes(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
@@ -221,7 +221,13 @@ func TestCopyProbes(t *testing.T) {
 	if err != nil || !ok || !bytes.Equal(got.Raw, raw) || got.ProbeVersion != 3 || got.MediaType != "video/mp4" || got.Size != 5 {
 		t.Fatalf("read back: %v %v", ok, err)
 	}
-	if err := s.ForgetCopyProbes(ctx); err != nil {
+	if err := s.ForgetCopyProbes(ctx, now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.CopyProbeOf(ctx, p.Fingerprint); !ok {
+		t.Error("a probe kept lately forgotten")
+	}
+	if err := s.ForgetCopyProbes(ctx, now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, _ := s.CopyProbeOf(ctx, p.Fingerprint); ok {

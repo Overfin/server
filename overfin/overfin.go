@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/msfp-io/msfp-go/describe"
 	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/admin"
 	"github.com/overfin/server/internal/api"
@@ -33,6 +34,7 @@ import (
 	"github.com/overfin/server/internal/config"
 	"github.com/overfin/server/internal/connector"
 	"github.com/overfin/server/internal/cookie"
+	"github.com/overfin/server/internal/copies"
 	"github.com/overfin/server/internal/emails"
 	"github.com/overfin/server/internal/files"
 	"github.com/overfin/server/internal/gpu"
@@ -825,6 +827,29 @@ func run(logger *slog.Logger) error {
 			},
 			Maker: previews.Maker{FFmpeg: os.Getenv("JELLYFIN_FFMPEG"), Busy: func() bool { return sh.tickets.Transcodes() > 0 }}}
 	}
+	// The copy index: every version as an MSFP copy, its file's headers
+	// read by Overfin with the image's ffprobe, in a pass of its own
+	// (package copies). Nobody sees it yet: players and peers still get
+	// Jellyfin's answers.
+	if ownPreviews() {
+		var layout func(string) (*wire.PreviewLayout, bool)
+		if sh.previews != nil {
+			layout = func(fp string) (*wire.PreviewLayout, bool) {
+				set, ok := sh.previews.Store.Get(fp)
+				if !ok {
+					return nil, false
+				}
+				return &wire.PreviewLayout{TileWidth: set.Width, TileHeight: set.Height, Columns: set.Columns, Rows: set.Rows,
+					IntervalMs: set.IntervalMs, TileCount: set.Count}, true
+			}
+		}
+		sh.copies = &copies.Keeper{DB: db, CopyKey: sh.keys.CopyID, EtagKey: sh.keys.Etag, Every: 30 * time.Minute, Logger: logger,
+			Prober: &describe.Prober{FFprobe: filepath.Join(filepath.Dir(os.Getenv("JELLYFIN_FFMPEG")), "ffprobe"), Frames: true},
+			Files: func(ctx context.Context, each func(jellyfin.VideoFile) bool) error {
+				return sh.jf.VideoFiles(ctx, gw.adminAuth(), each)
+			},
+			Libraries: libraryFolders, Layout: layout}
+	}
 	sh.texts = catalog.NewTexts(func(language string) catalog.TitleSource { return gw.textSource(language) }, db, logger,
 		100*time.Millisecond, 3*time.Second)
 	sh.titles = catalog.NewTitles(func() catalog.TitleSource { return gw.titleSource() }, db, logger,
@@ -850,6 +875,9 @@ func run(logger *slog.Logger) error {
 	}
 	if sh.previews != nil {
 		go sh.previews.Run(ctx) // it asks Jellyfin with the gateway's key
+	}
+	if sh.copies != nil {
+		go sh.copies.Run(ctx) // so does it
 	}
 	skipper.Jellyfin = func() (*jellyfin.Client, jellyfin.Auth, bool) { return sh.jf, gw.adminAuth(), true }
 	// The service account follows the configuration's admin key.
@@ -878,6 +906,7 @@ func run(logger *slog.Logger) error {
 		// titles that arrived leave the wishlists for the watchlists.
 		Read: func() {
 			sh.titles.Wake()
+			sh.copies.Wake() // a new episode's file is read at once
 			go func() {
 				if err := arrivals.Settle(ctx); err != nil {
 					logger.Error("settling arrived wishes failed", "err", err)
