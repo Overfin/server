@@ -70,6 +70,7 @@ func startOnA(t *testing.T, x *twoServers) (previewSession, string) {
 // offers them at its own playback's route, each sheet fetched from B and
 // re-encoded, and refuses sheets that aren't what B announced.
 func TestPeerPlaybackPreviews(t *testing.T) {
+	t.Skip("federation off until phase 7")
 	var standIn sheetStandIn
 	x := pairForPlayWith(t, standIn.wrap)
 
@@ -126,6 +127,7 @@ func TestPeerPlaybackPreviews(t *testing.T) {
 // A paired server without previews for a copy, or with previews outside
 // what MSFP allows, plays without them, as an older Overfin's do.
 func TestPeerPlaybackWithoutPreviews(t *testing.T) {
+	t.Skip("federation off until phase 7")
 	x := pairForPlay(t)
 	x.fakeB.setTrickplay(true, nil)
 	s, body := startOnA(t, x)

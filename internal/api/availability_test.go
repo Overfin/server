@@ -19,6 +19,7 @@ import (
 // 3.2). The control panel's setting off, only the first is given,
 // nameless.
 func TestTitleAvailability(t *testing.T) {
+	t.Skip("federation off until phase 7")
 	ctx := context.Background()
 	var stB, stA *store.Store
 	var b, a *msfp.Engine

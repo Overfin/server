@@ -126,6 +126,11 @@ func speaks(audio []string, language string) bool {
 // libraries or categories (paired servers' aren't among them); within its
 // ceiling and its hidden tags, by the title's (or its series') TMDB ID.
 func (l Library) peerSources(ctx context.Context, a *store.Access, ref store.TitleRef) ([]store.PeerSource, error) {
+	if !FederationOn {
+		// Off until plan phase 7: a peer's title kept from before isn't
+		// a source.
+		return nil, nil
+	}
 	if a.Limited() || ref.TMDB() == "" {
 		return nil, nil
 	}

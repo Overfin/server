@@ -103,6 +103,12 @@ func (sh *shared) federation(cfg *config.Config) *msfp.Engine {
 	f := &sh.fed
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if !api.FederationOn {
+		// Off on this build until plan phase 7 (api.FederationOn): no
+		// engine, as on a server without a site address.
+		sh.logger.Info("federation: off on this build until the federation phase")
+		return nil
+	}
 	address := federationAddress(cfg, sh.logger)
 	if eng := f.engine.Load(); eng != nil {
 		eng.SetDiscovery(cfg.Federation.Discovery)

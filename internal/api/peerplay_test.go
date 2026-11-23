@@ -158,6 +158,7 @@ func livePlaybacks(t *playback.Tickets) []*playback.Stream {
 // nothing personal, a restart under a 1-stream limit replaces the
 // playback there, and stopping on A ends it on B.
 func TestPlayFromPeer(t *testing.T) {
+	t.Skip("federation off until phase 7")
 	ctx := context.Background()
 	x := pairForPlay(t)
 	srvA, srvB, stB, onB := x.srvA, x.srvB, x.stB, x.onB
@@ -243,6 +244,7 @@ func TestPlayFromPeer(t *testing.T) {
 // playbacks here at once, both sides: A's viewer's stream stops (MSFP
 // playback, section 6.3).
 func TestPeerPlaybacksEndAtOnce(t *testing.T) {
+	t.Skip("federation off until phase 7")
 	ctx := context.Background()
 	x := pairForPlay(t)
 	play := func() peerSession {
@@ -298,6 +300,7 @@ func TestPeerPlaybacksEndAtOnce(t *testing.T) {
 // from B is an entry of the menu, "Films (B)" (or A's own name for it),
 // listing B's films; all titles list both films, each once.
 func TestPeerTitlesListed(t *testing.T) {
+	t.Skip("federation off until phase 7")
 	ctx := context.Background()
 	var stB, stA *store.Store
 	var b, a *msfp.Engine
@@ -391,6 +394,7 @@ func TestPeerTitlesListed(t *testing.T) {
 // B refusing a playback tells A why, and A its viewer: a title B can't
 // play isn't playable, B's limit for A reached is busy.
 func TestPeerRefusalsToldApart(t *testing.T) {
+	t.Skip("federation off until phase 7")
 	ctx := context.Background()
 	x := pairForPlay(t)
 	start := func() (int, string) {
@@ -420,6 +424,7 @@ func TestPeerRefusalsToldApart(t *testing.T) {
 // to be served whole as HLS; B can't serve it as one, so it isn't
 // playable (MSFP playback section 1, media section 1).
 func TestPeerCopyOfSeveralParts(t *testing.T) {
+	t.Skip("federation off until phase 7")
 	x := pairForPlay(t)
 	x.fakeB.mu.Lock()
 	x.fakeB.parts = 2
@@ -444,6 +449,7 @@ func TestPeerCopyOfSeveralParts(t *testing.T) {
 // B's host refusing A's play unsigned (a gateway's plain 429) is busy
 // for now to A's viewer, not "can't be played".
 func TestPeerPlayUnansweredIsBusy(t *testing.T) {
+	t.Skip("federation off until phase 7")
 	x := pairForPlayWith(t, func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/api/v1/federation/play" {
@@ -465,6 +471,7 @@ func TestPeerPlayUnansweredIsBusy(t *testing.T) {
 // B says it can't be called (MSFP core section 7.5): A connects to it no
 // more, its viewers' playback from B among them, which ends at once.
 func TestRemotePlaybackEndsWhenPeerUncallable(t *testing.T) {
+	t.Skip("federation off until phase 7")
 	ctx := context.Background()
 	x := pairForPlay(t)
 	status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
@@ -539,6 +546,7 @@ func waitFor(t *testing.T, what string, ok func() bool) {
 // once: B's live view (the control panel's Now playing) shows where the
 // paired server's viewer is.
 func TestPeerProgressShownByOwner(t *testing.T) {
+	t.Skip("federation off until phase 7")
 	x := pairForPlay(t)
 	s := x.playPeer(t)
 	onB := func(positionMs int64, paused bool) func() bool {
@@ -568,6 +576,7 @@ func TestPeerProgressShownByOwner(t *testing.T) {
 // (stop): the viewer's player stopping, A's idle cleanup, the viewer
 // signing out.
 func TestPeerPlaybackEndsWithViewer(t *testing.T) {
+	t.Skip("federation off until phase 7")
 	x := pairForPlay(t)
 	s := x.playPeer(t)
 	if status, _ := post(t, x.srvA, "/api/v1/playback/"+s.ID+"/stop", `{"positionMs":5000}`); status != 204 {
@@ -597,6 +606,7 @@ func TestPeerPlaybackEndsWithViewer(t *testing.T) {
 // expiry, the operator's stop the operator's; A's viewer's player stops
 // at its next report.
 func TestPeerPlaybackEndedByOwner(t *testing.T) {
+	t.Skip("federation off until phase 7")
 	x := pairForPlay(t)
 	s := x.playPeer(t)
 	x.pbB.EndIdle(time.Now().Add(api.IdleTimeout + time.Minute))
@@ -622,6 +632,7 @@ func TestPeerPlaybackEndedByOwner(t *testing.T) {
 // pairing's transcodes (msfp.Slot.Transcoding): with one left, it plays
 // on; with none, B stops it.
 func TestPeerRemuxThatReencodes(t *testing.T) {
+	t.Skip("federation off until phase 7")
 	for _, transcodes := range []int{1, 0} {
 		t.Run(fmt.Sprint("transcodes=", transcodes), func(t *testing.T) {
 			ctx := context.Background()

@@ -168,6 +168,7 @@ func TestFederationUnavailable(t *testing.T) {
 // Sharing from the panels: A offers Films to B; B sees it and wants it;
 // each list counts it; a server not paired yet has no sharing.
 func TestSharingPanel(t *testing.T) {
+	t.Skip("federation off until phase 7")
 	ctx := context.Background()
 	a, fa, dbA := fedPanel(t, "A")
 	b, fb, _ := fedPanel(t, "B")
