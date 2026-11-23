@@ -101,18 +101,6 @@ type fakeJellyfin struct {
 	parts int
 }
 
-func (f *fakeJellyfin) setRemux(remux, reencodes bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.remux, f.reencodes = remux, reencodes
-}
-
-func (f *fakeJellyfin) setTrickplay(none bool, set map[string]int) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.noTrickplay, f.trickplay = none, set
-}
-
 func (f *fakeJellyfin) setDirect(on bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
