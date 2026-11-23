@@ -99,9 +99,11 @@ type MediaStream struct {
 	IsForced             bool
 	IsHearingImpaired    bool
 	IsTextSubtitleStream bool
-	Width                int
-	Height               int
-	VideoRange           string
+	// IsExternal: a subtitle file beside the video, not one of its streams.
+	IsExternal bool
+	Width      int
+	Height     int
+	VideoRange string
 	// For the player's information: SDR, HDR10, HDR10Plus, DOVIWithHDR10…
 	VideoRangeType string
 	Profile        string

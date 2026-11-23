@@ -64,6 +64,19 @@ type IndexItem struct {
 	LibraryId  string
 	FolderName string
 	FileName   string
+	// Segments are a film's or an episode's media segments (skip
+	// markers), by media source; nil when the plugin doesn't send them
+	// (before 0.9.0), empty when it has none.
+	Segments []IndexSegment
+}
+
+// IndexSegment is one of an item's media segments, for one of its media
+// sources: Jellyfin's type (Intro, Outro, Recap, Preview, Commercial,
+// Unknown) and its times, in ticks.
+type IndexSegment struct {
+	SourceId             string
+	Type                 string
+	StartTicks, EndTicks int64
 }
 
 // IndexPage is a page of the index's items, and where the next one starts

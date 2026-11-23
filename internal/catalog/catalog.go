@@ -15,11 +15,12 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/jellyfin"
-	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/textclean"
@@ -435,30 +436,19 @@ func convert(raw jellyfin.IndexItem) (store.CatalogItem, bool) {
 		it.CommunityRating = r
 	}
 	// The languages of a film's or an episode's audio, for telling which
-	// title it is (identify.Match): two letters each, once.
-	for _, s := range raw.MediaStreams {
-		if l := lang.Base(s.Language); s.Type == "Audio" && l != "" && !slices.Contains(it.AudioLanguages, l) &&
-			len(it.AudioLanguages) < maxAudioLanguages {
-			it.AudioLanguages = append(it.AudioLanguages, l)
-		}
-	}
+	// title it is (identify.Match), and as the player lists them, for its
+	// title's sources; once Overfin read its file, its copies' instead
+	// (package copies).
+	it.AudioLanguages, it.AudioTags, it.SubtitleTags = tracks.Languages(raw.MediaStreams)
 	// Its picture, named as the player names versions.
 	if v := playback.Describe(jellyfin.MediaSource{MediaStreams: raw.MediaStreams}); v != "Version" {
 		it.Video = v
 	}
 	// And as paired servers are told of it.
 	it.Height, it.HDR = playback.Picture(jellyfin.MediaSource{MediaStreams: raw.MediaStreams})
-	// Its languages as the player lists them, for its title's sources.
-	audio, subtitles, _ := tracks.Read(raw.MediaStreams)
-	for _, t := range audio {
-		if t.Role == tracks.Main && t.Language != "" && !slices.Contains(it.AudioTags, t.Language) && len(it.AudioTags) < maxAudioLanguages {
-			it.AudioTags = append(it.AudioTags, t.Language)
-		}
-	}
-	for _, t := range subtitles {
-		if t.Language != "" && !slices.Contains(it.SubtitleTags, t.Language) && len(it.SubtitleTags) < maxAudioLanguages {
-			it.SubtitleTags = append(it.SubtitleTags, t.Language)
-		}
+	// Its skip markers by version, when the plugin sends them.
+	if raw.Segments != nil {
+		it.SegmentsRead, it.Segments = true, segments(raw.Segments)
 	}
 	it.PrimaryTag = matching(imageTag, raw.ImageTags["Primary"])
 	it.ThumbTag = matching(imageTag, raw.ImageTags["Thumb"])
@@ -488,5 +478,19 @@ func matching(re *regexp.Regexp, s string) string {
 	return ""
 }
 
-// maxAudioLanguages is how many audio languages of a file the index keeps.
-const maxAudioLanguages = 12
+// segments are the plugin's skip markers (Jellyfin's media segments) as
+// MSFP's, by media source: kinds in lower case, Unknown left out, each
+// ending after it starts.
+func segments(raw []jellyfin.IndexSegment) map[string][]wire.CopySegment {
+	out := map[string][]wire.CopySegment{}
+	for _, sg := range raw {
+		source, err := jellyfin.NormalizeID(sg.SourceId)
+		kind := strings.ToLower(sg.Type)
+		if err != nil || kind == "" || kind == "unknown" || !wire.Token(kind) || sg.StartTicks < 0 || sg.EndTicks <= sg.StartTicks ||
+			len(out[source]) == wire.MaxSegments {
+			continue
+		}
+		out[source] = append(out[source], wire.CopySegment{Kind: kind, StartMs: sg.StartTicks / 10_000, EndMs: sg.EndTicks / 10_000})
+	}
+	return out
+}

@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/seal"
 	"github.com/overfin/server/internal/store"
@@ -290,5 +291,21 @@ func TestConvert(t *testing.T) {
 	// And as paired servers are told of it.
 	if it.Height != 2160 || !slices.Equal(it.HDR, []string{"hdr10"}) {
 		t.Errorf("picture %d %v", it.Height, it.HDR)
+	}
+	// Skip markers, when the plugin sends them: by version, MSFP's kinds,
+	// Unknown and empty ones left out; none sent, none read.
+	if it.SegmentsRead {
+		t.Error("segments read when none were sent")
+	}
+	it, _ = convert(jellyfin.IndexItem{RawItem: jellyfin.RawItem{Id: id(1), Type: "Movie", Name: "Dune"}, Segments: []jellyfin.IndexSegment{
+		{SourceId: id(1), Type: "Intro", StartTicks: 0, EndTicks: 600_000_000},
+		{SourceId: id(2), Type: "Outro", StartTicks: 1_000_000_000, EndTicks: 1_200_000_000},
+		{SourceId: id(1), Type: "Unknown", StartTicks: 0, EndTicks: 10},
+		{SourceId: id(1), Type: "Recap", StartTicks: 50, EndTicks: 50},
+		{SourceId: "not an ID", Type: "Intro", StartTicks: 0, EndTicks: 10},
+	}})
+	if !it.SegmentsRead || len(it.Segments) != 2 || len(it.Segments[id(1)]) != 1 || it.Segments[id(1)][0] != (wire.CopySegment{Kind: "intro", EndMs: 60_000}) ||
+		it.Segments[id(2)][0].Kind != "outro" {
+		t.Errorf("segments: %+v", it.Segments)
 	}
 }

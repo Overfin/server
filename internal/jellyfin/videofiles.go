@@ -20,6 +20,14 @@ type VideoFile struct {
 	// NoVideo: Jellyfin read its streams and none is a video (a broken
 	// file, sound only); false while it hasn't read them.
 	NoVideo bool
+	// Container is Jellyfin's name of its container ("mkv", "mov,mp4…").
+	Container string
+	// Streams are its streams as Jellyfin read them, the subtitle files
+	// beside it among them (IsExternal); nil while it hasn't.
+	Streams []MediaStream
+	// Parts are a stacked film's files (CD1, CD2): its first is Path; 1
+	// for one file.
+	Parts int
 }
 
 // videoFilesPage is how many items a page of VideoFiles asks for.
@@ -40,8 +48,10 @@ func (c *Client) VideoFiles(ctx context.Context, admin Auth, each func(VideoFile
 					IsRemote     bool
 					Size         int64
 					RunTimeTicks int64
-					MediaStreams []struct{ Type string }
+					Container    string
+					MediaStreams []MediaStream
 				}
+				PartCount *int
 				Trickplay map[string]map[string]struct {
 					Width, Height, TileWidth, TileHeight, ThumbnailCount, Interval int
 				}
@@ -64,7 +74,11 @@ func (c *Client) VideoFiles(ctx context.Context, admin Auth, each func(VideoFile
 				if err != nil || ms.Path == "" || ms.IsRemote || (ms.Protocol != "" && ms.Protocol != "File") {
 					continue
 				}
-				f := VideoFile{ItemID: item, SourceID: source, Path: ms.Path, Size: ms.Size, RunTimeTicks: ms.RunTimeTicks}
+				f := VideoFile{ItemID: item, SourceID: source, Path: ms.Path, Size: ms.Size, RunTimeTicks: ms.RunTimeTicks,
+					Container: ms.Container, Streams: ms.MediaStreams, Parts: 1}
+				if it.PartCount != nil && *it.PartCount > 1 {
+					f.Parts = *it.PartCount
+				}
 				f.NoVideo = len(ms.MediaStreams) > 0
 				for _, st := range ms.MediaStreams {
 					if st.Type == "Video" {

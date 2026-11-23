@@ -231,3 +231,32 @@ func Find(ts []Track, index int) (Track, bool) {
 	}
 	return ts[i], true
 }
+
+// MaxLanguages is how many languages of each kind a file's Languages keeps.
+const MaxLanguages = 12
+
+// Languages are a file's languages as the catalog keeps them: its audio
+// streams' languages, two letters each (for telling which title it is),
+// then those of its main audio tracks and of its subtitles as Read lists
+// them (with a region when known, "fr-CA"; forced subtitles aside), each
+// once, at most MaxLanguages of each.
+func Languages(streams []jellyfin.MediaStream) (audioLanguages, audioTags, subtitleTags []string) {
+	for _, s := range streams {
+		if l := lang.Base(s.Language); s.Type == "Audio" && l != "" && !slices.Contains(audioLanguages, l) &&
+			len(audioLanguages) < MaxLanguages {
+			audioLanguages = append(audioLanguages, l)
+		}
+	}
+	audio, subtitles, _ := Read(streams)
+	for _, t := range audio {
+		if t.Role == Main && t.Language != "" && !slices.Contains(audioTags, t.Language) && len(audioTags) < MaxLanguages {
+			audioTags = append(audioTags, t.Language)
+		}
+	}
+	for _, t := range subtitles {
+		if t.Language != "" && !slices.Contains(subtitleTags, t.Language) && len(subtitleTags) < MaxLanguages {
+			subtitleTags = append(subtitleTags, t.Language)
+		}
+	}
+	return audioLanguages, audioTags, subtitleTags
+}
