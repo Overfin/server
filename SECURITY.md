@@ -140,8 +140,10 @@ anyone. Paired servers are not trusted at all (rule 94).
     subtitle track inside remuxed and transcoded streams, and drops
     subtitle entries from playlists. Subtitles are never burned into the
     picture for this server's players; for a paired server's viewer, only
-    with the operator's burn-in switch (off by default; no delivery burns
-    any yet).
+    with the operator's burn-in switch (`federation.burn_in`, off by
+    default; no delivery burns any yet, so one asked is refused). DVD and
+    DVB subtitle pictures are never served apart, to this server's players
+    or to paired servers (whose answers list them as not served apart).
     - Exception: a file played as it is (direct play, or the file delivery
       Overfin serves from disk) is sent unchanged,
       with the subtitles, attached files and tags inside it; rules 15, 16
@@ -304,6 +306,12 @@ anyone. Paired servers are not trusted at all (rule 94).
     paired server's, 256: the MSFP engine's), never reused, looked up by
     its hash (so how long a lookup takes says nothing of it), and never
     written to a log.
+    - A paired server's download (its ticket 24 hours, without the idle
+      rule, its reads paced at the speed cap) or scan (10 minutes, a
+      bounded number of bytes) is started only within the download and
+      scan limits of its pairing or of its group's pool, which the
+      operator sets for each, never for the whole server: none by
+      default.
 
 ### Limits
 
@@ -629,8 +637,14 @@ anyone. Paired servers are not trusted at all (rule 94).
     stranger gets a plain 404. A server's key changes only as rules 137
     and 138 say; its address, as rule 139 says.
 96. Each side shares only libraries it offers and the other wants: titles
-    by their TMDB keys, with their languages, the other episodes a file
-    holds and the IDs TMDB gives them, never files, paths or people. Every
+    by their TMDB keys (episodes with the other IDs TMDB gives them; films
+    and series with none), the other episodes a file holds, and each film
+    and episode with its copies as MSFP describes them: facts the copy
+    index read from the file (its media type, size, length, codecs,
+    picture, tracks with their languages and flags, chapters' cleaned
+    names), its skip markers, its previews' layout and an etag keyed by
+    Overfin's secret; never files, paths, file or track names, or people.
+    A copy of several files isn't offered. Every
     ID a server gives a peer (a library's, a version's, a playback's, a
     ticket) is its own, random or a keyed MAC, never Jellyfin's or one a
     peer could work out from Jellyfin's, a file or a name. Playing
@@ -643,6 +657,22 @@ anyone. Paired servers are not trusted at all (rule 94).
     never the viewer's address, browser or identity; and of that server,
     only its remote gateway when it has one, its own machine's address
     otherwise (rule 132).
+    - Every media address is built from a ticket, on both sides: the
+      viewer's server builds the paired server's from that server's
+      stream root and the ticket its answer gave (the MSFP engine), and
+      gives its player a ticket of its own, under its own routes; no
+      address an answer holds is ever fetched. A paired server's copies
+      reach this server's players as they were sent, under IDs of this
+      server's (a keyed MAC of the pairing, the title and the version).
+    - A paired server's file is relayed by byte ranges; a read cut there
+      goes on under a new playback of the same copy, only while its etag
+      is the same. Its seek-bar previews are fetched only for a copy
+      someone opened (during its play, or under a previews ticket of this
+      server's, rule 45), never ahead for a library, and re-encoded.
+    - What a paired server learns of a viewer is what the play asks: the
+      delivery and the codecs chosen tell the kind of device (HEVC with
+      the range kept: one that shows HDR), and a player's fallback ladder
+      can make several plays for one viewing. Nothing else.
 98. A server never acts for another beyond what was shared, and never
     hands one paired server's data to another.
 99. Servers pair over `https://` only; a plain `http://` address is
@@ -1059,7 +1089,10 @@ anyone. Paired servers are not trusted at all (rule 94).
      get the original file" (`limits.original_file`) is on, the default.
      Whoever is given it can save the original through the ticket, more
      often than with Jellyfin's direct play; a paired server's viewer goes
-     by MSFP's file delivery and the pairing's limits.
+     by MSFP's file delivery and the pairing's limits. A paired server's
+     play goes through the same executor and the same checks, the copy the
+     one its catalog gave, its handle the copy index's ID; Jellyfin is
+     never asked about it but through the plugin's deliveries.
 
 ## Deployment
 
