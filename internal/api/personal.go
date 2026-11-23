@@ -37,7 +37,7 @@ func (pb Playback) record(ctx context.Context, s *playback.Stream, positionMs in
 	if strings.HasPrefix(s.ProfileID, playback.PeerPrefix) {
 		return
 	}
-	duration := s.Decision.Source.RunTimeTicks / 10_000
+	duration := s.DurationMs()
 	if duration <= 0 {
 		return
 	}

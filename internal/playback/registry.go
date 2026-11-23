@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/msfp-io/msfp-go/wire"
+	"github.com/overfin/server/internal/delivery"
 	"github.com/overfin/server/internal/ids"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/tracks"
@@ -28,7 +30,14 @@ type Stream struct {
 	ItemID        string // Jellyfin IDs
 	SourceID      string
 	PlaySessionID string
-	Decision      Decision
+	// Decision is how Jellyfin decided to serve it (the older way);
+	// Delivery, for a playback the executor serves (package delivery):
+	// what it makes of the copy, and then Decision is empty.
+	Decision Decision
+	Delivery *delivery.Started
+	// MediaPlaylist is a delivery's media playlist as served (its
+	// segments' names neutral, their URLs in files).
+	MediaPlaylist []byte
 	Auth          jellyfin.Auth // to report to Jellyfin after the request is gone
 	AudioIndex    *int
 	SubtitleIndex *int
@@ -101,8 +110,13 @@ func (s *Stream) File(name string) (Upstream, bool) {
 }
 
 // TextSubtitle reports whether index is a text subtitle track of the
-// stream's version, the only kind served as WebVTT.
+// stream's version, the only kind served as WebVTT. For a delivery, index
+// is the copy's track number (s<n>).
 func (s *Stream) TextSubtitle(index int) bool {
+	if d := s.Delivery; d != nil {
+		t, ok := d.Subtitle("s" + strconv.Itoa(index))
+		return ok && wire.ServedForms[t.Format].Form == wire.FormText
+	}
 	for _, ms := range s.Decision.Source.MediaStreams {
 		if ms.Type == "Subtitle" && ms.Index == index && ms.IsTextSubtitleStream {
 			return true
@@ -115,12 +129,48 @@ func (s *Stream) TextSubtitle(index int) bool {
 // (PGS) of the stream's version, served as the track itself, checked
 // (CheckPGS).
 func (s *Stream) PictureSubtitle(index int) bool {
+	if d := s.Delivery; d != nil {
+		t, ok := d.Subtitle("s" + strconv.Itoa(index))
+		return ok && tracks.IsPGS(t.Format)
+	}
 	for _, ms := range s.Decision.Source.MediaStreams {
 		if ms.Type == "Subtitle" && ms.Index == index && !ms.IsTextSubtitleStream && tracks.IsPGS(ms.Codec) {
 			return true
 		}
 	}
 	return false
+}
+
+// JellyfinSubtitle is Jellyfin's index of a subtitle track for the plugin's
+// calls: the track's own number, or for a delivery the copy's track (s<n>)
+// as its map says; false when it has none.
+func (s *Stream) JellyfinSubtitle(index int) (int, bool) {
+	if d := s.Delivery; d != nil {
+		return d.JellyfinIndex("s" + strconv.Itoa(index))
+	}
+	return index, true
+}
+
+// DurationMs is how long the version playing is; 0 when not known.
+func (s *Stream) DurationMs() int64 {
+	if d := s.Delivery; d != nil {
+		return d.Plan.Copy.Facts.DurationMs
+	}
+	return s.Decision.Source.RunTimeTicks / 10_000
+}
+
+// converting says whether the stream takes a transcode slot: its
+// delivery converts the video (a remux, or only the audio converted, is
+// a stream only), or Jellyfin decided a transcode, or a remux turned out
+// to re-encode. The registry's lock is held.
+func (s *Stream) converting() bool {
+	if s.reencodes {
+		return true
+	}
+	if d := s.Delivery; d != nil {
+		return d.Transcodes()
+	}
+	return s.Decision.Method == "transcode"
 }
 
 // PlayMethod is the stream's method in Jellyfin's terms.
@@ -241,10 +291,10 @@ func (t *Tickets) Admit(s *Stream, startTicks int64, now time.Time, lim Limits, 
 	}
 	// Every transcode taken: refused before anything stops, counting those
 	// the playbacks it replaces would free.
-	if s.Decision.Method == "transcode" && lim.MaxTranscodes > 0 {
+	if s.converting() && lim.MaxTranscodes > 0 {
 		busy := t.transcodes()
 		for _, old := range replaced {
-			if old.reencodes || old.Decision.Method == "transcode" {
+			if old.converting() {
 				busy--
 			}
 		}
@@ -252,10 +302,10 @@ func (t *Tickets) Admit(s *Stream, startTicks int64, now time.Time, lim Limits, 
 			return nil, ErrServerBusy
 		}
 	}
-	if s.Decision.Method == "transcode" && lim.AccountTranscodes != nil {
+	if s.converting() && lim.AccountTranscodes != nil {
 		mine := 0
 		for _, old := range t.forAccount(s.AccountID) {
-			if old.reencodes || old.Decision.Method == "transcode" {
+			if old.converting() {
 				mine++
 			}
 		}
@@ -400,9 +450,11 @@ func (t *Tickets) forAccount(accountID string) []*Stream {
 // Live is a playback as it stands now, for the control panel's live view:
 // read from memory when the page asks, never kept (rule 60).
 type Live struct {
-	Stream     *Stream
-	Title      string // as Describe set it; "" while starting
-	Method     string // as Method says
+	Stream *Stream
+	Title  string // as Describe set it; "" while starting
+	Method string // as Method says
+	// Transcodes: it takes a transcode slot (its video converted).
+	Transcodes bool
 	Started    time.Time
 	PositionMs int64
 	Paused     bool
@@ -415,7 +467,7 @@ func (t *Tickets) Live(now time.Time) []Live {
 	var out []Live
 	for _, s := range t.byID {
 		if t.live(s, now) {
-			out = append(out, Live{Stream: s, Title: s.title, Method: t.method(s), Started: s.started,
+			out = append(out, Live{Stream: s, Title: s.title, Method: t.method(s), Transcodes: s.converting(), Started: s.started,
 				PositionMs: s.positionTicks / 10_000, Paused: s.paused})
 		}
 	}
@@ -448,10 +500,22 @@ func (t *Tickets) Method(s *Stream) string {
 }
 
 func (t *Tickets) method(s *Stream) string {
-	if s.reencodes {
+	switch {
+	case s.reencodes:
 		return "transcode"
+	case s.Delivery != nil:
+		return s.Delivery.Method()
 	}
 	return s.Decision.Method
+}
+
+// SetDelivery records what a delivery made, once the playback it was
+// counted for is registered: the delivery started, and its media
+// playlist as served.
+func (t *Tickets) SetDelivery(s *Stream, d *delivery.Started, media []byte) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s.Delivery, s.MediaPlaylist = d, media
 }
 
 // Reencodes records that a remux turned out to re-encode its video: it
@@ -462,8 +526,8 @@ func (t *Tickets) Reencodes(s *Stream) {
 	s.reencodes = true
 }
 
-// Transcodes counts playbacks that make Jellyfin re-encode the media;
-// repackaging (remux) costs little and isn't counted.
+// Transcodes counts playbacks that convert the video; repackaging
+// (remux) and converting the audio alone cost little and aren't counted.
 func (t *Tickets) Transcodes() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -473,7 +537,7 @@ func (t *Tickets) Transcodes() int {
 func (t *Tickets) transcodes() int {
 	n := 0
 	for _, s := range t.byID {
-		if s.Decision.Method == "transcode" || s.reencodes {
+		if s.converting() {
 			n++
 		}
 	}

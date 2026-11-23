@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/msfp-io/msfp-go"
+	"github.com/overfin/server/internal/delivery"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/library"
@@ -38,7 +39,11 @@ type Playback struct {
 	// take; Engine, federation now, the MSFP engine (nil without it).
 	PeerTranscodeReserve int
 	Engine               func() *msfp.Engine
-	Logger               *slog.Logger
+	// Delivery carries out plays of the copy index's copies (package
+	// delivery): the file from disk, or a remux or a transcode by the
+	// companion plugin. nil without it.
+	Delivery *delivery.Executor
+	Logger   *slog.Logger
 }
 
 func (Playback) Name() string { return "playback" }
@@ -79,7 +84,9 @@ func RunJanitor(ctx context.Context, current func() Playback) {
 		case <-ctx.Done():
 			return
 		case now := <-tick.C:
-			current().EndIdle(now)
+			pb := current()
+			pb.EndIdle(now)
+			pb.PingDeliveries(now)
 		}
 	}
 }
@@ -88,6 +95,30 @@ func RunJanitor(ctx context.Context, current func() Playback) {
 func (pb Playback) EndIdle(now time.Time) {
 	for _, s := range pb.Tickets.Idle(now, IdleTimeout) {
 		pb.end(s, "expired", "")
+	}
+}
+
+// PingDeliveries keeps the plugin's deliveries of live playbacks alive
+// (its watchdog stops one after two minutes without a segment read or a
+// ping: a paused player reads nothing); a delivery gone there ends its
+// playback here.
+func (pb Playback) PingDeliveries(now time.Time) {
+	if pb.Delivery == nil {
+		return
+	}
+	for _, s := range pb.Tickets.Where(func(s *playback.Stream) bool { return s.Delivery != nil && s.Delivery.ID != "" }) {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			err := pb.Delivery.Ping(ctx, s.Delivery)
+			switch {
+			case errors.Is(err, delivery.ErrGone):
+				pb.Logger.Info("a playback's delivery ended at the plugin: the playback ends", "playback", s.ID)
+				pb.end(s, "expired", "")
+			case err != nil:
+				pb.Logger.Warn("could not ping a playback's delivery", "playback", s.ID, "err", err)
+			}
+		}()
 	}
 }
 
@@ -131,6 +162,21 @@ func (pb Playback) stopped(s *playback.Stream, reason string) {
 				}
 			}
 		}
+	}
+	if s.Delivery != nil {
+		// The executor's: no Jellyfin session (rule 5); the plugin's
+		// delivery, if any, is stopped (a file has nothing to stop).
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			pb.record(ctx, s, snap.PositionTicks/10_000, true)
+			if pb.Delivery != nil {
+				if err := pb.Delivery.Stop(ctx, s.Delivery); err != nil {
+					pb.Logger.Warn("could not stop a playback's delivery", "playback", s.ID, "err", err)
+				}
+			}
+		}()
+		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -287,6 +333,12 @@ func (pb Playback) progress(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	if s.Delivery != nil {
+		// What the executor's delivery makes was checked when it started;
+		// no Jellyfin session to report to.
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if pb.Tickets.Method(s) == "remux" {
 		s.Checked.Do(func() { go pb.checkRemux(s) })
 	}
@@ -311,7 +363,7 @@ func (pb Playback) stop(w http.ResponseWriter, r *http.Request) {
 	if s, ended, ok := pb.Tickets.ByID(r.PathValue("id"), p.ID, time.Now()); ok && ended == nil {
 		position := req.PositionMs
 		if req.Ended { // played to the end, whatever the last position said
-			position = max(position, s.Decision.Source.RunTimeTicks/10_000)
+			position = max(position, s.DurationMs())
 		}
 		pb.Tickets.Progress(s, position*10_000, false, time.Now())
 		pb.end(s, "stopped", "")
@@ -1007,6 +1059,15 @@ func (pb Playback) chooseTracks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st := l.Provisioner.Store
+	if d := s.Delivery; d != nil {
+		// The copy's tracks, by their IDs.
+		if err := pb.keepDeliveryTracks(ctx, s, d, key, req.AudioTrack, req.SubtitleTrack); err != nil {
+			l.storeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	audio, subtitles, forced := tracks.Read(s.Decision.Source.MediaStreams)
 	if audioIndex >= 0 {
 		if t, ok := tracks.Find(audio, audioIndex); ok && t.Language != "" && t.Role == tracks.Main {
@@ -1025,6 +1086,32 @@ func (pb Playback) chooseTracks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// keepDeliveryTracks keeps, for a delivery's playback, the language of
+// the audio (the film's own sound only) or of the subtitles chosen (none
+// for ""; a forced track changes nothing), by the copy's track IDs.
+func (pb Playback) keepDeliveryTracks(ctx context.Context, s *playback.Stream, d *delivery.Started, key string, audio, subtitle *string) error {
+	st := pb.Library.Provisioner.Store
+	if audio != nil {
+		for _, t := range d.Plan.Copy.Facts.AudioTracks {
+			if t.ID == *audio && t.Language != "" && t.Role == "" {
+				if err := st.SetTitleAudio(ctx, s.ProfileID, key, t.Language); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	switch {
+	case subtitle == nil:
+	case *subtitle == "":
+		return st.SetTitleSubtitles(ctx, s.ProfileID, key, "")
+	default:
+		if t, ok := d.Subtitle(*subtitle); ok && t.Language != "" && !t.Forced {
+			return st.SetTitleSubtitles(ctx, s.ProfileID, key, t.Language)
+		}
+	}
+	return nil
 }
 
 // openArgs is what opening a copy needs: the request as checked, the copy,

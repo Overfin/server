@@ -166,6 +166,10 @@ func (s Stream) serve(w http.ResponseWriter, r *http.Request) {
 		s.fetchRemote(w, r, st, path)
 		return
 	}
+	if st.Delivery != nil {
+		s.serveDelivery(w, r, st, *a, name)
+		return
+	}
 	dec := st.Decision
 	switch {
 	case name == "file" && dec.Protocol == "file":
@@ -365,9 +369,9 @@ func subtitlePart(r *http.Request) (int, bool) {
 	return n, true
 }
 
-// stretch fetches one stretch of a subtitle track of this server's own
-// playback from Overfin's plugin, or answers the error itself (nil). The
-// caller holds a subtitle slot.
+// stretch fetches one stretch of a subtitle track (Jellyfin's index) of
+// this server's own playback from Overfin's plugin, or answers the error
+// itself (nil). The caller holds a subtitle slot.
 func (s Stream) stretch(w http.ResponseWriter, r *http.Request, st *playback.Stream, index, part, limit int) []byte {
 	l := s.Playback.Library
 	if l.Service == nil {
@@ -407,7 +411,8 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 		s.fetchRemote(w, r, st, msfp.MediaPath{Kind: msfp.MediaSubtitles, Track: track, Part: part})
 		return
 	}
-	if !st.TextSubtitle(index) {
+	jfIndex, mapped := st.JellyfinSubtitle(index)
+	if !st.TextSubtitle(index) || !mapped {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -417,7 +422,7 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 	}
 	free = sync.OnceFunc(free)
 	defer free()
-	body := s.stretch(w, r, st, index, part, wire.MaxWebVTT)
+	body := s.stretch(w, r, st, jfIndex, part, wire.MaxWebVTT)
 	if body == nil {
 		return
 	}
@@ -459,7 +464,8 @@ func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
 		s.fetchRemote(w, r, st, msfp.MediaPath{Kind: msfp.MediaPictures, Track: track, Part: part})
 		return
 	}
-	if !st.PictureSubtitle(index) {
+	jfIndex, mapped := st.JellyfinSubtitle(index)
+	if !st.PictureSubtitle(index) || !mapped {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -469,7 +475,7 @@ func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
 	}
 	free = sync.OnceFunc(free)
 	defer free()
-	body := s.stretch(w, r, st, index, part, wire.MaxPGS)
+	body := s.stretch(w, r, st, jfIndex, part, wire.MaxPGS)
 	if body == nil {
 		return
 	}

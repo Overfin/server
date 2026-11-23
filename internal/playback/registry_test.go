@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/overfin/server/internal/delivery"
 	"github.com/overfin/server/internal/jellyfin"
 )
 
@@ -158,5 +159,41 @@ func TestAdmit(t *testing.T) {
 	}
 	if _, err := tk.Admit(&Stream{AccountID: "acct_a", ProfileID: "prof_a"}, 0, now, Limits{MaxStreams: 1, RefuseOverLimit: true}, ""); err != ErrStreamLimit {
 		t.Errorf("refusing: %v", err)
+	}
+}
+
+// A delivery takes a transcode slot only when it converts the video: a
+// remux, and one converting the audio alone, are streams (D8, revised).
+func TestDeliveryCounting(t *testing.T) {
+	tk := NewTickets(time.Hour)
+	now := time.Now()
+	lim := Limits{MaxTranscodes: 1}
+	with := func(kind string, video, audio bool) *Stream {
+		return &Stream{AccountID: "acct_" + kind, ProfileID: "prof", SessionID: "sess",
+			Delivery: &delivery.Started{Plan: &delivery.Plan{Kind: kind, VideoConverted: video, AudioConverted: audio}}}
+	}
+	video := with(delivery.KindTranscode, true, true)
+	if _, err := tk.Admit(video, 0, now, lim, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tk.Admit(with(delivery.KindTranscode, true, false), 0, now, lim, ""); err != ErrServerBusy {
+		t.Errorf("a second converted picture: %v", err)
+	}
+	audioOnly := with(delivery.KindTranscode, false, true)
+	for _, s := range []*Stream{with(delivery.KindRemux, false, false), audioOnly, with(delivery.KindFile, false, false)} {
+		if _, err := tk.Admit(s, 0, now, lim, ""); err != nil {
+			t.Errorf("%s: %v", s.Delivery.Plan.Kind, err)
+		}
+	}
+	if n := tk.Transcodes(); n != 1 {
+		t.Errorf("transcodes: %d", n)
+	}
+	if m := tk.Method(audioOnly); m != "transcode" {
+		t.Errorf("audio only: method %s", m)
+	}
+	for _, l := range tk.Live(now) {
+		if l.Transcodes != (l.Stream == video) {
+			t.Errorf("live: %s transcodes %v", l.Stream.Delivery.Plan.Kind, l.Transcodes)
+		}
 	}
 }

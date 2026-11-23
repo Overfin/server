@@ -56,6 +56,9 @@ func TestLoadValid(t *testing.T) {
 	if len(cfg.Identity.Proxies) != 2 {
 		t.Errorf("parsed %d proxies, want 2", len(cfg.Identity.Proxies))
 	}
+	if cfg.Limits.OriginalFile != "on" {
+		t.Errorf("players may get the original file by default: %q", cfg.Limits.OriginalFile)
+	}
 }
 
 // Wishes that went to Overswell, Overtide's adding while it was a separate
@@ -83,6 +86,11 @@ func TestLoadRejects(t *testing.T) {
 		env     map[string]string
 		wantErr string
 	}{
+		{
+			name:    "original file neither on nor off",
+			file:    goodFile + "\n[limits]\noriginal_file = \"yes\"\n",
+			wantErr: "limits.original_file",
+		},
 		{
 			name:    "misspelled key",
 			file:    goodFile + "\n[limits]\nmax_stream_per_account = 3\n",

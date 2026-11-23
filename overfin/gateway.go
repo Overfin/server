@@ -22,6 +22,7 @@ import (
 	"github.com/overfin/server/internal/config"
 	"github.com/overfin/server/internal/connector"
 	"github.com/overfin/server/internal/copies"
+	"github.com/overfin/server/internal/delivery"
 	"github.com/overfin/server/internal/emails"
 	"github.com/overfin/server/internal/feature"
 	"github.com/overfin/server/internal/gpu"
@@ -62,7 +63,10 @@ type shared struct {
 	images    *images.Pipeline
 	previews  *previews.Keeper // nil unless Overfin makes previews itself
 	copies    *copies.Keeper   // nil unless Overfin runs next to its Jellyfin
-	tickets   *playback.Tickets
+	// delivery carries out plays of the copy index's copies; nil with
+	// copies.
+	delivery *delivery.Executor
+	tickets  *playback.Tickets
 	// folders remembers which library items the index doesn't hold are in.
 	folders *api.FolderCache
 	// service is Overfin's one Jellyfin account, shared by everything: a
@@ -248,7 +252,16 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 	pb := api.Playback{Library: lib, Tickets: sh.tickets,
 		MaxBitrateKbps:  cfg.Limits.MaxBitrateKbps,
 		MaxTranscodes:   cfg.Limits.MaxTranscodesTotal,
-		RefuseOverLimit: cfg.Limits.OnLimit == "refuse", PeerTranscodeReserve: cfg.Limits.PeerTranscodeReserve, Logger: logger}
+		RefuseOverLimit: cfg.Limits.OnLimit == "refuse", PeerTranscodeReserve: cfg.Limits.PeerTranscodeReserve,
+		Logger: logger}
+	if sh.delivery != nil {
+		// The operator's switch "players may get the original file", as
+		// this configuration says.
+		e := *sh.delivery
+		original := cfg.Limits.OriginalFile != "off"
+		e.OriginalFile = func() bool { return original }
+		pb.Delivery = &e
+	}
 	// Federation: paired servers' viewers play too.
 	pb.Engine = sh.fed.current
 	// The modules the operator switched on, with their control panel routes

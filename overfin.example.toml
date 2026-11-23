@@ -209,6 +209,11 @@ pin_attempts = 5
 # profile, an account template's setting, that profile's own oldest only),
 # "refuse" refuses the new one.
 on_limit = "replace-oldest"
+# Whether this server's players may get a version's file itself, as it is
+# ("on", the default), or only remuxed or converted ("off"). Whoever plays
+# the file can save it too. Paired servers' viewers go by their pairing's
+# limits.
+original_file = "on"
 
 # Features' own settings, each under its name. Migration lets people bring
 # their watch history from your other Jellyfin server, with their username

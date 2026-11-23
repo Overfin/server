@@ -35,7 +35,9 @@ import (
 	"github.com/overfin/server/internal/connector"
 	"github.com/overfin/server/internal/cookie"
 	"github.com/overfin/server/internal/copies"
+	"github.com/overfin/server/internal/delivery"
 	"github.com/overfin/server/internal/emails"
+	"github.com/overfin/server/internal/files"
 	"github.com/overfin/server/internal/gpu"
 	"github.com/overfin/server/internal/images"
 	"github.com/overfin/server/internal/imdb"
@@ -845,6 +847,19 @@ func run(logger *slog.Logger) error {
 				return sh.jf.VideoFiles(ctx, gw.adminAuth(), each)
 			},
 			Libraries: libraryFolders, Layout: layout}
+		// Plays of those copies: the file from disk, or Jellyfin's
+		// transcoder through the companion plugin (package delivery).
+		sh.delivery = &delivery.Executor{
+			Maker: &delivery.PluginMaker{Jellyfin: sh.jf, Admin: sh.service.Admin},
+			Path: func(ctx context.Context, item, source string) (string, error) {
+				f, err := sh.jf.VideoFileOf(ctx, gw.adminAuth(), item, source)
+				return f.Path, err
+			},
+			Libraries: libraryFolders,
+			Fingerprint: func(ctx context.Context, item, source string, f *files.File) (string, error) {
+				return files.Cache{DB: db}.Fingerprint(ctx, item, source, f, time.Now())
+			},
+		}
 	}
 	sh.texts = catalog.NewTexts(func(language string) catalog.TitleSource { return gw.textSource(language) }, db, logger,
 		100*time.Millisecond, 3*time.Second)
@@ -874,6 +889,12 @@ func run(logger *slog.Logger) error {
 	}
 	if sh.copies != nil {
 		go sh.copies.Run(ctx) // so does it
+	}
+	if sh.delivery != nil {
+		// Deliveries a run before left (stopped or crashed without
+		// stopping them) end now (rule 50); the plugin's watchdog ends them
+		// otherwise.
+		go clearDeliveries(ctx, sh.delivery, logger)
 	}
 	skipper.Jellyfin = func() (*jellyfin.Client, jellyfin.Auth, bool) { return sh.jf, gw.adminAuth(), true }
 	// The service account follows the configuration's admin key.
@@ -1352,4 +1373,21 @@ func listenSocket(path string) (net.Listener, error) {
 		return nil, err
 	}
 	return ln, nil
+}
+
+// clearDeliveries ends every delivery the plugin has, once it answers
+// (Jellyfin may start after Overfin): tried for a few minutes.
+func clearDeliveries(ctx context.Context, e *delivery.Executor, logger *slog.Logger) {
+	for range 10 {
+		err := e.Clear(ctx)
+		if err == nil || jellyfin.IsStatus(err, http.StatusNotFound) {
+			return // cleared, or a plugin without deliveries
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(30 * time.Second):
+		}
+	}
+	logger.Warn("could not clear the plugin's deliveries at start; its watchdog ends them")
 }

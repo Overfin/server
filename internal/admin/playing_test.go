@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
+	"github.com/overfin/server/internal/delivery"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/store"
@@ -48,7 +50,12 @@ func TestNowPlaying(t *testing.T) {
 	f := &fakePlaying{live: []playback.Live{
 		{Stream: &playback.Stream{ID: "play_one", AccountID: acct.ID, ProfileID: owner.ID, Device: "Firefox on Linux",
 			Decision: playback.Decision{Method: "transcode", Source: src}},
-			Title: "Free Guy (2021)", Method: "transcode", Started: time.Now(), PositionMs: 61_000},
+			Title: "Free Guy (2021)", Method: "transcode", Transcodes: true, Started: time.Now(), PositionMs: 61_000},
+		// The executor's, its audio alone converted: a stream, no transcode slot.
+		{Stream: &playback.Stream{ID: "play_four", AccountID: acct.ID, ProfileID: owner.ID,
+			Delivery: &delivery.Started{Plan: &delivery.Plan{Kind: delivery.KindTranscode, AudioConverted: true,
+				Copy: store.IndexedCopy{Facts: wire.Copy{DurationMs: 1000, Size: 1000, Video: &wire.VideoStream{Height: 2160}}}}}},
+			Method: "transcode", Started: time.Now()},
 		// An account deleted meanwhile still shows.
 		{Stream: &playback.Stream{ID: "play_two", AccountID: "acct_gone"}, Method: "direct", Started: time.Now()},
 		// A paired server's viewer: the server, not a deleted account.
@@ -62,7 +69,7 @@ func TestNowPlaying(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{`"name":"Main"`, `"profile":"Main"`, `"title":"Free Guy (2021)"`, `"method":"transcode"`,
 		`"height":1080`, `"bitrateKbps":8000`, `"positionMs":61000`, `"durationMs":3600000`, `"transcodes":1`,
-		`"maxTranscodes":2`, `"name":"Deleted account"`, `"name":"Films de B (paired server)"`, `"title":"Heat (1995)"`} {
+		`"maxTranscodes":2`, `"delivery":"transcode","converts":["audio"]`, `"height":2160`, `"name":"Deleted account"`, `"name":"Films de B (paired server)"`, `"title":"Heat (1995)"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("lacks %s: %s", want, body)
 		}

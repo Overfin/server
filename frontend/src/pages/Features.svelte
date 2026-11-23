@@ -90,6 +90,7 @@
       }
       f.push(
         { path: 'limits.onLimit', kind: 'choice', label: 'One stream too many' },
+        { path: 'limits.originalFile', kind: 'onOff', label: 'Players may get the original file' },
         { path: 'limits.maxTranscodesTotal', kind: 'number', label: 'Transcodes on the server', zero: '0: no limit' },
         { path: 'limits.maxBitrateKbps', kind: 'number', label: 'Bitrate cap (kbps)', zero: '0: no cap' },
         { path: 'limits.peerTranscodeReserve', kind: 'number', label: 'Transcodes kept from other servers' },
@@ -188,6 +189,9 @@
             <option value="refuse">Refuse the new one</option>
           </select>
         {/snippet}
+      </Setting>
+      <Setting label="Players may get the original file" hint="A version's file as it is, when the player plays it: whoever plays it can save it too. Off: remuxed or converted instead. Other servers' viewers go by their pairing's limits.">
+        {#snippet children(ids)}<input type="checkbox" bind:checked={values['limits.originalFile']} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
       </Setting>
       <Setting label="Transcodes on the server" hint="Re-encoded video only, not repackaging. 0: no limit.">
         {#snippet children(ids)}<input type="number" min="0" bind:value={values['limits.maxTranscodesTotal']} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}

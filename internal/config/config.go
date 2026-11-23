@@ -461,6 +461,12 @@ type Limits struct {
 	// OnLimit is what happens when an account starts one stream too many:
 	// "replace-oldest" (the default) or "refuse".
 	OnLimit string `toml:"on_limit" json:"onLimit"`
+	// OriginalFile is whether this server's players may get a version's
+	// file itself (its bytes as they are: saved too, by anyone who plays
+	// it): "on" (the default) or "off", then they get it remuxed or
+	// converted. Paired servers' viewers go by MSFP's file delivery and
+	// their pairing's limits.
+	OriginalFile string `toml:"original_file" json:"originalFile"`
 }
 
 type Secrets struct {
@@ -512,6 +518,7 @@ func defaults() Config {
 			PeerTranscodeReserve: 1,
 			PINAttempts:          5,
 			OnLimit:              "replace-oldest",
+			OriginalFile:         "on",
 		},
 		OIDC:   OIDC{FreshForMinutes: 5, RecheckMinutes: 10, GroupsClaim: "groups"},
 		Wishes: Wishes{KeptDays: 60, PerDay: 10},
@@ -957,6 +964,12 @@ func (c *Config) validate() error {
 	}
 	if c.Limits.PeerTranscodeReserve < 0 {
 		add("limits.peer_transcode_reserve must not be negative")
+	}
+	if c.Limits.OriginalFile == "" {
+		c.Limits.OriginalFile = "on" // saved before the switch existed
+	}
+	if c.Limits.OriginalFile != "on" && c.Limits.OriginalFile != "off" {
+		add(`limits.original_file must be "on" or "off"`)
 	}
 	if c.Limits.OnLimit != "replace-oldest" && c.Limits.OnLimit != "refuse" {
 		add("limits.on_limit must be \"replace-oldest\" or \"refuse\"")

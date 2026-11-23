@@ -33,10 +33,14 @@ type playingJSON struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"account"`
-	Profile     string   `json:"profile,omitempty"`
-	Device      string   `json:"device,omitempty"`
-	Title       string   `json:"title,omitempty"`
-	Method      string   `json:"method"`
+	Profile string `json:"profile,omitempty"`
+	Device  string `json:"device,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Method  string `json:"method"`
+	// Delivery, for a playback the executor serves: file, remux or
+	// transcode, and what it converts (video, audio).
+	Delivery    string   `json:"delivery,omitempty"`
+	Converts    []string `json:"converts,omitempty"`
 	Reasons     []string `json:"reasons,omitempty"`
 	Height      int      `json:"height,omitempty"`
 	BitrateKbps int      `json:"bitrateKbps,omitempty"`
@@ -100,7 +104,25 @@ func (p *Panel) playing(w http.ResponseWriter, r *http.Request, _ *session) {
 				break
 			}
 		}
-		if l.Method == "transcode" {
+		if d := s.Delivery; d != nil {
+			c := d.Plan.Copy
+			pj.Delivery, pj.DurationMs = d.Plan.Kind, c.Facts.DurationMs
+			if c.Facts.DurationMs > 0 {
+				pj.BitrateKbps = int(c.Facts.Size * 8 / c.Facts.DurationMs)
+			}
+			if v := c.Facts.Video; v != nil {
+				pj.Height = v.Height
+			}
+			if d.Plan.VideoConverted {
+				pj.Converts = append(pj.Converts, "video")
+			}
+			if d.Plan.AudioConverted {
+				pj.Converts = append(pj.Converts, "audio")
+			}
+		}
+		// A transcode slot: the video converted (an audio-only
+		// conversion counts as a stream).
+		if l.Transcodes {
 			transcodes++
 		}
 		out = append(out, pj)

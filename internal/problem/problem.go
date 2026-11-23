@@ -41,10 +41,13 @@ const (
 	ClaimFailed Type = "claim-failed"
 	// SigninFailed: a wrong password or code, or an unusable link, never
 	// saying whether the email has an account.
-	SigninFailed        Type = "signin-failed"
-	ClaimNotAllowed     Type = "claim-not-allowed"
-	CrossSiteRequest    Type = "cross-site-request"
-	NotPlayable         Type = "not-playable"
+	SigninFailed     Type = "signin-failed"
+	ClaimNotAllowed  Type = "claim-not-allowed"
+	CrossSiteRequest Type = "cross-site-request"
+	NotPlayable      Type = "not-playable"
+	// DeliveryRefused: the version can't be served the way asked (MSFP
+	// playback section 2.5): the player asks for another.
+	DeliveryRefused     Type = "delivery-refused"
 	StreamLimitReached  Type = "stream-limit-reached"
 	NameTaken           Type = "name-taken"
 	ProfileLimitReached Type = "profile-limit-reached"
@@ -104,6 +107,7 @@ var registry = map[Type]info{
 	ClaimNotAllowed:      {http.StatusForbidden, "This account can't be brought over"},
 	CrossSiteRequest:     {http.StatusForbidden, "Cross-site requests are not allowed"},
 	NotPlayable:          {http.StatusConflict, "This item can't be played"},
+	DeliveryRefused:      {http.StatusConflict, "This version can't be served that way"},
 	StreamLimitReached:   {http.StatusConflict, "Too many streams on this account"},
 	NameTaken:            {http.StatusConflict, "This name is already used in this account"},
 	ProfileLimitReached:  {http.StatusConflict, "This account has as many profiles as allowed"},

@@ -964,6 +964,7 @@ var settingLabels = strings.NewReplacer(
 	"limits.max_transcodes_total", "Transcodes on the server",
 	"limits.max_bitrate_kbps", "The bitrate cap",
 	"limits.on_limit", "One stream too many",
+	"limits.original_file", "Players may get the original file",
 	"wishes.to", "Wishes go to",
 	"wishes.kept_days", "Kept after arriving (days)",
 	"wishes.per_day", "Wishes a day",
