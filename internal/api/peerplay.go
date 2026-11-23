@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/msfp-io/msfp-go"
@@ -36,17 +35,6 @@ type source struct {
 	item   string // a Jellyfin item here
 	peer   string // a paired server's ID
 	theirs *store.PeerSource
-}
-
-// sourceOf picks where a film or an episode plays for p, in language (a
-// tag; "" for no preference): the first of sourcesOf, none when there is
-// none.
-func (l Library) sourceOf(ctx context.Context, p *store.Profile, id, language string) (source, error) {
-	all, err := l.sourcesOf(ctx, p, id, language)
-	if err != nil || len(all) == 0 {
-		return source{}, err
-	}
-	return all[0], nil
 }
 
 // sourcesOf lists where a film or an episode may play for p, in language
@@ -278,9 +266,8 @@ func (pb Playback) playRemote(w http.ResponseWriter, r *http.Request, caller *Ca
 		device = deviceName(r.UserAgent())
 	}
 	s := &playback.Stream{AccountID: p.AccountID, ProfileID: p.ID, SessionID: caller.Session.ID, Device: device,
-		Reason:   rp.reason,
-		Decision: playback.Decision{Method: "remote", Source: jellyfin.MediaSource{RunTimeTicks: got.DurationMs * 10_000}},
-		Remote:   playback.NewRemote(peer, rp.key, pc.Copy, got)}
+		Reason: rp.reason,
+		Remote: playback.NewRemote(peer, rp.key, pc.Copy, got)}
 	if pc.Copy.PreviewLayout != nil && got.Sheets > 0 {
 		pl := pc.Copy.PreviewLayout
 		s.Trickplay = &jellyfin.Trickplay{Width: pl.TileWidth, Height: pl.TileHeight, Columns: pl.Columns, Rows: pl.Rows,
@@ -316,71 +303,6 @@ func sendRemoteError(w http.ResponseWriter, err error) {
 	default:
 		problem.Send(w, problem.NotPlayable, "")
 	}
-}
-
-// startRemote is the older body's play of a paired server's title: its
-// first copy, as MSFP's baseline (the older body names no delivery).
-func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *Caller, req startRequest, kbps int, peer, key string) {
-	l, ctx := pb.Library, r.Context()
-	ref, _ := store.ParseTitleKey(key)
-	t, ok := l.visibleTitleRef(w, ctx, caller.Profile, ref)
-	if !ok {
-		return
-	}
-	all, err := l.peerCopies(ctx, caller.Profile, t)
-	if err != nil {
-		l.storeError(w, err)
-		return
-	}
-	i := slices.IndexFunc(all, func(pc peerCopy) bool { return pc.Source.Peer == peer })
-	if i < 0 {
-		problem.Send(w, problem.NotFound, "")
-		return
-	}
-	s, got, ok := pb.playRemote(w, r, caller, remotePlay{copy: all[i], key: key, device: req.Device,
-		req: wire.PlayRequest{StartPositionMs: req.StartPositionMs, MaxBitrateKbps: kbps}})
-	if !ok {
-		return
-	}
-	titles, err := l.titleSummaries(ctx, caller.Profile, []string{key})
-	if err != nil {
-		pb.end(s, "stopped", "")
-		l.storeError(w, err)
-		return
-	}
-	out := remoteView(got, s)
-	out.VersionID = all[i].ID
-	if len(titles) == 1 {
-		out.Title = &titles[0]
-		if ref.Kind == "episode" {
-			if next, err := l.nextEpisode(ctx, caller.Profile, ref); err == nil {
-				out.Next = next
-			}
-		}
-	}
-	s.View = out
-	pb.Tickets.Describe(s, describe(out.Title))
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	writeOK(w, out)
-}
-
-// remoteView is a playback on a paired server as this server's site
-// shows it: every address this server's own, under the ticket of its
-// playback here (s); the paired server's are never seen. With msfp-go's
-// revised v0 the copy's tracks, segments and previews come from the
-// catalog's copy, not the play's answer: plan phase 7 adds them
-// (federation is off on this branch); until then only the stream.
-func remoteView(rp msfp.RemotePlayback, s *playback.Stream) sessionJSON {
-	base := "/api/v1/stream/" + s.Ticket + "/"
-	out := sessionJSON{ID: s.ID, Method: rp.Method, PositionMs: rp.PositionMs, DurationMs: rp.DurationMs,
-		VersionID: rp.VersionID, AudioTrack: rp.AudioTrack, MaxBitrateKbps: rp.MaxBitrateKbps}
-	if rp.Protocol == "hls" {
-		out.Stream = streamJSON{URL: base + "master.m3u8", Protocol: "hls", MimeType: "application/vnd.apple.mpegurl"}
-	} else {
-		out.Stream = streamJSON{URL: base + "file", Protocol: "file", MimeType: rp.MimeType}
-	}
-	return out
 }
 
 // RemoteEnded ends this server's side of a playback on a paired server

@@ -3,17 +3,15 @@ package playback
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"net/url"
 	"path"
 	"regexp"
-	"slices"
 	"strings"
 )
 
-// HLS playlists from Jellyfin are parsed, never searched and replaced
-// (SECURITY.md rule 14). Every URI in them carries Jellyfin's token; each one
-// is replaced by a neutral name, and the real URL stays on the server. Tags
+// A delivery's media playlist, made by Jellyfin through Overfin's plugin,
+// is parsed, never searched and replaced (SECURITY.md rule 14). Every URI
+// in it may carry Jellyfin's token; each one is replaced by a neutral name, and the real URL stays on the server. Tags
 // outside an allow-list are dropped, including any that point to other URIs
 // (alternate renditions, subtitles, keys, I-frame playlists).
 
@@ -27,15 +25,13 @@ const (
 var ErrBadPlaylist = errors.New("playback: unexpected playlist content")
 
 var (
-	// Tags allowed through, by playlist kind.
-	masterTags  = []string{"EXTM3U", "EXT-X-VERSION", "EXT-X-INDEPENDENT-SEGMENTS", "EXT-X-STREAM-INF"}
+	// Tags allowed through.
 	variantTags = []string{"EXTM3U", "EXT-X-VERSION", "EXT-X-TARGETDURATION", "EXT-X-MEDIA-SEQUENCE",
 		"EXT-X-PLAYLIST-TYPE", "EXT-X-INDEPENDENT-SEGMENTS", "EXTINF", "EXT-X-DISCONTINUITY",
 		"EXT-X-ENDLIST", "EXT-X-MAP"}
 
 	tagLine = regexp.MustCompile(`^#(EXT[A-Z0-9-]*)(:[\x20-\x7e]*)?$`)
 	// URIs as Jellyfin writes them, relative to the playlist.
-	variantURI = regexp.MustCompile(`^([A-Za-z0-9_-]{1,32})\.m3u8$`)
 	segmentURI = regexp.MustCompile(`^hls1/([A-Za-z0-9_-]{1,32})/(-?[0-9]{1,6})\.(mp4|m4s|ts|aac|mp3)$`)
 	mapURI     = regexp.MustCompile(`^#EXT-X-MAP:URI="([^"]*)"$`)
 	// Where those URIs may lead on Jellyfin.
@@ -47,53 +43,6 @@ var (
 type Rewritten struct {
 	Body  []byte
 	Files map[string]Upstream
-}
-
-// RewriteMaster rewrites a master playlist fetched from upstream. Variant
-// playlists become v0.m3u8, v1.m3u8...
-func RewriteMaster(body []byte, upstream Upstream) (*Rewritten, error) {
-	return rewrite(keepCopies(body), upstream, masterTags, func(uri string, n int) (string, *regexp.Regexp) {
-		return fmt.Sprintf("v%d.m3u8", n), variantURI
-	})
-}
-
-// keepCopies drops, from a master playlist with a variant that copies the
-// video, the variants that re-encode it (AllowVideoStreamCopy=false).
-// For HDR video, Jellyfin adds SDR versions beside the copy, at the same
-// bandwidth, and players on screens without HDR pick them: the video is
-// then re-encoded and tone-mapped for a browser that shows HDR on any
-// screen (the capabilities said so).
-func keepCopies(body []byte) []byte {
-	lines := strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n")
-	reencodes := func(uri string) bool {
-		_, q, _ := strings.Cut(uri, "?")
-		v, err := url.ParseQuery(q)
-		return err == nil && slices.ContainsFunc(param(v, "AllowVideoStreamCopy"), isFalse)
-	}
-	// Which variant lines (the URI after an EXT-X-STREAM-INF) re-encode.
-	var copies, others int
-	for i, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "#EXT-X-STREAM-INF") && i+1 < len(lines) {
-			if reencodes(strings.TrimSpace(lines[i+1])) {
-				others++
-			} else {
-				copies++
-			}
-		}
-	}
-	if copies == 0 || others == 0 {
-		return body
-	}
-	var out []string
-	for i := 0; i < len(lines); i++ {
-		line := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(line, "#EXT-X-STREAM-INF") && i+1 < len(lines) && reencodes(strings.TrimSpace(lines[i+1])) {
-			i++ // the variant, and its URI
-			continue
-		}
-		out = append(out, lines[i])
-	}
-	return []byte(strings.Join(out, "\n"))
 }
 
 // RewriteVariant rewrites a variant playlist. Segments become seg0.mp4,

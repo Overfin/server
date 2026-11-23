@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  Overfin, OverfinError, Player, capabilities, deviceEnv, chooseDelivery, audioMenu, subtitleMenu, forcedFor, subtitlesFor,
+  Overfin, OverfinError, Player, deviceEnv, chooseDelivery, audioMenu, subtitleMenu, forcedFor, subtitlesFor,
   copyLabel, audioLabel, subtitleLabel, playRequest, streamUrls, previewSheets, fallbacks, dolbyVisionCodecs,
 } from './overfin.js';
 
@@ -177,14 +177,31 @@ function fakeVideo() {
   };
 }
 
+// plainPage is a title's page with one copy every browser plays as it is
+// (an MP4 of H.264 and AAC), 1000 seconds long.
+function plainPage(more = {}) {
+  return {
+    id: 'title_movie_tmdb_1', limits: { originalFile: true }, copies: [{
+      id: 'vplain', etag: 'e', durationMs: 1_000_000, mediaType: 'video/mp4', size: 100_000_000,
+      video: { codec: 'h264', codecs: 'avc1.640028', width: 1920, height: 1080, bitDepth: 8 },
+      audioTracks: [{ id: 'a1', codec: 'aac', codecs: 'mp4a.40.2', channels: 2, language: 'en', default: true }],
+    }], ...more,
+  };
+}
+
+// answer is the server's answer to a play: MSFP's playback object.
+function answer(n, body, protocol = 'file', more = {}) {
+  return { id: `pb${n}`, ticket: `t${n}`, protocol, method: protocol === 'file' ? 'direct' : 'remux', etag: 'e',
+    positionMs: body.startPositionMs, versionId: body.versionId, audioTrack: body.audioTrack || 'a1', subtitles: [],
+    title: { id: body.titleId, name: 'Film' }, ...more };
+}
+
 function playbackServer() {
   let n = 0;
   const state = { gone: null };
   const calls = fakeServer({
-    'POST /api/v1/playback': (_, body) => [201, {
-      id: `pb${++n}`, title: { id: body.titleId, name: 'Film' }, method: 'direct',
-      stream: { url: `/api/v1/stream/t${n}/file`, protocol: 'file' }, positionMs: body.startPositionMs,
-    }],
+    'GET /api/v1/titles/title_movie_tmdb_1': () => [200, plainPage()],
+    'POST /api/v1/playback': (_, body) => [201, answer(++n, body)],
     'POST /api/v1/playback/pb1/progress': () => state.gone || [204, null],
     'POST /api/v1/playback/pb1/stop': () => [410, { type: 'playback-expired', status: 410 }],
     'POST /api/v1/playback/pb2/stop': () => [204, null],
@@ -200,7 +217,7 @@ test('the player restarts a freed stream at the same place, quietly', async () =
   const video = fakeVideo();
   const errors = [];
   const player = await new Overfin().play(video, 'title_movie_tmdb_1', {
-    startMs: 0, capabilities: {}, onError: (e) => errors.push(e),
+    startMs: 0, env: chrome(), onError: (e) => errors.push(e),
   });
   assert.equal(player.playback.id, 'pb1');
 
@@ -221,7 +238,7 @@ test('after a night on pause, a playback the server forgot restarts too', async 
   const video = fakeVideo();
   const errors = [];
   const player = await new Overfin().play(video, 'title_movie_tmdb_1', {
-    startMs: 0, capabilities: {}, onError: (e) => errors.push(e),
+    startMs: 0, env: chrome(), onError: (e) => errors.push(e),
   });
   video.currentTime = 1200;
   video.emit('pause');
@@ -245,7 +262,7 @@ test('a takeover is reported, and continueHere takes it back', async () => {
   const video = fakeVideo();
   let takenBy = null;
   const player = await new Overfin().play(video, 'title_movie_tmdb_1', {
-    startMs: 0, capabilities: {}, onTakenOver: (device) => { takenBy = device; },
+    startMs: 0, env: chrome(), onTakenOver: (device) => { takenBy = device; },
   });
   video.currentTime = 30;
   state.gone = [410, { type: 'playback-taken-over', takenOverBy: 'Firefox on Linux', status: 410 }];
@@ -261,14 +278,11 @@ test('a takeover is reported, and continueHere takes it back', async () => {
 
 test('without a start position, the player resumes where the profile left off', async () => {
   const calls = fakeServer({
-    'GET /api/v1/titles/title_movie_tmdb_1': () => [200, { id: 'title_movie_tmdb_1', userState: { positionMs: 42000 } }],
-    'POST /api/v1/playback': (_, body) => [201, {
-      id: 'pb1', title: { id: 'title_movie_tmdb_1', name: 'Film' }, method: 'direct',
-      stream: { url: '/x', protocol: 'file' }, positionMs: body.startPositionMs,
-    }],
+    'GET /api/v1/titles/title_movie_tmdb_1': () => [200, plainPage({ userState: { positionMs: 42000 } })],
+    'POST /api/v1/playback': (_, body) => [201, answer(1, body)],
     'POST /api/v1/playback/pb1/stop': () => [204, null],
   });
-  const player = await new Overfin().play(fakeVideo(), 'title_movie_tmdb_1', { capabilities: {} });
+  const player = await new Overfin().play(fakeVideo(), 'title_movie_tmdb_1', { env: chrome() });
   assert.equal(calls.find((c) => c.url === '/api/v1/playback').body.startPositionMs, 42000);
   await player.close();
 });
@@ -276,38 +290,6 @@ test('without a start position, the player resumes where the profile left off', 
 test('Player is exported for clients that build their own', () => {
   assert.equal(typeof Player, 'function');
 });
-
-// A browser, as capabilities() sees it: its name, and what it says it
-// plays. The screen is a standard one.
-function asBrowser(userAgent, answers) {
-  Object.defineProperty(globalThis, 'navigator', { value: { userAgent }, configurable: true });
-  globalThis.document = { createElement: () => ({ canPlayType: (mime) => answers[mime] || '' }) };
-  globalThis.screen = { width: 3840, height: 2160 };
-  globalThis.matchMedia = () => ({ matches: false });
-  globalThis.MediaSource = undefined;
-}
-
-const plays = {
-  'video/mp4; codecs="avc1.640028"': 'probably',
-  'video/mp4; codecs="hvc1.2.4.L153.90"': 'probably', // Main 10 only
-  'video/x-matroska': 'maybe',
-};
-
-test('Chrome gets Matroska, 10-bit HEVC and HDR, whatever the screen', () => {
-  asBrowser('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36', plays);
-  const c = capabilities();
-  assert.ok(c.containers.includes('mkv'), c.containers);
-  assert.ok(c.videoCodecs.includes('hevc'), c.videoCodecs);
-  assert.deepEqual(c.hdr, ['hdr10', 'hlg']);
-});
-
-test('Firefox gets neither Matroska nor HDR on Linux, whatever it says', () => {
-  asBrowser('Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0', plays);
-  const c = capabilities();
-  assert.ok(!c.containers.includes('mkv'), c.containers);
-  assert.deepEqual(c.hdr, []);
-});
-
 
 test('wishes are put on the wishlist by title, and ordered', async () => {
   const calls = fakeServer({
@@ -336,45 +318,29 @@ test('batch: several calls in one, each answered or failed on its own', async ()
   assert.ok(second instanceof OverfinError && second.type === 'not-found');
 });
 
-test('subtitles: the language kept, and those the server turned on shown', async () => {
-  const calls = fakeServer({
-    'PUT /api/v1/me/subtitles': () => [204, null],
-    'POST /api/v1/playback': (_, body) => [201, {
-      id: 'pb1', title: { id: body.titleId, name: 'Film' }, method: 'direct', stream: { url: '/x', protocol: 'file' },
-      positionMs: 0, subtitleTrack: 's3', subtitleTracks: [{ id: 's3', label: 'Français', url: '/vtt' }],
-    }],
-    'POST /api/v1/playback/pb1/stop': () => [204, null],
-  });
-  const realDocument = globalThis.document;
-  globalThis.document = { createElement: () => ({ dataset: {} }) }; // the <track> elements
-  const overfin = new Overfin();
-  await overfin.setSubtitleLanguage('fr');
+test('subtitles: the language kept', async () => {
+  const calls = fakeServer({ 'PUT /api/v1/me/subtitles': () => [204, null] });
+  await new Overfin().setSubtitleLanguage('fr');
   assert.deepEqual(calls[0].body, { language: 'fr' });
-  // The app's language goes with the start; the subtitles the server
-  // turned on show.
-  const player = await overfin.play(fakeVideo(), 'title_movie_tmdb_1', { startMs: 0, capabilities: {}, audioLanguage: 'fr' });
-  assert.equal(calls.find((c) => c.url === '/api/v1/playback').body.audioLanguage, 'fr');
-  assert.equal(player.subtitleTrack, 's3');
-  await player.close();
-  globalThis.document = realDocument;
 });
 
 test('two quick changes leave one playback: the overtaken one is stopped', async () => {
   const { calls } = playbackServer();
-  const player = await new Overfin().play(fakeVideo(), 'title_movie_tmdb_1', { startMs: 0, capabilities: {} });
+  const player = await new Overfin().play(fakeVideo(), 'title_movie_tmdb_1', { startMs: 0, env: chrome() });
   await Promise.all([player.setMaxBitrate(4000), player.setMaxBitrate(2000)]);
   await settle();
   const started = calls.filter((c) => c.method === 'POST' && c.url === '/api/v1/playback').length;
   const stopped = calls.filter((c) => c.url.endsWith('/stop')).map((c) => c.url);
-  assert.equal(started, 3);
-  assert.equal(player.playback.id, 'pb3');
-  assert.ok(stopped.includes('/api/v1/playback/pb1/stop') && stopped.includes('/api/v1/playback/pb2/stop'), stopped);
+  // The first change, overtaken before it asked the server, asks nothing.
+  assert.equal(started, 2);
+  assert.equal(player.playback.id, 'pb2');
+  assert.ok(stopped.includes('/api/v1/playback/pb1/stop'), stopped);
   await player.close();
 });
 
 test('closed while starting: what the start gets is stopped, nothing plays', async () => {
   const { calls } = playbackServer();
-  const player = new Player(new Overfin(), fakeVideo(), 'title_movie_tmdb_1', { startMs: 0, capabilities: {} });
+  const player = new Player(new Overfin(), fakeVideo(), 'title_movie_tmdb_1', { startMs: 0, env: chrome() });
   // Closed while the server starts it (the title's page read first).
   const ask = globalThis.fetch;
   let closing;
@@ -393,7 +359,7 @@ test('closed while starting: what the start gets is stopped, nothing plays', asy
 
 test('quality: a bitrate limit restarts the stream at the same place with it', async () => {
   const { calls } = playbackServer();
-  const player = await new Overfin().play(fakeVideo(), 'title_movie_tmdb_1', { startMs: 0, capabilities: {} });
+  const player = await new Overfin().play(fakeVideo(), 'title_movie_tmdb_1', { startMs: 0, env: chrome() });
   player.video.currentTime = 120;
   await player.setMaxBitrate(4000);
   const starts = calls.filter((c) => c.method === 'POST' && c.url === '/api/v1/playback');
@@ -505,24 +471,29 @@ test('real PGS tracks', { skip: !process.env.PGS_SAMPLES }, async () => {
 });
 
 test('subtitles: forced ones whenever none are chosen; a choice shows at once, in stretches, never restarts, kept for the title', async () => {
+  const env = chrome();
+  // The copy: French audio; English subtitles (s2), French ones as
+  // pictures (s3), forced French ones (s4).
+  const page = plainPage();
+  page.copies[0].audioTracks[0].language = 'fr';
+  page.copies[0].subtitleTracks = [{ id: 's2', format: 'subrip', language: 'en' },
+    { id: 's3', format: 'hdmv_pgs_subtitle', language: 'fr' }, { id: 's4', format: 'subrip', language: 'fr', forced: true }];
   const calls = fakeServer({
-    'POST /api/v1/playback': (_, body) => [201, {
-      id: 'pb1', title: { id: body.titleId, name: 'Film' }, method: 'direct', stream: { url: '/x', protocol: 'file' },
-      positionMs: 0, audioTrack: 'a1',
-      subtitleTracks: [{ id: 's3', label: 'English', url: '/vtt3' }, { id: 's4', label: 'Français', pictures: true, url: '/pgs4' }],
-      forcedTracks: [{ id: 's5', label: 'Français', forced: true, url: '/vtt5' }], forcedTrack: 's5',
-      subtitleStretchSeconds: 120,
-    }],
+    'GET /api/v1/titles/title_movie_tmdb_1': () => [200, page],
+    'POST /api/v1/playback': (_, body) => [201, answer(1, body, 'file',
+      { subtitles: [{ id: 's2', form: 'text' }, { id: 's3', form: 'pgs' }, { id: 's4', form: 'text' }] })],
     'PUT /api/v1/playback/pb1/tracks': () => [204, null],
     'POST /api/v1/playback/pb1/stop': () => [204, null],
   });
   const api = globalThis.fetch;
   const stretches = [];
+  const root = '/api/v1/stream/t1/';
   globalThis.fetch = async (url, init) => {
-    if (/^\/(vtt|pgs)\d\//.test(url)) stretches.push(url);
-    if (url.startsWith('/pgs4/')) return { ok: true, status: 200, arrayBuffer: async () => new Uint8Array(displaySet(0, RUNS)).buffer };
+    const part = url.startsWith(root) ? url.slice(root.length) : '';
+    if (/^(subtitles|pictures)\/s\d\/\d+$/.test(part)) stretches.push(part);
+    if (part.startsWith('pictures/s3/')) return { ok: true, status: 200, arrayBuffer: async () => new Uint8Array(displaySet(0, RUNS)).buffer };
     // Each stretch starts a little early: the line at 1 s comes twice.
-    if (url.startsWith('/vtt')) return { ok: true, status: 200, text: async () => 'WEBVTT\n\n00:01.000 --> 00:02.000\nHi\n' };
+    if (part.startsWith('subtitles/')) return { ok: true, status: 200, text: async () => 'WEBVTT\n\n00:01.000 --> 00:02.000\nHi\n' };
     return api(url, init);
   };
   globalThis.VTTCue = class { constructor(start, end, text) { Object.assign(this, { start, end, text }); } };
@@ -538,34 +509,34 @@ test('subtitles: forced ones whenever none are chosen; a choice shows at once, i
   video.querySelectorAll = () => els;
   const mode = () => Object.fromEntries(els.map((el) => [el.dataset.overfin, el.track.mode]));
   const canvas = { style: {}, width: 0, height: 0, getContext: () => ({ clearRect() {}, putImageData() {} }) };
-  const player = await new Overfin().play(video, 'title_movie_tmdb_1', { startMs: 0, capabilities: {}, pictureCanvas: canvas });
+  const player = await new Overfin().play(video, 'title_movie_tmdb_1', { startMs: 0, env, pictureCanvas: canvas });
   // Text tracks are there at once, their cues coming in stretches: none
   // chosen, the forced ones, in the audio's language, the stretch playing
   // and the next, each line once.
   assert.equal(player.subtitleTrack, null);
-  assert.equal(player.forcedTrack, 's5');
-  assert.deepEqual(mode(), { s3: 'disabled', s5: 'showing' });
+  assert.equal(player.forcedTrack, 's4');
+  assert.deepEqual(mode(), { s2: 'disabled', s4: 'showing' });
   await settle();
-  assert.deepEqual(stretches, ['/vtt5/0', '/vtt5/1']);
-  assert.equal(els.find((el) => el.dataset.overfin === 's5').track.cues.length, 1);
-  await player.setSubtitleTrack('s3');
+  assert.deepEqual(stretches, ['subtitles/s4/0', 'subtitles/s4/1']);
+  assert.equal(els.find((el) => el.dataset.overfin === 's4').track.cues.length, 1);
+  await player.setSubtitleTrack('s2');
   await settle();
-  assert.deepEqual(mode(), { s3: 'showing', s5: 'disabled' });
+  assert.deepEqual(mode(), { s2: 'showing', s4: 'disabled' });
   assert.equal(player.forcedTrack, null);
-  assert.deepEqual(stretches.slice(2), ['/vtt3/0', '/vtt3/1']);
+  assert.deepEqual(stretches.slice(2), ['subtitles/s2/0', 'subtitles/s2/1']);
   // Pictures: drawn on the canvas, the text tracks off; overlapping
   // stretches merge.
-  await player.setSubtitleTrack('s4');
+  await player.setSubtitleTrack('s3');
   await settle();
-  assert.deepEqual(mode(), { s3: 'disabled', s5: 'disabled' });
-  assert.deepEqual(stretches.slice(4), ['/pgs4/0', '/pgs4/1']);
+  assert.deepEqual(mode(), { s2: 'disabled', s4: 'disabled' });
+  assert.deepEqual(stretches.slice(4), ['pictures/s3/0', 'pictures/s3/1']);
   assert.equal(player.pictures.cues.length, 1);
   await player.setSubtitleTrack(null);
-  assert.deepEqual(mode(), { s3: 'disabled', s5: 'showing' });
+  assert.deepEqual(mode(), { s2: 'disabled', s4: 'showing' });
   assert.equal(player.pictures.cues.length, 0);
   await settle();
   const kept = calls.filter((c) => c.url === '/api/v1/playback/pb1/tracks').map((c) => c.body.subtitleTrack);
-  assert.deepEqual(kept, ['s3', 's4', '']);
+  assert.deepEqual(kept, ['s2', 's3', '']);
   assert.equal(calls.filter((c) => c.url === '/api/v1/playback').length, 1, 'never restarted');
   await player.close();
   globalThis.document = realDocument;
@@ -587,10 +558,10 @@ function fakeHls(video, seen) {
 function hlsServer(state) {
   let n = 0;
   return fakeServer({
+    'GET /api/v1/titles/title_movie_tmdb_1': () => [200, plainPage()],
     'POST /api/v1/playback': (_, body) => {
       state.started.push(body.startPositionMs);
-      return [201, { id: `pb${++n}`, title: { id: body.titleId, name: 'Film' }, method: 'transcode',
-        stream: { url: `/api/v1/stream/t${n}/master.m3u8`, protocol: 'hls' }, positionMs: body.startPositionMs }];
+      return [201, answer(++n, body, 'hls')];
     },
     'POST /api/v1/playback/pb1/progress': () => state.gone || [204, null],
     'POST /api/v1/playback/pb1/stop': () => [204, null],
@@ -611,7 +582,7 @@ test('continueHere takes back at the same place, though hls.js reset the video',
   const video = fakeVideo();
   const seen = [];
   const player = await new Overfin().play(video, 'title_movie_tmdb_1', {
-    startMs: 0, capabilities: {}, Hls: fakeHls(video, seen), onTakenOver: () => {},
+    startMs: 0, env: chrome(), Hls: fakeHls(video, seen), onTakenOver: () => {},
   });
   video.currentTime = 30;
   state.gone = [410, { type: 'playback-taken-over', takenOverBy: 'Firefox', status: 410 }];
@@ -632,13 +603,14 @@ test('two track changes in a row keep the place', async () => {
   hlsServer(state);
   const video = fakeVideo();
   const player = await new Overfin().play(video, 'title_movie_tmdb_1', {
-    startMs: 0, capabilities: {}, Hls: fakeHls(video, []),
+    startMs: 0, env: chrome(), Hls: fakeHls(video, []),
   });
   video.currentTime = 40;
   const first = player.restart();
   const second = player.restart();
   await Promise.all([first, second]);
-  assert.deepEqual(state.started.slice(1), [40000, 40000]);
+  // The first, overtaken before it asked the server, asks nothing.
+  assert.deepEqual(state.started.slice(1), [40000]);
   await player.close();
 });
 
@@ -649,7 +621,7 @@ test('a stream hls.js gives up on starts over at the same place, then says so', 
   const seen = [];
   const errors = [];
   const player = await new Overfin().play(video, 'title_movie_tmdb_1', {
-    startMs: 0, capabilities: {}, Hls: fakeHls(video, seen), onError: (e) => errors.push(e),
+    startMs: 0, env: chrome(), Hls: fakeHls(video, seen), onError: (e) => errors.push(e),
   });
   video.currentTime = 50;
   for (let i = 0; i < 3; i++) {
@@ -681,7 +653,7 @@ test('a stream failed with the server out of reach: the player waits for it, the
   const errors = [];
   const reconnecting = [];
   const player = await new Overfin().play(video, 'title_movie_tmdb_1', {
-    startMs: 0, capabilities: {}, Hls: fakeHls(video, seen), onError: (e) => errors.push(e),
+    startMs: 0, env: chrome(), Hls: fakeHls(video, seen), onError: (e) => errors.push(e),
     onReconnecting: (on) => reconnecting.push(on),
   });
   video.currentTime = 211;
@@ -705,7 +677,7 @@ test('a direct stream cut short is not the end of the title: it starts over at t
   const video = fakeVideo();
   const ended = [];
   const player = await new Overfin().play(video, 'title_movie_tmdb_1', {
-    startMs: 0, capabilities: {}, onEnded: () => ended.push(true),
+    startMs: 0, env: chrome(), onEnded: () => ended.push(true),
   });
   video.duration = 1000;
   video.currentTime = 371;

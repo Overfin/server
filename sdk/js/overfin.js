@@ -322,9 +322,10 @@ export class Overfin {
 
   /**
    * Starts a playback: MSFP's play request (playRequest() builds it from
-   * chooseDelivery()'s decision), or, for a title without copies, the
-   * older body with capabilities. Most clients want play() instead, which
-   * does the rest.
+   * chooseDelivery()'s decision). Most clients want play() instead, which
+   * does the rest. A body of the older API (capabilities, before 0.10) is
+   * answered 401 not-authenticated, which sends a page still on an older
+   * SDK through sign-in and so loads it again.
    */
   startPlayback(request) { return this.request('POST', '/playback', request); }
 
@@ -368,56 +369,6 @@ export class Overfin {
   }
 }
 
-// ---- Capabilities ---------------------------------------------------------
-
-/**
- * What this browser can play, for Overfin to pick direct play, repackaging or
- * transcoding. Clients can adjust it before passing it on.
- */
-export function capabilities() {
-  const video = document.createElement('video');
-  const mse = globalThis.ManagedMediaSource || globalThis.MediaSource;
-  const can = (mime) => Boolean((mse && mse.isTypeSupported(mime)) || video.canPlayType(mime).replace('no', ''));
-  const any = (...mimes) => mimes.some(can);
-  const pick = (table) => Object.entries(table).filter(([, mimes]) => any(...[].concat(mimes))).map(([name]) => name);
-  const { firefox, chromium, safari, mac } = browserFamily();
-  // Firefox says it plays Matroska, but loads the whole file before playing
-  // it, which streaming can't afford: it gets it repackaged instead.
-  const containers = pick({ mp4: 'video/mp4; codecs="avc1.640028"', webm: 'video/webm; codecs="vp9"' });
-  if (!firefox && any('video/x-matroska', 'video/mkv')) containers.push('mkv');
-  // Desktop Chromium browsers (Chrome, Edge…) and Safari map HDR video onto
-  // the screen themselves, whatever the screen; Firefox does only on macOS.
-  // Elsewhere, the screen says.
-  // In Overfin's Android app, the app says (WebView doesn't tell pages).
-  const app = appHdr();
-  const hdr = app ? app.length > 0 : matchMedia('(dynamic-range: high)').matches || chromium || safari || (firefox && mac);
-  return {
-    containers,
-    videoCodecs: pick({
-      h264: 'video/mp4; codecs="avc1.640028"',
-      // Main (8-bit) or Main 10, which most HDR films are.
-      hevc: ['video/mp4; codecs="hvc1.1.6.L120.90"', 'video/mp4; codecs="hev1.1.6.L120.90"',
-        'video/mp4; codecs="hvc1.2.4.L153.90"', 'video/mp4; codecs="hev1.2.4.L153.90"'],
-      av1: 'video/mp4; codecs="av01.0.08M.08"',
-      vp9: 'video/mp4; codecs="vp09.00.10.08"',
-    }),
-    audioCodecs: pick({
-      aac: 'audio/mp4; codecs="mp4a.40.2"',
-      mp3: 'audio/mpeg',
-      opus: 'audio/mp4; codecs="opus"',
-      flac: 'audio/mp4; codecs="flac"',
-      ac3: 'audio/mp4; codecs="ac-3"',
-      eac3: 'audio/mp4; codecs="ec-3"',
-    }),
-    // Browsers decode 4K whatever the screen: scaling it down on the server
-    // means re-encoding it. The bitrate limits still apply.
-    maxHeight: 2160,
-    hdr: app ?? (hdr ? ['hdr10', 'hlg'] : []),
-    subtitles: ['vtt'],
-    maxAudioChannels: 2,
-  };
-}
-
 // appHdr is what Overfin's Android app says the screen shows in HDR
 // (OverfinApp.hdr(), JSON names), or null outside the app.
 function appHdr() {
@@ -427,17 +378,6 @@ function appHdr() {
   } catch {
     return null;
   }
-}
-
-// browserFamily tells the browsers apart where what they say they play
-// isn't enough: whether they map HDR themselves, and Firefox's Matroska.
-function browserFamily() {
-  const ua = navigator.userAgent;
-  const firefox = /Firefox\//.test(ua);
-  const mobile = /Mobile|Android/.test(ua);
-  const chromium = !firefox && /Chrom(e|ium)\//.test(ua) && !mobile;
-  const safari = !firefox && !/Chrom(e|ium)\//.test(ua) && /Safari\//.test(ua);
-  return { firefox, chromium, safari, mac: /Mac OS X|Macintosh/.test(ua) };
 }
 
 // ---- Choosing a copy and how it plays -------------------------------------
@@ -1236,7 +1176,7 @@ export function subtitleLabel(track, lang) {
  * @property {string} [subtitleTrack]
  * @property {string} [audioLanguage] The language to start in (the app's),
  *   when the video has it and no audioTrack is given.
- * @property {object} [capabilities] What the browser can play; detected by default.
+ * @property {object} [env] What the device plays (deviceEnv()); detected by default.
  * @property {(playback: object) => void} [onStart] Called on every (re)start,
  *   with the playback: tracks, segments, method.
  * @property {(device: string) => void} [onTakenOver] Another device of the
@@ -1310,7 +1250,7 @@ export class Player {
       },
       ended: () => {
         if (this.cutShort()) { this.fatal({ details: 'cut short' }); return; }
-        this.report({ ended: true }); this.close(); this.options.onEnded?.();
+        this.report(); this.close(); this.options.onEnded?.();
       },
     };
   }
@@ -1329,8 +1269,7 @@ export class Player {
     this.teardown();
     const run = ++this.starts;
     const overtaken = () => this.closed || run !== this.starts;
-    // The title's page: its copies, and where the profile left off. A
-    // title without copies plays the older way, the server choosing.
+    // The title's page: its copies, and where the profile left off.
     if (!this.page) {
       let page;
       try {
@@ -1344,31 +1283,11 @@ export class Player {
     }
     const at = startMs ?? (this.page.userState?.positionMs || 0);
     if (this.page.copies?.length) return this.startCopy(at, overtaken);
-    let pb;
-    try {
-      pb = await this.client.startPlayback({
-        titleId: this.titleId,
-        capabilities: this.options.capabilities || capabilities(),
-        startPositionMs: Math.round(at),
-        ...clean({ audioLanguage: this.options.audioLanguage }),
-        ...clean(this.choice),
-      });
-    } catch (err) {
-      if (overtaken()) return null;
-      this.options.onError?.(err);
-      throw err;
-    }
-    if (overtaken()) {
-      // Nobody watches it: the server frees it at once.
-      this.client.stopPlayback(pb.id, Math.round(at)).catch(() => {});
-      return null;
-    }
-    this.playback = pb;
-    this.attach(pb);
-    for (const [event, fn] of Object.entries(this.handlers)) this.video.addEventListener(event, fn);
-    this.timer = setInterval(() => { if (!this.video.paused) this.report(); }, PROGRESS_EVERY);
-    this.options.onStart?.(pb);
-    return pb;
+    // No copy this profile may play (none read yet, or none it may see).
+    this.page = null;
+    const err = new OverfinError(409, { type: 'not-playable', title: 'This item can\'t be played', status: 409 });
+    this.options.onError?.(err);
+    throw err;
   }
 
   // startCopy starts a play of one of the title's copies, chosen here
@@ -1519,7 +1438,7 @@ export class Player {
     return true;
   }
 
-  /** The decision the playback plays by (chooseDelivery's), or null for a title without copies. */
+  /** The decision the playback plays by (chooseDelivery's), or null before it plays. */
   get delivery() { return this.decision; }
 
   /**

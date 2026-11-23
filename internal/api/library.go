@@ -177,16 +177,6 @@ func (l Library) upstreamError(w http.ResponseWriter, err error) {
 	}
 }
 
-// hidden answers for an item the profile may not see, or for the error
-// that kept Overfin from knowing.
-func (l Library) hidden(w http.ResponseWriter, err error) {
-	if err != nil {
-		l.storeError(w, err)
-		return
-	}
-	problem.Send(w, problem.NotFound, "")
-}
-
 // ---- Endpoints --------------------------------------------------------------
 
 func (l Library) libraries(w http.ResponseWriter, r *http.Request) {

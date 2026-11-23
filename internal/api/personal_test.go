@@ -15,13 +15,13 @@ import (
 // set it, and Continue Watching (next episodes included) and the filters
 // read it.
 func TestPersonalData(t *testing.T) {
-	var st *store.Store
-	srv, _ := newServerWith(t, options{store: &st})
+	p := playedServer(t, options{})
+	srv, st := p.srv, p.st
 	ctx := context.Background()
 	id := func(n int) string { return fmt.Sprintf("%032x", n) }
 	one, two, three := 1, 2, 3
 	st.PutCatalog(ctx, []store.CatalogItem{
-		// Item 1: the film the fake Jellyfin plays (two hours long).
+		// Item 1: Heat, its copy 100 minutes long, its credits from 80 %.
 		{ID: id(1), Kind: "movie", Name: "Heat", SortName: "Heat", TMDB: "949"},
 		{ID: id(10), Kind: "series", Name: "Dark", SortName: "Dark", TMDB: "70523"},
 		{ID: id(11), Kind: "episode", Name: "E1", SortName: "E1", SeriesID: id(10), SeasonNumber: &one, EpisodeNumber: &one},
@@ -63,8 +63,8 @@ func TestPersonalData(t *testing.T) {
 		t.Fatalf("Continue Watching: %+v", cw)
 	}
 
-	// Played to the end: watched once, out of Continue Watching.
-	post(t, srv, "/api/v1/playback/"+play+"/stop", `{"positionMs":7100000,"ended":true}`)
+	// Stopped in its credits: watched once, out of Continue Watching.
+	post(t, srv, "/api/v1/playback/"+play+"/stop", `{"positionMs":5900000}`)
 	if !eventually(t, func() bool { return len(list("/api/v1/titles/continue").Items) == 0 }) {
 		t.Fatal("still in Continue Watching")
 	}
@@ -79,7 +79,7 @@ func TestPersonalData(t *testing.T) {
 	playFrom := func(ms int) string {
 		t.Helper()
 		code, body := post(t, srv, "/api/v1/playback",
-			fmt.Sprintf(`{"itemId":"item_%032x","capabilities":{},"device":"Laptop","startPositionMs":%d}`, 1, ms))
+			fmt.Sprintf(`{"titleId":"title_movie_tmdb_949","versionId":"%s","delivery":"file","device":"Laptop","startPositionMs":%d}`, heatCopy, ms))
 		if code != http.StatusCreated {
 			t.Fatalf("start at %d: %d %s", ms, code, body)
 		}
@@ -94,11 +94,11 @@ func TestPersonalData(t *testing.T) {
 		}
 		return w.Items[0].UserState.PlayCount
 	}
-	play = playFrom(6_700_000)
-	post(t, srv, "/api/v1/playback/"+play+"/stop", `{"positionMs":7100000,"ended":true}`)
-	play = playFrom(6_700_000)
+	play = playFrom(5_000_000)
+	post(t, srv, "/api/v1/playback/"+play+"/stop", `{"positionMs":5900000}`)
+	play = playFrom(5_000_000)
 	post(t, srv, "/api/v1/playback/"+play+"/progress", `{"positionMs":600000}`)
-	post(t, srv, "/api/v1/playback/"+play+"/stop", `{"positionMs":7100000,"ended":true}`)
+	post(t, srv, "/api/v1/playback/"+play+"/stop", `{"positionMs":5900000}`)
 	eventually(t, func() bool { return playCount() == 2 })
 	time.Sleep(200 * time.Millisecond) // both stops are recorded in the background
 	if n := playCount(); n != 2 {
@@ -112,7 +112,7 @@ func TestPersonalData(t *testing.T) {
 	if favs := list("/api/v1/titles?kind=movie&favorite=true"); len(favs.Items) != 1 || !favs.Items[0].UserState.Favorite {
 		t.Errorf("favorites: %+v", favs)
 	}
-	if none := list("/api/v1/titles?kind=movie&favorite=false"); len(none.Items) != 0 {
+	if none := list("/api/v1/titles?kind=movie&favorite=false"); len(none.Items) != 1 || none.Items[0].ID != "title_movie_tmdb_14160" {
 		t.Errorf("not favorites: %+v", none)
 	}
 

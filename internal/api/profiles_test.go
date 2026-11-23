@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -225,17 +224,16 @@ func ownerID(t *testing.T, srv *httptest.Server) string {
 
 // A stream URL only works in the session that started the playback.
 func TestTicketBoundToSession(t *testing.T) {
-	srv, _ := newServer(t)
-	_, body := post(t, srv, "/api/v1/playback", `{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{}}`)
-	var s struct{ Stream struct{ URL string } }
-	json.Unmarshal([]byte(body), &s)
-	if code, _ := getAs(t, srv, subject, s.Stream.URL); code != 200 {
+	srv := playedServer(t, options{}).srv
+	_, a, _ := play(t, srv, `{"titleId":"title_movie_tmdb_949","versionId":"`+heatCopy+`","delivery":"file"}`)
+	url := "/api/v1/stream/" + a.Ticket + "/file"
+	if code, _ := getAs(t, srv, subject, url); code != 200 {
 		t.Fatalf("own session: %d", code)
 	}
 	// Same person, another browser (a fresh cookie jar): no access.
 	other := &http.Client{Transport: srv.Client().Transport}
 	other.Jar, _ = cookiejar.New(nil)
-	req, _ := http.NewRequest("GET", srv.URL+s.Stream.URL, nil)
+	req, _ := http.NewRequest("GET", srv.URL+url, nil)
 	req.Header.Set("Remote-User", subject)
 	res, err := other.Do(req)
 	if err != nil {
@@ -324,10 +322,8 @@ func TestNoFallbackToAProtectedOwner(t *testing.T) {
 // After switching profile on the same device, "what was playing?" doesn't
 // tell the new profile what the previous one watched.
 func TestCurrentPlaybackIsPerProfile(t *testing.T) {
-	srv, _ := newServer(t)
-	if code, body := post(t, srv, "/api/v1/playback", `{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{}}`); code != 201 {
-		t.Fatalf("start: %d %s", code, body)
-	}
+	srv := playedServer(t, options{}).srv
+	startDelivery(t, srv, "Laptop", `"delivery":"file"`)
 	if code, _ := getAs(t, srv, subject, "/api/v1/playback/current"); code != 200 {
 		t.Fatalf("own current playback: %d", code)
 	}

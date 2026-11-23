@@ -1,8 +1,6 @@
 package api_test
 
 import (
-	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -13,20 +11,13 @@ import (
 // takeover, mustn't leave it going on, past the account's limits (rules 45
 // and 49).
 func TestStreamEndsWithItsPlayback(t *testing.T) {
-	srv, fake := newServerWith(t, options{maxStreams: 2})
-	fake.setDirect(true)
-	code, body := post(t, srv, "/api/v1/playback",
-		`{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{},"device":"Laptop"}`)
+	srv := playedServer(t, options{maxStreams: 2, fileSize: 64 << 20}).srv
+	code, s, body := play(t, srv, `{"titleId":"title_movie_tmdb_949","versionId":"`+heatCopy+`","delivery":"file","device":"Laptop"}`)
 	if code != http.StatusCreated {
 		t.Fatalf("start: %d %s", code, body)
 	}
-	var s struct {
-		ID     string
-		Stream struct{ URL string }
-	}
-	json.Unmarshal([]byte(body), &s)
 
-	req, _ := http.NewRequest("GET", srv.URL+s.Stream.URL, nil)
+	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/stream/"+s.Ticket+"/file", nil)
 	req.Header.Set("Remote-User", subject)
 	res, err := client(srv, subject).Do(req)
 	if err != nil {

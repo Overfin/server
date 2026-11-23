@@ -44,16 +44,15 @@ type playingJSON struct {
 	// Reason is why the player chose that delivery, a closed code
 	// (playback.Reasons) for the panel to translate; VideoCodec and HDR,
 	// with Height, what the copy's label is made of.
-	Reason      string   `json:"reason,omitempty"`
-	VideoCodec  string   `json:"videoCodec,omitempty"`
-	HDR         bool     `json:"hdr,omitempty"`
-	Reasons     []string `json:"reasons,omitempty"`
-	Height      int      `json:"height,omitempty"`
-	BitrateKbps int      `json:"bitrateKbps,omitempty"`
-	PositionMs  int64    `json:"positionMs"`
-	DurationMs  int64    `json:"durationMs,omitempty"`
-	Paused      bool     `json:"paused"`
-	StartedAt   string   `json:"startedAt"`
+	Reason      string `json:"reason,omitempty"`
+	VideoCodec  string `json:"videoCodec,omitempty"`
+	HDR         bool   `json:"hdr,omitempty"`
+	Height      int    `json:"height,omitempty"`
+	BitrateKbps int    `json:"bitrateKbps,omitempty"`
+	PositionMs  int64  `json:"positionMs"`
+	DurationMs  int64  `json:"durationMs,omitempty"`
+	Paused      bool   `json:"paused"`
+	StartedAt   string `json:"startedAt"`
 }
 
 func (p *Panel) playing(w http.ResponseWriter, r *http.Request, _ *session) {
@@ -101,14 +100,13 @@ func (p *Panel) playing(w http.ResponseWriter, r *http.Request, _ *session) {
 			names[s.AccountID] = accountName(people[a.Subject], a.Label, owner)
 		}
 		pj := playingJSON{ID: s.ID, Profile: profiles[s.ProfileID], Device: s.Device, Title: l.Title, Method: l.Method,
-			Reasons: s.Decision.Reasons(), BitrateKbps: s.Decision.Source.Bitrate / 1000, PositionMs: l.PositionMs,
-			DurationMs: s.Decision.Source.RunTimeTicks / 10_000, Paused: l.Paused, StartedAt: l.Started.Format(time.RFC3339)}
+			PositionMs: l.PositionMs, DurationMs: s.DurationMs(), Paused: l.Paused, StartedAt: l.Started.Format(time.RFC3339)}
 		pj.Account.ID, pj.Account.Name = s.AccountID, names[s.AccountID]
-		for _, ms := range s.Decision.Source.MediaStreams {
-			if ms.Type == "Video" {
-				pj.Height = ms.Height
-				break
-			}
+		if rm := s.Remote; rm != nil && rm.Copy.Video != nil {
+			pj.Height, pj.VideoCodec, pj.HDR = rm.Copy.Video.Height, rm.Copy.Video.Codec, rm.Copy.Video.HighDynamicRange()
+		}
+		if playback.KnownReason(s.Reason) {
+			pj.Reason = s.Reason
 		}
 		if d := s.Delivery; d != nil {
 			c := d.Plan.Copy
@@ -118,9 +116,6 @@ func (p *Panel) playing(w http.ResponseWriter, r *http.Request, _ *session) {
 			}
 			if v := c.Facts.Video; v != nil {
 				pj.Height, pj.VideoCodec, pj.HDR = v.Height, v.Codec, v.HighDynamicRange()
-			}
-			if playback.KnownReason(s.Reason) {
-				pj.Reason = s.Reason
 			}
 			if d.Plan.VideoConverted {
 				pj.Converts = append(pj.Converts, "video")

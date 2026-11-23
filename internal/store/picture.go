@@ -78,7 +78,7 @@ func BestPicture(pictures []Picture) (Picture, bool) {
 	return best, best.Height > 0
 }
 
-// readPicture reads a copy's picture as kept (pictureJSON); false when
+// readPicture reads a copy's picture as kept (copyindex.go); false when
 // its size isn't known.
 func readPicture(s sql.NullString) (Picture, bool) {
 	var p Picture

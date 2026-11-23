@@ -31,10 +31,8 @@ type Stream struct {
 	ItemID        string // Jellyfin IDs
 	SourceID      string
 	PlaySessionID string
-	// Decision is how Jellyfin decided to serve it (the older way);
-	// Delivery, for a playback the executor serves (package delivery):
-	// what it makes of the copy, and then Decision is empty.
-	Decision Decision
+	// Delivery is what the executor makes of the copy (package
+	// delivery); nil for a paired server's title (Remote).
 	Delivery *delivery.Started
 	// MediaPlaylist is a delivery's media playlist as served (its
 	// segments' names neutral, their URLs in files).
@@ -43,9 +41,9 @@ type Stream struct {
 	AudioIndex    *int
 	SubtitleIndex *int
 	View          any // the session as last sent to the client, for restoring
-	// Trickplay is the set of seek-bar previews offered with it, if any;
-	// Previews, the fingerprint they're kept by when Overfin made them,
-	// "" when Jellyfin did.
+	// Trickplay is the layout of the seek-bar previews offered with it,
+	// if any; Previews, the fingerprint Overfin keeps them by ("" for a
+	// paired server's, fetched from there).
 	Trickplay *jellyfin.Trickplay
 	Previews  string
 	// Remote, for a title a paired server holds: the playback is there,
@@ -67,8 +65,6 @@ type Stream struct {
 	over chan struct{}
 
 	// Guarded by the registry's lock.
-	// reencodes: a remux found to re-encode its video (Reencodes).
-	reencodes     bool
 	started       time.Time
 	lastSeen      time.Time
 	positionTicks int64
@@ -83,14 +79,6 @@ type Stream struct {
 	// files maps the neutral names in rewritten playlists to the real
 	// upstream URLs. It grows as playlists are fetched.
 	files map[string]Upstream
-
-	// Checked runs once: whether a remux really copies the video.
-	Checked sync.Once
-	// Reencoding, for a paired server's playback, is told when a remux
-	// turns out to re-encode its video: it counts it in the pairing's
-	// transcodes, false when none is left (msfp.Slot.Transcoding). Set
-	// before the stream is registered.
-	Reencoding func() bool
 }
 
 // Over is closed when the playback ends, however it ends (stopped,
@@ -125,11 +113,6 @@ func (s *Stream) TextSubtitle(index int) bool {
 		t, ok := d.Subtitle("s" + strconv.Itoa(index))
 		return ok && wire.ServedForms[t.Format].Form == wire.FormText
 	}
-	for _, ms := range s.Decision.Source.MediaStreams {
-		if ms.Type == "Subtitle" && ms.Index == index && ms.IsTextSubtitleStream {
-			return true
-		}
-	}
 	return false
 }
 
@@ -141,11 +124,6 @@ func (s *Stream) PictureSubtitle(index int) bool {
 		t, ok := d.Subtitle("s" + strconv.Itoa(index))
 		return ok && tracks.IsPGS(t.Format)
 	}
-	for _, ms := range s.Decision.Source.MediaStreams {
-		if ms.Type == "Subtitle" && ms.Index == index && !ms.IsTextSubtitleStream && tracks.IsPGS(ms.Codec) {
-			return true
-		}
-	}
 	return false
 }
 
@@ -156,7 +134,7 @@ func (s *Stream) JellyfinSubtitle(index int) (int, bool) {
 	if d := s.Delivery; d != nil {
 		return d.JellyfinIndex("s" + strconv.Itoa(index))
 	}
-	return index, true
+	return 0, false
 }
 
 // DurationMs is how long the version playing is; 0 when not known.
@@ -164,32 +142,21 @@ func (s *Stream) DurationMs() int64 {
 	if d := s.Delivery; d != nil {
 		return d.Plan.Copy.Facts.DurationMs
 	}
-	return s.Decision.Source.RunTimeTicks / 10_000
+	if rm := s.Remote; rm != nil {
+		return rm.Copy.DurationMs
+	}
+	return 0
 }
 
 // converting says whether the stream takes a transcode slot: its
 // delivery converts the video (a remux, or only the audio converted, is
-// a stream only), or Jellyfin decided a transcode, or a remux turned out
-// to re-encode. The registry's lock is held.
+// a stream only). A paired server's title converts there, not here. The
+// registry's lock is held.
 func (s *Stream) converting() bool {
-	if s.reencodes {
-		return true
-	}
 	if d := s.Delivery; d != nil {
 		return d.Transcodes()
 	}
-	return s.Decision.Method == "transcode"
-}
-
-// PlayMethod is the stream's method in Jellyfin's terms.
-func (s *Stream) PlayMethod() string {
-	switch s.Decision.Method {
-	case "direct":
-		return "DirectPlay"
-	case "remux":
-		return "DirectStream"
-	}
-	return "Transcode"
+	return false
 }
 
 // Ended remembers why a playback stopped, so its device can be told.
@@ -542,8 +509,8 @@ func (t *Tickets) Find(id string, now time.Time) (*Stream, bool) {
 	return s, ok && t.live(s, now)
 }
 
-// Method is how the playback is served: "direct", "remux" or "transcode",
-// a remux found to re-encode its video being a transcode.
+// Method is how the playback is served: its delivery's method ("direct",
+// "remux" or "transcode"), or "remote" for a paired server's title.
 func (t *Tickets) Method(s *Stream) string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -552,12 +519,12 @@ func (t *Tickets) Method(s *Stream) string {
 
 func (t *Tickets) method(s *Stream) string {
 	switch {
-	case s.reencodes:
-		return "transcode"
 	case s.Delivery != nil:
 		return s.Delivery.Method()
+	case s.Remote != nil:
+		return "remote"
 	}
-	return s.Decision.Method
+	return ""
 }
 
 // SetDelivery records what a delivery made, once the playback it was
@@ -567,14 +534,6 @@ func (t *Tickets) SetDelivery(s *Stream, d *delivery.Started, media []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	s.Delivery, s.MediaPlaylist = d, media
-}
-
-// Reencodes records that a remux turned out to re-encode its video: it
-// counts as a transcode from then on. The decision itself stays as made.
-func (t *Tickets) Reencodes(s *Stream) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	s.reencodes = true
 }
 
 // Transcodes counts playbacks that convert the video; repackaging

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/msfp-io/msfp-go"
@@ -20,8 +19,6 @@ import (
 	"github.com/overfin/server/internal/plugin"
 	"github.com/overfin/server/internal/problem"
 	"github.com/overfin/server/internal/store"
-	"github.com/overfin/server/internal/textclean"
-	"github.com/overfin/server/internal/tracks"
 )
 
 // Playback starts, follows, ends and restores playbacks.
@@ -50,15 +47,14 @@ func (Playback) Name() string { return "playback" }
 
 func (pb Playback) Register(r *plugin.Registrar) error {
 	for pattern, h := range map[string]http.HandlerFunc{
-		"POST /api/v1/playback":                       pb.start,
-		"POST /api/v1/previews":                       pb.startPreviews,
-		"GET /api/v1/playback/current":                pb.current,
-		"GET /api/v1/playback/{id}":                   pb.get,
-		"POST /api/v1/playback/{id}/progress":         pb.progress,
-		"POST /api/v1/playback/{id}/stop":             pb.stop,
-		"GET /api/v1/playback/{id}/trickplay/{sheet}": pb.trickplaySheet,
-		"PUT /api/v1/me/subtitles":                    pb.setSubtitles,
-		"PUT /api/v1/playback/{id}/tracks":            pb.chooseTracks,
+		"POST /api/v1/playback":               pb.start,
+		"POST /api/v1/previews":               pb.startPreviews,
+		"GET /api/v1/playback/current":        pb.current,
+		"GET /api/v1/playback/{id}":           pb.get,
+		"POST /api/v1/playback/{id}/progress": pb.progress,
+		"POST /api/v1/playback/{id}/stop":     pb.stop,
+		"PUT /api/v1/me/subtitles":            pb.setSubtitles,
+		"PUT /api/v1/playback/{id}/tracks":    pb.chooseTracks,
 	} {
 		if err := r.HandleFunc(pattern, h); err != nil {
 			return err
@@ -179,21 +175,6 @@ func (pb Playback) stopped(s *playback.Stream, reason string) {
 		}()
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		// Where the profile is in the title, now that the playback is over.
-		pb.record(ctx, s, snap.PositionTicks/10_000, true)
-		jf := pb.Library.Jellyfin
-		if err := jf.ReportStopped(ctx, s.Auth, pb.state(s, snap)); err != nil {
-			pb.Logger.Warn("could not report a stopped playback", "playback", s.ID, "err", err)
-		}
-		if s.Decision.Protocol == "hls" {
-			if err := jf.StopEncoding(ctx, s.Auth, s.Auth.DeviceID, s.PlaySessionID); err != nil {
-				pb.Logger.Warn("could not stop a transcode", "playback", s.ID, "err", err)
-			}
-		}
-	}()
 }
 
 // hostEnding is how a paired server's playback ended here, by this
@@ -204,14 +185,6 @@ func hostEnding(reason string) msfp.EndReason {
 		return msfp.EndExpired
 	}
 	return msfp.EndOperator
-}
-
-func (pb Playback) state(s *playback.Stream, snap playback.Snapshot) jellyfin.PlayState {
-	return jellyfin.PlayState{
-		ItemId: s.ItemID, MediaSourceId: s.SourceID, PlaySessionId: s.PlaySessionID,
-		PositionTicks: snap.PositionTicks, IsPaused: snap.Paused, CanSeek: true,
-		PlayMethod: s.PlayMethod(), AudioStreamIndex: s.AudioIndex, SubtitleStreamIndex: s.SubtitleIndex,
-	}
 }
 
 // EndByAdmin ends a playback from the control panel's live view; its
@@ -268,7 +241,6 @@ func describe(t *library.TitleSummary) string {
 type progressRequest struct {
 	PositionMs int64 `json:"positionMs"`
 	Paused     bool  `json:"paused"`
-	Ended      bool  `json:"ended"`
 }
 
 var playIDRe = regexp.MustCompile(`^play_[a-z2-7]{26}$`)
@@ -334,18 +306,8 @@ func (pb Playback) progress(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if s.Delivery != nil {
-		// What the executor's delivery makes was checked when it started;
-		// no Jellyfin session to report to.
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	if pb.Tickets.Method(s) == "remux" {
-		s.Checked.Do(func() { go pb.checkRemux(s) })
-	}
-	if err := pb.Library.Jellyfin.ReportProgress(r.Context(), s.Auth, pb.state(s, pb.Tickets.Snapshot(s))); err != nil {
-		pb.Logger.Warn("could not report progress", "playback", s.ID, "err", err)
-	}
+	// What the executor's delivery makes was checked when it started; no
+	// Jellyfin session to report to (rule 5).
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -362,14 +324,9 @@ func (pb Playback) stop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s, ended, ok := pb.Tickets.ByID(r.PathValue("id"), p.ID, time.Now()); ok && ended == nil {
-		position := req.PositionMs
-		// The older API's: played to the end, whatever the last position
-		// said. A delivery's playback is watched by where it stopped alone
-		// (past the credits, or most of it).
-		if req.Ended && s.Delivery == nil {
-			position = max(position, s.DurationMs())
-		}
-		pb.Tickets.Progress(s, position*10_000, false, time.Now())
+		// Watched by where it stopped alone: past the copy's credits, or
+		// most of it (D9).
+		pb.Tickets.Progress(s, req.PositionMs*10_000, false, time.Now())
 		pb.end(s, "stopped", "")
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -400,155 +357,12 @@ func (pb Playback) current(w http.ResponseWriter, r *http.Request) {
 func (pb Playback) writeView(w http.ResponseWriter, s *playback.Stream) {
 	position := pb.Tickets.Snapshot(s).PositionTicks / 10_000
 	switch view := s.View.(type) {
-	case sessionJSON:
-		view.PositionMs = position
-		writeOK(w, view)
 	case playJSON:
 		view.PositionMs = position
 		writeOK(w, view)
 	default:
 		problem.Send(w, problem.Internal, "")
 	}
-}
-
-type startRequest struct {
-	// TitleID is what to play (milestone 5): Overfin picks a copy the
-	// profile may see. ItemID, a copy, is the older way.
-	TitleID         string                `json:"titleId"`
-	ItemID          string                `json:"itemId"`
-	Capabilities    playback.Capabilities `json:"capabilities"`
-	StartPositionMs int64                 `json:"startPositionMs"`
-	VersionID       string                `json:"versionId"`
-	AudioTrack      string                `json:"audioTrack"`
-	SubtitleTrack   string                `json:"subtitleTrack"`
-	MaxBitrateKbps  int                   `json:"maxBitrateKbps"`
-	// AudioLanguage is the language to start in (the site's), when the
-	// video has it and no AudioTrack is asked for.
-	AudioLanguage string   `json:"audioLanguage"`
-	Queue         []string `json:"queue"`
-	Device        string   `json:"device"`
-}
-
-// Shapes from the API specification.
-type trackJSON struct {
-	ID string `json:"id"`
-	// Label is its language's name in itself ("Français (Canada)").
-	Label    string `json:"label"`
-	Language string `json:"language,omitempty"`
-	Channels int    `json:"channels,omitempty"`
-	// Role, for audio besides the film's own: commentary, description.
-	Role            string `json:"role,omitempty"`
-	Default         bool   `json:"default,omitempty"`
-	Forced          bool   `json:"forced,omitempty"`
-	HearingImpaired bool   `json:"hearingImpaired,omitempty"`
-	// Pictures: subtitles that are pictures (PGS), for the client to draw.
-	Pictures bool   `json:"pictures,omitempty"`
-	URL      string `json:"url,omitempty"`
-}
-
-type versionJSON struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-type segmentJSON struct {
-	Kind    string `json:"kind"`
-	StartMs int64  `json:"startMs"`
-	EndMs   int64  `json:"endMs"`
-}
-
-// playbackInfoJSON is how a playback is served, for the player's
-// information: why the media server converts it (none when it plays the
-// file as it is), and what the file holds.
-type playbackInfoJSON struct {
-	Reasons     []string        `json:"reasons,omitempty"`
-	Container   string          `json:"container,omitempty"`
-	BitrateKbps int             `json:"bitrateKbps,omitempty"`
-	Video       *streamInfoJSON `json:"video,omitempty"`
-	Audio       *streamInfoJSON `json:"audio,omitempty"`
-}
-
-type streamInfoJSON struct {
-	Codec       string `json:"codec,omitempty"`
-	Profile     string `json:"profile,omitempty"`
-	Width       int    `json:"width,omitempty"`
-	Height      int    `json:"height,omitempty"`
-	BitDepth    int    `json:"bitDepth,omitempty"`
-	Range       string `json:"range,omitempty"`
-	BitrateKbps int    `json:"bitrateKbps,omitempty"`
-	Channels    int    `json:"channels,omitempty"`
-	Language    string `json:"language,omitempty"`
-}
-
-// infoOf describes how a playback is served: the file's video and the
-// audio track playing (index audio, -1 for the default).
-func infoOf(dec *playback.Decision, audio int) *playbackInfoJSON {
-	src := dec.Source
-	out := &playbackInfoJSON{Reasons: dec.Reasons(), Container: textclean.Plain(src.Container, 32), BitrateKbps: src.Bitrate / 1000}
-	if audio < 0 {
-		audio = defaultAudio(src)
-	}
-	for _, ms := range src.MediaStreams {
-		switch {
-		case ms.Type == "Video" && out.Video == nil:
-			out.Video = &streamInfoJSON{Codec: textclean.Plain(ms.Codec, 32), Profile: textclean.Plain(ms.Profile, 32),
-				Width: ms.Width, Height: ms.Height, BitDepth: ms.BitDepth, Range: textclean.Plain(ms.VideoRangeType, 32),
-				BitrateKbps: ms.BitRate / 1000}
-		case ms.Type == "Audio" && ms.Index == audio:
-			out.Audio = &streamInfoJSON{Codec: textclean.Plain(ms.Codec, 32), Channels: ms.Channels,
-				Language: languageTag(ms.Language), BitrateKbps: ms.BitRate / 1000}
-		}
-	}
-	return out
-}
-
-// trickplayJSON is a set of seek-bar previews (the API's Trickplay).
-type trickplayJSON struct {
-	TileWidth  int      `json:"tileWidth"`
-	TileHeight int      `json:"tileHeight"`
-	Columns    int      `json:"columns"`
-	Rows       int      `json:"rows"`
-	IntervalMs int      `json:"intervalMs"`
-	TileCount  int      `json:"tileCount"`
-	Sheets     []string `json:"sheets"`
-}
-
-type streamJSON struct {
-	URL      string `json:"url"`
-	Protocol string `json:"protocol"`
-	MimeType string `json:"mimeType,omitempty"`
-}
-
-type sessionJSON struct {
-	ID string `json:"id"`
-	// Title is what plays, as titles are shown everywhere else.
-	Title          *library.TitleSummary `json:"title,omitempty"`
-	Method         string                `json:"method"`
-	Stream         streamJSON            `json:"stream"`
-	PositionMs     int64                 `json:"positionMs"`
-	DurationMs     int64                 `json:"durationMs,omitempty"`
-	Versions       []versionJSON         `json:"versions,omitempty"`
-	VersionID      string                `json:"versionId,omitempty"`
-	AudioTracks    []trackJSON           `json:"audioTracks,omitempty"`
-	AudioTrack     string                `json:"audioTrack,omitempty"`
-	SubtitleTracks []trackJSON           `json:"subtitleTracks,omitempty"`
-	SubtitleTrack  string                `json:"subtitleTrack,omitempty"`
-	// ForcedTracks are subtitles for the lines in another language only;
-	// ForcedTrack, the one in the audio's language, shown whenever no
-	// other subtitles are.
-	ForcedTracks []trackJSON `json:"forcedTracks,omitempty"`
-	ForcedTrack  string      `json:"forcedTrack,omitempty"`
-	// SubtitleStretchSeconds is how long each part of a subtitle track
-	// is: part n, at its url + "/n", covers the n-th stretch of the video.
-	SubtitleStretchSeconds int            `json:"subtitleStretchSeconds,omitempty"`
-	MaxBitrateKbps         int            `json:"maxBitrateKbps,omitempty"`
-	Segments               []segmentJSON  `json:"segments,omitempty"`
-	Trickplay              *trickplayJSON `json:"trickplay,omitempty"`
-	// Next is the episode after this one, when it's one the profile may
-	// see: the rest of the season, then the next season's.
-	Next *library.TitleSummary `json:"next,omitempty"`
-	// Info is how it's served, and what the file holds.
-	Info *playbackInfoJSON `json:"info,omitempty"`
 }
 
 var (
@@ -568,202 +382,6 @@ func trackIndex(id string, letter byte) (int, bool) {
 	return n, true
 }
 
-// startOld starts a playback from the older body (capabilities; Jellyfin
-// decides), still taken on this branch while players move to MSFP's play
-// request (play.go).
-func (pb Playback) startOld(w http.ResponseWriter, r *http.Request) {
-	var req startRequest
-	if !decode(r, &req) {
-		problem.Send(w, problem.InvalidRequest, "")
-		return
-	}
-	jfItem, ok := library.Unwrap(library.ItemPrefix, req.ItemID)
-	if req.TitleID != "" {
-		_, ok = titleRef(req.TitleID)
-		ok = ok && req.ItemID == ""
-	}
-	if !ok || req.StartPositionMs < 0 || req.StartPositionMs > maxPositionMs || req.MaxBitrateKbps < 0 || req.MaxBitrateKbps > maxKbps || req.Capabilities.MaxBitrateKbps < 0 || req.Capabilities.MaxBitrateKbps > maxKbps || len(req.Queue) > 0 ||
-		(req.Device != "" && !deviceRe.MatchString(req.Device)) {
-		// Queues arrive with the rest of playback management.
-		problem.Send(w, problem.InvalidRequest, "")
-		return
-	}
-
-	var pr jellyfin.PlaybackRequest
-	pr.StartTimeTicks = req.StartPositionMs * 10_000
-	if req.VersionID != "" {
-		if pr.MediaSourceID, ok = library.Unwrap("ver_", req.VersionID); !ok {
-			problem.Send(w, problem.InvalidRequest, "")
-			return
-		}
-	}
-	if req.AudioTrack != "" {
-		n, ok := trackIndex(req.AudioTrack, 'a')
-		if !ok {
-			problem.Send(w, problem.InvalidRequest, "")
-			return
-		}
-		pr.AudioStreamIndex = &n
-	}
-	// Subtitles are the client's to show, text or pictures: Jellyfin is
-	// never asked for any, so it never burns them into the video.
-	off := -1
-	pr.SubtitleStreamIndex = &off
-	if req.SubtitleTrack != "" && req.SubtitleTrack != "off" {
-		if _, ok := trackIndex(req.SubtitleTrack, 's'); !ok {
-			problem.Send(w, problem.InvalidRequest, "")
-			return
-		}
-	}
-	kbps := lowest(req.MaxBitrateKbps, req.Capabilities.MaxBitrateKbps, pb.MaxBitrateKbps)
-	if kbps == 0 {
-		kbps = 120_000
-	}
-	pr.MaxStreamingBitrate = kbps * 1000
-	pr.DeviceProfile = playback.DeviceProfile(req.Capabilities, pr.MaxStreamingBitrate)
-
-	l := pb.Library
-	caller := l.Sessions.Current(w, r)
-	if caller == nil {
-		return
-	}
-	p := caller.Profile
-	ctx := r.Context()
-	if req.TitleID != "" {
-		// Where it plays from: a copy here, or a paired server's, by the
-		// language it would start in (Overfin never picks by itself one
-		// without it when another has it).
-		ref, _ := titleRef(req.TitleID)
-		tracksKey := ref.Key()
-		if ref.Kind == "episode" {
-			tracksKey = ref.Series().Key()
-		}
-		language, _ := l.wishesFor(ctx, p, tracksKey, req.AudioLanguage)
-		src, err := l.sourceOf(ctx, p, req.TitleID, language)
-		if err != nil {
-			l.storeError(w, err)
-			return
-		}
-		if src.peer != "" {
-			pb.startRemote(w, r, caller, req, kbps, src.peer, ref.Key())
-			return
-		}
-		if jfItem = src.item; jfItem == "" {
-			problem.Send(w, problem.NotFound, "")
-			return
-		}
-	}
-	// An episode of a file holding several plays the file.
-	jfItem = l.Provisioner.Store.RealItem(ctx, jfItem)
-
-	ja, uid, ok := l.account(w, r)
-	if !ok {
-		return
-	}
-	// Everything that can fail comes before the playback is registered:
-	// one registered without its view would count against the stream
-	// limit until it went idle, and answer nothing.
-	titles, err := l.titlesOfItems(ctx, p, []string{jfItem})
-	if err != nil {
-		l.storeError(w, err)
-		return
-	}
-	// The account's stream limit: replace its oldest playback, whose device
-	// is then told who took over, or refuse (rule 49). Another account's
-	// playback is never touched. With a stream reserved for each profile,
-	// only the profile's own are ever replaced, never another profile's.
-	// When every transcode is taken, refused before anything stops.
-	// Unnamed by the client, from its browser; if that says nothing either,
-	// the one told says "another device" in their own language.
-	device := req.Device
-	if device == "" {
-		device = deviceName(r.UserAgent())
-	}
-	lim := playback.Limits{MaxStreams: caller.Account.Template.MaxStreams, RefuseOverLimit: pb.RefuseOverLimit,
-		MaxTranscodes: pb.MaxTranscodes}
-	if lim.MaxStreams > 0 && caller.Account.Template.ReserveStreams {
-		profiles, err := l.Provisioner.Store.Profiles(ctx, p.AccountID)
-		if err != nil {
-			pb.Logger.Error("listing the account's profiles failed", "err", err)
-			problem.Send(w, problem.Internal, "")
-			return
-		}
-		lim.Reserve, lim.Profiles = true, len(profiles)
-	}
-	// The languages, for tracks not asked for: those chosen for this title
-	// while watching it, else the profile's preferences.
-	wantAudio, wantSubtitles := l.trackWishes(ctx, p, jfItem, req.AudioLanguage)
-	o, ok := pb.open(w, r, openArgs{req: req, pr: pr, kbps: kbps, item: jfItem, uid: uid, ja: ja,
-		mayOpen:   func(raw *jellyfin.RawItem) (bool, error) { return l.mayOpen(ctx, p, raw) },
-		wantAudio: wantAudio, wantSubtitles: wantSubtitles, lim: lim, device: device,
-		accountID: p.AccountID, profileID: p.ID, sessionID: caller.Session.ID})
-	if !ok {
-		return
-	}
-	s, out, dec, pr := o.stream, o.out, o.dec, o.pr
-	if len(titles) == 1 {
-		out.Title = &titles[0]
-		if ref, ok := titleRef(titles[0].ID); ok && ref.Kind == "episode" {
-			next, err := l.nextEpisode(ctx, p, ref)
-			if err != nil {
-				pb.Logger.Warn("finding the next episode failed", "err", err) // a bonus: playback goes on
-			}
-			out.Next = next
-		}
-	}
-	// Seek-bar previews are a bonus too.
-	out.Trickplay = pb.previews(ctx, s, ja, uid, func(n int) string {
-		return "/api/v1/playback/" + s.ID + "/trickplay/" + strconv.Itoa(n)
-	})
-
-	// How it's served and why, without anything that names or reaches the
-	// file (rule 54): what tells a needless conversion.
-	pb.Logger.Info("playback started", "playback", s.ID, "method", dec.Method, "reasons", dec.Reasons(),
-		"maxKbps", kbps, "videoCodecs", req.Capabilities.VideoCodecs, "hdr", req.Capabilities.HDR,
-		"maxHeight", req.Capabilities.MaxHeight, "clientKbps", req.Capabilities.MaxBitrateKbps, "askedKbps", req.MaxBitrateKbps,
-		"audioLanguage", req.AudioLanguage, "askedAudio", req.AudioTrack, "audio", out.AudioTrack)
-
-	s.View = out
-	pb.Tickets.Describe(s, describe(out.Title))
-	if err := l.Jellyfin.ReportStart(ctx, s.Auth, pb.state(s, pb.Tickets.Snapshot(s))); err != nil {
-		pb.Logger.Warn("could not report a playback start", "playback", s.ID, "err", err)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	writeOK(w, out)
-}
-
-// previews gives a playback its seek-bar previews, when its copy has
-// some: Overfin's own, else Jellyfin's set nearest 320 pixels wide, with
-// sheet(n) the address of sheet n. A bonus: nil when there are none or
-// asking fails.
-func (pb Playback) previews(ctx context.Context, s *playback.Stream, ja jellyfin.Auth, uid string, sheet func(n int) string) *trickplayJSON {
-	l := pb.Library
-	var set jellyfin.Trickplay
-	if fp, own, ok := l.Previews.ForVersion(ctx, s.ItemID, s.SourceID); ok {
-		set = jellyfin.Trickplay{Width: own.Width, Height: own.Height, Columns: own.Columns, Rows: own.Rows,
-			Count: own.Count, IntervalMs: own.IntervalMs}
-		s.Previews = fp
-	} else if sets, err := l.Jellyfin.Trickplays(ctx, ja, uid, s.ItemID, s.SourceID); err == nil && len(sets) > 0 {
-		set = sets[0]
-		for _, t := range sets[1:] {
-			if max(t.Width-320, 320-t.Width) < max(set.Width-320, 320-set.Width) {
-				set = t
-			}
-		}
-	}
-	if sheetCount(set) == 0 {
-		return nil
-	}
-	s.Trickplay = &set
-	tp := &trickplayJSON{TileWidth: set.Width, TileHeight: set.Height, Columns: set.Columns, Rows: set.Rows,
-		IntervalMs: set.IntervalMs, TileCount: set.Count, Sheets: []string{}}
-	for n := range sheetCount(set) {
-		tp.Sheets = append(tp.Sheets, sheet(n))
-	}
-	return tp
-}
-
 // sheetCount is how many sheets a set of previews takes.
 func sheetCount(tp jellyfin.Trickplay) int {
 	per := tp.Columns * tp.Rows
@@ -771,17 +389,6 @@ func sheetCount(tp jellyfin.Trickplay) int {
 		return 0
 	}
 	return (tp.Count + per - 1) / per
-}
-
-// lowest returns the smallest positive value, or 0 when there is none.
-func lowest(values ...int) int {
-	m := 0
-	for _, v := range values {
-		if v > 0 && (m == 0 || v < m) {
-			m = v
-		}
-	}
-	return m
 }
 
 var languageRe = regexp.MustCompile(`^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$`)
@@ -794,32 +401,6 @@ func languageTag(s string) string {
 	return s
 }
 
-// checkRemux asks Jellyfin, once the stream runs, whether a remux really
-// copies the video. The reasons Jellyfin gives beforehand don't cover
-// everything it decides when it starts encoding (converting HDR for a
-// screen, say); a remux that re-encodes is a transcode, and counts as one
-// from then on, for a paired server's playback in its pairing's
-// transcodes too.
-func (pb Playback) checkRemux(s *playback.Stream) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	copied, found, err := pb.Library.Jellyfin.VideoCopied(ctx, s.Auth, s.Auth.DeviceID, s.ItemID)
-	if err != nil {
-		pb.Logger.Warn("could not check how Jellyfin serves a playback", "playback", s.ID, "err", err)
-		return
-	}
-	if found && !copied {
-		pb.Tickets.Reencodes(s)
-		pb.Logger.Info("a playback taken for a remux re-encodes its video: counted as a transcode", "playback", s.ID)
-		// A paired server's: counted in its pairing's transcodes too, and
-		// stopped when none is left (MSFP playback section 6).
-		if s.Reencoding != nil && !s.Reencoding() {
-			pb.Logger.Info("a paired server's playback re-encodes its video, over its pairing's transcodes: stopped", "playback", s.ID)
-			pb.end(s, "over the pairing's transcodes", "")
-		}
-	}
-}
-
 // Bounds on what a browser says of a playback: positions within a hundred
 // days (ticks are milliseconds × 10,000 in an int64), bitrates within
 // 10 Gb/s, so no multiplication overflows.
@@ -827,26 +408,6 @@ const (
 	maxPositionMs = 100 * 24 * 3600 * 1000
 	maxKbps       = 10_000_000
 )
-
-// trickplaySheet serves one sheet of a playback's seek-bar previews, to
-// whoever may see the playback, re-encoded like every image (rule 16); a
-// paired server's playback's, from that server (rule 97).
-func (pb Playback) trickplaySheet(w http.ResponseWriter, r *http.Request) {
-	s := pb.find(w, r)
-	if s == nil {
-		return
-	}
-	if s.Remote != nil {
-		n, ok := sheetNumber(s.Trickplay, r.PathValue("sheet"))
-		if !ok {
-			problem.Send(w, problem.NotFound, "")
-			return
-		}
-		Stream{Playback: pb}.fetchRemote(w, r, s, msfp.MediaPath{Kind: msfp.MediaSheet, Sheet: n})
-		return
-	}
-	pb.serveSheet(w, r, s, r.PathValue("sheet"))
-}
 
 // sheetNumber reads a sheet's number, in decimal without leading zeros,
 // within tp's sheets.
@@ -859,32 +420,10 @@ func sheetNumber(tp *jellyfin.Trickplay, sheet string) (int, bool) {
 }
 
 // serveSheet serves sheet of a playback of this server's copy, its
-// access checked by the caller.
+// access checked by the caller: Overfin's own previews only (none from
+// Jellyfin, plan decision 4).
 func (pb Playback) serveSheet(w http.ResponseWriter, r *http.Request, s *playback.Stream, sheet string) {
-	tp := s.Trickplay
-	n, ok := sheetNumber(tp, sheet)
-	if !ok {
-		problem.Send(w, problem.NotFound, "")
-		return
-	}
-	l := pb.Library
-	key := fmt.Sprintf("trickplay/%s/%s/%d/%d", s.ItemID, s.SourceID, tp.Width, n)
-	fetch := func(ctx context.Context) ([]byte, error) {
-		return l.Jellyfin.TrickplaySheet(ctx, s.Auth, s.ItemID, s.SourceID, tp.Width, n)
-	}
-	if fp := s.Previews; fp != "" {
-		key = fmt.Sprintf("previews/%s/%d", fp, n)
-		fetch = func(context.Context) ([]byte, error) { return l.Previews.Store.Sheet(fp, n) }
-	}
-	data, err := l.Images.Fetched(r.Context(), key, fetch)
-	if err != nil {
-		if r.Context().Err() == nil {
-			pb.Logger.Warn("a seek-bar preview sheet failed", "playback", s.ID, "err", err)
-		}
-		problem.Send(w, problem.NotFound, "")
-		return
-	}
-	writeSheet(w, data)
+	pb.serveOwnSheet(w, r, s.Previews, s.Trickplay, sheet)
 }
 
 // serveOwnSheet serves sheet of the previews Overfin made, kept by the
@@ -915,48 +454,6 @@ func writeSheet(w http.ResponseWriter, data []byte) {
 	w.Write(data)
 }
 
-// roleJSON is an audio track's role as the API says it: none for the
-// film's own sound.
-func roleJSON(role string) string {
-	if role == tracks.Main {
-		return ""
-	}
-	return role
-}
-
-// defaultAudio is the index of the audio track a version plays unless
-// asked otherwise: Jellyfin's default, else the one marked default, else
-// the first; -1 when it has none.
-func defaultAudio(src jellyfin.MediaSource) int {
-	if i := src.DefaultAudioStreamIndex; i != nil {
-		return *i
-	}
-	first := -1
-	for _, ms := range src.MediaStreams {
-		if ms.Type != "Audio" {
-			continue
-		}
-		if ms.IsDefault {
-			return ms.Index
-		}
-		if first < 0 {
-			first = ms.Index
-		}
-	}
-	return first
-}
-
-// markedAudio tells whether a version marks one of its audio tracks as
-// the default.
-func markedAudio(src jellyfin.MediaSource) bool {
-	for _, ms := range src.MediaStreams {
-		if ms.Type == "Audio" && ms.IsDefault {
-			return true
-		}
-	}
-	return false
-}
-
 // setSubtitles sets the subtitles the active profile prefers: a language
 // ("" for none), its next playbacks start with, when the video has it and
 // nothing else was chosen for the title.
@@ -978,19 +475,6 @@ func (pb Playback) setSubtitles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// trackWishes are the audio and subtitle languages a playback of an item
-// starts with: those the profile chose for its title (an episode's: its
-// series') while watching it, else its preferences. The audio preference
-// "" is the site's language (siteLanguage), "original" the title's own.
-// "" for either: the file's default audio, no subtitles.
-func (l Library) trackWishes(ctx context.Context, p *store.Profile, item, siteLanguage string) (audio, subtitles string) {
-	key, err := l.trackKey(ctx, item)
-	if err != nil {
-		l.Logger.Warn("finding a title's tracks chosen failed", "err", err) // the preferences do
-	}
-	return l.wishesFor(ctx, p, key, siteLanguage)
 }
 
 // wishesFor is trackWishes by the title's key (a film's or a series'; ""
@@ -1054,22 +538,17 @@ func (pb Playback) chooseTracks(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.InvalidRequest, "")
 		return
 	}
-	audioIndex, subtitleIndex := -1, -1
 	if req.AudioTrack != nil {
-		n, ok := trackIndex(*req.AudioTrack, 'a')
-		if !ok {
+		if _, ok := trackIndex(*req.AudioTrack, 'a'); !ok {
 			problem.Send(w, problem.InvalidRequest, "")
 			return
 		}
-		audioIndex = n
 	}
 	if req.SubtitleTrack != nil && *req.SubtitleTrack != "" {
-		n, ok := trackIndex(*req.SubtitleTrack, 's')
-		if !ok {
+		if _, ok := trackIndex(*req.SubtitleTrack, 's'); !ok {
 			problem.Send(w, problem.InvalidRequest, "")
 			return
 		}
-		subtitleIndex = n
 	}
 	s := pb.find(w, r)
 	if s == nil {
@@ -1090,32 +569,12 @@ func (pb Playback) chooseTracks(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	st := l.Provisioner.Store
 	if d := s.Delivery; d != nil {
 		// The copy's tracks, by their IDs.
 		if err := pb.keepDeliveryTracks(ctx, s, d, key, req.AudioTrack, req.SubtitleTrack); err != nil {
 			l.storeError(w, err)
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	audio, subtitles, forced := tracks.Read(s.Decision.Source.MediaStreams)
-	if audioIndex >= 0 {
-		if t, ok := tracks.Find(audio, audioIndex); ok && t.Language != "" && t.Role == tracks.Main {
-			err = st.SetTitleAudio(ctx, s.ProfileID, key, t.Language)
-		}
-	}
-	if err == nil && req.SubtitleTrack != nil {
-		if subtitleIndex < 0 {
-			err = st.SetTitleSubtitles(ctx, s.ProfileID, key, "")
-		} else if t, ok := tracks.Find(append(subtitles, forced...), subtitleIndex); ok && t.Language != "" && !t.Forced {
-			err = st.SetTitleSubtitles(ctx, s.ProfileID, key, t.Language)
-		}
-	}
-	if err != nil {
-		l.storeError(w, err)
-		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -1144,322 +603,4 @@ func (pb Playback) keepDeliveryTracks(ctx context.Context, s *playback.Stream, d
 		}
 	}
 	return nil
-}
-
-// openArgs is what opening a copy needs: the request as checked, the copy,
-// whose playback it is and under which limits.
-type openArgs struct {
-	req  startRequest
-	pr   jellyfin.PlaybackRequest
-	kbps int
-	item string // the Jellyfin item
-	uid  string
-	ja   jellyfin.Auth
-	// mayOpen says whether the item read may be played (a profile's
-	// access); nil when the caller checked already.
-	mayOpen func(*jellyfin.RawItem) (bool, error)
-	// wantAudio and wantSubtitles are the languages to start in, when the
-	// video has them and no track is asked for.
-	wantAudio, wantSubtitles string
-	lim                      playback.Limits
-	device                   string
-	// whose playback it is: the account (or pairing), profile and session
-	// it counts for.
-	accountID, profileID, sessionID string
-	// urlBase goes before the stream's URLs: "" on this server's own site,
-	// its address for another server's viewers; origin, then, is the site
-	// those viewers fetch it from (Stream.Origin).
-	urlBase, origin string
-	// versionID, when set, is a version's ID as the playback's viewer
-	// knows it (a paired server's: never Jellyfin's, MSFP playback, section 2.3);
-	// nil for this server's own site, which knows them as "ver_" and
-	// Jellyfin's.
-	versionID func(sourceID string) string
-	// wantVersion, with versionID, is the version a paired server asks
-	// for: the copy's version of that ID, when it has one (MSFP playback,
-	// section 2.6).
-	wantVersion string
-	// peerTracks: req's tracks are a paired server's, checked against
-	// the copy's own before Jellyfin hears of them; one the copy doesn't
-	// have counts as none asked for (MSFP playback, section 2.6). This
-	// server's own site sets pr.AudioStreamIndex itself.
-	peerTracks bool
-	// admit, for a paired server's playback, counts it by the pairing's
-	// limits once the method is known, before this server's own count
-	// (msfp.StartRequest.Admit); its slot frees that count, and moves a
-	// remux found to re-encode into the pairing's transcodes.
-	admit func(method string) (msfp.Slot, error)
-}
-
-// opened is a copy opened: its playback registered, and the session's
-// view so far (no title, next episode or previews: those are the caller's).
-type opened struct {
-	stream *playback.Stream
-	out    sessionJSON
-	dec    *playback.Decision
-	pr     jellyfin.PlaybackRequest
-}
-
-// open plays a copy: asks Jellyfin how, picks the tracks, admits the
-// playback under the limits and describes it, with its stream's URLs. It
-// answers w itself when it fails.
-func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*opened, bool) {
-	l, ctx, req, pr, jfItem, uid, ja, kbps := pb.Library, r.Context(), o.req, o.pr, o.item, o.uid, o.ja, o.kbps
-	// Overfin's one Jellyfin account plays, as a device of this playback's
-	// own: Jellyfin keeps one session per device, and ties each transcode
-	// to the device that asked for it.
-	play := ja
-	play.DeviceID = pb.Tickets.ReserveDevice("overfin-play")
-	started := false
-	defer func() {
-		if !started {
-			pb.Tickets.ReleaseDevice(play.DeviceID)
-		}
-	}()
-
-	raw, err := l.Jellyfin.Item(ctx, ja, uid, jfItem)
-	if err != nil {
-		l.upstreamError(w, err)
-		return nil, false
-	}
-	if o.mayOpen != nil {
-		if may, err := o.mayOpen(raw); err != nil || !may {
-			l.hidden(w, err)
-			return nil, false
-		}
-	}
-	summary, ok := library.Summary(raw)
-	if !ok {
-		problem.Send(w, problem.NotFound, "")
-		return nil, false
-	}
-	audioItem := summary.Kind == "track" || summary.Kind == "audiobook"
-	var info *jellyfin.PlaybackInfo
-	var dec *playback.Decision
-	decide := func() bool {
-		var err error
-		if info, err = l.Jellyfin.PlaybackInfo(ctx, play, uid, jfItem, pr); err != nil {
-			l.upstreamError(w, err)
-			return false
-		}
-		dec, err = playback.Decide(info, jfItem, audioItem, play.DeviceID)
-		switch {
-		case errors.Is(err, playback.ErrNotPlayable):
-			problem.Send(w, problem.NotPlayable, "")
-			return false
-		case errors.Is(err, playback.ErrUnsafeUpstream):
-			pb.Logger.Warn("refused an unexpected stream URL from Jellyfin", "item", req.ItemID, "err", err)
-			problem.Send(w, problem.NotPlayable, "")
-			return false
-		case err != nil:
-			l.upstreamError(w, err)
-			return false
-		}
-		return true
-	}
-	if !decide() {
-		return nil, false
-	}
-	// The version asked for, when it is one of the copy's others: chosen
-	// before the tracks, which are its.
-	if o.wantVersion != "" && o.versionID != nil && pr.MediaSourceID == "" {
-		for _, src := range info.MediaSources {
-			if id, err := jellyfin.NormalizeID(src.Id); err == nil && o.versionID(id) == o.wantVersion && src.Id != dec.Source.Id {
-				pr.MediaSourceID = src.Id
-				if !decide() {
-					return nil, false
-				}
-				break
-			}
-		}
-	}
-	// The languages, for tracks not asked for: those chosen for this title
-	// while watching it, else the profile's preferences, when the video
-	// has them. Subtitles are the client's to show, text or pictures; only
-	// another audio track has Jellyfin asked again.
-	shownSubtitle := ""
-	again := false
-	wantAudio, wantSubtitles := o.wantAudio, o.wantSubtitles
-	audioTracks, subtitleTracks, forcedTracks := tracks.Read(dec.Source.MediaStreams)
-	if o.peerTracks {
-		if n, ok := trackIndex(req.AudioTrack, 'a'); ok {
-			if _, listed := tracks.Find(audioTracks, n); listed {
-				pr.AudioStreamIndex, again = &n, true
-			} else {
-				req.AudioTrack = ""
-			}
-		}
-		if n, ok := trackIndex(req.SubtitleTrack, 's'); ok {
-			_, text := tracks.Find(subtitleTracks, n)
-			_, forced := tracks.Find(forcedTracks, n)
-			if !text && !forced {
-				req.SubtitleTrack = ""
-			}
-		}
-	}
-	if req.AudioTrack == "" && wantAudio != "" {
-		if t, ok := tracks.Pick(audioTracks, wantAudio); ok && t.Index != defaultAudio(dec.Source) {
-			n := t.Index
-			pr.AudioStreamIndex, again = &n, true
-		}
-	}
-	// The audio playing is always one listed: a variant merged away (a
-	// stereo beside the 5.1) gives way to the one kept.
-	if req.AudioTrack == "" && pr.AudioStreamIndex == nil {
-		if i := defaultAudio(dec.Source); i >= 0 {
-			if _, listed := tracks.Find(audioTracks, i); !listed {
-				for _, ms := range dec.Source.MediaStreams {
-					if ms.Type != "Audio" || ms.Index != i {
-						continue
-					}
-					a := tracks.Audio(ms)
-					for _, t := range audioTracks {
-						if t.Language == a.Language && t.Role == a.Role {
-							n := t.Index
-							pr.AudioStreamIndex, again = &n, true
-						}
-					}
-				}
-			}
-		}
-	}
-	// A file that marks no audio track as default: Jellyfin then checks no
-	// audio codec, and offers the file as it is even when the browser can't
-	// play its audio (The 100's season 2, French AC3: no sound). The track
-	// that plays is named, so Jellyfin checks it.
-	if req.AudioTrack == "" && pr.AudioStreamIndex == nil && !markedAudio(dec.Source) {
-		if i := defaultAudio(dec.Source); i >= 0 {
-			pr.AudioStreamIndex, again = &i, true
-		}
-	}
-	if req.SubtitleTrack == "" && wantSubtitles != "" {
-		if t, ok := tracks.Pick(subtitleTracks, wantSubtitles); ok {
-			shownSubtitle = "s" + strconv.Itoa(t.Index)
-		}
-	}
-	// Jellyfin applies the tracks asked for only to the version named:
-	// without one, it streamed the default ones (the audio asked for, by
-	// language or from the menu, never played). So it's asked again, for
-	// the version it chose.
-	if pr.MediaSourceID == "" && pr.AudioStreamIndex != nil {
-		pr.MediaSourceID, again = dec.Source.Id, true
-	}
-	if again && !decide() {
-		return nil, false
-	}
-
-	sourceID, _ := jellyfin.NormalizeID(dec.Source.Id)
-	s := &playback.Stream{
-		AccountID: o.accountID, ProfileID: o.profileID, SessionID: o.sessionID, Device: o.device,
-		ItemID: jfItem, SourceID: sourceID, PlaySessionID: info.PlaySessionId, Decision: *dec,
-		Auth: play, AudioIndex: pr.AudioStreamIndex, SubtitleIndex: pr.SubtitleStreamIndex, Origin: o.origin,
-	}
-	// A paired server's: counted by its pairing's limits first (the
-	// engine's), then by this server's (Tickets.Admit), released when the
-	// second refuses.
-	release := func() {}
-	if o.admit != nil {
-		slot, err := o.admit(dec.Method)
-		if err != nil {
-			problem.Send(w, problem.StreamLimitReached, "")
-			return nil, false
-		}
-		release, s.Reencoding = slot.Release, slot.Transcoding
-	}
-	// Checked and registered at once, so two starts can't both pass.
-	replaced, err := pb.Tickets.Admit(s, pr.StartTimeTicks, time.Now(), o.lim, o.device)
-	switch {
-	case errors.Is(err, playback.ErrStreamLimit):
-		release()
-		problem.Send(w, problem.StreamLimitReached, "")
-		return nil, false
-	case errors.Is(err, playback.ErrServerBusy):
-		release()
-		problem.Send(w, problem.ServerBusy, "")
-		return nil, false
-	}
-	for _, old := range replaced {
-		pb.stopped(old, "taken-over")
-	}
-	started = true // the device is the playback's now, freed when it ends
-
-	versionID := o.versionID
-	if versionID == nil {
-		versionID = func(id string) string { return "ver_" + id }
-	}
-	out := sessionJSON{
-		ID: s.ID, Method: dec.Method,
-		PositionMs: req.StartPositionMs, DurationMs: dec.Source.RunTimeTicks / 10_000,
-		VersionID: versionID(sourceID), MaxBitrateKbps: kbps,
-	}
-	base := o.urlBase + "/api/v1/stream/" + s.Ticket + "/"
-	if dec.Protocol == "hls" {
-		out.Stream = streamJSON{URL: base + "master.m3u8", Protocol: "hls", MimeType: "application/vnd.apple.mpegurl"}
-	} else {
-		out.Stream = streamJSON{URL: base + "file", Protocol: "file"}
-	}
-	for _, src := range info.MediaSources {
-		if id, err := jellyfin.NormalizeID(src.Id); err == nil {
-			out.Versions = append(out.Versions, versionJSON{ID: versionID(id), Name: playback.Describe(src)})
-		}
-	}
-	// The tracks as the player lists them (tracks.Read), read again from
-	// the version streamed.
-	audioTracks, subtitleTracks, forcedTracks = tracks.Read(dec.Source.MediaStreams)
-	for _, a := range audioTracks {
-		out.AudioTracks = append(out.AudioTracks, trackJSON{ID: "a" + strconv.Itoa(a.Index), Label: a.Name,
-			Language: a.Language, Channels: a.Channels, Role: roleJSON(a.Role), Default: a.Default})
-	}
-	subtitle := func(t tracks.Track) trackJSON {
-		j := trackJSON{ID: "s" + strconv.Itoa(t.Index), Label: t.Name, Language: t.Language, Default: t.Default,
-			Forced: t.Forced, HearingImpaired: t.HearingImpaired, Pictures: !t.Text}
-		if t.Text {
-			j.URL = base + "subtitles/" + j.ID // sanitized WebVTT (rule 17), "/<part>" after it
-		} else {
-			j.URL = base + "pictures/" + j.ID // PGS, each stretch checked whole (rule 17), "/<part>" after it
-		}
-		return j
-	}
-	for _, t := range subtitleTracks {
-		out.SubtitleTracks = append(out.SubtitleTracks, subtitle(t))
-	}
-	for _, t := range forcedTracks {
-		out.ForcedTracks = append(out.ForcedTracks, subtitle(t))
-	}
-	if len(out.SubtitleTracks)+len(out.ForcedTracks) > 0 {
-		out.SubtitleStretchSeconds = StretchSeconds
-	}
-	playing := defaultAudio(dec.Source)
-	if pr.AudioStreamIndex != nil {
-		playing = *pr.AudioStreamIndex
-	}
-	if playing >= 0 {
-		out.AudioTrack = "a" + strconv.Itoa(playing)
-		if a, ok := tracks.Find(audioTracks, playing); ok {
-			if f, ok := tracks.Pick(forcedTracks, a.Language); ok {
-				out.ForcedTrack = "s" + strconv.Itoa(f.Index)
-			}
-		}
-	}
-	switch {
-	case shownSubtitle != "":
-		out.SubtitleTrack = shownSubtitle // shown by the client, from its URL
-	case req.SubtitleTrack != "" && req.SubtitleTrack != "off":
-		out.SubtitleTrack = req.SubtitleTrack // asked for, shown by the client
-	}
-	// Skip markers are a bonus: playback goes on without them.
-	if segs, err := l.Jellyfin.MediaSegments(ctx, ja, jfItem); err == nil {
-		for _, sg := range segs {
-			if kind := strings.ToLower(sg.Type); kind != "unknown" && kind != "" && sg.EndTicks > sg.StartTicks {
-				out.Segments = append(out.Segments, segmentJSON{Kind: kind, StartMs: sg.StartTicks / 10_000, EndMs: sg.EndTicks / 10_000})
-			}
-		}
-	}
-
-	audioIndex := -1
-	if pr.AudioStreamIndex != nil {
-		audioIndex = *pr.AudioStreamIndex
-	}
-	out.Info = infoOf(dec, audioIndex)
-	return &opened{stream: s, out: out, dec: dec, pr: pr}, true
 }

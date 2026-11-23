@@ -6,15 +6,13 @@ import (
 	"encoding/json"
 )
 
-// Copy is what a title's page says of one of its copies: its picture's
-// neutral name, and its audio and subtitle languages as the player lists
-// them (forced subtitles aside).
+// Copy is what a title's page says of one of its copies: its audio and
+// subtitle languages as the player lists them (forced subtitles aside).
 type Copy struct {
 	ID               string
-	Video            string
 	Audio, Subtitles []string
-	// Picture is its picture as paired servers are told of it (MSFP video
-	// section 3.2); nil when its size isn't known.
+	// Picture is its picture, stepped (BestPicture), from the copy read
+	// from its file; nil until Overfin read it.
 	Picture *Picture
 }
 
@@ -28,7 +26,7 @@ func (s *Store) Copies(ctx context.Context, ids []string) ([]Copy, error) {
 	for i, id := range ids {
 		args[i] = id
 	}
-	rows, err := s.read.QueryContext(ctx, `SELECT id, coalesce(video, ''), coalesce(audio_tags, ''), coalesce(subtitle_tags, ''), picture
+	rows, err := s.read.QueryContext(ctx, `SELECT id, coalesce(audio_tags, ''), coalesce(subtitle_tags, ''), picture
 		FROM catalog_items WHERE id IN (`+marks(len(ids))+`)`, args...)
 	if err != nil {
 		return nil, err
@@ -39,7 +37,7 @@ func (s *Store) Copies(ctx context.Context, ids []string) ([]Copy, error) {
 		var c Copy
 		var audio, subtitles string
 		var picture sql.NullString
-		if err := rows.Scan(&c.ID, &c.Video, &audio, &subtitles, &picture); err != nil {
+		if err := rows.Scan(&c.ID, &audio, &subtitles, &picture); err != nil {
 			return nil, err
 		}
 		if p, ok := readPicture(picture); ok {

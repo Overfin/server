@@ -21,7 +21,6 @@ import (
 
 	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/jellyfin"
-	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/textclean"
 	"github.com/overfin/server/internal/tracks"
@@ -440,12 +439,6 @@ func convert(raw jellyfin.IndexItem) (store.CatalogItem, bool) {
 	// title's sources; once Overfin read its file, its copies' instead
 	// (package copies).
 	it.AudioLanguages, it.AudioTags, it.SubtitleTags = tracks.Languages(raw.MediaStreams)
-	// Its picture, named as the player names versions.
-	if v := playback.Describe(jellyfin.MediaSource{MediaStreams: raw.MediaStreams}); v != "Version" {
-		it.Video = v
-	}
-	// And as paired servers are told of it.
-	it.Height, it.HDR = playback.Picture(jellyfin.MediaSource{MediaStreams: raw.MediaStreams})
 	// Its skip markers by version, when the plugin sends them.
 	if raw.Segments != nil {
 		it.SegmentsRead, it.Segments = true, segments(raw.Segments)

@@ -8,8 +8,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"image"
-	"image/jpeg"
 	"io"
 	"log/slog"
 	"net/http"
@@ -67,8 +65,6 @@ type fakeJellyfin struct {
 	mu        sync.Mutex
 	badAuth   int
 	lastQury  url.Values
-	calls     []string       // playstate and encoding calls, in order
-	lastAsked map[string]any // the body of the last PlaybackInfo
 	lastToken string         // the token of the last library call
 	pgs       []byte         // the PGS track it extracts (subtitle 4)
 	stretches []string       // subtitle stretches asked of the plugin: "track from to token"
@@ -77,46 +73,6 @@ type fakeJellyfin struct {
 	// first, instead of an empty one.
 	partnerSeesAll bool
 	users          map[string]string // created users: name -> ID (the first gets partnerJF)
-	// direct offers the movie to play as it is, instead of transcoded.
-	direct bool
-	// unmarked marks no audio track as default: as Jellyfin does, the
-	// movie is offered as it is unless a track is named.
-	unmarked bool
-	// notPlayable offers the movie no way to play.
-	notPlayable bool
-	// noTrickplay: the movie has no seek-bar previews; trickplay, when
-	// set, is its only set.
-	noTrickplay bool
-	trickplay   map[string]int
-	// onPlaybackInfo, when set, runs as PlaybackInfo is asked (something
-	// happening while a playback opens).
-	onPlaybackInfo func()
-	// streamStatus, when set, is how a file played as it is is answered.
-	streamStatus int
-	// remux streams the movie with its video copied, by Jellyfin's
-	// reasons; reencodes then has its session say the video is
-	// re-encoded after all.
-	remux, reencodes bool
-	// parts makes the movie a stacked one, of that many files.
-	parts int
-}
-
-func (f *fakeJellyfin) setDirect(on bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.direct = on
-}
-
-func (f *fakeJellyfin) called(prefix string) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	n := 0
-	for _, c := range f.calls {
-		if strings.HasPrefix(c, prefix) {
-			n++
-		}
-	}
-	return n
 }
 
 func movie(i int) map[string]any {
@@ -124,23 +80,6 @@ func movie(i int) map[string]any {
 }
 
 func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// A file played as it is: a first part, then it flows until the reader
-	// goes away, as a film would.
-	if strings.HasSuffix(r.URL.Path, "/stream") {
-		f.mu.Lock()
-		status := f.streamStatus
-		f.mu.Unlock()
-		if status != 0 {
-			w.WriteHeader(status)
-			_, _ = w.Write([]byte("Jellyfin's own words"))
-			return
-		}
-		w.Header().Set("Content-Type", "video/mp4")
-		w.Write(make([]byte, 64*1024))
-		w.(http.Flusher).Flush()
-		<-r.Context().Done()
-		return
-	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	authz := r.Header.Get("Authorization")
@@ -214,43 +153,12 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.lastToken = token
 	q := r.URL.Query()
 	f.lastQury = q
-	if strings.HasPrefix(r.URL.Path, "/Sessions/Playing") || r.URL.Path == "/Videos/ActiveEncodings" {
-		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
-		f.calls = append(f.calls, fmt.Sprintf("%s %s %v", r.Method, r.URL.Path, body["PositionTicks"]))
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	if r.URL.Path == "/Sessions" {
-		// The device's session, as VideoCopied reads it.
-		f.calls = append(f.calls, "GET /Sessions")
-		json.NewEncoder(w).Encode([]map[string]any{{"NowPlayingItem": map[string]any{"Id": fmt.Sprintf("%032x", 1)},
-			"TranscodingInfo": map[string]any{"IsVideoDirect": !f.reencodes}}})
-		return
-	}
 	if q.Get("userId") != userJF && (!f.partnerSeesAll || q.Get("userId") != partnerJF) && !strings.HasPrefix(r.URL.Path, "/MediaSegments/") &&
 		!strings.HasPrefix(strings.ToLower(r.URL.Path), "/videos/") {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	switch {
-	case r.URL.Path == "/Items" && q.Get("fields") == "Trickplay":
-		// Item 1's version has previews at two widths.
-		id := fmt.Sprintf("%032x", 1)
-		if f.noTrickplay {
-			json.NewEncoder(w).Encode(map[string]any{"Items": []map[string]any{{"Id": id}}})
-			break
-		}
-		sets := map[string]any{
-			"160": map[string]int{"Width": 160, "Height": 68, "TileWidth": 10, "TileHeight": 10, "ThumbnailCount": 645, "Interval": 10000},
-			"320": map[string]int{"Width": 320, "Height": 136, "TileWidth": 10, "TileHeight": 10, "ThumbnailCount": 645, "Interval": 10000},
-		}
-		if f.trickplay != nil {
-			sets = map[string]any{"320": f.trickplay}
-		}
-		json.NewEncoder(w).Encode(map[string]any{"Items": []map[string]any{{"Id": id, "Trickplay": map[string]any{id: sets}}}})
-	case r.URL.Path == "/Videos/"+fmt.Sprintf("%032x", 1)+"/Trickplay/320/6.jpg" && q.Get("mediaSourceId") == fmt.Sprintf("%032x", 1):
-		jpeg.Encode(w, image.NewRGBA(image.Rect(0, 0, 64, 32)), nil)
 	case r.URL.Path == "/Items" && q.Has("ids"):
 		var items []map[string]any
 		for _, id := range strings.Split(q.Get("ids"), ",") {
@@ -283,58 +191,7 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"EndDate": "1852-11-27T00:00:00.0000000Z", "ProviderIds": map[string]string{"Imdb": "nm0000001", "Evil": "x"},
 			"ImageTags": map[string]string{"Primary": fmt.Sprintf("%032x", 7)}})
 	case r.URL.Path == "/Items/"+fmt.Sprintf("%032x", 1):
-		m := movie(0)
-		if f.parts > 1 {
-			m["PartCount"] = f.parts
-		}
-		json.NewEncoder(w).Encode(m)
-	case r.Method == "POST" && r.URL.Path == "/Items/"+fmt.Sprintf("%032x", 1)+"/PlaybackInfo":
-		var asked map[string]any
-		json.NewDecoder(r.Body).Decode(&asked)
-		// As Jellyfin does: the tracks asked for apply only to the version
-		// named; without one, the stream has the default audio.
-		streamed := 1
-		if n, ok := asked["AudioStreamIndex"].(float64); ok && asked["MediaSourceId"] == fmt.Sprintf("%032x", 1) {
-			streamed = int(n)
-		}
-		f.lastAsked = asked
-		if f.onPlaybackInfo != nil {
-			f.onPlaybackInfo()
-		}
-		f.calls = append(f.calls, fmt.Sprintf("PlaybackInfo audio=%v subtitles=%v streamed=%d", asked["AudioStreamIndex"], asked["SubtitleStreamIndex"], streamed))
-		if f.notPlayable {
-			json.NewEncoder(w).Encode(map[string]any{"ErrorCode": "NoCompatibleStream"})
-			return
-		}
-		_, named := asked["AudioStreamIndex"]
-		direct := f.direct || (f.unmarked && !named)
-		reasons := "VideoCodecNotSupported,AudioCodecNotSupported"
-		if f.remux {
-			reasons = "ContainerNotSupported"
-		}
-		json.NewEncoder(w).Encode(map[string]any{
-			"PlaySessionId": "abc123",
-			"MediaSources": []map[string]any{{
-				"Id": fmt.Sprintf("%032x", 1), "Name": "1080p", "Protocol": "File", "Path": "/mnt/media/secret.mkv",
-				"SupportsTranscoding": true, "TranscodingSubProtocol": "hls", "SupportsDirectPlay": direct,
-				"TranscodingUrl": "/videos/" + fmt.Sprintf("%032x", 1) + "/master.m3u8?ApiKey=" + token + "&MediaSourceId=x&TranscodeReasons=" + reasons + "&AudioStreamIndex=" + strconv.Itoa(streamed),
-				"RunTimeTicks":   72000000000, "Container": "mkv", "Bitrate": 9258000,
-				"MediaStreams": []map[string]any{
-					{"Index": 0, "Type": "Video", "Codec": "hevc", "Profile": "Main 10", "Width": 3840, "Height": 2160, "BitDepth": 10,
-						"VideoRangeType": "HDR10Plus", "BitRate": 4601924},
-					{"Index": 1, "Type": "Audio", "Codec": "eac3", "Language": "fre", "DisplayTitle": "Français - EAC3 5.1", "Channels": 6, "IsDefault": !f.unmarked},
-					{"Index": 2, "Type": "Audio", "Codec": "aac", "Language": "eng", "DisplayTitle": "English - AAC 2.0", "Channels": 2},
-					{"Index": 3, "Type": "Subtitle", "Codec": "srt", "Language": "eng", "DisplayTitle": "English", "IsTextSubtitleStream": true},
-					{"Index": 4, "Type": "Subtitle", "Codec": "PGSSUB", "DisplayTitle": "Blu-ray"},
-					{"Index": 5, "Type": "Subtitle", "Codec": "srt", "Language": "fre", "IsForced": true, "IsTextSubtitleStream": true},
-				},
-			}},
-		})
-	case r.URL.Path == "/videos/"+fmt.Sprintf("%032x", 1)+"/master.m3u8":
-		f.calls = append(f.calls, "master audio="+r.URL.Query().Get("AudioStreamIndex"))
-		fmt.Fprint(w, "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nmain.m3u8?ApiKey="+token+"&x=1\n")
-	case r.URL.Path == "/videos/"+fmt.Sprintf("%032x", 1)+"/main.m3u8":
-		fmt.Fprint(w, "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nhls1/main/0.mp4?ApiKey="+token+"&runtimeTicks=0\n#EXT-X-ENDLIST\n")
+		json.NewEncoder(w).Encode(movie(0))
 	case r.URL.Path == "/videos/"+fmt.Sprintf("%032x", 1)+"/hls1/main/0.mp4":
 		w.Header().Set("Content-Type", "video/mp4")
 		fmt.Fprint(w, "SEGMENT-ZERO")
@@ -377,6 +234,9 @@ func newServerLimited(t *testing.T, maxStreams int) (*httptest.Server, *fakeJell
 // options changes how the test server is set up.
 type options struct {
 	maxStreams int
+	// fileSize, for playedServer, is how large Heat's file is (10,000
+	// bytes by default).
+	fileSize int
 	// maxTranscodes caps transcodes in total (none: no cap).
 	maxTranscodes int
 	// provider, when set, enables step-up; with login, also Overfin's own
@@ -899,110 +759,6 @@ func post(t *testing.T, srv *httptest.Server, path, body string) (int, string) {
 	return res.StatusCode, string(b)
 }
 
-func TestStartPlaybackNeverLeaksUpstream(t *testing.T) {
-	srv, _ := newServer(t)
-	code, body := post(t, srv, "/api/v1/playback",
-		`{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{"containers":["mp4"],"videoCodecs":["h264"],"audioCodecs":["aac"]}}`)
-	if code != http.StatusCreated {
-		t.Fatalf("status %d: %s", code, body)
-	}
-	for _, leak := range []string{token, "ApiKey", "/videos/", "/mnt/", "abc123", "MediaSourceId"} {
-		if strings.Contains(body, leak) {
-			t.Errorf("response contains %q: %s", leak, body)
-		}
-	}
-	var s struct {
-		ID, Method     string
-		Stream         struct{ URL, Protocol string }
-		DurationMs     int64
-		AudioTracks    []struct{ ID, Label, Language string }
-		SubtitleTracks []struct {
-			ID, URL  string
-			Pictures bool
-		}
-		ForcedTracks []struct{ ID, Language string }
-		ForcedTrack  string
-		Segments     []struct{ Kind string }
-		Info         struct {
-			Reasons     []string
-			Container   string
-			BitrateKbps int
-			Video       struct {
-				Codec, Range string
-				Height       int
-				BitrateKbps  int
-			}
-			Audio struct {
-				Codec    string
-				Channels int
-			}
-		}
-	}
-	json.Unmarshal([]byte(body), &s)
-	// How it's served and what the file holds; the default audio track.
-	if in := s.Info; len(in.Reasons) != 2 || in.Reasons[1] != "AudioCodecNotSupported" || in.Container != "mkv" || in.BitrateKbps != 9258 ||
-		in.Video.Codec != "hevc" || in.Video.Range != "HDR10Plus" || in.Video.Height != 2160 || in.Video.BitrateKbps != 4601 ||
-		in.Audio.Codec != "eac3" || in.Audio.Channels != 6 {
-		t.Errorf("info: %+v", s.Info)
-	}
-	if !strings.HasPrefix(s.ID, "play_") || s.Method != "transcode" || s.Stream.Protocol != "hls" ||
-		!strings.HasPrefix(s.Stream.URL, "/api/v1/stream/") || !strings.HasSuffix(s.Stream.URL, "/master.m3u8") {
-		t.Errorf("session: %+v", s)
-	}
-	if s.DurationMs != 7_200_000 || len(s.AudioTracks) != 2 || s.AudioTracks[0].ID != "a1" || s.AudioTracks[0].Language != "fr" ||
-		s.AudioTracks[0].Label != "Français" {
-		t.Errorf("tracks/duration: %+v", s)
-	}
-	// Text subtitles get a WebVTT URL; pictures, theirs, for the client to
-	// draw.
-	if len(s.SubtitleTracks) != 2 || !strings.HasSuffix(s.SubtitleTracks[0].URL, "/subtitles/s3") ||
-		!strings.HasSuffix(s.SubtitleTracks[1].URL, "/pictures/s4") || !s.SubtitleTracks[1].Pictures {
-		t.Errorf("subtitles: %+v", s.SubtitleTracks)
-	}
-	// The forced subtitles apart; those in the audio's language, French,
-	// to show whenever no others are.
-	if len(s.ForcedTracks) != 1 || s.ForcedTracks[0].Language != "fr" || s.ForcedTrack != "s5" {
-		t.Errorf("forced: %+v %q", s.ForcedTracks, s.ForcedTrack)
-	}
-	if len(s.Segments) != 1 || s.Segments[0].Kind != "intro" {
-		t.Errorf("segments: %+v", s.Segments)
-	}
-	// Another site can't use the stream, nor start a session with it.
-	for _, from := range []string{"cross-site", "same-site"} {
-		req, _ := http.NewRequest("GET", srv.URL+s.Stream.URL, nil)
-		req.Header.Set("Remote-User", subject)
-		req.Header.Set("Sec-Fetch-Site", from)
-		res, err := client(srv, subject).Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		res.Body.Close()
-		if res.StatusCode != http.StatusNotFound || len(res.Cookies()) > 0 {
-			t.Errorf("%s: status %d, cookies %v", from, res.StatusCode, res.Cookies())
-		}
-	}
-}
-
-func TestStartPlaybackRefuses(t *testing.T) {
-	srv, _ := newServer(t)
-	for _, body := range []string{
-		`{"itemId":"not-an-id","capabilities":{}}`,
-		`{"itemId":"item_` + fmt.Sprintf("%032x", 1) + `","capabilities":{},"audioTrack":"s1"}`,
-		`{"itemId":"item_` + fmt.Sprintf("%032x", 1) + `","capabilities":{},"startPositionMs":-5}`,
-		`{"itemId":"item_` + fmt.Sprintf("%032x", 1) + `","capabilities":{},"startPositionMs":922337203685477580}`,
-		`{"itemId":"item_` + fmt.Sprintf("%032x", 1) + `","capabilities":{},"maxBitrateKbps":9223372036854775}`,
-		`{"itemId":"item_` + fmt.Sprintf("%032x", 1) + `","capabilities":{},"extra":true}`,
-	} {
-		if code, _ := post(t, srv, "/api/v1/playback", body); code != http.StatusBadRequest {
-			t.Errorf("%s: status %d, want 400", body, code)
-		}
-	}
-	// An item the profile may not see.
-	if code, _ := post(t, srv, "/api/v1/playback", `{"itemId":"item_`+fmt.Sprintf("%032x", 99)+`","capabilities":{}}`); code != http.StatusNotFound {
-		t.Errorf("hidden item: status %d", code)
-	}
-}
-
 func getAs(t *testing.T, srv *httptest.Server, who, path string) (int, string) {
 	t.Helper()
 	req, _ := http.NewRequest("GET", srv.URL+path, nil)
@@ -1014,113 +770,6 @@ func getAs(t *testing.T, srv *httptest.Server, who, path string) (int, string) {
 	defer res.Body.Close()
 	b, _ := io.ReadAll(res.Body)
 	return res.StatusCode, string(b)
-}
-
-func TestStreamingThroughRewrittenPlaylists(t *testing.T) {
-	srv, fake := newServer(t)
-	_, body := post(t, srv, "/api/v1/playback", `{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{}}`)
-	var s struct {
-		Stream         struct{ URL string }
-		SubtitleTracks []struct{ ID, URL string }
-	}
-	json.Unmarshal([]byte(body), &s)
-	base := strings.TrimSuffix(s.Stream.URL, "master.m3u8")
-
-	code, master := getAs(t, srv, subject, s.Stream.URL)
-	if code != 200 || !strings.Contains(master, "\nv0.m3u8\n") {
-		t.Fatalf("master: %d\n%s", code, master)
-	}
-	code, variant := getAs(t, srv, subject, base+"v0.m3u8")
-	if code != 200 || !strings.Contains(variant, "\nseg0.mp4\n") {
-		t.Fatalf("variant: %d\n%s", code, variant)
-	}
-	code, seg := getAs(t, srv, subject, base+"seg0.mp4")
-	if code != 200 || seg != "SEGMENT-ZERO" {
-		t.Errorf("segment: %d %q", code, seg)
-	}
-	for _, text := range []string{master, variant} {
-		for _, leak := range []string{token, "ApiKey", "hls1", "runtimeTicks", "/videos/"} {
-			if strings.Contains(text, leak) {
-				t.Errorf("playlist contains %q:\n%s", leak, text)
-			}
-		}
-	}
-
-	// Subtitles: text track 3, in stretches from Overfin's plugin, asked
-	// with Overfin's own key, each 10 s early; rebuilt as WebVTT
-	// (wire.RebuildWebVTT: since msfp-go's revised v0, the italic, bold
-	// and colour tags are kept, balanced).
-	code, vtt := getAs(t, srv, subject, s.SubtitleTracks[0].URL+"/0")
-	if code != 200 || vtt != "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<b>Hi</b>\n" {
-		t.Errorf("subtitles: %d %q", code, vtt)
-	}
-	if code, _ := getAs(t, srv, subject, s.SubtitleTracks[0].URL+"/1"); code != 200 {
-		t.Errorf("subtitles, part 1: %d", code)
-	}
-	fake.mu.Lock()
-	if got := strings.Join(fake.stretches, ", "); got != "3 0 120, 3 110 240" {
-		t.Errorf("stretches asked: %s", got)
-	}
-	fake.mu.Unlock()
-	for _, part := range []string{"", "/-1", "/x", "/01", "/10000", "/1/2"} {
-		if code, _ := getAs(t, srv, subject, s.SubtitleTracks[0].URL+part); code != http.StatusNotFound {
-			t.Errorf("subtitles part %q: status %d, want 404", part, code)
-		}
-	}
-	// Track 4 is pictures (PGS): no WebVTT, but the stretch itself, checked
-	// whole; one that isn't well-formed is refused; text track 3 has no
-	// pictures.
-	if code, _ := getAs(t, srv, subject, base+"subtitles/s4/0"); code != http.StatusNotFound {
-		t.Errorf("image subtitles as WebVTT: status %d", code)
-	}
-	fake.mu.Lock()
-	fake.pgs = pgsTrack()
-	fake.mu.Unlock()
-	if code, body := getAs(t, srv, subject, base+"pictures/s4/3"); code != 200 || body != string(fake.pgs) {
-		t.Errorf("picture subtitles: %d, %d bytes", code, len(body))
-	}
-	// A stretch with no pictures: a 200 with an empty body (MSFP video
-	// section 6.4), not a refusal.
-	fake.mu.Lock()
-	fake.pgs = []byte{}
-	fake.mu.Unlock()
-	if code, body := getAs(t, srv, subject, base+"pictures/s4/3"); code != 200 || body != "" {
-		t.Errorf("picture subtitles, a stretch without any: %d, %d bytes", code, len(body))
-	}
-	// A track ID with a leading zero isn't one (MSFP playback section 2.1).
-	if code, _ := getAs(t, srv, subject, base+"pictures/s04/3"); code != http.StatusNotFound {
-		t.Errorf("picture subtitles as s04: status %d, want 404", code)
-	}
-	fake.mu.Lock()
-	fake.pgs = append(pgsTrack(), "PX"...)
-	fake.mu.Unlock()
-	for _, p := range []string{base + "pictures/s4/0", base + "pictures/s3/0", base + "pictures/s9/0", base + "pictures/s4/0?x=1", base + "pictures/s4"} {
-		if code, _ := getAs(t, srv, subject, p); code != http.StatusNotFound {
-			t.Errorf("%s: status %d, want 404", p, code)
-		}
-	}
-
-	// Names that were never in a playlist, and other accounts, get nothing.
-	for _, p := range []string{base + "seg1.mp4", base + "file", base + "v9.m3u8"} {
-		if code, _ := getAs(t, srv, subject, p); code != http.StatusNotFound {
-			t.Errorf("%s: status %d, want 404", p, code)
-		}
-	}
-	if code, _ := getAs(t, srv, "other-subject", base+"seg0.mp4"); code != http.StatusNotFound {
-		t.Errorf("another account used the ticket: status %d", code)
-	}
-}
-
-func startPlayback(t *testing.T, srv *httptest.Server, device string) string {
-	t.Helper()
-	code, body := post(t, srv, "/api/v1/playback",
-		`{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{},"device":"`+device+`","startPositionMs":1000}`)
-	if code != http.StatusCreated {
-		t.Fatalf("start: %d %s", code, body)
-	}
-	var s struct{ ID string }
-	json.Unmarshal([]byte(body), &s)
-	return s.ID
 }
 
 // eventually waits for background reporting to reach the fake.
@@ -1135,222 +784,17 @@ func eventually(t *testing.T, cond func() bool) bool {
 	return false
 }
 
-// A playback offers its seek-bar previews, the set nearest 320 pixels
-// wide, sheet by sheet, to its own profile only.
-func TestPlaybackPreviews(t *testing.T) {
-	srv, _ := newServer(t)
-	code, body := post(t, srv, "/api/v1/playback",
-		`{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{},"device":"Laptop"}`)
-	var pb struct {
-		ID        string
-		Trickplay struct {
-			TileWidth, Columns, Rows, IntervalMs, TileCount int
-			Sheets                                          []string
-		}
-	}
-	json.Unmarshal([]byte(body), &pb)
-	tp := pb.Trickplay
-	if code != 201 || tp.TileWidth != 320 || tp.Columns != 10 || tp.TileCount != 645 || len(tp.Sheets) != 7 ||
-		tp.Sheets[6] != "/api/v1/playback/"+pb.ID+"/trickplay/6" {
-		t.Fatalf("previews: %d %s", code, body)
-	}
-	code, body = getAs(t, srv, subject, tp.Sheets[6])
-	if code != 200 || !strings.HasPrefix(body, "\xff\xd8") {
-		t.Errorf("sheet: %d", code)
-	}
-	for _, bad := range []string{"7", "-1", "06", "x"} {
-		if code, _ := getAs(t, srv, subject, "/api/v1/playback/"+pb.ID+"/trickplay/"+bad); code != 404 {
-			t.Errorf("sheet %s: %d", bad, code)
-		}
-	}
-	if code, _ := getAs(t, srv, "other-subject", tp.Sheets[6]); code != 404 {
-		t.Errorf("another account: %d", code)
-	}
-}
-
-// Languages: the audio in the site's language, the subtitles in the
-// profile's last choice, when the video has them; Jellyfin asked again
-// only when the stream changes (another audio track).
-func TestPlaybackLanguages(t *testing.T) {
-	srv, fake := newServer(t)
-	start := func(extra string) (audio, subtitles string) {
-		t.Helper()
-		code, body := post(t, srv, "/api/v1/playback",
-			`{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{},"device":"Laptop"`+extra+`}`)
-		var pb struct{ AudioTrack, SubtitleTrack string }
-		json.Unmarshal([]byte(body), &pb)
-		if code != 201 {
-			t.Fatalf("start: %d %s", code, body)
-		}
-		return pb.AudioTrack, pb.SubtitleTrack
-	}
-	// Nothing chosen: Jellyfin's default audio, no subtitles.
-	if a, s := start(``); a != "a1" || s != "" || fake.called("PlaybackInfo audio=<nil> subtitles=-1") != 1 {
-		t.Errorf("default: %q %q %v", a, s, fake.calls)
-	}
-	// The site in English: the English audio, Jellyfin asked again for it.
-	if a, _ := start(`,"audioLanguage":"en"`); a != "a2" || fake.called("PlaybackInfo audio=2 subtitles=-1") != 1 {
-		t.Errorf("English audio: %q %v", a, fake.calls)
-	}
-	// In French: the default already is.
-	if a, _ := start(`,"audioLanguage":"fr-CA"`); a != "a1" || fake.called("PlaybackInfo audio=2") != 1 {
-		t.Errorf("French audio: %q", a)
-	}
-	// The profile chose English subtitles: the text track, from its URL.
-	if code, _ := put(t, srv, "PUT", "/api/v1/me/subtitles", `{"language":"en"}`); code != 204 {
-		t.Fatalf("set subtitles: %d", code)
-	}
-	if _, s := start(``); s != "s3" {
-		t.Errorf("subtitles: %q", s)
-	}
-	// None again; a track asked for wins.
-	put(t, srv, "PUT", "/api/v1/me/subtitles", `{"language":""}`)
-	if _, s := start(``); s != "" {
-		t.Errorf("no subtitles: %q", s)
-	}
-	if a, _ := start(`,"audioLanguage":"en","audioTrack":"a1"`); a != "a1" {
-		t.Errorf("asked track: %q", a)
-	}
-	// Pictures asked for: the client's to draw, never burned in (Jellyfin
-	// asked for no subtitles).
-	if _, s := start(`,"subtitleTrack":"s4"`); s != "s4" || fake.called("PlaybackInfo audio=<nil> subtitles=-1") == 0 ||
-		fake.called("PlaybackInfo audio=<nil> subtitles=4") != 0 {
-		t.Errorf("pictures asked for: %q %v", s, fake.calls)
-	}
-	for _, bad := range []string{`{"language":"klingon"}`, `{"language":"und"}`, `{}x`} {
-		if code, _ := put(t, srv, "PUT", "/api/v1/me/subtitles", bad); code != 400 {
-			t.Errorf("%s: %d", bad, code)
-		}
-	}
-
-	// The profile's own preferences, set by itself: English audio over
-	// the site's French; French subtitles, Canada's, from a track that
-	// only says French.
-	var who struct{ ActiveProfile struct{ ID string } }
-	get(t, srv, "/api/v1/me", &who)
-	profile := "/api/v1/profiles/" + who.ActiveProfile.ID
-	if code, body := put(t, srv, "PATCH", profile, `{"audioLanguage":"en","subtitleLanguage":"fr-ca"}`); code != 200 ||
-		!strings.Contains(body, `"audioLanguage":"en"`) || !strings.Contains(body, `"subtitleLanguage":"fr-CA"`) {
-		t.Fatalf("preferences: %d %s", code, body)
-	}
-	if a, s := start(`,"audioLanguage":"fr-CA"`); a != "a2" || s != "" {
-		t.Errorf("preferred: %q %q", a, s)
-	}
-	for _, bad := range []string{`{"audioLanguage":"klingon"}`, `{"subtitleLanguage":"original"}`, `{"audioLanguage":"und"}`} {
-		if code, _ := put(t, srv, "PATCH", profile, bad); code != 400 {
-			t.Errorf("%s: %d", bad, code)
-		}
-	}
-	// Chosen while watching: kept for the title, over the preferences.
-	code, body := post(t, srv, "/api/v1/playback", `{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{}}`)
-	var pb struct{ ID string }
-	json.Unmarshal([]byte(body), &pb)
-	if code != 201 {
-		t.Fatalf("start: %d", code)
-	}
-	choose := func(body string) int {
-		t.Helper()
-		code, _ := put(t, srv, "PUT", "/api/v1/playback/"+pb.ID+"/tracks", body)
-		return code
-	}
-	if code := choose(`{"audioTrack":"a1","subtitleTrack":"s3"}`); code != 204 {
-		t.Fatalf("choose: %d", code)
-	}
-	if a, s := start(``); a != "a1" || s != "s3" {
-		t.Errorf("chosen: %q %q", a, s)
-	}
-	if code := choose(`{"subtitleTrack":""}`); code != 204 {
-		t.Fatalf("choose none: %d", code)
-	}
-	if a, s := start(``); a != "a1" || s != "" {
-		t.Errorf("chosen, none: %q %q", a, s)
-	}
-	for _, bad := range []string{`{}`, `{"audioTrack":"s1"}`, `{"subtitleTrack":"a3"}`, `{"audioTrack":""}`} {
-		if code := choose(bad); code != 400 {
-			t.Errorf("%s: %d", bad, code)
-		}
-	}
-	if code, _ := put(t, srv, "PUT", "/api/v1/playback/play_unknown/tracks", `{"audioTrack":"a1"}`); code != 404 {
-		t.Errorf("unknown playback: %d", code)
-	}
-}
-
-// The audio asked for, by the site's language or from the menu, is the
-// one streamed: Jellyfin applies a track only to the version named, so
-// Overfin names the one it chose.
-func TestPlaybackTrackReachesJellyfin(t *testing.T) {
-	srv, fake := newServer(t)
-	streamed := func(extra string) string {
-		t.Helper()
-		code, body := post(t, srv, "/api/v1/playback",
-			`{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{},"device":"Laptop"`+extra+`}`)
-		var pb struct {
-			ID     string
-			Stream struct{ URL string }
-		}
-		json.Unmarshal([]byte(body), &pb)
-		if code != 201 {
-			t.Fatalf("start: %d %s", code, body)
-		}
-		before := len(fake.calls)
-		if code := get(t, srv, pb.Stream.URL, nil); code != 200 {
-			t.Fatalf("stream: %d", code)
-		}
-		fake.mu.Lock()
-		defer fake.mu.Unlock()
-		for _, c := range fake.calls[before:] {
-			if a, ok := strings.CutPrefix(c, "master audio="); ok {
-				return a
-			}
-		}
-		return ""
-	}
-	if a := streamed(``); a != "1" {
-		t.Errorf("default: audio %q", a)
-	}
-	if a := streamed(`,"audioLanguage":"en"`); a != "2" {
-		t.Errorf("in English: audio %q", a)
-	}
-	if a := streamed(`,"audioTrack":"a2"`); a != "2" {
-		t.Errorf("from the menu: audio %q", a)
-	}
-	if a := streamed(`,"audioLanguage":"fr-CA"`); a != "1" {
-		t.Errorf("in French: audio %q", a)
-	}
-}
-
-// A file that marks no audio track as default: Jellyfin checks no audio
-// codec and offers the file as it is, audio the browser may not play
-// (silence). Overfin names the track, so Jellyfin checks it.
-func TestUnmarkedAudioIsChecked(t *testing.T) {
-	srv, fake := newServer(t)
-	fake.mu.Lock()
-	fake.unmarked = true
-	fake.mu.Unlock()
-	code, body := post(t, srv, "/api/v1/playback",
-		`{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{},"device":"Laptop"}`)
-	var pb struct {
-		Method     string
-		AudioTrack string
-	}
-	json.Unmarshal([]byte(body), &pb)
-	if code != 201 || pb.Method == "direct" || pb.AudioTrack != "a1" {
-		t.Errorf("start: %d %s", code, body)
-	}
-}
-
 // Every transcode taken: a playback that needs one is refused before the
 // account's oldest stream stops, unless stopping it frees one (rule 49).
 func TestTranscodeLimitStopsNothing(t *testing.T) {
-	srv, fake := newServerWith(t, options{maxStreams: 2, maxTranscodes: 1})
-	fake.setDirect(true)
-	direct := startPlayback(t, srv, "Laptop")
-	fake.setDirect(false)
+	srv := playedServer(t, options{maxStreams: 2, maxTranscodes: 1}).srv
+	file := func(device string) string { return startDelivery(t, srv, device, `"delivery":"file"`) }
+	direct := file("Laptop")
 	transcoded := startPlayback(t, srv, "Phone")
-	// At the limit of 2, a transcode would replace the direct playback:
+	// At the limit of 2, a transcode would replace the file's playback:
 	// no transcode is free, so it's refused, and nothing stops.
-	code, body := post(t, srv, "/api/v1/playback",
-		`{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{},"device":"TV"}`)
+	code, body := post(t, srv, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","versionId":"`+heatCopy+
+		`","delivery":"transcode","transcode":{"videoCodec":"h264"},"device":"TV"}`)
 	if code != http.StatusServiceUnavailable || !strings.Contains(body, "server-busy") {
 		t.Errorf("a third: %d %s", code, body)
 	}
@@ -1360,10 +804,8 @@ func TestTranscodeLimitStopsNothing(t *testing.T) {
 		}
 	}
 	// When the oldest is the transcode, replacing it frees one.
-	post(t, srv, "/api/v1/playback/"+direct+"/stop", `{}`)
-	fake.setDirect(true)
-	startPlayback(t, srv, "TV")
-	fake.setDirect(false)
+	post(t, srv, "/api/v1/playback/"+direct+"/stop", `{"positionMs":0}`)
+	file("TV")
 	startPlayback(t, srv, "Tablet")
 	if code, _ := getAs(t, srv, subject, "/api/v1/playback/"+transcoded); code != http.StatusGone {
 		t.Errorf("the oldest, a transcode, replaced: %d", code)
@@ -1371,10 +813,11 @@ func TestTranscodeLimitStopsNothing(t *testing.T) {
 }
 
 // The control panel's live view lists what plays, and stops it: the
-// player learns an administrator stopped it, and the transcode stops.
+// player learns an administrator stopped it, and its delivery stops.
 func TestLiveViewStopsAPlayback(t *testing.T) {
 	var pb api.Playback
-	srv, fake := newServerWith(t, options{maxStreams: 2, playback: &pb})
+	p := playedServer(t, options{maxStreams: 2, playback: &pb})
+	srv := p.srv
 	id := startPlayback(t, srv, "Bedroom laptop")
 
 	live := pb.Tickets.Live(time.Now())
@@ -1392,33 +835,34 @@ func TestLiveViewStopsAPlayback(t *testing.T) {
 	if code != http.StatusGone || !strings.Contains(body, "playback-ended-by-admin") {
 		t.Errorf("its player: %d %s", code, body)
 	}
-	if !eventually(t, func() bool { return fake.called("DELETE /Videos/ActiveEncodings") == 1 }) {
-		t.Error("its transcode was not stopped")
+	if !eventually(t, func() bool { return p.maker.stops() == 1 }) {
+		t.Error("its delivery was not stopped")
 	}
 	if live := pb.Tickets.Live(time.Now()); len(live) != 0 {
 		t.Errorf("after: %+v", live)
 	}
 }
 
-// Signing out ends the session's playbacks: its transcode stops, and the
+// Signing out ends the session's playbacks: its delivery stops, and the
 // live view no longer lists it.
 func TestLogoutEndsPlaybacks(t *testing.T) {
 	var pb api.Playback
-	srv, fake := newServerWith(t, options{maxStreams: 2, playback: &pb})
-	startPlayback(t, srv, "Bedroom laptop")
-	if code, _ := post(t, srv, "/api/v1/logout", "{}"); code >= 300 {
+	p := playedServer(t, options{maxStreams: 2, playback: &pb})
+	startPlayback(t, p.srv, "Bedroom laptop")
+	if code, _ := post(t, p.srv, "/api/v1/logout", "{}"); code >= 300 {
 		t.Fatalf("logout: %d", code)
 	}
 	if live := pb.Tickets.Live(time.Now()); len(live) != 0 {
 		t.Errorf("after: %+v", live)
 	}
-	if !eventually(t, func() bool { return fake.called("DELETE /Videos/ActiveEncodings") == 1 }) {
-		t.Error("its transcode was not stopped")
+	if !eventually(t, func() bool { return p.maker.stops() == 1 }) {
+		t.Error("its delivery was not stopped")
 	}
 }
 
 func TestPlaybackLifecycle(t *testing.T) {
-	srv, fake := newServerLimited(t, 1)
+	p := playedServer(t, options{maxStreams: 1})
+	srv := p.srv
 
 	first := startPlayback(t, srv, "Bedroom laptop")
 	second := startPlayback(t, srv, "Living room TV")
@@ -1431,16 +875,13 @@ func TestPlaybackLifecycle(t *testing.T) {
 	if code != http.StatusGone || gone.Type != "playback-taken-over" || gone.TakenOverBy != "Living room TV" {
 		t.Errorf("taken over: %d %+v", code, gone)
 	}
-	if !eventually(t, func() bool { return fake.called("DELETE /Videos/ActiveEncodings") == 1 }) {
-		t.Error("the taken-over transcode was not stopped")
+	if !eventually(t, func() bool { return p.maker.stops() == 1 }) {
+		t.Error("the taken-over delivery was not stopped")
 	}
 
-	// Progress reaches Jellyfin; a reload restores the position.
+	// A reload restores the position reported.
 	if code, _ := post(t, srv, "/api/v1/playback/"+second+"/progress", `{"positionMs":61000,"paused":true}`); code != http.StatusNoContent {
 		t.Fatalf("progress: %d", code)
-	}
-	if fake.called("POST /Sessions/Playing/Progress 6.1e+08") != 1 {
-		t.Errorf("progress not reported: %v", fake.calls)
 	}
 	code, body = getAs(t, srv, subject, "/api/v1/playback/current")
 	var cur struct {
@@ -1452,17 +893,14 @@ func TestPlaybackLifecycle(t *testing.T) {
 		t.Errorf("current: %d %+v", code, cur)
 	}
 
-	// Stop reports the final position and ends the transcode; twice is fine.
+	// Stop ends the delivery; twice is fine.
 	for i := 0; i < 2; i++ {
 		if code, _ := post(t, srv, "/api/v1/playback/"+second+"/stop", `{"positionMs":90000}`); code != http.StatusNoContent {
 			t.Errorf("stop %d: %d", i, code)
 		}
 	}
-	if !eventually(t, func() bool { return fake.called("POST /Sessions/Playing/Stopped 9e+08") == 1 }) {
-		t.Errorf("final position not reported once: %v", fake.calls)
-	}
-	if !eventually(t, func() bool { return fake.called("DELETE /Videos/ActiveEncodings") == 2 }) {
-		t.Error("the stopped transcode was not stopped")
+	if !eventually(t, func() bool { return p.maker.stops() == 2 }) {
+		t.Error("the stopped delivery was not stopped")
 	}
 	code, body = getAs(t, srv, subject, "/api/v1/playback/"+second)
 	json.Unmarshal([]byte(body), &gone)

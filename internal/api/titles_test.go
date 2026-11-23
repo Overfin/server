@@ -231,11 +231,11 @@ func TestTitles(t *testing.T) {
 	}
 }
 
-// Playback asks for a title; Overfin picks the copy. A title no library
-// has doesn't play.
+// Playback asks for a title (its first copy, as MSFP's baseline, when the
+// request names none). A title no library has doesn't play.
 func TestPlayATitle(t *testing.T) {
-	var st *store.Store
-	srv, _ := newServerWith(t, options{store: &st})
+	p := playedServer(t, options{})
+	srv, st := p.srv, p.st
 	ctx := context.Background()
 	st.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "949"}}, 1)
 	st.RefreshTitleKeys(ctx)
@@ -243,7 +243,7 @@ func TestPlayATitle(t *testing.T) {
 	st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "949", Name: "Heat (TMDB)"}, det, time.Now())
 	st.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "100", Name: "Pas ici"}, det, time.Now())
 
-	code, body := post(t, srv, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
+	code, body := post(t, srv, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949"}`)
 	var session struct {
 		Title *struct{ ID, Name string }
 	}
@@ -251,19 +251,16 @@ func TestPlayATitle(t *testing.T) {
 	if code != 201 || session.Title == nil || session.Title.ID != "title_movie_tmdb_949" || session.Title.Name != "Heat (TMDB)" {
 		t.Errorf("play a title: %d %s", code, body)
 	}
-	if code, _ := post(t, srv, "/api/v1/playback", `{"titleId":"title_movie_tmdb_100","capabilities":{}}`); code != 404 {
+	if code, _ := post(t, srv, "/api/v1/playback", `{"titleId":"title_movie_tmdb_100"}`); code != 404 {
 		t.Errorf("a title no library has: %d", code)
-	}
-	if code, _ := post(t, srv, "/api/v1/playback", fmt.Sprintf(`{"titleId":"title_movie_tmdb_949","itemId":"item_%032x"}`, 1)); code != 400 {
-		t.Errorf("both a title and a copy: %d", code)
 	}
 }
 
 // An episode's playback names the episode after it: the next of its
 // season, else the first of the next season.
 func TestPlayNextEpisode(t *testing.T) {
-	var st *store.Store
-	srv, _ := newServerWith(t, options{store: &st})
+	p := playedServer(t, options{})
+	srv, st := p.srv, p.st
 	ctx := context.Background()
 	now := time.Now()
 	n := func(i int) *int { return &i }
@@ -285,7 +282,7 @@ func TestPlayNextEpisode(t *testing.T) {
 
 	next := func(title string) string {
 		t.Helper()
-		code, body := post(t, srv, "/api/v1/playback", `{"titleId":"`+title+`","capabilities":{}}`)
+		code, body := post(t, srv, "/api/v1/playback", `{"titleId":"`+title+`"}`)
 		var pb struct{ Next *struct{ ID string } }
 		json.Unmarshal([]byte(body), &pb)
 		if code != 201 {

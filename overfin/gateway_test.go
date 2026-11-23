@@ -559,8 +559,7 @@ func TestJanitorEndsIdlePlaybacks(t *testing.T) {
 	}
 	// Half watched, then abandoned.
 	now := time.Now()
-	s := &playback.Stream{AccountID: "acct", ProfileID: "prof", ItemID: fmt.Sprintf("%032x", 1),
-		Decision: playback.Decision{Method: "direct", Protocol: "file", Source: jellyfin.MediaSource{RunTimeTicks: 600_000_000}}}
+	s := &playback.Stream{AccountID: "acct", ProfileID: "prof", ItemID: fmt.Sprintf("%032x", 1)}
 	sh.tickets.Add(s, 0, now)
 	sh.tickets.Progress(s, 300_000_000, false, now)
 	g.current.Load().playback.EndIdle(now.Add(api.IdleTimeout + time.Minute))

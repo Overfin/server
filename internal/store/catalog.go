@@ -120,14 +120,6 @@ type CatalogItem struct {
 	// them: main audio tracks (with a region when known, "fr-CA") and
 	// subtitles, forced ones aside.
 	AudioTags, SubtitleTags []string
-	// Video is its picture's neutral name ("2160p HDR · HEVC"), as the
-	// player names versions; "" when unknown.
-	Video string
-	// Height and HDR are its picture for paired servers (MSFP video
-	// section 3.2, playback.Picture); kept stepped, as sent. Height 0:
-	// unknown.
-	Height int
-	HDR    []string
 	// EpisodeNumberEnd is the last episode a file holding several holds
 	// (S01E01-E02: 2); nil for one.
 	EpisodeNumberEnd *int
@@ -138,20 +130,10 @@ type CatalogItem struct {
 }
 
 // copiesRead says, in PutCatalog's upsert, that the item has a copy read
-// from its file (catalog_copies): its languages and picture are its
-// copies', not Jellyfin's.
+// from its file (catalog_copies): its languages are its copies', not
+// Jellyfin's, and its picture is known (only copies give it; the video
+// column, Jellyfin's picture named, is no longer written).
 const copiesRead = `EXISTS (SELECT 1 FROM catalog_copies c WHERE c.item_id = catalog_items.id AND c.minimal = 0 AND c.languages IS NOT NULL)`
-
-// pictureJSON is a copy's picture as kept, stepped as paired servers are
-// told of it (BestPicture): NULL when its size isn't known.
-func pictureJSON(height int, hdr []string) any {
-	p, ok := BestPicture([]Picture{{Height: height, HDR: hdr}})
-	if !ok {
-		return nil
-	}
-	b, _ := json.Marshal(p)
-	return string(b)
-}
 
 // rangeID is the index row of an episode n held by item, after its first:
 // derived from the item's ID, so it stays the same pass after pass.
@@ -175,7 +157,7 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 		series_id, season_id, season_number, episode_number, tmdb, imdb, tvdb, rating,
 		primary_tag, backdrop_tag, thumb_tag, seen, library_id, added_at, premiere_date, community_rating,
 		folder_name, file_name, runtime_ms, jellyfin_tmdb, audio_languages, audio_tags, subtitle_tags, video, picture)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
 		ON CONFLICT (id) DO UPDATE SET kind = excluded.kind, name = excluded.name,
 			sort_name = excluded.sort_name, year = excluded.year, series_id = excluded.series_id,
 			season_id = excluded.season_id, season_number = excluded.season_number,
@@ -189,7 +171,7 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 			audio_languages = CASE WHEN `+copiesRead+` THEN audio_languages ELSE excluded.audio_languages END,
 			audio_tags = CASE WHEN `+copiesRead+` THEN audio_tags ELSE excluded.audio_tags END,
 			subtitle_tags = CASE WHEN `+copiesRead+` THEN subtitle_tags ELSE excluded.subtitle_tags END,
-			picture = CASE WHEN `+copiesRead+` THEN picture ELSE excluded.picture END`)
+			picture = CASE WHEN `+copiesRead+` THEN picture ELSE NULL END`)
 	if err != nil {
 		return err
 	}
@@ -220,8 +202,7 @@ func (s *Store) PutCatalog(ctx context.Context, items []CatalogItem, pass int64)
 			nullString(it.PrimaryTag), nullString(it.BackdropTag), nullString(it.ThumbTag), pass,
 			nullString(it.LibraryID), added, nullString(it.PremiereDate), it.CommunityRating,
 			nullString(it.FolderName), nullString(it.FileName), nullInt64(it.RuntimeMs), nullString(it.TMDB),
-			jsonList(it.AudioLanguages), jsonList(it.AudioTags), jsonList(it.SubtitleTags), nullString(it.Video),
-			pictureJSON(it.Height, it.HDR)); err != nil {
+			jsonList(it.AudioLanguages), jsonList(it.AudioTags), jsonList(it.SubtitleTags)); err != nil {
 			return err
 		}
 		// Its skip markers, when the plugin sent them (package copies).

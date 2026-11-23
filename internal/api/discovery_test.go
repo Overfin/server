@@ -203,9 +203,6 @@ func TestDiscover(t *testing.T) {
 		page.Items[0].ID != "title_movie_tmdb_949" || page.TotalCount == nil || *page.TotalCount != 1 {
 		t.Errorf("kids listing: %d %+v", code, page)
 	}
-	if code, body := post(t, srv, "/api/v1/playback", fmt.Sprintf(`{"itemId":"item_%032x"}`, 4)); code != 404 {
-		t.Errorf("kids playback of item 4: %d %s", code, body)
-	}
 }
 
 // The upcoming list keeps the films not out yet when the server shows only

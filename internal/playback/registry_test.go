@@ -2,6 +2,7 @@ package playback
 
 import (
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -128,7 +129,7 @@ func TestAdmitAtOnce(t *testing.T) {
 	}
 	// One transcode for the whole server, across accounts.
 	transcode := func(i int) *Stream {
-		return &Stream{AccountID: "acct_" + strconv.Itoa(i), ProfileID: "prof", Decision: Decision{Method: "transcode"}}
+		return &Stream{AccountID: "acct_" + strconv.Itoa(i), ProfileID: "prof", Delivery: transcoding()}
 	}
 	if got, _, tk := at(Limits{MaxTranscodes: 1}, transcode); got != 1 || tk.Transcodes() != 1 {
 		t.Errorf("transcodes: %d admitted, %d running", got, tk.Transcodes())
@@ -139,17 +140,17 @@ func TestAdmitAtOnce(t *testing.T) {
 func TestAdmit(t *testing.T) {
 	tk := NewTickets(time.Hour)
 	now := time.Now()
-	old := &Stream{AccountID: "acct_a", ProfileID: "prof_a", Decision: Decision{Method: "transcode"}}
+	old := &Stream{AccountID: "acct_a", ProfileID: "prof_a", Delivery: transcoding()}
 	if _, err := tk.Admit(old, 0, now, Limits{MaxStreams: 1, MaxTranscodes: 1}, ""); err != nil {
 		t.Fatal(err)
 	}
 	// Another account's transcode: every one taken.
-	other := &Stream{AccountID: "acct_b", ProfileID: "prof_b", Decision: Decision{Method: "transcode"}}
+	other := &Stream{AccountID: "acct_b", ProfileID: "prof_b", Delivery: transcoding()}
 	if _, err := tk.Admit(other, 0, now, Limits{MaxStreams: 1, MaxTranscodes: 1}, ""); err != ErrServerBusy {
 		t.Errorf("another account's transcode: %v", err)
 	}
 	// The same account's replaces its oldest, freeing its transcode.
-	newer := &Stream{AccountID: "acct_a", ProfileID: "prof_a", Decision: Decision{Method: "transcode"}}
+	newer := &Stream{AccountID: "acct_a", ProfileID: "prof_a", Delivery: transcoding()}
 	gone, err := tk.Admit(newer, 0, now.Add(time.Second), Limits{MaxStreams: 1, MaxTranscodes: 1}, "TV")
 	if err != nil || len(gone) != 1 || gone[0] != old {
 		t.Fatalf("replacing: %v %v", gone, err)
@@ -197,3 +198,60 @@ func TestDeliveryCounting(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistry(t *testing.T) {
+	tk := NewTickets(24 * time.Hour)
+	now := time.Now()
+	old := &Stream{AccountID: "acct_a", ProfileID: "prof_a", SessionID: "sess_a", ItemID: item}
+	tk.Add(old, 0, now)
+	newer := &Stream{AccountID: "acct_a", ProfileID: "prof_b", ItemID: item}
+	tk.Add(newer, 0, now.Add(time.Second))
+
+	if len(old.Ticket) < 32 || !strings.HasPrefix(old.ID, "play_") {
+		t.Errorf("ticket %q, id %q", old.Ticket, old.ID)
+	}
+	if got, ok := tk.ByTicket(old.Ticket, "sess_a", "prof_a", now); !ok || got != old {
+		t.Error("ticket not found")
+	}
+	if _, _, ok := tk.ByID(old.ID, "prof_b", now); ok {
+		t.Error("another profile found the playback")
+	}
+	if list := tk.ForAccount("acct_a"); len(list) != 2 || list[0] != old {
+		t.Errorf("ForAccount: oldest first expected, got %v", list)
+	}
+
+	// Taken over: the ticket stops working, and the reason is remembered.
+	if !tk.Remove(old, "taken-over", "Living room TV", now) {
+		t.Fatal("Remove failed")
+	}
+	if tk.Remove(old, "stopped", "", now) {
+		t.Error("a playback was removed twice")
+	}
+	if _, ok := tk.ByTicket(old.Ticket, "sess_a", "prof_a", now); ok {
+		t.Error("an ended playback's ticket still works")
+	}
+	if _, e, ok := tk.ByID(old.ID, "prof_a", now); !ok || e == nil || e.Reason != "taken-over" || e.By != "Living room TV" {
+		t.Errorf("ended: %+v", e)
+	}
+
+	// Idle detection: activity through the ticket or progress counts.
+	later := now.Add(3 * time.Minute)
+	if idle := tk.Idle(later, 2*time.Minute); len(idle) != 1 || idle[0] != newer {
+		t.Errorf("idle: %v", idle)
+	}
+	tk.Progress(newer, 600_000_000, true, later)
+	if idle := tk.Idle(later, 2*time.Minute); len(idle) != 0 {
+		t.Errorf("a reporting playback was idle")
+	}
+	if snap := tk.Snapshot(newer); snap.PositionTicks != 600_000_000 || !snap.Paused {
+		t.Errorf("snapshot: %+v", snap)
+	}
+}
+
+// transcoding is a delivery that converts the picture: it takes a
+// transcode slot.
+func transcoding() *delivery.Started {
+	return &delivery.Started{Plan: &delivery.Plan{Kind: delivery.KindTranscode, VideoConverted: true}}
+}
+
+const item = "0123456789abcdef0123456789abcdef"

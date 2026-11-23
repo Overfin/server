@@ -243,8 +243,8 @@ type peerStreamKey struct{}
 // having checked its ticket and the request: the file's bytes for the
 // engine's range, the executor's playlists and segments, subtitles in
 // stretches, PGS, and previews' sheets (a playback's, or a copy's under a
-// previews ticket: OfCopy), by the same code as this server's own. ASS,
-// fonts and whole text tracks aren't served this release (D7).
+// previews ticket: OfCopy), by the same code as this server's own, a
+// text track whole too. ASS and fonts aren't served this release (D7).
 func (h PeerHost) Serve(ctx context.Context, handle string, path msfp.MediaPath, rng *msfp.Range, out msfp.ResponseSink) error {
 	pb, err := h.playback()
 	if err != nil {
@@ -263,7 +263,7 @@ func (h PeerHost) Serve(ctx context.Context, handle string, path msfp.MediaPath,
 	case msfp.MediaFile:
 		return pb.servePeerFile(ctx, s, rng, out)
 	}
-	if path.Whole {
+	if path.Whole && path.Kind != msfp.MediaSubtitles {
 		return msfp.ErrNotFound
 	}
 	r, err := http.NewRequestWithContext(context.WithValue(ctx, peerStreamKey{}, s), http.MethodGet, "/", nil)
@@ -285,6 +285,9 @@ func (h PeerHost) Serve(ctx context.Context, handle string, path msfp.MediaPath,
 	case msfp.MediaSubtitles, msfp.MediaPictures:
 		r.SetPathValue("track", path.Track)
 		r.SetPathValue("part", strconv.Itoa(path.Part))
+		if path.Whole {
+			r.SetPathValue("part", "whole")
+		}
 		if path.Kind == msfp.MediaPictures {
 			st.pictures(w, r)
 		} else {

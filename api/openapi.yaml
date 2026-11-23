@@ -3234,12 +3234,13 @@ paths:
         it; the answer is MSFP's playback object (`PlayAnswer`), with no
         URL: the player builds them from its `ticket`, under
         `/stream/{ticket}/` (`master.m3u8` for `hls`, `file` for `file`,
-        `subtitles/{trackId}/{part}`, `pictures/{trackId}/{part}`,
-        `trickplay/{sheet}`).
+        `subtitles/{trackId}/{part}` or `subtitles/{trackId}/whole`,
+        `pictures/{trackId}/{part}`, `trickplay/{sheet}`).
 
-        The older body (`PlaybackStart`, with `capabilities`: the media
-        server decides) is still taken, answered with a `PlaybackSession`;
-        it goes once every player is on the play request.
+        This is the only body. The older one (with `capabilities`, the
+        server choosing; before 0.10) is answered `401 not-authenticated`:
+        a page still on an older SDK goes through sign-in, straight back
+        when signed in, and so loads the site again, on this API.
 
         If the account is at its stream limit, its oldest playback is ended
         and that device is told why (unless the operator chose to refuse new
@@ -3250,25 +3251,25 @@ paths:
         content:
           application/json:
             schema:
-              oneOf:
-                - $ref: "#/components/schemas/PlayRequest"
-                - $ref: "#/components/schemas/PlaybackStart"
+              $ref: "#/components/schemas/PlayRequest"
       responses:
         "201":
-          description: The playback, as MSFP's playback object (the play
-            request), or the older playback session (the older body).
+          description: The playback, as MSFP's playback object.
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: "#/components/schemas/PlayAnswer"
-                  - $ref: "#/components/schemas/PlaybackSession"
+                $ref: "#/components/schemas/PlayAnswer"
         "400":
           description: >-
-            A body that isn't one of the two, or malformed: a
-            member neither has, `null`, a value not of its form or range
-            (`invalid-request`). Only what's malformed; what can't be made
-            is a 409.
+            A malformed body: a member the play request doesn't have,
+            `null`, a value not of its form or range (`invalid-request`).
+            Only what's malformed; what can't be made is a 409.
+        "401":
+          description: >-
+            The older body (`capabilities`, `itemId`, `audioLanguage`,
+            `subtitleTrack` or `queue` in it), from a page older than this
+            API: `not-authenticated`, which makes such a page sign in again
+            and so load again. Nothing starts.
           content:
             application/problem+json:
               schema:
@@ -3372,9 +3373,7 @@ paths:
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: "#/components/schemas/PlayAnswer"
-                  - $ref: "#/components/schemas/PlaybackSession"
+                $ref: "#/components/schemas/PlayAnswer"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -3417,34 +3416,7 @@ paths:
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: "#/components/schemas/PlayAnswer"
-                  - $ref: "#/components/schemas/PlaybackSession"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "410":
-          $ref: "#/components/responses/PlaybackEnded"
-    patch:
-      x-status: planned
-      operationId: changePlayback
-      summary: Switch audio, subtitles, version or quality
-      description: When the change needs a different stream, the response has
-        a new `stream.url`; the client switches to it at its current
-        position.
-      tags: [playback]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PlaybackChange"
-      responses:
-        "200":
-          description: The updated playback session.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PlaybackSession"
+                $ref: "#/components/schemas/PlayAnswer"
         "404":
           $ref: "#/components/responses/NotFound"
         "410":
@@ -3532,9 +3504,8 @@ paths:
       description: |
         Safe to call more than once. Stopping a playback that has already
         ended, or one this profile doesn't have, still answers 204. A play
-        request's playback is watched by where it stopped: past the copy's
-        final credits (its last `outro`), else past 90 % of it; `ended`
-        counts for the older body's only.
+        playback is watched by where it stopped: past the copy's final
+        credits (its last `outro`), else past 90 % of it.
       tags: [playback]
       requestBody:
         required: true
@@ -3553,34 +3524,6 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
-
-  /playback/{playbackId}/trickplay/{sheet}:
-    parameters:
-      - $ref: "#/components/parameters/PlaybackId"
-      - name: sheet
-        in: path
-        required: true
-        schema:
-          type: integer
-          minimum: 0
-    get:
-      operationId: getTrickplaySheet
-      summary: One sheet of a playback's seek-bar previews
-      description: Use a URL from the playback's `trickplay.sheets`. Only for
-        the profile playing it; a JPEG, re-encoded by Overfin.
-      tags: [playback]
-      responses:
-        "200":
-          description: The sheet.
-          content:
-            image/jpeg:
-              schema:
-                type: string
-                format: binary
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "410":
-          $ref: "#/components/responses/PlaybackEnded"
 
   /playback/{playbackId}/queue:
     parameters:
@@ -3618,9 +3561,9 @@ paths:
           application/json:
             schema:
               type: object
-              required: [itemIds]
+              required: [titleIds]
               properties:
-                itemIds:
+                titleIds:
                   type: array
                   maxItems: 500
                   items:
@@ -3628,11 +3571,11 @@ paths:
                     maxLength: 64
       responses:
         "200":
-          description: The playback session with its new queue.
+          description: The playback with its new queue.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PlaybackSession"
+                $ref: "#/components/schemas/PlayAnswer"
         "404":
           $ref: "#/components/responses/NotFound"
         "410":
@@ -3646,7 +3589,7 @@ paths:
       operationId: advanceQueue
       summary: Move to another queue entry (next episode, next track, a jump)
       description: Ends the current item and starts the chosen one, keeping
-        the queue. Returns the new playback session.
+        the queue. Returns the new playback.
       tags: [playback]
       requestBody:
         required: true
@@ -3661,11 +3604,11 @@ paths:
                   minimum: 0
       responses:
         "201":
-          description: The playback session for the new entry.
+          description: The playback of the new entry.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PlaybackSession"
+                $ref: "#/components/schemas/PlayAnswer"
         "404":
           $ref: "#/components/responses/NotFound"
         "410":
@@ -3743,30 +3686,36 @@ paths:
       - name: trackId
         in: path
         required: true
-        description: A text track's `id` from `subtitleTracks`.
+        description: A text track's `id`, from the copy's `subtitleTracks`
+          and the play's answer (`subtitles`, `form` `text`).
         schema:
           type: string
           maxLength: 4
-          pattern: "^s[0-9]{1,3}$"
+          pattern: "^s(0|[1-9][0-9]{0,2})$"
       - name: part
         in: path
         required: true
         description: >-
           The stretch of the video, from 0: part n covers
-          [n × `subtitleStretchSeconds`, (n+1) × `subtitleStretchSeconds`)
-          seconds, and starts a few seconds earlier so a subtitle already on
-          screen comes with it; the client drops the doubles.
+          [n × 120, (n+1) × 120) seconds (MSFP media section 3.4), and
+          starts 10 seconds earlier so a subtitle already on screen comes
+          with it; the client drops the doubles. Or `whole`, the whole
+          track (since 0.10).
         schema:
           type: string
-          maxLength: 4
-          pattern: "^(0|[1-9][0-9]{0,3})$"
+          maxLength: 5
+          pattern: "^(0|[1-9][0-9]{0,3}|whole)$"
     get:
       security: []
       operationId: getSubtitles
-      summary: A stretch of a subtitle track as sanitized WebVTT
+      summary: A stretch of a text subtitle track, or the whole track, as rebuilt WebVTT
       description: >-
-        Read from that point of the file, not the whole file: the first
-        subtitles come in about a second.
+        A stretch is read from that point of the file, not the whole file:
+        the first subtitles come in about a second. The whole track is read
+        in ten-minute stretches over the copy's length, each cue once, and
+        rebuilt as one track (MSFP video section 6.3, at most 16 MiB and
+        200,000 cues); a paired server fetches it as MSFP's
+        `subtitles/<id>/whole`. Tracks of pictures come in stretches only.
       tags: [playback]
       responses:
         "200":
@@ -4395,20 +4344,24 @@ paths:
   /federation/play:
     post:
       operationId: federationPlay
-      summary: A paired server's viewer plays one of this server's titles
+      summary: A paired server's viewer plays one of this server's copies
       description: |
         Server to server, signed both ways as for pair, for a paired server
-        only. The title (a film's or an episode's TMDB key, in its one
-        form) must be in a library this server offers the caller. This
-        server picks its copy (the version asked for, else one with the
-        viewer's audio language when it has one; each copy is a version,
-        named by its video) and the tracks, within
-        the pairing's limits (streams, transcodes, bitrate) and the
-        transcodes it keeps for its own people, and answers with the
-        playback as POST /playback does, its stream's URLs on this server:
-        the caller fetches them with the ticket alone, for its viewer, who
-        never asks here (a browser's request with the ticket is refused).
-        Nothing about the viewer is kept here.
+        only: MSFP's play request (MSFP playback section 2), served by
+        the MSFP engine. The caller's viewer chose a copy of the title's
+        catalog entry (its `copies`, facts only), its audio and its
+        delivery; this server makes exactly that, through the same
+        executor as its own players (the file from disk, a remux or a
+        transcode by its companion plugin), within the pairing's or the
+        group pool's limits (streams, transcodes, bitrate, downloads,
+        scans) and the transcodes it keeps for its own people, or refuses
+        it as MSFP says. Subtitles are never burned in unless the operator
+        turned it on (`federation.burn_in`, off by default); DVD and DVB
+        subtitles aren't served apart. The answer is MSFP's playback
+        object, with no URL: the caller builds the media addresses from
+        its ticket, under /stream/{ticket}/, and fetches them for its
+        viewer, who never asks here (a browser's request with the ticket
+        is refused). Nothing about the viewer is kept here.
       tags: [federation]
       security: []
       requestBody:
@@ -4417,22 +4370,25 @@ paths:
           application/json:
             schema:
               type: object
+              description: MSFP's play request.
               required: [title]
               properties:
-                title: {type: string}
-                capabilities: {type: object}
+                title: {type: string, description: "The title's key, as the catalog gives it"}
+                versionId: {type: string, description: "A copy's id from the catalog"}
+                audioTrack: {type: string}
+                delivery: {type: string, enum: [file, remux, transcode]}
+                mediaType: {type: string}
+                transcode: {type: object}
+                audioRenditions: {type: boolean}
                 startPositionMs: {type: integer}
                 maxBitrateKbps: {type: integer}
-                audioLanguage: {type: string}
-                subtitleLanguage: {type: string}
-                audioTrack: {type: string}
-                subtitleTrack: {type: string}
-                versionId: {type: string, description: "A version from a former answer of the same title"}
+                purpose: {type: string, enum: [playback, download, scan]}
       responses:
-        "200": {description: "The playback, as POST /playback answers it. Signed."}
-        "400": {description: "A title that isn't a film's or an episode's key, a number or a tag out of range, a malformed track."}
-        "404": {description: "Not signed, not a paired server, or a title not offered it; `not-supported` when playback isn't on between the two."}
-        "409": {description: "The pairing's limit, or every transcode it may take, is reached."}
+        "200": {description: "The playback, MSFP's playback object. Signed."}
+        "400": {description: "Malformed, as MSFP reads a play request."}
+        "404": {description: "Not signed, not a paired server, or a title or copy not offered it; `not-supported` when playback isn't on between the two."}
+        "409": {description: "`delivery-refused` (what was asked isn't made, with MSFP's code), or `stream-limit-reached` (the pairing's or the pool's limit)."}
+        "503": {description: "`server-busy`: every transcode it may take is in use."}
 
   /federation/progress:
     post:
@@ -5696,37 +5652,6 @@ components:
               startMs:
                 $ref: "#/components/schemas/Milliseconds"
 
-    Trickplay:
-      description: |
-        One set of seek-bar previews. Each sheet is a grid of `columns` x
-        `rows` tiles, read left to right and top to bottom; tile n shows the
-        video at n x `intervalMs`.
-      type: object
-      required: [tileWidth, tileHeight, columns, rows, intervalMs, tileCount, sheets]
-      properties:
-        tileWidth:
-          type: integer
-          minimum: 1
-        tileHeight:
-          type: integer
-          minimum: 1
-        columns:
-          type: integer
-          minimum: 1
-        rows:
-          type: integer
-          minimum: 1
-        intervalMs:
-          $ref: "#/components/schemas/Milliseconds"
-        tileCount:
-          type: integer
-          minimum: 0
-        sheets:
-          type: array
-          items:
-            type: string
-            format: uri-reference
-
     SearchRequest:
       type: object
       required: [query]
@@ -6071,135 +5996,6 @@ components:
         next:
           $ref: "#/components/schemas/TitleSummary"
 
-    Capabilities:
-      description: |
-        What the playing device can handle. The JavaScript SDK fills this in
-        from the browser. Unknown values are ignored, so clients can declare
-        new codecs or formats without breaking anything; unknown fields are
-        refused (`invalid-request`).
-      type: object
-      additionalProperties: false
-      properties:
-        containers:
-          type: array
-          items:
-            type: string
-          examples: [[mp4, webm, mkv]]
-        videoCodecs:
-          type: array
-          items:
-            type: string
-          examples: [[h264, hevc, av1, vp9]]
-        audioCodecs:
-          type: array
-          items:
-            type: string
-          examples: [[aac, opus, flac, eac3]]
-        maxHeight:
-          type: integer
-          minimum: 144
-        hdr:
-          type: array
-          items:
-            type: string
-          examples: [[hdr10, dolbyVision]]
-        subtitles:
-          type: array
-          description: Subtitle formats the client renders itself. Not
-            used since subtitles are never burned in; text comes as WebVTT,
-            pictures (PGS) as their own file.
-          items:
-            type: string
-          examples: [[vtt, ass, pgs]]
-        maxAudioChannels:
-          type: integer
-          minimum: 1
-        maxBitrateKbps:
-          type: integer
-          minimum: 64
-
-    PlaybackStart:
-      type: object
-      additionalProperties: false
-      required: [capabilities]
-      description: Name what to play with `titleId` (Overfin picks the copy) or, for a
-        particular copy, `itemId`; one of the two, never both.
-      properties:
-        titleId:
-          type: string
-          maxLength: 126
-        itemId:
-          type: string
-          maxLength: 64
-        capabilities:
-          $ref: "#/components/schemas/Capabilities"
-        startPositionMs:
-          $ref: "#/components/schemas/Milliseconds"
-        versionId:
-          type: string
-          description: Which version of the item, when it has several.
-          maxLength: 64
-        audioTrack:
-          type: string
-          description: An `id` from the session's `audioTracks`.
-          maxLength: 64
-          pattern: "^a[0-9]{1,3}$"
-        audioLanguage:
-          type: string
-          description: The language to start in (the app's, BCP 47 or ISO
-            639), when the video has a track in it and no `audioTrack` is
-            given.
-          maxLength: 35
-        subtitleTrack:
-          type: string
-          description: A subtitle track ID, or `off`. Without one, the
-            active profile's subtitle language (`PUT /me/subtitles`) is
-            turned on when the video has it; none otherwise.
-          maxLength: 64
-          pattern: "^(off|s[0-9]{1,3})$"
-        maxBitrateKbps:
-          type: integer
-          minimum: 0
-          description: |
-            The client's cap; 0 or absent means none. The lowest of this,
-            `capabilities.maxBitrateKbps` and the operator's cap applies.
-        queue:
-          type: array
-          x-status: planned
-          description: Planned. Items to play after this one (next
-            episodes, an album's tracks). Each is checked against the active
-            profile. Until queues are served, a non-empty queue is refused
-            (`invalid-request`).
-          maxItems: 500
-          items:
-            type: string
-            maxLength: 64
-        device:
-          type: string
-          description: |
-            A readable name for this device, shown when another device takes
-            over. Printable ASCII only; anything else is refused
-            (`invalid-request`).
-          maxLength: 64
-          pattern: '^[\x20-\x7E]{1,64}$'
-
-    PlaybackChange:
-      type: object
-      minProperties: 1
-      properties:
-        versionId:
-          type: string
-          maxLength: 64
-        audioTrack:
-          type: string
-          maxLength: 64
-        subtitleTrack:
-          type: string
-          maxLength: 64
-        maxBitrateKbps:
-          type: integer
-          minimum: 64
-
     ProgressReport:
       type: object
       additionalProperties: false
@@ -6209,221 +6005,6 @@ components:
           $ref: "#/components/schemas/Milliseconds"
         paused:
           type: boolean
-        ended:
-          type: boolean
-          description: True when the item played to its end. The older
-            body's playbacks only; a play request's is watched by its
-            position.
-
-    Track:
-      type: object
-      required: [id, label]
-      properties:
-        id:
-          type: string
-        label:
-          type: string
-          description: The language's name in itself, with its country for
-            a regional variant (`Français (Canada)`, `日本語`); a language
-            Overfin doesn't know, its code; none, `?`. The same names
-            everywhere in Overfin.
-        language:
-          type: string
-          description: Its language tag, with its region when the file says
-            it (its tag, or its title's markers such as VFQ or Latino);
-            absent when unknown.
-          examples: [fr-CA]
-        channels:
-          type: integer
-          minimum: 1
-        role:
-          type: string
-          description: Audio besides the film's own sound; never chosen by
-            default. Open set.
-          examples: [commentary, description]
-        default:
-          type: boolean
-        forced:
-          type: boolean
-        hearingImpaired:
-          type: boolean
-        pictures:
-          type: boolean
-          description: Subtitles that are pictures (PGS), at `url`, for
-            the client to draw over the video; never burned in.
-        url:
-          type: string
-          format: uri-reference
-          description: Where the subtitles' stretches are, WebVTT for
-            text, PGS for pictures, each checked whole by Overfin first;
-            part n at `url` + "/n" (see `subtitleStretchSeconds`).
-
-    MediaSegment:
-      description: A marked part of the media, e.g. for a "Skip intro"
-        button.
-      type: object
-      required: [kind, startMs, endMs]
-      properties:
-        kind:
-          type: string
-          description: Open set; clients must handle unknown values.
-          examples: [intro, outro, recap, preview, commercial]
-        startMs:
-          $ref: "#/components/schemas/Milliseconds"
-        endMs:
-          $ref: "#/components/schemas/Milliseconds"
-
-    PlaybackSession:
-      type: object
-      required: [id, method, stream, positionMs]
-      properties:
-        id:
-          type: string
-          examples: [play_k3m7q2w5x4c6v2b7n3d5f4gahj]
-        title:
-          description: What plays; absent when Overfin has no title for the
-            item yet.
-          allOf:
-            - $ref: "#/components/schemas/TitleSummary"
-        method:
-          type: string
-          description: >-
-            How the media reaches the client. `direct` is the file as it is,
-            `remux` repackages it (only the container or the audio changes),
-            `transcode` re-encodes the video. Only transcodes count toward
-            the server's transcode limit. Open set.
-          examples: [direct, remux, transcode]
-        stream:
-          type: object
-          required: [url, protocol]
-          properties:
-            url:
-              type: string
-              format: uri-reference
-            protocol:
-              type: string
-              description: Open set.
-              examples: [file, hls]
-            mimeType:
-              type: string
-        positionMs:
-          $ref: "#/components/schemas/Milliseconds"
-        durationMs:
-          $ref: "#/components/schemas/Milliseconds"
-        versions:
-          type: array
-          items:
-            type: object
-            required: [id, name]
-            properties:
-              id:
-                type: string
-              name:
-                type: string
-        versionId:
-          type: string
-        audioTracks:
-          type: array
-          description: One per language variant (the most channels), then
-            commentaries and audio descriptions apart.
-          items:
-            $ref: "#/components/schemas/Track"
-        audioTrack:
-          type: string
-        subtitleTracks:
-          type: array
-          description: One per language variant, text before pictures,
-            those for the hard of hearing only when there's nothing else.
-          items:
-            $ref: "#/components/schemas/Track"
-        subtitleTrack:
-          type: string
-          description: The subtitles to show (chosen for the title, else the
-            profile's preference); the client shows them from their `url`.
-        forcedTracks:
-          type: array
-          description: Subtitles for the lines in another language only,
-            one per language variant.
-          items:
-            $ref: "#/components/schemas/Track"
-        forcedTrack:
-          type: string
-          description: The forced subtitles in the audio's language, to show
-            whenever no other subtitles are, subtitles off included.
-        subtitleStretchSeconds:
-          type: integer
-          description: How long each part of a subtitle track is, in
-            seconds; present when there are subtitle tracks.
-        maxBitrateKbps:
-          type: integer
-        segments:
-          type: array
-          items:
-            $ref: "#/components/schemas/MediaSegment"
-        trickplay:
-          description: Seek-bar previews of the version playing, when the
-            media server made some; absent otherwise.
-          allOf:
-            - $ref: "#/components/schemas/Trickplay"
-        next:
-          description: For an episode, the one after it that the profile
-            may see (the rest of its season, then the next season's);
-            absent at the end. It may not be playable (no library has it).
-          allOf:
-            - $ref: "#/components/schemas/TitleSummary"
-        info:
-          type: object
-          description: How it's served and what the file holds, for the
-            player's information. `reasons` are the media server's reasons
-            for converting it (e.g. `AudioCodecNotSupported`,
-            `VideoRangeTypeNotSupported`); none when the file plays as it is.
-          properties:
-            reasons:
-              type: array
-              items:
-                type: string
-            container:
-              type: string
-            bitrateKbps:
-              type: integer
-            video:
-              type: object
-              properties:
-                codec: {type: string}
-                profile: {type: string}
-                width: {type: integer}
-                height: {type: integer}
-                bitDepth: {type: integer}
-                range: {type: string, description: "SDR, HDR10, HDR10Plus, HLG, DOVIWithHDR10…"}
-                bitrateKbps: {type: integer}
-            audio:
-              type: object
-              properties:
-                codec: {type: string}
-                channels: {type: integer}
-                language: {type: string}
-                bitrateKbps: {type: integer}
-        queue:
-          x-status: planned
-          description: Planned, not sent yet. Where playback is in the
-            queue. The whole queue is available from
-            `GET /playback/{id}/queue`.
-          type: object
-          required: [index, length]
-          properties:
-            index:
-              type: integer
-              minimum: 0
-              description: The entry playing now.
-            length:
-              type: integer
-              minimum: 0
-            upcoming:
-              type: array
-              description: The next few entries (at most 10).
-              maxItems: 10
-              items:
-                $ref: "#/components/schemas/TitleSummary"
 
     # ---- Kind-specific parts -----------------------------------------------
 

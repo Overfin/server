@@ -67,6 +67,13 @@ func (m *testMaker) Stop(_ context.Context, id string) error {
 
 func (m *testMaker) Clear(context.Context) error { return nil }
 
+// stops is how many deliveries were stopped.
+func (m *testMaker) stops() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.stopped)
+}
+
 func (m *testMaker) last() delivery.Order {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -81,6 +88,7 @@ func (m *testMaker) last() delivery.Order {
 // skip markers.
 type played struct {
 	srv      *httptest.Server
+	fake     *fakeJellyfin
 	st       *store.Store
 	tickets  *playback.Tickets
 	maker    *testMaker
@@ -102,7 +110,7 @@ func playedServer(t *testing.T, o options) *played {
 	libDir := filepath.Join(dir, "films")
 	os.MkdirAll(libDir, 0o700)
 	path := filepath.Join(libDir, "heat.mkv")
-	content := bytes.Repeat([]byte("0123456789"), 1000)
+	content := bytes.Repeat([]byte("0123456789"), max(o.fileSize, 10_000)/10)
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +137,7 @@ func playedServer(t *testing.T, o options) *played {
 	os.WriteFile(filepath.Join(sets, "0.jpg"), sheet.Bytes(), 0o600)
 	o.previews = func(st *store.Store) *previews.Keeper { return &previews.Keeper{Store: pv, DB: st} }
 
-	p.srv, _ = newServerWith(t, o)
+	p.srv, p.fake = newServerWith(t, o)
 	st := p.st
 	id := func(n int) string { return fmt.Sprintf("%032x", n) }
 	films, music := id(0xf1), id(0xf2)
@@ -289,8 +297,8 @@ func play(t *testing.T, srv *httptest.Server, body string) (int, playAnswer, str
 
 // A play from MSFP's play request: the answer is MSFP's playback object
 // (no URL), what the player asked made exactly, the stream served from
-// the ticket; restored as it is after a reload; the older body still
-// plays.
+// the ticket; restored as it is after a reload; the older body makes
+// the page load again.
 func TestPlayRequest(t *testing.T) {
 	p := playedServer(t, options{maxBitrateKbps: 40_000})
 	code, a, raw := play(t, p.srv, `{"titleId":"title_movie_tmdb_949","versionId":"`+heatCopy+`","audioTrack":"a2",
@@ -359,10 +367,19 @@ func TestPlayRequest(t *testing.T) {
 	if res.StatusCode != 206 || string(got) != string(p.file[10:20]) {
 		t.Errorf("the file's range: %d %q", res.StatusCode, got)
 	}
-	// The older body: Jellyfin decides, as before.
-	code, raw = post(t, p.srv, "/api/v1/playback", `{"itemId":"item_`+fmt.Sprintf("%032x", 1)+`","capabilities":{},"device":"Laptop"}`)
-	if code != 201 || !strings.Contains(raw, `"stream":{"url":`) {
-		t.Errorf("the older body: %d %s", code, raw)
+	// The older body, from a page still on an older player: "not signed
+	// in", which sends it through sign-in and so loads the site again;
+	// nothing starts.
+	n := len(p.tickets.Live(time.Now()))
+	for _, older := range []string{`{"itemId":"item_` + fmt.Sprintf("%032x", 1) + `","capabilities":{},"device":"Laptop"}`,
+		`{"titleId":"title_movie_tmdb_949","capabilities":{}}`, `{"titleId":"title_movie_tmdb_949","audioLanguage":"fr"}`} {
+		code, raw = post(t, p.srv, "/api/v1/playback", older)
+		if code != http.StatusUnauthorized || !strings.Contains(raw, `"type":"not-authenticated"`) {
+			t.Errorf("the older body %s: %d %s", older, code, raw)
+		}
+	}
+	if len(p.tickets.Live(time.Now())) != n {
+		t.Error("the older body started a playback")
 	}
 }
 
@@ -457,10 +474,9 @@ func TestPlayProgressAndPlayed(t *testing.T) {
 	}) {
 		t.Errorf("Heat, stopped in its credits: %+v", heat.UserState)
 	}
-	// Up has no skip markers: at 85 % it's where it stopped; "ended"
-	// changes nothing.
+	// Up has no skip markers: at 85 % it's where it stopped.
 	_, a, _ = play(t, p.srv, `{"titleId":"title_movie_tmdb_14160","delivery":"remux","mediaType":"video/mp4"}`)
-	if code, body := post(t, p.srv, "/api/v1/playback/"+a.ID+"/stop", `{"positionMs":5100000,"ended":true}`); code != 204 {
+	if code, body := post(t, p.srv, "/api/v1/playback/"+a.ID+"/stop", `{"positionMs":5100000}`); code != 204 {
 		t.Fatalf("stop: %d %s", code, body)
 	}
 	var up titlePage
@@ -521,5 +537,110 @@ func TestPreviewsCall(t *testing.T) {
 	_, a, _ := play(t, p.srv, `{"titleId":"title_movie_tmdb_949","delivery":"remux","mediaType":"video/mp4"}`)
 	if code, _ := getAs(t, p.srv, subject, "/api/v1/stream/"+a.Ticket+"/trickplay/0"); code != 200 {
 		t.Errorf("a playback's sheet: %d", code)
+	}
+}
+
+// startPlayback starts a transcode of Heat's copy (its picture converted:
+// a transcode slot) on a played server, from device, at 1 s.
+func startPlayback(t *testing.T, srv *httptest.Server, device string) string {
+	t.Helper()
+	return startDelivery(t, srv, device, `"delivery":"transcode","transcode":{"videoCodec":"h264"}`)
+}
+
+// startDelivery starts a play of Heat's copy on a played server, with
+// the play request's members delivery gives.
+func startDelivery(t *testing.T, srv *httptest.Server, device, delivery string) string {
+	t.Helper()
+	code, body := post(t, srv, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","versionId":"`+heatCopy+`",`+delivery+
+		`,"device":"`+device+`","startPositionMs":1000}`)
+	if code != http.StatusCreated {
+		t.Fatalf("start: %d %s", code, body)
+	}
+	var s struct{ ID string }
+	json.Unmarshal([]byte(body), &s)
+	return s.ID
+}
+
+// A delivery's subtitles: a text track in stretches from Overfin's plugin
+// (asked with Overfin's own key, each 10 s early) or whole, rebuilt as
+// WebVTT (MSFP video section 6.3); a track of pictures (PGS) as the
+// stretch itself, checked whole; DVD subtitles not served.
+func TestDeliverySubtitles(t *testing.T) {
+	p := playedServer(t, options{})
+	code, a, raw := play(t, p.srv, `{"titleId":"title_movie_tmdb_949","versionId":"`+heatCopy+`","delivery":"remux","mediaType":"video/mp4"}`)
+	if code != 201 {
+		t.Fatalf("play: %d %s", code, raw)
+	}
+	base := "/api/v1/stream/" + a.Ticket + "/"
+	fake := p.fake
+	const cue = "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<b>Hi</b>\n"
+	if code, vtt := getAs(t, p.srv, subject, base+"subtitles/s3/0"); code != 200 || vtt != cue {
+		t.Errorf("subtitles: %d %q", code, vtt)
+	}
+	if code, _ := getAs(t, p.srv, subject, base+"subtitles/s3/1"); code != 200 {
+		t.Errorf("subtitles, part 1: %d", code)
+	}
+	fake.mu.Lock()
+	if got := strings.Join(fake.stretches, ", "); got != "3 0 120, 3 110 240" {
+		t.Errorf("stretches asked: %s", got)
+	}
+	fake.stretches = nil
+	fake.mu.Unlock()
+	// Whole: the plugin's stretches of 10 minutes over the copy's length
+	// (100 minutes), a cue shown in two of them kept once.
+	req, _ := http.NewRequest("GET", p.srv.URL+base+"subtitles/s3/whole", nil)
+	req.Header.Set("Remote-User", subject)
+	res, err := client(p.srv, subject).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	whole, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 200 || string(whole) != cue || res.Header.Get("Content-Type") != "text/vtt; charset=utf-8" {
+		t.Errorf("whole: %d %q %s", res.StatusCode, whole, res.Header.Get("Content-Type"))
+	}
+	fake.mu.Lock()
+	if got := strings.Join(fake.stretches, ", "); !strings.HasPrefix(got, "3 0 600, 3 600 1200, ") || !strings.HasSuffix(got, ", 3 5400 6000") ||
+		len(fake.stretches) != 10 {
+		t.Errorf("whole, stretches asked: %s", got)
+	}
+	fake.mu.Unlock()
+	for _, part := range []string{"", "/-1", "/x", "/01", "/10000", "/1/2", "/Whole", "/whole/0"} {
+		if code, _ := getAs(t, p.srv, subject, base+"subtitles/s3"+part); code != http.StatusNotFound {
+			t.Errorf("subtitles part %q: status %d, want 404", part, code)
+		}
+	}
+	// Track 4 is pictures (PGS): no WebVTT, whole or not, but the stretch
+	// itself; one that isn't well-formed is refused; text track 3 has no
+	// pictures, DVD subtitles (5) aren't served.
+	for _, u := range []string{base + "subtitles/s4/0", base + "subtitles/s4/whole", base + "subtitles/s5/0", base + "pictures/s4/whole"} {
+		if code, _ := getAs(t, p.srv, subject, u); code != http.StatusNotFound {
+			t.Errorf("%s: status %d, want 404", u, code)
+		}
+	}
+	fake.mu.Lock()
+	fake.pgs = pgsTrack()
+	fake.mu.Unlock()
+	if code, body := getAs(t, p.srv, subject, base+"pictures/s4/3"); code != 200 || body != string(fake.pgs) {
+		t.Errorf("picture subtitles: %d, %d bytes", code, len(body))
+	}
+	fake.mu.Lock()
+	fake.pgs = []byte{}
+	fake.mu.Unlock()
+	if code, body := getAs(t, p.srv, subject, base+"pictures/s4/3"); code != 200 || body != "" {
+		t.Errorf("picture subtitles, a stretch without any: %d, %d bytes", code, len(body))
+	}
+	fake.mu.Lock()
+	fake.pgs = append(pgsTrack(), "PX"...)
+	fake.mu.Unlock()
+	for _, u := range []string{base + "pictures/s4/0", base + "pictures/s3/0", base + "pictures/s04/3", base + "pictures/s5/0",
+		base + "pictures/s4/0?x=1", base + "pictures/s4"} {
+		if code, _ := getAs(t, p.srv, subject, u); code != http.StatusNotFound {
+			t.Errorf("%s: status %d, want 404", u, code)
+		}
+	}
+	// Another account gets nothing.
+	if code, _ := getAs(t, p.srv, "other-subject", base+"subtitles/s3/whole"); code != http.StatusNotFound {
+		t.Errorf("another account: %d", code)
 	}
 }

@@ -15,8 +15,8 @@ import (
 // nobody's playback stops for another profile's.
 func TestReservedStreams(t *testing.T) {
 	var tmpl string
-	var st *store.Store
-	srv, _ := newServerWith(t, options{maxStreams: 3, template: &tmpl, store: &st})
+	p := playedServer(t, options{maxStreams: 3, template: &tmpl})
+	srv, st := p.srv, p.st
 	ctx := context.Background()
 
 	limits := func() (out struct {

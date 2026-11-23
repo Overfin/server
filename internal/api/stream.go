@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -211,65 +212,8 @@ func (s Stream) serve(w http.ResponseWriter, r *http.Request) {
 		s.serveDelivery(w, r, st, *a, name)
 		return
 	}
-	dec := st.Decision
-	switch {
-	case name == "file" && dec.Protocol == "file":
-		s.proxy(w, r, st, *a, dec.Upstream, true, "")
-	case name == "master.m3u8" && dec.Protocol == "hls":
-		s.playlist(w, r, st, *a, dec.Upstream, playback.RewriteMaster)
-	case strings.HasSuffix(name, ".m3u8"):
-		up, ok := st.File(name)
-		if !ok {
-			problem.Send(w, problem.NotFound, "")
-			return
-		}
-		s.playlist(w, r, st, *a, up, playback.RewriteVariant)
-	default:
-		up, ok := st.File(name)
-		if !ok {
-			problem.Send(w, problem.NotFound, "")
-			return
-		}
-		contentType := "video/mp4"
-		switch {
-		case strings.HasSuffix(name, ".ts"):
-			contentType = "video/mp2t"
-		case strings.HasSuffix(name, ".aac"):
-			contentType = "audio/aac"
-		case strings.HasSuffix(name, ".mp3"):
-			contentType = "audio/mpeg"
-		}
-		// A paired server may ask a segment by range too (MSFP media,
-		// section 2.1); a browser here, the whole segment.
-		s.proxy(w, r, st, *a, up, peerTicket(st), contentType)
-	}
-}
-
-// playlist fetches an upstream playlist, rewrites it and remembers the real
-// URLs behind its new names.
-func (s Stream) playlist(w http.ResponseWriter, r *http.Request, st *playback.Stream, a jellyfin.Auth,
-	up playback.Upstream, rewrite func([]byte, playback.Upstream) (*playback.Rewritten, error)) {
-
-	l := s.Playback.Library
-	body, err := l.Jellyfin.ReadSmall(r.Context(), a, up.Path, up.Query, wire.MaxPlaylist)
-	if err != nil {
-		s.upstreamError(w, st, err)
-		return
-	}
-	rw, err := rewrite(body, up)
-	if err != nil {
-		l.Logger.Warn("refused an upstream playlist", "playback", st.ID, "err", err)
-		if peerTicket(st) {
-			problem.Send(w, problem.NotFound, "") // a media status (MSFP core, section 8.4)
-			return
-		}
-		problem.Send(w, problem.NotPlayable, "")
-		return
-	}
-	st.AddFiles(rw.Files)
-	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	w.Header().Set("Content-Length", strconv.Itoa(len(rw.Body)))
-	_, _ = w.Write(rw.Body)
+	// Every playback of this server's copies is a delivery's.
+	problem.Send(w, problem.NotFound, "")
 }
 
 // proxy streams bytes from upstream without buffering. Only the headers
@@ -429,8 +373,61 @@ func (s Stream) stretch(w http.ResponseWriter, r *http.Request, st *playback.Str
 	return body
 }
 
+// wholeWindow is how much of a track one plugin call reads for a whole
+// track: the plugin's longest stretch (10 minutes).
+const wholeWindow = 600
+
+// wholeTrack reads a whole text subtitle track (Jellyfin's index) of this
+// server's own playback, as MSFP's subtitles/<track>/whole asks (media
+// section 3.4): the plugin's stretches, each rebuilt, over the copy's
+// length, a cue that shows across two of them kept once, then the whole
+// rebuilt as a whole track (video section 6.3, MaxWholeText bytes,
+// 200,000 cues). nil and true: the error was answered; false: refused.
+// The caller holds a subtitle slot.
+func (s Stream) wholeTrack(w http.ResponseWriter, r *http.Request, st *playback.Stream, index int) ([]byte, bool) {
+	l := s.Playback.Library
+	if l.Service == nil {
+		problem.Send(w, problem.Internal, "")
+		return nil, true
+	}
+	length := float64(st.DurationMs()) / 1000
+	if length <= 0 {
+		return nil, false
+	}
+	var all bytes.Buffer
+	all.WriteString("WEBVTT\n")
+	seen := map[string]bool{}
+	for from := 0.0; from < length; from += wholeWindow {
+		body, err := l.Jellyfin.SubtitleStretch(r.Context(), l.Service.Admin(), st.ItemID, st.SourceID, index, from, from+wholeWindow, wire.MaxWebVTT)
+		if err != nil {
+			s.upstreamError(w, st, err)
+			return nil, true
+		}
+		part, ok := wire.RebuildWebVTT(body)
+		if !ok {
+			return nil, false
+		}
+		// What a stretch holds once rebuilt: "WEBVTT", then each cue after
+		// an empty line.
+		next := map[string]bool{}
+		for _, cue := range strings.Split(string(part), "\n\n")[1:] {
+			cue = strings.TrimSuffix(cue, "\n")
+			next[cue] = true
+			if seen[cue] {
+				continue
+			}
+			all.WriteString("\n" + cue + "\n")
+			if all.Len() > wire.MaxWholeText {
+				return nil, false
+			}
+		}
+		seen = next
+	}
+	return wire.RebuildWholeWebVTT(all.Bytes())
+}
+
 // subtitles serves one stretch of a text subtitle track as sanitized
-// WebVTT.
+// WebVTT, or the whole track (part "whole").
 func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 	track := r.PathValue("track")
 	if hasQuery(r) {
@@ -438,8 +435,9 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	index, ok := trackIndex(track, 's')
+	whole := r.PathValue("part") == "whole"
 	part, okPart := subtitlePart(r)
-	if !ok || !okPart {
+	if !ok || (!okPart && !whole) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -449,7 +447,7 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st.Remote != nil {
-		s.fetchRemote(w, r, st, msfp.MediaPath{Kind: msfp.MediaSubtitles, Track: track, Part: part})
+		s.fetchRemote(w, r, st, msfp.MediaPath{Kind: msfp.MediaSubtitles, Track: track, Part: part, Whole: whole})
 		return
 	}
 	jfIndex, mapped := st.JellyfinSubtitle(index)
@@ -463,11 +461,19 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 	}
 	free = sync.OnceFunc(free)
 	defer free()
-	body := s.stretch(w, r, st, jfIndex, part, wire.MaxWebVTT)
-	if body == nil {
-		return
+	var vtt []byte
+	if whole {
+		vtt, ok = s.wholeTrack(w, r, st, jfIndex)
+		if vtt == nil && ok {
+			return // answered
+		}
+	} else {
+		body := s.stretch(w, r, st, jfIndex, part, wire.MaxWebVTT)
+		if body == nil {
+			return
+		}
+		vtt, ok = wire.RebuildWebVTT(body)
 	}
-	vtt, ok := wire.RebuildWebVTT(body)
 	if !ok {
 		s.Playback.Library.Logger.Warn("refused upstream subtitles", "playback", st.ID)
 		problem.Send(w, problem.NotFound, "")

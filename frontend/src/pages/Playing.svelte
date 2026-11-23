@@ -16,7 +16,6 @@
     durationMs?: number;
     startedAt: string;
     method: string;
-    reasons?: string[];
     height?: number;
     bitrateKbps?: number;
     // A playback of a copy: its delivery, what it converts, why the
@@ -28,27 +27,8 @@
     hdr?: boolean;
   }
 
-  // Jellyfin's reasons for converting, in words (as the site's player says them).
-  const convertReasons: Record<string, string> = {
-    ContainerNotSupported: 'the browser can\'t read the container (repackaged)',
-    VideoCodecNotSupported: 'the browser can\'t play the video format',
-    AudioCodecNotSupported: 'the browser can\'t play the audio format',
-    SubtitleCodecNotSupported: 'picture subtitles, drawn into the video',
-    AudioIsExternal: 'the audio is in a separate file',
-    SecondaryAudioNotSupported: 'another audio track than the first',
-    VideoProfileNotSupported: 'the video\'s profile',
-    VideoLevelNotSupported: 'the video\'s level',
-    VideoResolutionNotSupported: 'the picture is larger than allowed',
-    VideoBitDepthNotSupported: 'the video\'s bit depth',
-    VideoFramerateNotSupported: 'the frame rate',
-    AudioChannelsNotSupported: 'too many audio channels',
-    ContainerBitrateExceedsLimit: 'the bitrate is above the limit',
-    VideoBitrateNotSupported: 'the video\'s bitrate is above the limit',
-    AudioBitrateNotSupported: 'the audio\'s bitrate is above the limit',
-    VideoRangeTypeNotSupported: 'the screen or browser can\'t show HDR',
-    DirectPlayError: 'playing the file as it is failed',
-  };
-  const methodNames: Record<string, [string, 'ok' | 'plain' | 'warn']> = { direct: ['As is', 'ok'], remux: ['Repackaged', 'plain'], transcode: ['Converted', 'warn'] };
+  // A paired server's title converts there, if at all.
+  const methodNames: Record<string, [string, 'ok' | 'plain' | 'warn']> = { remote: ['On a paired server', 'plain'] };
   // A copy's delivery, by what it converts: the picture takes a
   // conversion slot, the sound alone doesn't.
   const deliveryName = (pb: Playback): [string, 'ok' | 'plain' | 'warn'] => {
@@ -108,8 +88,7 @@
     await load();
   }
 
-  const why = (pb: Playback) => pb.delivery ? (pb.reason ? reasonNames[pb.reason] ?? '' : '')
-    : (pb.reasons || []).map((r) => convertReasons[r] || r).join('; ');
+  const why = (pb: Playback) => (pb.reason ? reasonNames[pb.reason] ?? '' : '');
   const codecNames: Record<string, string> = { h264: 'H.264', hevc: 'HEVC', av1: 'AV1', vp9: 'VP9' };
   const quality = (pb: Playback) => [pb.height && `${pb.height}p`, pb.videoCodec && (codecNames[pb.videoCodec] ?? pb.videoCodec.toUpperCase()),
     pb.hdr && 'HDR', pb.bitrateKbps && `${(pb.bitrateKbps / 1000).toFixed(1)} Mb/s`].filter(Boolean).join(', ');

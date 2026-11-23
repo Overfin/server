@@ -40,8 +40,7 @@ func TestCopyIndex(t *testing.T) {
 	ctx := context.Background()
 	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
 	n := func(i int) *int { return &i }
-	film := CatalogItem{ID: id(0), Kind: "movie", Name: "F", SortName: "f", TMDB: "7", AudioTags: []string{"de"}, AudioLanguages: []string{"de"},
-		Height: 480}
+	film := CatalogItem{ID: id(0), Kind: "movie", Name: "F", SortName: "f", TMDB: "7", AudioTags: []string{"de"}, AudioLanguages: []string{"de"}}
 	series := CatalogItem{ID: id(1), Kind: "series", Name: "A", SortName: "a", TMDB: "1"}
 	season := CatalogItem{ID: id(2), Kind: "season", Name: "S1", SortName: "s1", SeriesID: id(1), SeasonNumber: n(1)}
 	file := CatalogItem{ID: id(3), Kind: "episode", Name: "E1", SortName: "e1", SeriesID: id(1), SeasonID: id(2), SeasonNumber: n(1),

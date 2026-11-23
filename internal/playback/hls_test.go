@@ -8,16 +8,7 @@ import (
 
 const vid = "01234567-89ab-cdef-0123-456789abcdef"
 
-var masterUp = Upstream{Path: "/videos/" + vid + "/master.m3u8"}
 var variantUp = Upstream{Path: "/videos/" + vid + "/main.m3u8"}
-
-const master = `#EXTM3U
-#EXT-X-STREAM-INF:BANDWIDTH=8000000,CODECS="avc1.640028,mp4a.40.2",RESOLUTION=1920x1080
-main.m3u8?DeviceId=d&MediaSourceId=m&ApiKey=SECRET
-#EXT-X-MEDIA:TYPE=SUBTITLES,URI="http://198.51.100.1/evil.m3u8"
-#EXT-X-I-FRAME-STREAM-INF:URI="iframe.m3u8?ApiKey=SECRET"
-# a comment
-`
 
 const variant = `#EXTM3U
 #EXT-X-PLAYLIST-TYPE:VOD
@@ -32,26 +23,6 @@ hls1/main/1.mp4?ApiKey=SECRET&runtimeTicks=60000000&actualSegmentLengthTicks=600
 #EXT-X-KEY:METHOD=AES-128,URI="https://198.51.100.1/key"
 #EXT-X-ENDLIST
 `
-
-func TestRewriteMaster(t *testing.T) {
-	r, err := RewriteMaster([]byte(master), masterUp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(r.Body)
-	for _, leak := range []string{"SECRET", "ApiKey", "198.51.100.1", "iframe", "EXT-X-MEDIA", "comment"} {
-		if strings.Contains(out, leak) {
-			t.Errorf("output contains %q:\n%s", leak, out)
-		}
-	}
-	if !strings.Contains(out, "\nv0.m3u8\n") || !strings.Contains(out, "RESOLUTION=1920x1080") {
-		t.Errorf("output:\n%s", out)
-	}
-	up := r.Files["v0.m3u8"]
-	if up.Path != "/videos/"+vid+"/main.m3u8" || up.Query.Get("ApiKey") != "SECRET" {
-		t.Errorf("upstream for v0: %+v", up)
-	}
-}
 
 func TestRewriteVariant(t *testing.T) {
 	r, err := RewriteVariant([]byte(variant), variantUp)
@@ -92,30 +63,6 @@ func TestRewriteRefuses(t *testing.T) {
 		if _, err := RewriteVariant([]byte(body), variantUp); !errors.Is(err, ErrBadPlaylist) {
 			t.Errorf("%s: err = %v", name, err)
 		}
-	}
-	if _, err := RewriteMaster([]byte("#EXTM3U\n../evil.m3u8\n"), masterUp); !errors.Is(err, ErrBadPlaylist) {
-		t.Errorf("master traversal: %v", err)
-	}
-}
-
-// An HDR video Jellyfin copies comes with SDR versions it would re-encode,
-// at the same bandwidth: only the copy is offered. Without a copy, every
-// version stays.
-func TestMasterKeepsTheCopy(t *testing.T) {
-	hdr := "#EXTM3U\n" +
-		"#EXT-X-STREAM-INF:BANDWIDTH=9000000,VIDEO-RANGE=PQ,CODECS=\"hvc1.2.4.L153,mp4a.40.2\"\nmain.m3u8?VideoCodec=h264,hevc&ApiKey=SECRET\n" +
-		"#EXT-X-STREAM-INF:BANDWIDTH=9000000,VIDEO-RANGE=SDR,CODECS=\"hvc1.1.4.L153,mp4a.40.2\"\nmain.m3u8?VideoCodec=hevc&AllowVideoStreamCopy=false&ApiKey=SECRET\n" +
-		"#EXT-X-STREAM-INF:BANDWIDTH=9000000,VIDEO-RANGE=SDR,CODECS=\"avc1.640033,mp4a.40.2\"\nmain.m3u8?VideoCodec=h264&AllowVideoStreamCopy=false&ApiKey=SECRET\n"
-	r, err := RewriteMaster([]byte(hdr), masterUp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out := string(r.Body); len(r.Files) != 1 || !strings.Contains(out, "VIDEO-RANGE=PQ") || strings.Contains(out, "VIDEO-RANGE=SDR") {
-		t.Errorf("copy only:\n%s", out)
-	}
-	sdrOnly := "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=5000000\nmain.m3u8?VideoCodec=h264&AllowVideoStreamCopy=false&ApiKey=SECRET\n"
-	if r, err := RewriteMaster([]byte(sdrOnly), masterUp); err != nil || len(r.Files) != 1 {
-		t.Errorf("no copy: %v %v", r, err)
 	}
 }
 

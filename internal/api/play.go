@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,8 +31,9 @@ import (
 // maxPlayBody bounds a play request's body.
 const maxPlayBody = 16 << 10
 
-// olderPlay are the members only the older body has (capabilities;
-// Jellyfin decides): a body with one of them is played the older way.
+// olderPlay are the members only the older body had (capabilities; the
+// server chose): a body with one of them comes from a page older than
+// this API, made to load again (start).
 var olderPlay = []string{"capabilities", "itemId", "audioLanguage", "subtitleTrack", "queue"}
 
 // playMembers are the members of the play request this server's players
@@ -51,8 +51,7 @@ type playJSON struct {
 	Next  *library.TitleSummary `json:"next,omitempty"`
 }
 
-// start starts a playback: from MSFP's play request, or, while players
-// move to it, from the older body.
+// start starts a playback from MSFP's play request.
 func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxPlayBody+1))
 	if err != nil || len(body) > maxPlayBody {
@@ -66,8 +65,11 @@ func (pb Playback) start(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, m := range olderPlay {
 		if _, ok := members[m]; ok {
-			r.Body = io.NopCloser(bytes.NewReader(body))
-			pb.startOld(w, r)
+			// A page still on an older player (a tab left open over an
+			// update): "not signed in" sends it through sign-in, straight
+			// back when the session is there, which loads the site again,
+			// on the player of this API. Nothing of the older body is read.
+			problem.Send(w, problem.NotAuthenticated, "")
 			return
 		}
 	}

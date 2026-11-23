@@ -25,9 +25,9 @@ func TestTitleAvailability(t *testing.T) {
 	var b, a *msfp.Engine
 	newServerWith(t, options{store: &stB, federation: &b, fedName: "Bee"})
 	stB.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "Heat", SortName: "heat",
-		TMDB: "949", LibraryID: "films", AudioTags: []string{"fr"}, SubtitleTags: []string{"en"}, Height: 2160, HDR: []string{"hdr10"}},
+		TMDB: "949", LibraryID: "films", AudioTags: []string{"fr"}, SubtitleTags: []string{"en"}},
 		{ID: fmt.Sprintf("%032x", 2), Kind: "movie", Name: "Up", SortName: "up", TMDB: "14160", LibraryID: "films",
-			AudioTags: []string{"en"}, Height: 1080}}, 1)
+			AudioTags: []string{"en"}}}, 1)
 	stB.RefreshTitleKeys(ctx)
 	// B's copies, as its copy index reads its files: they go with the
 	// titles, and A says what plays there from them.
@@ -63,8 +63,17 @@ func TestTitleAvailability(t *testing.T) {
 	stB.SetLibraries(ctx, []store.Library{{ID: "films", Item: []byte(`{"Name":"Films","CollectionType":"movies"}`)}})
 	srvA, _ := newServerWith(t, options{store: &stA, federation: &a, fedName: "A"})
 	stA.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 9), Kind: "movie", Name: "Up", SortName: "up",
-		TMDB: "14160", LibraryID: "mine", AudioTags: []string{"en"}, Height: 720}}, 1)
+		TMDB: "14160", LibraryID: "mine", AudioTags: []string{"en"}}}, 1)
 	stA.RefreshTitleKeys(ctx)
+	// A's own copy, read from its file: its picture (none from Jellyfin).
+	if err := stA.PutCopy(ctx, store.IndexedCopy{CopyID: fmt.Sprintf("v%026d", 9), ItemID: fmt.Sprintf("%032x", 9),
+		SourceID: fmt.Sprintf("%032x", 9), Fingerprint: "x1-9", ETag: fmt.Sprintf("etag%018d", 9), Size: 1000, Parts: 1,
+		Streams: map[string]int{"v": 0, "a1": 1}, Languages: &store.CopyLanguages{AudioLanguages: []string{"en"}, Audio: []string{"en"}},
+		Facts: wire.Copy{DurationMs: 60_000, MediaType: "video/matroska", Size: 1000,
+			Video:       &wire.VideoStream{Codec: "h264", Codecs: "avc1.640028", Width: 1280, Height: 720, BitDepth: 8},
+			AudioTracks: []wire.CopyAudio{{ID: "a1", Codec: "aac", Codecs: "mp4a.40.2", Channels: 2, Language: "en"}}}}); err != nil {
+		t.Fatal(err)
+	}
 	stA.SetCatalogState(ctx, store.CatalogState{Pass: 1})
 	if err := stA.SetBranding(ctx, true, "Zed"); err != nil {
 		t.Fatal(err)
