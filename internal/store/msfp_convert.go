@@ -423,13 +423,13 @@ func convertPeers(ctx context.Context, tx *sql.Tx) error {
 		err = eachTx(ctx, tx, func(rows *sql.Rows) error {
 			var w msfp.WantedLibrary
 			var offered bool
-			if err := rows.Scan(&w.ID, &w.Name, &w.Kind, &offered); err != nil {
+			if err := rows.Scan(&w.ID, &w.Name, &offered); err != nil {
 				return err
 			}
 			w.Wanted, w.Gone = true, !offered
 			p.Wants = append(p.Wants, w)
 			return nil
-		}, `SELECT library_id, name, kind, offered FROM peer_wants WHERE peer_id = ? ORDER BY name, library_id`, p.ID)
+		}, `SELECT library_id, name, offered FROM peer_wants WHERE peer_id = ? ORDER BY name, library_id`, p.ID)
 		if err != nil {
 			return err
 		}

@@ -1036,9 +1036,11 @@ func TestStreamingThroughRewrittenPlaylists(t *testing.T) {
 	}
 
 	// Subtitles: text track 3, in stretches from Overfin's plugin, asked
-	// with Overfin's own key, each 10 s early; rebuilt as plain WebVTT.
+	// with Overfin's own key, each 10 s early; rebuilt as WebVTT
+	// (wire.RebuildWebVTT: since msfp-go's revised v0, the italic, bold
+	// and colour tags are kept, balanced).
 	code, vtt := getAs(t, srv, subject, s.SubtitleTracks[0].URL+"/0")
-	if code != 200 || vtt != "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n" {
+	if code != 200 || vtt != "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<b>Hi</b>\n" {
 		t.Errorf("subtitles: %d %q", code, vtt)
 	}
 	if code, _ := getAs(t, srv, subject, s.SubtitleTracks[0].URL+"/1"); code != 200 {

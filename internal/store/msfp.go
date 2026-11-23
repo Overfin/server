@@ -260,9 +260,13 @@ func (t *msfpTx) PutPeer(p msfp.PeerRecord) error {
 		if !w.Wanted {
 			continue
 		}
-		if err := t.exec(`INSERT INTO peer_wants (peer_id, library_id, name, kind, menu_id, offered) VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT (peer_id, library_id) DO UPDATE SET name = excluded.name, kind = excluded.kind, offered = excluded.offered`,
-			p.ID, w.ID, w.Name, w.Kind, MenuID(p.ID, w.ID), !w.Gone); err != nil {
+		// msfp-go's revised v0 sends no library kind (its titles' keys
+		// tell it): a new row's kind is '' until the federation phase
+		// (plan phase 7) types it by its first titles; a kept row keeps
+		// the one it has.
+		if err := t.exec(`INSERT INTO peer_wants (peer_id, library_id, name, kind, menu_id, offered) VALUES (?, ?, ?, '', ?, ?)
+			ON CONFLICT (peer_id, library_id) DO UPDATE SET name = excluded.name, offered = excluded.offered`,
+			p.ID, w.ID, w.Name, MenuID(p.ID, w.ID), !w.Gone); err != nil {
 			return err
 		}
 	}
@@ -451,11 +455,16 @@ func (t *msfpTx) PutPeerTitles(peer string, reading int64, titles []msfp.Title) 
 			b, _ := json.Marshal(v.IDs)
 			ids = string(b)
 		}
-		if v.Video != nil {
-			b, _ := json.Marshal(v.Video)
-			video = string(b)
+		// The title's languages and picture, from its copies (msfp-go's
+		// revised v0 sends no summary); the copies themselves are kept
+		// from the federation phase on (plan phase 7).
+		if best, ok := v.BestCopy(); ok {
+			if p, ok := copyPicture(best); ok {
+				b, _ := json.Marshal(p)
+				video = string(b)
+			}
 		}
-		if _, err := stmt.ExecContext(t.ctx, peer, v.Key, v.Kind, v.Libraries[0], jsonList(v.Audio), jsonList(v.Subtitles),
+		if _, err := stmt.ExecContext(t.ctx, peer, v.Key, v.Kind, v.Libraries[0], jsonList(v.AudioLanguages()), jsonList(v.SubtitleLanguages()),
 			jsonList(v.With), ids, video, now, reading); err != nil {
 			return err
 		}
@@ -528,15 +537,15 @@ func (t *msfpTx) peerTitles(query string, args ...any) ([]msfp.Title, error) {
 	err := t.each(func(rows *sql.Rows) error {
 		var v msfp.VideoTitle
 		var library string
-		var audio, subs, with, ids, video sql.NullString
-		if err := rows.Scan(&v.Key, &v.Kind, &library, &audio, &subs, &with, &ids, &video); err != nil {
+		var with, ids sql.NullString
+		if err := rows.Scan(&v.Key, &v.Kind, &library, &with, &ids); err != nil {
 			return err
 		}
-		if p, ok := readPicture(video); ok {
-			v.Video = &p
-		}
+		// No copies: peer_titles keeps a summary only (languages,
+		// picture) until the federation phase (plan phase 7) keeps
+		// each title's copies.
 		v.Libraries = []string{library}
-		v.Audio, v.Subtitles, v.With = mergeTags(nil, audio.String), mergeTags(nil, subs.String), mergeTags(nil, with.String)
+		v.With = mergeTags(nil, with.String)
 		if ids.Valid {
 			if err := json.Unmarshal([]byte(ids.String), &v.IDs); err != nil {
 				return err
@@ -544,7 +553,7 @@ func (t *msfpTx) peerTitles(query string, args ...any) ([]msfp.Title, error) {
 		}
 		out = append(out, &v)
 		return nil
-	}, `SELECT title_key, kind, library_id, audio, subtitles, with_keys, ids, video FROM peer_titles `+query, args...)
+	}, `SELECT title_key, kind, library_id, with_keys, ids FROM peer_titles `+query, args...)
 	return out, err
 }
 

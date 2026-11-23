@@ -297,14 +297,16 @@ func (p *Panel) groupSharing(w http.ResponseWriter, r *http.Request, _ *session)
 		return
 	}
 	type lib struct {
-		ID     string `json:"id"`
-		Name   string `json:"name"`
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		// Kind: msfp-go's revised v0 sends no library kind; "" until plan
+		// phase 7 types a library by its first titles.
 		Kind   string `json:"kind"`
 		Picked bool   `json:"picked"`
 	}
 	ours := []lib{}
 	for _, l := range libs {
-		ours = append(ours, lib{ID: l.ID, Name: l.Name, Kind: l.Kind, Picked: l.Offered})
+		ours = append(ours, lib{ID: l.ID, Name: l.Name, Picked: l.Offered})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ours": ours, "limits": limitsOf(g.Pool)})
 }
@@ -322,8 +324,10 @@ func (p *Panel) groupShows(w http.ResponseWriter, r *http.Request, _ *session) {
 		return
 	}
 	type lib struct {
-		ID    string `json:"id"`
-		Name  string `json:"name"`
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		// Kind: msfp-go's revised v0 sends no library kind; "" until plan
+		// phase 7 types a library by its first titles.
 		Kind  string `json:"kind"`
 		Shown bool   `json:"shown"`
 	}
@@ -336,7 +340,7 @@ func (p *Panel) groupShows(w http.ResponseWriter, r *http.Request, _ *session) {
 	for _, m := range v.Members {
 		mm := member{Member: m.Member, Name: m.Name, Libraries: []lib{}}
 		for _, l := range m.Libraries {
-			mm.Libraries = append(mm.Libraries, lib{ID: l.ID, Name: l.Name, Kind: l.Kind, Shown: l.Shown})
+			mm.Libraries = append(mm.Libraries, lib{ID: l.ID, Name: l.Name, Shown: l.Shown})
 		}
 		out = append(out, mm)
 	}

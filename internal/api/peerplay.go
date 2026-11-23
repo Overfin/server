@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/msfp-io/msfp-go"
@@ -162,11 +161,10 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 		return
 	}
 	ref, _ := store.ParseTitleKey(key)
-	tracksKey := ref.Key()
-	if ref.Kind == "episode" {
-		tracksKey = ref.Series().Key()
-	}
-	wantAudio, wantSubtitles := l.wishesFor(ctx, p, tracksKey, req.AudioLanguage)
+	// msfp-go's revised v0 takes no capabilities nor languages: this
+	// server chooses the copy, its audio and the delivery from the copy's
+	// facts. Until plan phase 7 does (federation is off on this branch:
+	// pb.engine() is nil), the play names only what the player named.
 	// Another audio track or a quality restarts a playback, and the
 	// browser's stop of the old one may come after this start: this
 	// browser's playback of the title there ends first, the engine
@@ -181,13 +179,8 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 		replaces = old.Remote.ID
 		pb.end(old, "stopped", "")
 	}
-	c := req.Capabilities
 	rp, err := eng.Play(ctx, peer, msfp.PlayRequest{Title: key, StartMs: req.StartPositionMs, MaxBitrateKbps: kbps,
-		Capabilities: msfp.Capabilities{Containers: c.Containers, AudioCodecs: c.AudioCodecs, VideoCodecs: c.VideoCodecs,
-			HDR: c.HDR, Subtitles: c.Subtitles, MaxAudioChannels: c.MaxAudioChannels, MaxHeight: c.MaxHeight,
-			MaxBitrateKbps: c.MaxBitrateKbps},
-		AudioLanguage: wantAudio, AudioTrack: req.AudioTrack, SubtitleLanguage: wantSubtitles, SubtitleTrack: req.SubtitleTrack,
-		VersionID: req.VersionID, Replaces: replaces})
+		AudioTrack: req.AudioTrack, VersionID: req.VersionID, Replaces: replaces})
 	if err != nil {
 		// Busy now, the viewer may try again later: its limit for this
 		// server reached, all its transcodes taken, no answer, or asked to
@@ -231,10 +224,7 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	s := &playback.Stream{AccountID: p.AccountID, ProfileID: p.ID, SessionID: caller.Session.ID, Device: device,
 		Decision: playback.Decision{Method: "remote", Source: jellyfin.MediaSource{RunTimeTicks: rp.DurationMs * 10_000}},
 		Remote:   &playback.Remote{PeerID: peer, ID: rp.ID, Key: key}}
-	if tp := rp.Trickplay; tp != nil {
-		s.Trickplay = &jellyfin.Trickplay{Width: tp.TileWidth, Height: tp.TileHeight, Columns: tp.Columns, Rows: tp.Rows,
-			Count: tp.TileCount, IntervalMs: tp.IntervalMs}
-	}
+	// Previews: the copy's layout and Engine.PreviewSheet in plan phase 7.
 	replaced, err := pb.Tickets.Admit(s, req.StartPositionMs*10_000, time.Now(), lim, device)
 	if err != nil {
 		stop()
@@ -264,66 +254,20 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 
 // remoteView is a playback on a paired server as this server's site
 // shows it: every address this server's own, under the ticket of its
-// playback here (s); the paired server's are never seen.
+// playback here (s); the paired server's are never seen. With msfp-go's
+// revised v0 the copy's tracks, segments and previews come from the
+// catalog's copy, not the play's answer: plan phase 7 adds them
+// (federation is off on this branch); until then only the stream.
 func remoteView(rp msfp.RemotePlayback, s *playback.Stream) sessionJSON {
 	base := "/api/v1/stream/" + s.Ticket + "/"
 	out := sessionJSON{ID: s.ID, Method: rp.Method, PositionMs: rp.PositionMs, DurationMs: rp.DurationMs,
-		VersionID: rp.VersionID, AudioTrack: rp.AudioTrack, SubtitleTrack: rp.SubtitleTrack, ForcedTrack: rp.ForcedTrack,
-		SubtitleStretchSeconds: rp.SubtitleStretchSeconds, MaxBitrateKbps: rp.MaxBitrateKbps}
+		VersionID: rp.VersionID, AudioTrack: rp.AudioTrack, MaxBitrateKbps: rp.MaxBitrateKbps}
 	if rp.Protocol == "hls" {
 		out.Stream = streamJSON{URL: base + "master.m3u8", Protocol: "hls", MimeType: "application/vnd.apple.mpegurl"}
 	} else {
 		out.Stream = streamJSON{URL: base + "file", Protocol: "file", MimeType: rp.MimeType}
 	}
-	for _, v := range rp.Versions {
-		out.Versions = append(out.Versions, versionJSON{ID: v.ID, Name: v.Name})
-	}
-	track := func(t msfp.Track) trackJSON {
-		return trackJSON{ID: t.ID, Label: t.Label, Language: t.Language, Channels: t.Channels, Role: t.Role,
-			Default: t.Default, Forced: t.Forced, HearingImpaired: t.HearingImpaired, Pictures: t.Pictures}
-	}
-	for _, t := range rp.AudioTracks {
-		out.AudioTracks = append(out.AudioTracks, track(t))
-	}
-	subtitle := func(t msfp.Track) trackJSON {
-		j := track(t)
-		if t.Pictures {
-			j.URL = base + "pictures/" + t.ID
-		} else {
-			j.URL = base + "subtitles/" + t.ID
-		}
-		return j
-	}
-	for _, t := range rp.SubtitleTracks {
-		out.SubtitleTracks = append(out.SubtitleTracks, subtitle(t))
-	}
-	for _, t := range rp.ForcedTracks {
-		out.ForcedTracks = append(out.ForcedTracks, subtitle(t))
-	}
-	for _, sg := range rp.Segments {
-		out.Segments = append(out.Segments, segmentJSON{Kind: sg.Kind, StartMs: sg.StartMs, EndMs: sg.EndMs})
-	}
-	if in := rp.Info; in != nil {
-		out.Info = &playbackInfoJSON{Reasons: in.Reasons, Container: in.Container, BitrateKbps: in.BitrateKbps,
-			Video: streamInfoOf(in.Video), Audio: streamInfoOf(in.Audio)}
-	}
-	// Its previews' sheets, through this server too.
-	if tp := rp.Trickplay; tp != nil {
-		out.Trickplay = &trickplayJSON{TileWidth: tp.TileWidth, TileHeight: tp.TileHeight, Columns: tp.Columns, Rows: tp.Rows,
-			IntervalMs: tp.IntervalMs, TileCount: tp.TileCount, Sheets: []string{}}
-		for n := range tp.Sheets {
-			out.Trickplay.Sheets = append(out.Trickplay.Sheets, "/api/v1/playback/"+s.ID+"/trickplay/"+strconv.Itoa(n))
-		}
-	}
 	return out
-}
-
-func streamInfoOf(s *msfp.StreamInfo) *streamInfoJSON {
-	if s == nil {
-		return nil
-	}
-	return &streamInfoJSON{Codec: s.Codec, Profile: s.Profile, Width: s.Width, Height: s.Height, BitDepth: s.BitDepth,
-		Range: s.Range, BitrateKbps: s.BitrateKbps, Channels: s.Channels, Language: s.Language}
 }
 
 // RemoteEnded ends this server's side of a playback on a paired server

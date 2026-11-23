@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-
-	"github.com/msfp-io/msfp-go"
 )
 
 // Copy is what a title's page says of one of its copies: its picture's
@@ -17,7 +15,7 @@ type Copy struct {
 	Audio, Subtitles []string
 	// Picture is its picture as paired servers are told of it (MSFP video
 	// section 3.2); nil when its size isn't known.
-	Picture *msfp.Picture
+	Picture *Picture
 }
 
 // Copies are the index's copies of ids, in the order given; those the

@@ -229,8 +229,8 @@ func TestSharingPanel(t *testing.T) {
 func TestFederationPanelWantsGone(t *testing.T) {
 	a, _, db := fedPanel(t, "A")
 	putPeer(t, db, msfp.PeerRecord{ID: "pb", Name: "B", Address: "https://b.example.org", State: msfp.Paired,
-		Wants: []msfp.WantedLibrary{{ID: "old", Name: "Films", Kind: "movies", Wanted: true, Gone: true},
-			{ID: "lib_new", Name: "Films", Kind: "movies"}}})
+		Wants: []msfp.WantedLibrary{{ID: "old", Name: "Films", Wanted: true, Gone: true},
+			{ID: "lib_new", Name: "Films"}}})
 	var st struct {
 		Peers []struct{ WantsGone int }
 	}

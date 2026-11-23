@@ -3,10 +3,12 @@ package store
 import (
 	"context"
 	"slices"
+	"strconv"
 	"sync/atomic"
 	"time"
 
 	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
 )
 
 // Peers as the engine writes them (store/msfp.go), for the tests of what
@@ -82,7 +84,7 @@ func (s *Store) SetPeerWants(ctx context.Context, id string, libs []PeerLibrary)
 	return s.changePeer(ctx, id, func(p *msfp.PeerRecord) {
 		p.Wants = nil
 		for _, l := range libs {
-			p.Wants = append(p.Wants, msfp.WantedLibrary{ID: l.ID, Name: l.Name, Kind: l.Kind, Wanted: true})
+			p.Wants = append(p.Wants, msfp.WantedLibrary{ID: l.ID, Name: l.Name, Wanted: true})
 		}
 	})
 }
@@ -103,10 +105,10 @@ func (s *Store) PutPeerTitles(ctx context.Context, id string, reading int64, tit
 		var page []msfp.Title
 		for _, t := range titles {
 			if !slices.ContainsFunc(p.Wants, func(w msfp.WantedLibrary) bool { return w.ID == t.Library }) {
-				p.Wants = append(p.Wants, msfp.WantedLibrary{ID: t.Library, Name: t.Library, Kind: "movies", Wanted: true})
+				p.Wants = append(p.Wants, msfp.WantedLibrary{ID: t.Library, Name: t.Library, Wanted: true})
 			}
 			page = append(page, &msfp.VideoTitle{TitleCommon: msfp.TitleCommon{Key: t.Key, Kind: t.Kind, Libraries: []string{t.Library}},
-				Audio: t.Audio, Subtitles: t.Subtitles, With: t.With, IDs: t.IDs})
+				Copies: testCopies(t.Audio, t.Subtitles), With: t.With, IDs: t.IDs})
 		}
 		if err := tx.PutPeer(*p); err != nil {
 			return err
@@ -153,4 +155,21 @@ func (s *Store) PublicLibraryIDs(ctx context.Context, hostIDs []string) (map[str
 		return nil
 	})
 	return out, err
+}
+
+// testCopies is one copy with tracks of the languages given, what the
+// peer's title's languages are read from (msfp-go's revised v0: titles
+// carry copies, no summary); none without a language.
+func testCopies(audio, subtitles []string) []wire.Copy {
+	if len(audio) == 0 && len(subtitles) == 0 {
+		return nil
+	}
+	c := wire.Copy{ID: "c1"}
+	for i, l := range audio {
+		c.AudioTracks = append(c.AudioTracks, wire.CopyAudio{ID: "a" + strconv.Itoa(i+1), Language: l})
+	}
+	for i, l := range subtitles {
+		c.SubtitleTracks = append(c.SubtitleTracks, wire.CopySubtitle{ID: "s" + strconv.Itoa(len(audio)+i+1), Language: l})
+	}
+	return []wire.Copy{c}
 }

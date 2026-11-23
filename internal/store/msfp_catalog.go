@@ -49,7 +49,7 @@ func (c MSFPCatalog) Libraries(ctx context.Context) ([]msfp.Library, error) {
 		if slices.Contains(notVideo, kind) {
 			continue
 		}
-		out = append(out, msfp.Library{ID: l.ID, Name: textclean.Plain(item.Name, 64), Kind: kind})
+		out = append(out, msfp.Library{ID: l.ID, Name: textclean.Plain(item.Name, 64)})
 	}
 	return out, nil
 }
@@ -63,6 +63,18 @@ func (c MSFPCatalog) Titles(ctx context.Context, libraries []string, after strin
 	return msfp.TitlePage{Titles: titles, More: more}, err
 }
 
+// OwnCopy is one of this server's copies of a film or an episode, as
+// Copies lists it: its handle (the Jellyfin item's ID), its library, its
+// picture's neutral name ("2160p HDR · HEVC") and its audio languages.
+//
+// It was msfp.Copy, which msfp-go's revised v0 removed (titles carry
+// their copies, wire.Copy). Kept, unused, until the federation phase
+// (plan phase 7) builds each title's copies from the copy index.
+type OwnCopy struct {
+	Handle, Library, Name string
+	Audio                 []string
+}
+
 // Copies lists this server's copies of a film or an episode in the
 // libraries: each a Jellyfin item, an episode a file holds after its
 // first being that file's item (range_of), what plays. Its handle is the
@@ -70,14 +82,14 @@ func (c MSFPCatalog) Titles(ctx context.Context, libraries []string, after strin
 // HEVC"). The best first, as the engine ranks pictures (MSFP video
 // section 3.2: the greatest height, then HDR): play without a version
 // plays the copy the title's picture describes.
-func (c MSFPCatalog) Copies(ctx context.Context, key string, libraries []string) ([]msfp.Copy, error) {
+func (c MSFPCatalog) Copies(ctx context.Context, key string, libraries []string) ([]OwnCopy, error) {
 	if len(libraries) == 0 {
 		return nil, nil
 	}
-	var out []msfp.Copy
-	var pictures []msfp.Picture
+	var out []OwnCopy
+	var pictures []Picture
 	err := c.S.each(ctx, func(rows *sql.Rows) error {
-		var cp msfp.Copy
+		var cp OwnCopy
 		var audio, picture sql.NullString
 		if err := rows.Scan(&cp.Handle, &audio, &cp.Library, &cp.Name, &picture); err != nil {
 			return err
@@ -108,21 +120,11 @@ func (c MSFPCatalog) Copies(ctx context.Context, key string, libraries []string)
 		}
 		return 0
 	})
-	sorted := make([]msfp.Copy, len(out))
+	sorted := make([]OwnCopy, len(out))
 	for i, j := range order {
 		sorted[i] = out[j]
 	}
 	return sorted, nil
-}
-
-// readPicture reads a copy's picture as kept (pictureJSON); false when
-// its size isn't known.
-func readPicture(s sql.NullString) (msfp.Picture, bool) {
-	var p msfp.Picture
-	if !s.Valid || json.Unmarshal([]byte(s.String), &p) != nil || p.Height <= 0 {
-		return msfp.Picture{}, false
-	}
-	return p, true
 }
 
 // Seq is the number of the last change noted in the catalog.
@@ -227,29 +229,11 @@ func (s *Store) titlesIn(ctx context.Context, libraries, keys []string, after st
 	if err != nil {
 		return nil, false, err
 	}
-	// Each one's languages, every copy's in those libraries, and each
-	// copy's picture (the engine sends the best).
-	for _, v := range videos {
-		if v.Kind != "movie" && v.Kind != "episode" {
-			continue
-		}
-		err := s.each(ctx, func(rows *sql.Rows) error {
-			var audio, subs, picture sql.NullString
-			if err := rows.Scan(&audio, &subs, &picture); err != nil {
-				return err
-			}
-			v.Audio = mergeTags(v.Audio, audio.String)
-			v.Subtitles = mergeTags(v.Subtitles, subs.String)
-			if p, ok := readPicture(picture); ok {
-				v.Pictures = append(v.Pictures, p)
-			}
-			return nil
-		}, `SELECT audio_tags, subtitle_tags, picture FROM catalog_items
-			WHERE title_key = ? AND library_id IN (SELECT value FROM json_each(?)) ORDER BY id`, v.Key, libs)
-		if err != nil {
-			return nil, false, err
-		}
-	}
+	// Each film's and episode's copies: msfp-go's revised v0 sends them
+	// on the title (VideoTitle.Copies, wire.Copy), in place of the
+	// languages and pictures this read before. Federation is off on this
+	// branch until plan phase 7, which fills them from the copy index;
+	// until then titles leave without copies.
 	if err := s.addWith(ctx, videos, libs); err != nil {
 		return nil, false, err
 	}
@@ -318,7 +302,7 @@ func (s *Store) addTMDBPlaces(ctx context.Context, titles []*msfp.VideoTitle) er
 	var keys [][]any
 	for _, t := range titles {
 		if k, ok := wire.ParseVideoKey(t.Key); ok && k.Kind == "episode" && k.EpisodeID > 0 {
-			keys = append(keys, []any{t.Key, strconv.FormatInt(k.TMDB, 10), k.EpisodeID})
+			keys = append(keys, []any{t.Key, strconv.FormatInt(k.ID, 10), k.EpisodeID})
 			at[t.Key] = t
 		}
 	}
@@ -353,9 +337,9 @@ func (s *Store) addOtherIDs(ctx context.Context, titles []*msfp.VideoTitle) erro
 		k, _ := wire.ParseVideoKey(t.Key)
 		switch {
 		case k.Kind == "movie" || k.Kind == "series":
-			titleKeys = append(titleKeys, []any{t.Key, k.Kind, strconv.FormatInt(k.TMDB, 10)})
+			titleKeys = append(titleKeys, []any{t.Key, k.Kind, strconv.FormatInt(k.ID, 10)})
 		case k.Kind == "episode" && k.EpisodeID > 0:
-			episodeKeys = append(episodeKeys, []any{t.Key, strconv.FormatInt(k.TMDB, 10), k.EpisodeID})
+			episodeKeys = append(episodeKeys, []any{t.Key, strconv.FormatInt(k.ID, 10), k.EpisodeID})
 		default:
 			continue
 		}

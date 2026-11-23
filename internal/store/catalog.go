@@ -12,8 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/msfp-io/msfp-go"
 )
 
 // ---- Jellyfin service account ---------------------------------------------------
@@ -134,9 +132,9 @@ type CatalogItem struct {
 }
 
 // pictureJSON is a copy's picture as kept, stepped as paired servers are
-// told of it (msfp.BestPicture): NULL when its size isn't known.
+// told of it (BestPicture): NULL when its size isn't known.
 func pictureJSON(height int, hdr []string) any {
-	p, ok := msfp.BestPicture([]msfp.Picture{{Height: height, HDR: hdr}})
+	p, ok := BestPicture([]Picture{{Height: height, HDR: hdr}})
 	if !ok {
 		return nil
 	}

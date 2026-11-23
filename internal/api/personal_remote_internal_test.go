@@ -38,7 +38,7 @@ func TestRemoteCopyWithMarksBoth(t *testing.T) {
 	}
 	key, _ := hex.DecodeString(strings.Repeat("ab", 32))
 	peer := msfp.PeerRecord{ID: "pb", Key: key, Name: "B", Address: "https://b.example.org", State: msfp.Paired,
-		Inbound: msfp.InboundYes, Wants: []msfp.WantedLibrary{{ID: "L", Name: "Series", Kind: "tvshows", Wanted: true}}}
+		Inbound: msfp.InboundYes, Wants: []msfp.WantedLibrary{{ID: "L", Name: "Series", Wanted: true}}}
 	first, second := "series/tmdb/1399/e63056", "series/tmdb/1399/e63057"
 	if err := st.MSFP().Update(ctx, func(tx msfp.Tx) error {
 		if err := tx.PutPeer(peer); err != nil {

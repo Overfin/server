@@ -672,11 +672,13 @@ func (p *Panel) ourLibraries(w http.ResponseWriter, r *http.Request, _ *session)
 	type lib struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
+		// Kind: msfp-go's revised v0 sends no library kind; "" until plan
+		// phase 7 types a library by its first titles.
 		Kind string `json:"kind"`
 	}
 	out := []lib{}
 	for _, l := range libs {
-		out = append(out, lib{ID: l.ID, Name: l.Name, Kind: l.Kind})
+		out = append(out, lib{ID: l.ID, Name: l.Name})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -813,8 +815,10 @@ func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
 		return
 	}
 	type lib struct {
-		ID     string `json:"id"`
-		Name   string `json:"name"`
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		// Kind: msfp-go's revised v0 sends no library kind; "" until plan
+		// phase 7 types a library by its first titles.
 		Kind   string `json:"kind"`
 		Picked bool   `json:"picked"`
 		// Gone: we want it, and the other server no longer offers it.
@@ -826,7 +830,7 @@ func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
 	}
 	outOurs := []lib{}
 	for _, l := range ours {
-		outOurs = append(outOurs, lib{ID: l.ID, Name: l.Name, Kind: l.Kind, Picked: l.Offered})
+		outOurs = append(outOurs, lib{ID: l.ID, Name: l.Name, Picked: l.Offered})
 	}
 	theirs, err := eng.TheirLibraries(ctx, peer.ID)
 	reachable := err == nil
@@ -847,7 +851,7 @@ func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
 	}
 	outTheirs := []lib{}
 	for _, l := range theirs {
-		outTheirs = append(outTheirs, lib{ID: l.ID, Name: l.Name, Kind: l.Kind, Picked: l.Wanted, Gone: l.Gone,
+		outTheirs = append(outTheirs, lib{ID: l.ID, Name: l.Name, Picked: l.Wanted, Gone: l.Gone,
 			Label: labels[l.ID], Shown: l.Name + " (" + peer.Name + ")"})
 	}
 	out := map[string]any{"ours": outOurs, "theirs": outTheirs, "reachable": reachable,

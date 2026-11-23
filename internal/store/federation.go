@@ -7,8 +7,6 @@ import (
 	"errors"
 	"slices"
 	"time"
-
-	"github.com/msfp-io/msfp-go"
 )
 
 // Paired servers' titles, as this server's pages read them beside its
@@ -145,7 +143,7 @@ type PeerSource struct {
 	Subtitles  []string
 	// Video is the picture it sent of the title (MSFP video section 3.2);
 	// nil when it sent none.
-	Video *msfp.Picture
+	Video *Picture
 }
 
 // PeerSources lists the paired servers holding a film or an episode for

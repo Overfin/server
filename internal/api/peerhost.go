@@ -14,7 +14,6 @@ import (
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/problem"
-	"github.com/overfin/server/internal/tracks"
 )
 
 // A paired server's viewer plays one of our titles (ROADMAP.md milestone
@@ -52,8 +51,12 @@ func (h PeerHost) playback() (Playback, error) {
 	return pb, nil
 }
 
-// Describe gives a copy's tracks, as the player lists them (the same
-// rules as for this server's own people), its duration and its previews.
+// Describe gives what the catalog doesn't say of a copy (msfp.CopyInfo:
+// fonts, tracks not served apart, forms): with msfp-go's revised v0 a
+// copy's tracks, length and previews' layout travel on the title
+// (wire.Copy), which this server doesn't fill yet. Federation is off on
+// this branch until plan phase 7, which describes copies from the copy
+// index; until then this checks only that Jellyfin has the copy.
 func (h PeerHost) Describe(ctx context.Context, copy string) (msfp.CopyInfo, error) {
 	pb, err := h.playback()
 	if err != nil {
@@ -78,39 +81,7 @@ func (h PeerHost) Describe(ctx context.Context, copy string) (msfp.CopyInfo, err
 	case len(info.MediaSources) == 0:
 		return msfp.CopyInfo{}, msfp.ErrNotPlayable
 	}
-	src := info.MediaSources[0]
-	audio, subtitles, forced := tracks.Read(src.MediaStreams)
-	out := msfp.CopyInfo{DurationMs: src.RunTimeTicks / 10_000}
-	// A copy of several files (Jellyfin's stacked parts) is one copy in
-	// MSFP (playback section 1); Start refuses it (below).
-	item, err := l.Jellyfin.Item(ctx, ja, uid, copy)
-	switch {
-	case jellyfin.IsStatus(err, http.StatusNotFound):
-		return msfp.CopyInfo{}, msfp.ErrNotFound
-	case err != nil:
-		return msfp.CopyInfo{}, msfp.ErrServerBusy
-	case item.PartCount != nil:
-		out.Parts = *item.PartCount
-	}
-	for _, a := range audio {
-		out.AudioTracks = append(out.AudioTracks, msfp.Track{ID: "a" + strconv.Itoa(a.Index), Label: a.Name,
-			Language: a.Language, Channels: a.Channels, Role: roleJSON(a.Role), Default: a.Default})
-	}
-	for _, list := range [][]tracks.Track{subtitles, forced} {
-		for _, t := range list {
-			out.SubtitleTracks = append(out.SubtitleTracks, msfp.Track{ID: "s" + strconv.Itoa(t.Index), Label: t.Name,
-				Language: t.Language, Default: t.Default, Forced: t.Forced, HearingImpaired: t.HearingImpaired, Pictures: !t.Text})
-		}
-	}
-	// Its seek-bar previews, a bonus (MSFP video, section 5.5): the same
-	// set Start keeps for the playback.
-	sourceID, _ := jellyfin.NormalizeID(src.Id)
-	probe := &playback.Stream{ItemID: copy, SourceID: sourceID}
-	if tp := pb.previews(ctx, probe, ja, uid, func(int) string { return "" }); tp != nil {
-		out.Trickplay = &msfp.Trickplay{TileWidth: tp.TileWidth, TileHeight: tp.TileHeight, Columns: tp.Columns, Rows: tp.Rows,
-			IntervalMs: tp.IntervalMs, TileCount: tp.TileCount, Sheets: len(tp.Sheets)}
-	}
-	return out, nil
+	return msfp.CopyInfo{}, nil
 }
 
 // Start plays a copy for a paired server's viewer: Jellyfin is asked how
@@ -141,10 +112,12 @@ func (h PeerHost) Start(ctx context.Context, req msfp.StartRequest) (msfp.Starte
 	if err != nil {
 		return msfp.Started{}, msfp.ErrServerBusy
 	}
-	c := req.Capabilities
-	caps := playback.Capabilities{Containers: c.Containers, VideoCodecs: c.VideoCodecs, AudioCodecs: c.AudioCodecs,
-		HDR: c.HDR, Subtitles: c.Subtitles, MaxAudioChannels: c.MaxAudioChannels, MaxHeight: c.MaxHeight,
-		MaxBitrateKbps: c.MaxBitrateKbps}
+	// msfp-go's revised v0 sends no device capabilities: the engine
+	// decides what is served (req.Delivery, req.Served). Until plan
+	// phase 7 runs it through the executor, Jellyfin is asked as for a
+	// device of no stated capabilities (federation is off on this
+	// branch: no engine calls this).
+	var caps playback.Capabilities
 	kbps := req.MaxBitrateKbps
 	var pr jellyfin.PlaybackRequest
 	pr.StartTimeTicks = req.StartMs * 10_000
@@ -166,7 +139,7 @@ func (h PeerHost) Start(ctx context.Context, req msfp.StartRequest) (msfp.Starte
 	id := playback.PeerPrefix + req.Peer.ID
 	w := &recorder{header: http.Header{}}
 	r, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/", nil)
-	o, ok := pb.open(w, r, openArgs{req: startRequest{AudioTrack: req.AudioTrack, SubtitleTrack: req.SubtitleTrack,
+	o, ok := pb.open(w, r, openArgs{req: startRequest{AudioTrack: req.AudioTrack,
 		StartPositionMs: req.StartMs}, pr: pr, kbps: kbps, item: req.Copy, uid: uid, ja: ja, lim: lim, device: req.Peer.Name,
 		accountID: id, profileID: id, sessionID: id, peerTracks: true, admit: req.Admit})
 	if !ok {
@@ -187,26 +160,9 @@ func (h PeerHost) Start(ctx context.Context, req msfp.StartRequest) (msfp.Starte
 	if err := l.Jellyfin.ReportStart(ctx, s.Auth, pb.state(s, pb.Tickets.Snapshot(s))); err != nil {
 		pb.Logger.Warn("could not report a playback start", "playback", s.ID, "err", err)
 	}
-	started := msfp.Started{Handle: s.ID, Method: o.dec.Method, Protocol: o.dec.Protocol, PositionMs: out.PositionMs}
-	if o.dec.Protocol == "file" {
-		started.MimeType = fileType(o.dec.Source.Container)
-	}
-	if in := out.Info; in != nil {
-		started.Info = &msfp.PlaybackInfo{Reasons: in.Reasons, Container: in.Container, BitrateKbps: in.BitrateKbps,
-			Video: streamInfo(in.Video), Audio: streamInfo(in.Audio)}
-	}
-	for _, sg := range out.Segments {
-		started.Segments = append(started.Segments, msfp.Segment{Kind: sg.Kind, StartMs: sg.StartMs, EndMs: sg.EndMs})
-	}
-	return started, nil
-}
-
-func streamInfo(s *streamInfoJSON) *msfp.StreamInfo {
-	if s == nil {
-		return nil
-	}
-	return &msfp.StreamInfo{Codec: s.Codec, Profile: s.Profile, Width: s.Width, Height: s.Height, BitDepth: s.BitDepth,
-		Range: s.Range, BitrateKbps: s.BitrateKbps, Channels: s.Channels, Language: s.Language}
+	// msfp-go's revised v0 takes no media type, information or
+	// segments here: the copy's facts are the catalog's (plan phase 7).
+	return msfp.Started{Handle: s.ID, Method: o.dec.Method, Protocol: o.dec.Protocol, PositionMs: out.PositionMs}, nil
 }
 
 // peerStream is a paired server's playback here, by its ID.
@@ -219,19 +175,26 @@ func (pb Playback) peerStream(handle string) (*playback.Stream, bool) {
 	return nil, false
 }
 
-// Progress is a paired server's viewer still watching, paused or not:
-// the playback here isn't idle (IdleTimeout), and Jellyfin hears where
-// it stands, as for this server's own.
-func (h PeerHost) Progress(ctx context.Context, handle string, positionMs int64, paused bool) error {
+// Progress is a paired server's viewer still watching: the playback here
+// isn't idle (IdleTimeout), and Jellyfin hears where it stands, as for
+// this server's own. msfp-go's revised v0 reports no pause: a peer's
+// playback shows as playing; a report without a position keeps the one
+// it had. Downloads' late reports and the stop's own report are plan
+// phase 7's (federation is off on this branch).
+func (h PeerHost) Progress(ctx context.Context, rep msfp.Report) error {
 	pb, err := h.playback()
 	if err != nil {
 		return err
 	}
-	s, ok := pb.peerStream(handle)
+	s, ok := pb.peerStream(rep.Handle)
 	if !ok {
 		return msfp.ErrNotFound
 	}
-	pb.Tickets.Progress(s, positionMs*10_000, paused, time.Now())
+	ticks := pb.Tickets.Snapshot(s).PositionTicks
+	if rep.HasPosition {
+		ticks = rep.PositionMs * 10_000
+	}
+	pb.Tickets.Progress(s, ticks, false, time.Now())
 	// Whether a remux really copies the video, as for our own people's;
 	// one that re-encodes counts in the pairing's transcodes (Start).
 	if pb.Tickets.Method(s) == "remux" {

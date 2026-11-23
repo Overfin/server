@@ -4,7 +4,6 @@ import (
 	"context"
 	"slices"
 
-	"github.com/msfp-io/msfp-go"
 	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/store"
 	"github.com/overfin/server/internal/textclean"
@@ -36,7 +35,7 @@ type pictureJSON struct {
 	HDR    []string `json:"hdr,omitempty"`
 }
 
-func toPicture(p *msfp.Picture) *pictureJSON {
+func toPicture(p *store.Picture) *pictureJSON {
 	if p == nil {
 		return nil
 	}
@@ -94,7 +93,7 @@ func (l Library) availability(ctx context.Context, p *store.Profile, id string, 
 		case s.item != "" && local < 0:
 			// This server: its copies' languages, its best copy's picture.
 			here := sourceJSON{Name: BrandName(br), Local: true}
-			var pictures []msfp.Picture
+			var pictures []store.Picture
 			for _, c := range copies {
 				here.Audio = languageNames(here.Audio, c.Audio)
 				here.Subtitles = languageNames(here.Subtitles, c.Subtitles)
@@ -102,7 +101,7 @@ func (l Library) availability(ctx context.Context, p *store.Profile, id string, 
 					pictures = append(pictures, *c.Picture)
 				}
 			}
-			if best, ok := msfp.BestPicture(pictures); ok {
+			if best, ok := store.BestPicture(pictures); ok {
 				here.Video = toPicture(&best)
 			}
 			local = len(out)

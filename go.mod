@@ -24,3 +24,8 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+// Until release day: msfp-go's revised v0 (branch revision) is not
+// pushed, so the build reads the local checkout. On release day this
+// line goes and the require above names the released version.
+replace github.com/msfp-io/msfp-go => /home/c0pt3r/Projects/msfp-go
