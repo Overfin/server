@@ -147,7 +147,7 @@ func (pb Playback) stopped(s *playback.Stream, reason string) {
 			defer cancel()
 			pb.record(ctx, s, snap.PositionTicks/10_000, true)
 			if eng != nil && !rm.Replaced.Load() {
-				eng.Stop(ctx, rm.ID, snap.PositionTicks/10_000)
+				eng.Stop(ctx, rm.ID(), snap.PositionTicks/10_000)
 			}
 		}()
 		return
@@ -329,7 +329,7 @@ func (pb Playback) progress(w http.ResponseWriter, r *http.Request) {
 		// there; the engine tells it where the viewer is, now and then,
 		// and pauses at once.
 		if eng := pb.engine(); eng != nil {
-			eng.Progress(rm.ID, req.PositionMs, req.Paused)
+			eng.Progress(rm.ID(), req.PositionMs, req.Paused)
 		}
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -1361,9 +1361,6 @@ func (pb Playback) open(w http.ResponseWriter, r *http.Request, o openArgs) (*op
 	if o.admit != nil {
 		slot, err := o.admit(dec.Method)
 		if err != nil {
-			if rec, ok := w.(*recorder); ok {
-				rec.err = err
-			}
 			problem.Send(w, problem.StreamLimitReached, "")
 			return nil, false
 		}

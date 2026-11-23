@@ -439,6 +439,11 @@ type Federation struct {
 	// tells anyone it federates; Overfin's calls are where every peer
 	// looks first anyway.
 	Discovery bool `toml:"discovery"`
+	// BurnIn lets paired servers' viewers have a subtitle burned into the
+	// picture of a transcode (MSFP's burnSubtitle). Off, the default:
+	// Overfin's own players never get one (SECURITY.md rule 17), and this
+	// release burns none (a paired server asking is refused).
+	BurnIn bool `toml:"burn_in"`
 }
 
 type Storage struct {

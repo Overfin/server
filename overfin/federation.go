@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/msfp-io/msfp-go"
 	"github.com/msfp-io/msfp-go/wire"
@@ -103,12 +104,6 @@ func (sh *shared) federation(cfg *config.Config) *msfp.Engine {
 	f := &sh.fed
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if !api.FederationOn {
-		// Off on this build until plan phase 7 (api.FederationOn): no
-		// engine, as on a server without a site address.
-		sh.logger.Info("federation: off on this build until the federation phase")
-		return nil
-	}
 	address := federationAddress(cfg, sh.logger)
 	if eng := f.engine.Load(); eng != nil {
 		eng.SetDiscovery(cfg.Federation.Discovery)
@@ -182,20 +177,44 @@ func (sh *shared) openEngine(cfg *config.Config, address string) (*msfp.Engine, 
 	if len(cfg.Site.Certificates) > 0 {
 		pins = cfg.Site.Certificates
 	}
+	// Burned subtitles for paired servers: the operator's switch, off by
+	// default (rule 17).
+	burn := cfg.Federation.BurnIn
+	host := api.PeerHost{Current: sh.fed.currentPlayback, MayBurn: func() bool { return burn }}
 	return msfp.Open(sh.fed.runCtx(), msfp.Config{
 		Address: address, Store: db.MSFP(), Name: name, Pins: pins,
 		Discovery:         cfg.Federation.Discovery,
 		PlainHTTPForTests: cfg.Federation.TestPlainHTTP,
 		Parts:             federationParts,
 		Catalog:           store.MSFPCatalog{S: db},
-		Playback:          api.PeerHost{Current: sh.fed.currentPlayback},
-		Media:             api.PeerHost{Current: sh.fed.currentPlayback},
+		Playback:          host,
+		Media:             host,
 		MaxBitrateKbps:    cfg.Limits.MaxBitrateKbps,
+		Encoders:          sh.peerEncoders(),
 		Dialer:            outboundDialer{},
 		Notifier:          &fedNotifier{sh: sh},
 		Logger:            sh.logger,
 		NotFound:          http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { apiproblem.Send(w, apiproblem.NotFound, "") }),
 	})
+}
+
+// peerEncoders are what this server converts to, for the engine to
+// refuse early a paired server's transcode it can't make (MSFP playback
+// section 2.7): the plugin's encoders when it answers as the engine
+// opens, else MSFP's baseline only. The executor checks again at each
+// play, against what the plugin can make then.
+func (sh *shared) peerEncoders() msfp.Encoders {
+	if sh.delivery == nil || sh.delivery.Maker == nil {
+		return msfp.Encoders{}
+	}
+	ctx, cancel := context.WithTimeout(sh.fed.runCtx(), 10*time.Second)
+	defer cancel()
+	enc, err := sh.delivery.Maker.Encoders(ctx)
+	if err != nil {
+		sh.logger.Warn("federation: what this server converts to isn't known yet; paired servers get the baseline's", "error", err)
+		return msfp.Encoders{}
+	}
+	return enc.Wire()
 }
 
 // outboundDialer connects to peers the way the rest of Overfin reaches
@@ -371,7 +390,8 @@ type fedRoutes struct{ engine *msfp.Engine }
 func (fedRoutes) Name() string { return "federation" }
 
 // The calls of MSFP version 0 (core, catalog, playback and groups), each
-// its own route: no catch-all.
+// its own route: no catch-all. Not image nor lyrics: Overfin shares no
+// local titles and no music.
 var federationCalls = []string{
 	"POST /api/v1/federation/pair",
 	"POST /api/v1/federation/hello",
@@ -382,6 +402,7 @@ var federationCalls = []string{
 	"POST /api/v1/federation/play",
 	"POST /api/v1/federation/progress",
 	"POST /api/v1/federation/stop",
+	"POST /api/v1/federation/previews",
 	"POST /api/v1/federation/group-sync",
 	"POST /api/v1/federation/group-push",
 	"POST /api/v1/federation/group-pair",

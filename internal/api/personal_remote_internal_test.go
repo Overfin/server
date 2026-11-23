@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/provision"
@@ -52,7 +53,7 @@ func TestRemoteCopyWithMarksBoth(t *testing.T) {
 	pb := Playback{Library: Library{Provisioner: &provision.Provisioner{Store: st}}, Tickets: playback.NewTickets(time.Hour)}
 	s := &playback.Stream{AccountID: acct.ID, ProfileID: profiles[0].ID, SessionID: "sess",
 		Decision: playback.Decision{Method: "remote", Source: jellyfin.MediaSource{RunTimeTicks: 3_600_000 * 10_000}},
-		Remote:   &playback.Remote{PeerID: peer.ID, ID: "play_" + strings.Repeat("a", 26), Key: first}}
+		Remote:   playback.NewRemote(peer.ID, first, wire.Copy{}, msfp.RemotePlayback{ID: "play_" + strings.Repeat("a", 26)})}
 	pb.Tickets.Add(s, 0, time.Now())
 	pb.record(ctx, s, 3_600_000, true)
 	states, err := st.PersonalStates(ctx, profiles[0].ID, []string{first, second})

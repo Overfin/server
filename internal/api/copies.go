@@ -51,7 +51,8 @@ func playable(ref store.TitleRef) bool {
 
 // titleCopies are the copies of t the profile may see (a title it may
 // see: the caller checked), in Overfin's order: its items' (the title's
-// own order), each item's by their place. A copy MSFP's bounds leave out
+// own order), each item's by their place. Paired servers' come after
+// (peerCopies). A copy MSFP's bounds leave out
 // (past 16) isn't offered.
 func (l Library) titleCopies(ctx context.Context, p *store.Profile, t *store.TitleInfo) ([]store.IndexedCopy, error) {
 	if t == nil || len(t.Items) == 0 {
@@ -121,6 +122,16 @@ func (l Library) copiesPage(ctx context.Context, p *store.Profile, t *store.Titl
 			return err
 		}
 		out.Copies = append(out.Copies, w)
+	}
+	// Then the paired servers' copies, as they sent them, under Overfin's
+	// IDs (a bonus: none when they can't be read).
+	theirs, err := l.peerCopies(ctx, p, t)
+	if err != nil {
+		l.Logger.Warn("could not list paired servers' copies", "err", err)
+	}
+	for _, pc := range theirs {
+		out.Copies = append(out.Copies, pc.playerCopy())
+		out.Peers = append(out.Peers, pc.ID)
 	}
 	out.Limits = &playLimitsJSON{MaxBitrateKbps: l.MaxBitrateKbps, OriginalFile: true}
 	if e := l.Delivery; e != nil && e.OriginalFile != nil {

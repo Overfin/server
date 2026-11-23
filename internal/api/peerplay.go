@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
+	"github.com/overfin/server/internal/copies"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/playback"
@@ -126,11 +129,6 @@ func speaks(audio []string, language string) bool {
 // libraries or categories (paired servers' aren't among them); within its
 // ceiling and its hidden tags, by the title's (or its series') TMDB ID.
 func (l Library) peerSources(ctx context.Context, a *store.Access, ref store.TitleRef) ([]store.PeerSource, error) {
-	if !FederationOn {
-		// Off until plan phase 7: a peer's title kept from before isn't
-		// a source.
-		return nil, nil
-	}
 	if a.Limited() || ref.TMDB() == "" {
 		return nil, nil
 	}
@@ -154,22 +152,83 @@ func (l Library) peerSources(ctx context.Context, a *store.Access, ref store.Tit
 	return st.PeerSources(ctx, ref.Key())
 }
 
-// startRemote starts a playback on a paired server for the caller, and
+// A paired server's copy as this server's players see it: MSFP's copy
+// object as the paired server sent it (catalog), its ID Overfin's own
+// (peerCopyID), so that players see one kind of ID, and mapped back here
+// to the paired server, the title's key there and its version ID.
+type peerCopy struct {
+	ID     string
+	Source store.PeerSource
+	Copy   wire.Copy // as received, its ID the paired server's version ID
+}
+
+// peerCopyID is the ID this server's players know a paired server's copy
+// by: a keyed hash of the pairing, the title's key there and its version
+// ID (copies.PeerCopyID).
+func (l Library) peerCopyID(peer, key, version string) string {
+	return copies.PeerCopyID(l.CopyKey, peer, key, version)
+}
+
+// peerCopies are the paired servers' copies of t the profile may see
+// (peerSources), in the order the servers were paired, each server's in
+// its own order (its preference).
+func (l Library) peerCopies(ctx context.Context, p *store.Profile, t *store.TitleInfo) ([]peerCopy, error) {
+	if t == nil || l.CopyKey == nil || (t.Ref.Kind != "movie" && t.Ref.Kind != "episode") {
+		return nil, nil
+	}
+	a, err := l.access(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	sources, err := l.peerSources(ctx, a, t.Ref)
+	if err != nil {
+		return nil, err
+	}
+	var out []peerCopy
+	for _, ps := range sources {
+		for _, c := range ps.Copies {
+			out = append(out, peerCopy{ID: l.peerCopyID(ps.Peer, ps.Key, c.ID), Source: ps, Copy: c})
+		}
+	}
+	return out, nil
+}
+
+// playerCopy is a paired server's copy as this server's players get it:
+// its facts as received, its ID Overfin's.
+func (pc peerCopy) playerCopy() wire.Copy {
+	w := pc.Copy
+	w.ID = pc.ID
+	if w.AudioTracks == nil {
+		w.AudioTracks = []wire.CopyAudio{}
+	}
+	return w
+}
+
+// remotePlay is a play on a paired server, as this server asks it: the
+// copy, MSFP's request as the player made it (the copy and the title
+// named the paired server's way here), and Overfin's members.
+type remotePlay struct {
+	copy   peerCopy
+	req    wire.PlayRequest
+	key    string // the title's key here
+	device string
+	reason string
+}
+
+// playRemote starts a playback on a paired server for the caller, and
 // keeps its profile's side here: the MSFP engine asks the paired server
-// (msfp.Engine.Play) and checks its answer; this server gives the viewer
-// its own addresses for everything, and its own title and next episode.
-func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *Caller, req startRequest, kbps int, peer, key string) {
-	l, ctx, p := pb.Library, r.Context(), caller.Profile
+// (msfp.Engine.Play) with the player's request almost as it is (the
+// version ID mapped back), and checks its answer; the paired server's
+// ticket stays with the engine, and the player gets this server's own,
+// under which every URL is this server's (rule 97). It answers w itself.
+func (pb Playback) playRemote(w http.ResponseWriter, r *http.Request, caller *Caller, rp remotePlay) (*playback.Stream, msfp.RemotePlayback, bool) {
+	ctx, p := r.Context(), caller.Profile
 	eng := pb.engine()
 	if eng == nil {
 		problem.Send(w, problem.NotFound, "")
-		return
+		return nil, msfp.RemotePlayback{}, false
 	}
-	ref, _ := store.ParseTitleKey(key)
-	// msfp-go's revised v0 takes no capabilities nor languages: this
-	// server chooses the copy, its audio and the delivery from the copy's
-	// facts. Until plan phase 7 does (federation is off on this branch:
-	// pb.engine() is nil), the play names only what the player named.
+	peer, pc := rp.copy.Source.Peer, rp.copy
 	// Another audio track or a quality restarts a playback, and the
 	// browser's stop of the old one may come after this start: this
 	// browser's playback of the title there ends first, the engine
@@ -177,79 +236,128 @@ func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *C
 	// other server doesn't count it against the pairing's limit.
 	replaces := ""
 	for _, old := range pb.Tickets.Where(func(s *playback.Stream) bool {
-		return s.Remote != nil && s.Remote.PeerID == peer && s.Remote.Key == key &&
+		return s.Remote != nil && s.Remote.PeerID == peer && s.Remote.Key == rp.key &&
 			s.SessionID == caller.Session.ID && s.ProfileID == p.ID
 	}) {
 		old.Remote.Replaced.Store(true)
-		replaces = old.Remote.ID
+		replaces = old.Remote.ID()
 		pb.end(old, "stopped", "")
 	}
-	rp, err := eng.Play(ctx, peer, msfp.PlayRequest{Title: key, StartMs: req.StartPositionMs, MaxBitrateKbps: kbps,
-		AudioTrack: req.AudioTrack, VersionID: req.VersionID, Replaces: replaces})
+	kbps := rp.req.BitrateCap(pb.MaxBitrateKbps, 0)
+	got, err := eng.Play(ctx, peer, msfp.PlayRequest{Title: pc.Source.Key, Purpose: rp.req.Purpose, Delivery: rp.req.Delivery,
+		MediaType: rp.req.MediaType, Transcode: rp.req.Transcode, AudioRenditions: rp.req.AudioRenditions,
+		StartMs: rp.req.StartPositionMs, MaxBitrateKbps: kbps, VersionID: pc.Copy.ID, AudioTrack: rp.req.AudioTrack,
+		Replaces: replaces})
 	if err != nil {
-		// Busy now, the viewer may try again later: its limit for this
-		// server reached, all its transcodes taken, no answer, or asked to
-		// wait (MSFP core section 8.3); anything else isn't playable.
-		why := problem.NotPlayable
-		switch {
-		case errors.Is(err, msfp.ErrServerBusy), errors.Is(err, msfp.ErrStreamLimitReached), errors.Is(err, msfp.ErrBackingOff):
-			why = problem.ServerBusy
-		}
 		pb.Logger.Info("a paired server didn't start a playback", "peer", peer, "err", err)
-		problem.Send(w, why, "")
-		return
+		sendRemoteError(w, err)
+		return nil, msfp.RemotePlayback{}, false
 	}
 	stop := func() {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			eng.Stop(ctx, rp.ID, -1)
+			eng.Stop(ctx, got.ID, -1)
 		}()
 	}
-	titles, err := l.titleSummaries(ctx, p, []string{key})
+	if got.CopyChanged {
+		// The paired server's copy isn't the one its catalog said: the
+		// engine reads the title again; this play goes on (its answer
+		// wins), the player told only if it fails.
+		pb.Logger.Info("a paired server's copy changed since its catalog was read", "peer", peer)
+	}
+	lim, err := pb.limitsOf(ctx, caller.Account.Template, p.AccountID)
 	if err != nil {
 		stop()
-		l.storeError(w, err)
-		return
+		problem.Send(w, problem.Internal, "")
+		return nil, msfp.RemotePlayback{}, false
 	}
-	device := req.Device
+	lim.MaxTranscodes = 0 // converted there, not here
+	device := rp.device
 	if device == "" {
 		device = deviceName(r.UserAgent())
 	}
-	lim := playback.Limits{MaxStreams: caller.Account.Template.MaxStreams, RefuseOverLimit: pb.RefuseOverLimit}
-	if lim.MaxStreams > 0 && caller.Account.Template.ReserveStreams {
-		profiles, err := l.Provisioner.Store.Profiles(ctx, p.AccountID)
-		if err != nil {
-			stop()
-			problem.Send(w, problem.Internal, "")
-			return
-		}
-		lim.Reserve, lim.Profiles = true, len(profiles)
-	}
 	s := &playback.Stream{AccountID: p.AccountID, ProfileID: p.ID, SessionID: caller.Session.ID, Device: device,
-		Decision: playback.Decision{Method: "remote", Source: jellyfin.MediaSource{RunTimeTicks: rp.DurationMs * 10_000}},
-		Remote:   &playback.Remote{PeerID: peer, ID: rp.ID, Key: key}}
-	// Previews: the copy's layout and Engine.PreviewSheet in plan phase 7.
-	replaced, err := pb.Tickets.Admit(s, req.StartPositionMs*10_000, time.Now(), lim, device)
+		Reason:   rp.reason,
+		Decision: playback.Decision{Method: "remote", Source: jellyfin.MediaSource{RunTimeTicks: got.DurationMs * 10_000}},
+		Remote:   playback.NewRemote(peer, rp.key, pc.Copy, got)}
+	if pc.Copy.PreviewLayout != nil && got.Sheets > 0 {
+		pl := pc.Copy.PreviewLayout
+		s.Trickplay = &jellyfin.Trickplay{Width: pl.TileWidth, Height: pl.TileHeight, Columns: pl.Columns, Rows: pl.Rows,
+			Count: pl.TileCount, IntervalMs: pl.IntervalMs}
+	}
+	replaced, err := pb.Tickets.Admit(s, got.PositionMs*10_000, time.Now(), lim, device)
 	if err != nil {
 		stop()
 		problem.Send(w, problem.StreamLimitReached, "")
-		return
+		return nil, msfp.RemotePlayback{}, false
 	}
 	for _, old := range replaced {
 		pb.stopped(old, "taken-over")
 	}
-	// The browser asks this server only (rule 97).
-	out := remoteView(rp, s)
+	pb.Logger.Info("playback started on a paired server", "playback", s.ID, "peer", peer, "method", got.Method,
+		"delivery", rp.req.Delivery)
+	return s, got, true
+}
+
+// sendRemoteError answers a play a paired server didn't start: busy now
+// (its limit for this server reached, all its transcodes taken, no
+// answer, or asked to wait: MSFP core section 8.3), the delivery refused
+// (the player steps down), the copy gone (the player reads the title
+// again); anything else isn't playable.
+func sendRemoteError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, msfp.ErrServerBusy), errors.Is(err, msfp.ErrStreamLimitReached), errors.Is(err, msfp.ErrBackingOff):
+		problem.Send(w, problem.ServerBusy, "")
+	case errors.Is(err, msfp.ErrDeliveryRefused):
+		problem.Send(w, problem.DeliveryRefused, "peer")
+	case errors.Is(err, msfp.ErrNotFound), errors.Is(err, msfp.ErrCopyChanged):
+		problem.Send(w, problem.NotFound, "")
+	default:
+		problem.Send(w, problem.NotPlayable, "")
+	}
+}
+
+// startRemote is the older body's play of a paired server's title: its
+// first copy, as MSFP's baseline (the older body names no delivery).
+func (pb Playback) startRemote(w http.ResponseWriter, r *http.Request, caller *Caller, req startRequest, kbps int, peer, key string) {
+	l, ctx := pb.Library, r.Context()
+	ref, _ := store.ParseTitleKey(key)
+	t, ok := l.visibleTitleRef(w, ctx, caller.Profile, ref)
+	if !ok {
+		return
+	}
+	all, err := l.peerCopies(ctx, caller.Profile, t)
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	i := slices.IndexFunc(all, func(pc peerCopy) bool { return pc.Source.Peer == peer })
+	if i < 0 {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	s, got, ok := pb.playRemote(w, r, caller, remotePlay{copy: all[i], key: key, device: req.Device,
+		req: wire.PlayRequest{StartPositionMs: req.StartPositionMs, MaxBitrateKbps: kbps}})
+	if !ok {
+		return
+	}
+	titles, err := l.titleSummaries(ctx, caller.Profile, []string{key})
+	if err != nil {
+		pb.end(s, "stopped", "")
+		l.storeError(w, err)
+		return
+	}
+	out := remoteView(got, s)
+	out.VersionID = all[i].ID
 	if len(titles) == 1 {
 		out.Title = &titles[0]
 		if ref.Kind == "episode" {
-			if next, err := l.nextEpisode(ctx, p, ref); err == nil {
+			if next, err := l.nextEpisode(ctx, caller.Profile, ref); err == nil {
 				out.Next = next
 			}
 		}
 	}
-	pb.Logger.Info("playback started on a paired server", "playback", s.ID, "peer", peer, "method", out.Method)
 	s.View = out
 	pb.Tickets.Describe(s, describe(out.Title))
 	w.Header().Set("Content-Type", "application/json")
@@ -279,17 +387,17 @@ func remoteView(rp msfp.RemotePlayback, s *playback.Stream) sessionJSON {
 // that ended there, or with the pairing (msfp.RemotePlaybackEnded): the
 // viewer's player stops.
 func (pb Playback) RemoteEnded(id string) {
-	for _, s := range pb.Tickets.Where(func(s *playback.Stream) bool { return s.Remote != nil && s.Remote.ID == id }) {
+	for _, s := range pb.Tickets.Where(func(s *playback.Stream) bool { return s.Remote != nil && s.Remote.ID() == id }) {
 		s.Remote.Replaced.Store(true) // over there already
 		pb.end(s, "pairing ended", "")
 	}
 }
 
 // chooseRemoteTracks keeps the tracks chosen while watching a paired
-// server's copy, for the title, by their languages as it listed them.
+// server's copy, for the title, by their languages as its copy lists them
+// (tags only: never a paired server's free text).
 func (pb Playback) chooseRemoteTracks(w http.ResponseWriter, r *http.Request, s *playback.Stream, audio, subtitles *string) {
 	ctx, st := r.Context(), pb.Library.Provisioner.Store
-	view, _ := s.View.(sessionJSON)
 	ref, ok := store.ParseTitleKey(s.Remote.Key)
 	if !ok {
 		w.WriteHeader(http.StatusNoContent)
@@ -299,27 +407,24 @@ func (pb Playback) chooseRemoteTracks(w http.ResponseWriter, r *http.Request, s 
 	if ref.Kind == "episode" {
 		key = ref.Series().Key()
 	}
-	find := func(list []trackJSON, id string) (trackJSON, bool) {
-		for _, t := range list {
-			if t.ID == id {
-				return t, true
-			}
-		}
-		return trackJSON{}, false
-	}
+	c := s.Remote.Copy
 	var err error
 	if audio != nil {
-		// The owner's words for the language, kept only when they're one:
-		// what's kept here for the profile is never a peer's free text.
-		if t, ok := find(view.AudioTracks, *audio); ok && languageTag(t.Language) != "" && t.Role == "" {
-			err = st.SetTitleAudio(ctx, s.ProfileID, key, t.Language)
+		for _, t := range c.AudioTracks {
+			if t.ID == *audio && languageTag(t.Language) != "" && t.Role == "" {
+				err = st.SetTitleAudio(ctx, s.ProfileID, key, t.Language)
+			}
 		}
 	}
 	if err == nil && subtitles != nil {
 		if *subtitles == "" {
 			err = st.SetTitleSubtitles(ctx, s.ProfileID, key, "")
-		} else if t, ok := find(view.SubtitleTracks, *subtitles); ok && languageTag(t.Language) != "" {
-			err = st.SetTitleSubtitles(ctx, s.ProfileID, key, t.Language)
+		} else {
+			for _, t := range c.SubtitleTracks {
+				if t.ID == *subtitles && languageTag(t.Language) != "" {
+					err = st.SetTitleSubtitles(ctx, s.ProfileID, key, t.Language)
+				}
+			}
 		}
 	}
 	if err != nil {

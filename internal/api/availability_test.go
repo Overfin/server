@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/store"
 )
 
@@ -19,7 +20,6 @@ import (
 // 3.2). The control panel's setting off, only the first is given,
 // nameless.
 func TestTitleAvailability(t *testing.T) {
-	t.Skip("federation off until phase 7")
 	ctx := context.Background()
 	var stB, stA *store.Store
 	var b, a *msfp.Engine
@@ -29,6 +29,37 @@ func TestTitleAvailability(t *testing.T) {
 		{ID: fmt.Sprintf("%032x", 2), Kind: "movie", Name: "Up", SortName: "up", TMDB: "14160", LibraryID: "films",
 			AudioTags: []string{"en"}, Height: 1080}}, 1)
 	stB.RefreshTitleKeys(ctx)
+	// B's copies, as its copy index reads its files: they go with the
+	// titles, and A says what plays there from them.
+	bCopy := func(n, height int, pq bool, audio, subtitles []string) {
+		t.Helper()
+		item := fmt.Sprintf("%032x", n)
+		v := &wire.VideoStream{Codec: "h264", Codecs: "avc1.640028", Width: height * 16 / 9, Height: height, BitDepth: 8}
+		if pq {
+			pqTransfer := wire.TransferPQ
+			v = &wire.VideoStream{Codec: "hevc", Codecs: "hvc1.2.4.L153.B0", Width: 3840, Height: height, BitDepth: 10,
+				Colour: &wire.VideoColour{Transfer: &pqTransfer}}
+		}
+		c := wire.Copy{DurationMs: 60_000, MediaType: "video/matroska", Size: 1000, Video: v}
+		streams := map[string]int{"v": 0}
+		for i, l := range audio {
+			id := fmt.Sprintf("a%d", i+1)
+			c.AudioTracks = append(c.AudioTracks, wire.CopyAudio{ID: id, Codec: "aac", Codecs: "mp4a.40.2", Channels: 2, Language: l})
+			streams[id] = i + 1
+		}
+		for i, l := range subtitles {
+			id := fmt.Sprintf("s%d", len(audio)+i+1)
+			c.SubtitleTracks = append(c.SubtitleTracks, wire.CopySubtitle{ID: id, Format: "subrip", Language: l})
+			streams[id] = len(audio) + i + 1
+		}
+		if err := stB.PutCopy(ctx, store.IndexedCopy{CopyID: fmt.Sprintf("v%026d", n), ItemID: item, SourceID: item,
+			Fingerprint: fmt.Sprintf("x1-%d-%d", n, len(audio)), ETag: fmt.Sprintf("etag%018d", len(audio)), Size: 1000,
+			Parts: 1, Facts: c, Streams: streams}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bCopy(1, 2160, true, []string{"fr"}, []string{"en"})
+	bCopy(2, 1080, false, []string{"en"}, nil)
 	stB.SetLibraries(ctx, []store.Library{{ID: "films", Item: []byte(`{"Name":"Films","CollectionType":"movies"}`)}})
 	srvA, _ := newServerWith(t, options{store: &stA, federation: &a, fedName: "A"})
 	stA.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 9), Kind: "movie", Name: "Up", SortName: "up",
@@ -59,7 +90,7 @@ func TestTitleAvailability(t *testing.T) {
 	type page struct {
 		Sources          []source
 		ShowAvailability bool
-		Copies           []struct{ Video string }
+		Copies           []struct{ ID string }
 	}
 	names := func(p page) string {
 		var out []string
@@ -74,7 +105,7 @@ func TestTitleAvailability(t *testing.T) {
 		t.Fatalf("Heat: %d %+v", status, heat)
 	}
 	if s := heat.Sources[0]; s.Name != "Bee" || s.Local || s.Video == nil || s.Video.Height != 2160 || !slices.Equal(s.Video.HDR, []string{"hdr10"}) ||
-		!slices.Equal(s.Audio, []string{"Français"}) || !slices.Equal(s.Subtitles, []string{"English"}) || len(heat.Copies) != 0 {
+		!slices.Equal(s.Audio, []string{"Français"}) || !slices.Equal(s.Subtitles, []string{"English"}) || len(heat.Copies) != 1 {
 		t.Errorf("Heat from Bee: %+v", heat)
 	}
 	// Up, held by both in the same language: this server first.
@@ -96,8 +127,7 @@ func TestTitleAvailability(t *testing.T) {
 	if err := stA.SetAudioLanguage(ctx, me.AccountID, me.ActiveProfile.ID, "de"); err != nil {
 		t.Fatal(err)
 	}
-	stB.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 2), Kind: "movie", Name: "Up", SortName: "up", TMDB: "14160",
-		LibraryID: "films", AudioTags: []string{"en", "de"}, Height: 1080}}, 1)
+	bCopy(2, 1080, false, []string{"en", "de"}, nil)
 	b.CatalogChanged()
 	if _, err := a.ReadNow(ctx, bOnA.ID); err != nil {
 		t.Fatal(err)

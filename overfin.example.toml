@@ -184,6 +184,10 @@ test_plain_http = false
 # federation calls are, for servers that look there. Off by default: a
 # server that serves it tells anyone it federates.
 discovery = false
+# Let paired servers' viewers have a subtitle burned into a transcode's
+# picture (MSFP's burnSubtitle). Off by default; this release burns none,
+# so a paired server asking is refused either way.
+burn_in = false
 
 # ---- Feature settings --------------------------------------------------------
 # Everything below is switched on and off in the control panel, and lives in

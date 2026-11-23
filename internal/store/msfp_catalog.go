@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -63,68 +64,83 @@ func (c MSFPCatalog) Titles(ctx context.Context, libraries []string, after strin
 	return msfp.TitlePage{Titles: titles, More: more}, err
 }
 
-// OwnCopy is one of this server's copies of a film or an episode, as
-// Copies lists it: its handle (the Jellyfin item's ID), its library, its
-// picture's neutral name ("2160p HDR · HEVC") and its audio languages.
-//
-// It was msfp.Copy, which msfp-go's revised v0 removed (titles carry
-// their copies, wire.Copy). Kept, unused, until the federation phase
-// (plan phase 7) builds each title's copies from the copy index.
-type OwnCopy struct {
-	Handle, Library, Name string
-	Audio                 []string
+// CopyByID is the copy index's copy of that ID (a paired server's play
+// names it by the handle the catalog gave, its copy ID); ok is false when
+// the index has none.
+func (s *Store) CopyByID(ctx context.Context, id string) (c IndexedCopy, ok bool, err error) {
+	c, err = scanCopy(s.read.QueryRowContext(ctx, `SELECT `+copyColumns+` FROM catalog_copies WHERE copy_id = ? LIMIT 1`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return IndexedCopy{}, false, nil
+	}
+	return c, err == nil, err
 }
 
-// Copies lists this server's copies of a film or an episode in the
-// libraries: each a Jellyfin item, an episode a file holds after its
-// first being that file's item (range_of), what plays. Its handle is the
-// item's ID; its name, the copy's video as a neutral name ("2160p HDR ·
-// HEVC"). The best first, as the engine ranks pictures (MSFP video
-// section 3.2: the greatest height, then HDR): play without a version
-// plays the copy the title's picture describes.
-func (c MSFPCatalog) Copies(ctx context.Context, key string, libraries []string) ([]OwnCopy, error) {
-	if len(libraries) == 0 {
-		return nil, nil
+// ShareableCopy is a copy as paired servers are given it (MSFP video
+// section 3.2): MSFP's copy object, its ID the copy index's (the
+// engine's handle of it, which never leaves: the engine sends its own
+// version ID), with its previews' layout and skip markers.
+func (s *Store) ShareableCopy(ctx context.Context, c IndexedCopy) (wire.Copy, error) {
+	w := c.Facts
+	w.ID, w.ETag, w.PreviewLayout = c.CopyID, c.ETag, c.PreviewLayout
+	if w.AudioTracks == nil {
+		w.AudioTracks = []wire.CopyAudio{}
 	}
-	var out []OwnCopy
-	var pictures []Picture
-	err := c.S.each(ctx, func(rows *sql.Rows) error {
-		var cp OwnCopy
-		var audio, picture sql.NullString
-		if err := rows.Scan(&cp.Handle, &audio, &cp.Library, &cp.Name, &picture); err != nil {
+	segs, err := s.CopySegments(ctx, c.ItemID, c.SourceID)
+	if err != nil {
+		return wire.Copy{}, err
+	}
+	if len(segs) > wire.MaxSegments {
+		segs = segs[:wire.MaxSegments]
+	}
+	w.Segments = segs
+	return w, nil
+}
+
+// addCopies gives each film and episode of titles its copies in the
+// libraries (a JSON list), from the copy index, in the owner's order
+// (its items', each item's by their place; the first is the one a play
+// naming none plays). Left out: a stacked film's copy (several files:
+// MSFP serves one file), and past MSFP's bound; a title left with none
+// isn't sent (the engine drops it). Minimal copies are offered: they
+// play as the baseline.
+func (s *Store) addCopies(ctx context.Context, titles []*msfp.VideoTitle, libs string) error {
+	for _, t := range titles {
+		if t.Kind != "movie" && t.Kind != "episode" {
+			continue
+		}
+		var items []string
+		err := s.each(ctx, func(rows *sql.Rows) error {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			items = append(items, id)
+			return nil
+		}, `SELECT id FROM catalog_items WHERE title_key = ? AND kind IN ('movie', 'episode')
+			AND library_id IN (SELECT value FROM json_each(?)) ORDER BY id`, t.Key, libs)
+		if err != nil {
 			return err
 		}
-		cp.Audio = mergeTags(nil, audio.String)
-		out = append(out, cp)
-		p, _ := readPicture(picture)
-		pictures = append(pictures, p)
-		return nil
-	}, `SELECT coalesce(i.range_of, i.id) AS item, min(i.audio_tags), min(i.library_id), coalesce(min(f.video), 'Version'), min(f.picture)
-		FROM catalog_items i LEFT JOIN catalog_items f ON f.id = coalesce(i.range_of, i.id)
-		WHERE i.title_key = ? AND i.kind IN ('movie', 'episode') AND i.library_id IN (SELECT value FROM json_each(?))
-		GROUP BY item ORDER BY item`, key, jsonOrEmpty(libraries))
-	if err != nil {
-		return nil, err
-	}
-	// Stable: copies alike stay in the order of their IDs.
-	order := make([]int, len(out))
-	for i := range order {
-		order[i] = i
-	}
-	slices.SortStableFunc(order, func(a, b int) int {
-		switch {
-		case pictures[a].Better(pictures[b]):
-			return -1
-		case pictures[b].Better(pictures[a]):
-			return 1
+		seen := map[string]bool{}
+		for _, item := range items {
+			copies, err := s.ItemCopies(ctx, item)
+			if err != nil {
+				return err
+			}
+			for _, c := range copies {
+				if c.Parts > 1 || seen[c.CopyID] || len(t.Copies) == wire.MaxCopies {
+					continue
+				}
+				seen[c.CopyID] = true
+				w, err := s.ShareableCopy(ctx, c)
+				if err != nil {
+					return err
+				}
+				t.Copies = append(t.Copies, w)
+			}
 		}
-		return 0
-	})
-	sorted := make([]OwnCopy, len(out))
-	for i, j := range order {
-		sorted[i] = out[j]
 	}
-	return sorted, nil
+	return nil
 }
 
 // Seq is the number of the last change noted in the catalog.
@@ -229,11 +245,10 @@ func (s *Store) titlesIn(ctx context.Context, libraries, keys []string, after st
 	if err != nil {
 		return nil, false, err
 	}
-	// Each film's and episode's copies: msfp-go's revised v0 sends them
-	// on the title (VideoTitle.Copies, wire.Copy), in place of the
-	// languages and pictures this read before. Federation is off on this
-	// branch until plan phase 7, which fills them from the copy index;
-	// until then titles leave without copies.
+	// Each film's and episode's copies (VideoTitle.Copies, wire.Copy).
+	if err := s.addCopies(ctx, videos, libs); err != nil {
+		return nil, false, err
+	}
 	if err := s.addWith(ctx, videos, libs); err != nil {
 		return nil, false, err
 	}
@@ -325,9 +340,9 @@ func (s *Store) addTMDBPlaces(ctx context.Context, titles []*msfp.VideoTitle) er
 		JOIN own_episodes e ON e.series = j.value ->> 1 AND e.tmdb_id = j.value ->> 2`, string(b))
 }
 
-// addOtherIDs gives films, series and episodes their other IDs, as TMDB
-// gives them: a film's or a series' IMDb and TheTVDB IDs, an episode's
-// IMDb ID (only those known by TMDB's ID of it).
+// addOtherIDs gives episodes their other IDs, as TMDB gives them: an
+// episode's IMDb ID (only those known by TMDB's ID of it). Films and
+// series keyed by TMDB carry none (proposal 17).
 func (s *Store) addOtherIDs(ctx context.Context, titles []*msfp.VideoTitle) error {
 	// Each looked for by its table's key, [key, kind or series, TMDB ID],
 	// so that it's found by index.
@@ -337,7 +352,9 @@ func (s *Store) addOtherIDs(ctx context.Context, titles []*msfp.VideoTitle) erro
 		k, _ := wire.ParseVideoKey(t.Key)
 		switch {
 		case k.Kind == "movie" || k.Kind == "series":
-			titleKeys = append(titleKeys, []any{t.Key, k.Kind, strconv.FormatInt(k.ID, 10)})
+			// Proposal 17: a title keyed by TMDB carries no other IDs;
+			// only episodes do.
+			continue
 		case k.Kind == "episode" && k.EpisodeID > 0:
 			episodeKeys = append(episodeKeys, []any{t.Key, strconv.FormatInt(k.ID, 10), k.EpisodeID})
 		default:

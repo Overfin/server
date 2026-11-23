@@ -69,6 +69,9 @@ type Library struct {
 	Delivery *delivery.Executor
 	// MaxBitrateKbps is the operator's cap on a play; 0 for none.
 	MaxBitrateKbps int
+	// CopyKey makes the IDs players know paired servers' copies by
+	// (keys.CopyID); nil: their copies aren't offered.
+	CopyKey []byte
 }
 
 func (Library) Name() string { return "library" }

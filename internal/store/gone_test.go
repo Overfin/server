@@ -2,9 +2,13 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/msfp-io/msfp-go"
 )
 
 // When TMDB merges a title into another, what's kept under its old ID
@@ -223,5 +227,94 @@ func TestPeerKeyFollows(t *testing.T) {
 	s.db.ExecContext(ctx, `INSERT INTO artwork_fetched (key, fetched_at) VALUES ('movie/tmdb/300', ?)`, at.Add(time.Hour).Unix())
 	if n, _ := s.RefetchIMDbConflicts(ctx, at.Add(time.Second)); n != 0 {
 		t.Fatalf("fetched lately, refetched again: %d", n)
+	}
+}
+
+// Proposal 17 sends no IDs with a TMDB key: the paired server's title
+// under another key follows by the IMDb IDs Overfin holds for both.
+func TestPeerKeyFollowsOwnIMDb(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	_, p, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
+	peer, err := s.AddPeer(ctx, []byte("key"), "peer.example", "Peer", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.db.ExecContext(ctx, `INSERT INTO catalog_titles (kind, tmdb, name, overview, status, seen_at, imdb)
+		VALUES ('movie', '500', 'Old', '', 0, 0, 'tt0000005'), ('movie', '600', 'New', '', 0, 0, 'tt0000005')`)
+	if err := s.SetPeerTitles(ctx, peer.ID, []PeerTitle{{Key: "movie/tmdb/500", Kind: "movie", Library: "l"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordPlay(ctx, p.ID, "movie/tmdb/500", "", 0, true, time.Unix(1_700_000_000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPeerTitles(ctx, peer.ID, []PeerTitle{{Key: "movie/tmdb/600", Kind: "movie", Library: "l"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.PersonalStates(ctx, p.ID, []string{"movie/tmdb/600"}); !got["movie/tmdb/600"].Played {
+		t.Fatalf("not followed: %+v", got)
+	}
+}
+
+// What a paired server sends is kept under the keys Overfin knows (D10):
+// a series keyed by TheTVDB under its TMDB ID, its episodes by their TMDB
+// IDs or their IMDb IDs; its extras, local titles, seasons in TheTVDB's
+// order, a series TMDB doesn't know and an episode matching none of
+// Overfin's, skipped quietly. The engine reads them back by the paired
+// server's keys, with their copies; kinds come from keys.
+func TestPeerTitlesKeys(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	peer, err := s.AddPeer(ctx, []byte("key"), "peer.example", "Peer", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetPeerState(ctx, peer.ID, PeerTheirs, PeerPaired)
+	s.db.ExecContext(ctx, `INSERT INTO episode_imdb (series, tmdb_id, imdb, checked_at) VALUES ('1399', 63057, 'tt1668746', 0)`)
+	err = s.SetPeerTitles(ctx, peer.ID, []PeerTitle{
+		{Key: "movie/tmdb/1/x/" + strings.Repeat("a", 22), Kind: "extra", Library: "l"},
+		{Key: "movie/local/" + strings.Repeat("b", 22), Kind: "movie", Library: "l"},
+		{Key: "series/tvdb/121361", Kind: "series", Library: "l", IDs: map[string]string{"tmdb": "1399", "imdb": "tt0944947"}},
+		{Key: "series/tvdb/121361/s1", Kind: "season", Library: "l"},
+		{Key: "series/tvdb/121361/s1/e1", Kind: "episode", Library: "l", Audio: []string{"en"}, IDs: map[string]string{"tmdb": "63056"}},
+		{Key: "series/tvdb/121361/s1/e2", Kind: "episode", Library: "l", Audio: []string{"en"}, IDs: map[string]string{"imdb": "tt1668746"}},
+		{Key: "series/tvdb/121361/s1/e3", Kind: "episode", Library: "l", Audio: []string{"en"}, IDs: map[string]string{"imdb": "tt9999999"}},
+		{Key: "series/tvdb/7", Kind: "series", Library: "l"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept []string
+	s.each(ctx, func(rows *sql.Rows) error {
+		var k string
+		rows.Scan(&k)
+		kept = append(kept, k)
+		return nil
+	}, `SELECT title_key || '<' || coalesce(peer_key, '') || '<' || kind FROM peer_titles WHERE peer_id = ? ORDER BY title_key`, peer.ID)
+	want := []string{"series/tmdb/1399<series/tvdb/121361<series", "series/tmdb/1399/e63056<series/tvdb/121361/s1/e1<episode",
+		"series/tmdb/1399/e63057<series/tvdb/121361/s1/e2<episode"}
+	if !slices.Equal(kept, want) {
+		t.Fatalf("kept %v, want %v", kept, want)
+	}
+	var back msfp.Title
+	s.MSFP().Read(ctx, func(tx msfp.Tx) error {
+		back, err = tx.PeerTitle(peer.ID, "series/tvdb/121361/s1/e2")
+		return err
+	})
+	if v, ok := back.(*msfp.VideoTitle); !ok || v.Key != "series/tvdb/121361/s1/e2" || len(v.Copies) != 1 {
+		t.Fatalf("read back: %+v", back)
+	}
+	sources, err := s.PeerSources(ctx, "series/tmdb/1399/e63056")
+	if err != nil || len(sources) != 1 || sources[0].Key != "series/tvdb/121361/s1/e1" || len(sources[0].Copies) != 1 {
+		t.Fatalf("sources %+v %v", sources, err)
+	}
+	// Dropped by the paired server's key.
+	if err := s.MSFP().Update(ctx, func(tx msfp.Tx) error {
+		return tx.DropPeerTitles(peer.ID, []string{"series/tvdb/121361/s1/e1"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if sources, _ := s.PeerSources(ctx, "series/tmdb/1399/e63056"); len(sources) != 0 {
+		t.Fatalf("still there: %+v", sources)
 	}
 }

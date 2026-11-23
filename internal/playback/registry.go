@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/msfp-io/msfp-go"
 	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/delivery"
 	"github.com/overfin/server/internal/ids"
@@ -351,11 +352,52 @@ func (t *Tickets) ByTicket(ticket, sessionID, profileID string, now time.Time) (
 // RemotePlayback), which asks that server for everything.
 type Remote struct {
 	PeerID string // our pairing's
-	ID     string // the engine's for it (never the paired server's)
-	Key    string // the title's key
+	// id is the engine's for it (never the paired server's): ID gives it,
+	// Restarted changes it (a file's playback started again after a cut).
+	mu  sync.Mutex
+	id  string
+	Key string // the title's key here
+	// Copy is the copy playing, as the paired server's catalog gave it
+	// (its ID the paired server's version ID); Playback, the engine's
+	// playback there (a file's is restarted from it after a cut).
+	Copy     wire.Copy
+	Playback msfp.RemotePlayback
 	// Replaced: the engine stops it there itself (a playback replacing
 	// it), or it is over there already; ending it here sends no stop.
 	Replaced atomic.Bool
+}
+
+// NewRemote is a playback on a paired server, the engine's id and
+// playback.
+func NewRemote(peer, key string, c wire.Copy, pb msfp.RemotePlayback) *Remote {
+	return &Remote{PeerID: peer, id: pb.ID, Key: key, Copy: c, Playback: pb}
+}
+
+// ID is the engine's ID of the playback there now.
+func (r *Remote) ID() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.id
+}
+
+// Current is the engine's playback there now.
+func (r *Remote) Current() msfp.RemotePlayback {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.Playback
+}
+
+// Restarted notes the playback started again there in place of old (a
+// file's, after a cut: msfp.Engine.Restart); false when another restart
+// came first.
+func (r *Remote) Restarted(old string, pb msfp.RemotePlayback) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.id != old {
+		return false
+	}
+	r.id, r.Playback = pb.ID, pb
+	return true
 }
 
 // PeerPrefix starts the account, profile and session IDs of a paired

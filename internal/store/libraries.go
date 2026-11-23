@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 // Library is a library as the index last read it: its ID, and Jellyfin's
@@ -50,4 +51,21 @@ func (s *Store) Libraries(ctx context.Context) ([]Library, error) {
 		out = append(out, l)
 	}
 	return out, rows.Err()
+}
+
+// LibraryKinds are this server's libraries' kinds as Jellyfin types them
+// (movies, tvshows…), by ID: MSFP sends no library kind (its titles' keys
+// tell it), so the panels name ours by Jellyfin's.
+func (s *Store) LibraryKinds(ctx context.Context) (map[string]string, error) {
+	libs, err := s.Libraries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, l := range libs {
+		var item struct{ CollectionType string }
+		json.Unmarshal(l.Item, &item)
+		out[l.ID] = strings.ToLower(item.CollectionType)
+	}
+	return out, nil
 }

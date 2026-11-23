@@ -246,7 +246,7 @@ func build(cfg *config.Config, sh *shared) (*built, error) {
 		e.OriginalFile = func() bool { return original }
 		exec = &e
 	}
-	lib := api.Library{Delivery: exec, MaxBitrateKbps: cfg.Limits.MaxBitrateKbps, Sessions: sessions, Provisioner: prov, Jellyfin: sh.jf, Images: sh.images, Previews: sh.previews, CursorKey: k.Cursor,
+	lib := api.Library{Delivery: exec, MaxBitrateKbps: cfg.Limits.MaxBitrateKbps, Sessions: sessions, Provisioner: prov, Jellyfin: sh.jf, Images: sh.images, Previews: sh.previews, CursorKey: k.Cursor, CopyKey: k.CopyID,
 		Folders: sh.folders, Service: sh.service, Titles: sh.titles, Texts: sh.texts, Searches: sh.searches, Lookups: sh.lookups, Logger: logger,
 		Interests: func(ctx context.Context) ([]store.ProfileTitle, error) { return interests(ctx, on, sh) }}
 	// The gateway's prefetch of new titles' artwork (backend only).

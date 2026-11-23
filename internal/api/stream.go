@@ -80,7 +80,14 @@ func (s Stream) trickplay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st.Remote != nil {
-		problem.Send(w, problem.NotFound, "")
+		// A paired server's playback's sheet, from it (re-encoded by the
+		// engine), within its copy's layout.
+		n, ok := sheetNumber(st.Trickplay, r.PathValue("sheet"))
+		if !ok {
+			problem.Send(w, problem.NotFound, "")
+			return
+		}
+		s.fetchRemote(w, r, st, msfp.MediaPath{Kind: msfp.MediaSheet, Sheet: n})
 		return
 	}
 	s.Playback.serveSheet(w, r, st, r.PathValue("sheet"))
@@ -107,6 +114,10 @@ func (s Stream) previewsSheet(w http.ResponseWriter, r *http.Request) bool {
 	pt, ok := pb.Tickets.PreviewsByTicket(ticket, c.Session.ID, c.Profile.ID, time.Now())
 	if !ok {
 		problem.Send(w, problem.NotFound, "")
+		return true
+	}
+	if pt.Peer != "" {
+		pb.servePeerSheet(w, r, pt, r.PathValue("sheet"))
 		return true
 	}
 	pb.serveOwnSheet(w, r, pt.Previews, &pt.Trickplay, r.PathValue("sheet"))
@@ -622,7 +633,24 @@ func (s Stream) fetchRemote(w http.ResponseWriter, r *http.Request, st *playback
 		}
 	}()
 	s.Playback.Tickets.Touch(st, time.Now())
-	err := eng.Fetch(ctx, st.Remote.ID, path, r.Header.Get("Range"), msfp.NewHTTPSink(ctx, w))
+	sw := &startedWriter{ResponseWriter: w}
+	id := st.Remote.ID()
+	err := eng.Fetch(ctx, id, path, r.Header.Get("Range"), msfp.NewHTTPSink(ctx, sw))
+	if err != nil && !sw.started && ctx.Err() == nil && path.Kind == msfp.MediaFile && path.Entry == 0 &&
+		!errors.Is(err, msfp.ErrRangeNotSatisfiable) && !errors.Is(err, msfp.ErrServerBusy) {
+		// A file's read cut there (its playback ended: a long pause, the
+		// paired server restarted): read on under a new playback of the
+		// same copy, same etag only (msfp.Engine.Restart).
+		if again, rerr := eng.Restart(ctx, st.Remote.Current()); rerr == nil {
+			if st.Remote.Restarted(id, again) {
+				s.Playback.Logger.Info("a paired server's file read on under a new playback", "playback", st.ID)
+			}
+			err = eng.Fetch(ctx, st.Remote.ID(), path, r.Header.Get("Range"), msfp.NewHTTPSink(ctx, sw))
+		} else if errors.Is(rerr, msfp.ErrCopyChanged) {
+			s.Playback.Logger.Info("a paired server's file changed: its playback ends", "playback", st.ID)
+			s.Playback.end(st, "stopped", "")
+		}
+	}
 	switch {
 	case err == nil, ctx.Err() != nil:
 	case errors.Is(err, msfp.ErrRangeNotSatisfiable):
@@ -631,5 +659,27 @@ func (s Stream) fetchRemote(w http.ResponseWriter, r *http.Request, st *playback
 		problem.Send(w, problem.ServerBusy, "")
 	default:
 		problem.Send(w, problem.NotFound, "")
+	}
+}
+
+// startedWriter notes whether an answer began.
+type startedWriter struct {
+	http.ResponseWriter
+	started bool
+}
+
+func (w *startedWriter) WriteHeader(status int) {
+	w.started = true
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *startedWriter) Write(b []byte) (int, error) {
+	w.started = true
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *startedWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
 	}
 }

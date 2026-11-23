@@ -7,6 +7,8 @@ import (
 	"errors"
 	"slices"
 	"time"
+
+	"github.com/msfp-io/msfp-go/wire"
 )
 
 // Paired servers' titles, as this server's pages read them beside its
@@ -75,6 +77,22 @@ func (s *Store) LabelPeerWant(ctx context.Context, peerID, libraryID, label stri
 	return nil
 }
 
+// PeerWantKinds are the kinds of a peer's libraries we want, by its
+// library ID, as their first titles typed them (movies, tvshows; "" until
+// one is read).
+func (s *Store) PeerWantKinds(ctx context.Context, peerID string) (map[string]string, error) {
+	out := map[string]string{}
+	err := s.each(ctx, func(rows *sql.Rows) error {
+		var id, kind string
+		if err := rows.Scan(&id, &kind); err != nil {
+			return err
+		}
+		out[id] = kind
+		return nil
+	}, `SELECT library_id, kind FROM peer_wants WHERE peer_id = ?`, peerID)
+	return out, err
+}
+
 // PeerWantLabels are our operator's names for the menu entries of a
 // peer's libraries we want, by the peer's library ID ("" for the one
 // made of the peer's names).
@@ -135,13 +153,17 @@ func (s *Store) PeerWith(ctx context.Context, peerID, key string) ([]string, err
 	return mergeTags(nil, with.String), err
 }
 
-// PeerSource is a paired server holding a title for us, with its copies'
-// languages: its ID and name.
+// PeerSource is a paired server holding a film or an episode for us:
+// its ID and name, the title's key there (the peer's own: a TheTVDB key
+// for a series joined through its TMDB ID), its copies as it sent them
+// (MSFP video section 3.2), and their languages.
 type PeerSource struct {
 	Peer, Name string
+	Key        string
+	Copies     []wire.Copy
 	Audio      []string
 	Subtitles  []string
-	// Video is the picture it sent of the title (MSFP video section 3.2);
+	// Video is the picture of its first copy (MSFP video section 3.2);
 	// nil when it sent none.
 	Video *Picture
 }
@@ -152,17 +174,24 @@ func (s *Store) PeerSources(ctx context.Context, key string) ([]PeerSource, erro
 	var out []PeerSource
 	err := s.each(ctx, func(rows *sql.Rows) error {
 		var ps PeerSource
-		var audio, subs, video sql.NullString
-		if err := rows.Scan(&ps.Peer, &ps.Name, &audio, &subs, &video); err != nil {
+		var audio, subs, copies sql.NullString
+		if err := rows.Scan(&ps.Peer, &ps.Name, &ps.Key, &audio, &subs, &copies); err != nil {
 			return err
 		}
 		ps.Audio, ps.Subtitles = mergeTags(nil, audio.String), mergeTags(nil, subs.String)
-		if p, ok := readPicture(video); ok {
-			ps.Video = &p
+		if copies.Valid {
+			if err := json.Unmarshal([]byte(copies.String), &ps.Copies); err != nil {
+				return err
+			}
+		}
+		if len(ps.Copies) > 0 {
+			if p, ok := copyPicture(ps.Copies[0]); ok {
+				ps.Video = &p
+			}
 		}
 		out = append(out, ps)
 		return nil
-	}, `SELECT t.peer_id, p.name, t.audio, t.subtitles, t.video FROM peer_titles t
+	}, `SELECT t.peer_id, p.name, coalesce(t.peer_key, t.title_key), t.audio, t.subtitles, t.copies FROM peer_titles t
 		JOIN peers p ON p.id = t.peer_id AND p.state = 'paired' AND p.suspended_at IS NULL
 		WHERE t.title_key = ? AND t.kind IN ('movie', 'episode') ORDER BY p.paired_at, p.id`, key)
 	return out, err

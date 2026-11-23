@@ -9,9 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
 )
 
 // Federation's records, as the MSFP engine keeps them (msfp.Store): in
@@ -430,42 +433,131 @@ func (t *msfpTx) DeleteLeftover(l msfp.Leftover) error {
 // here).
 var errNotVideo = errors.New("store: only films and series are kept of a paired server")
 
+// peerKeyOf is where a paired server's title is kept here: its own key,
+// or the key Overfin knows it by (D10): a series keyed by TheTVDB under
+// its TMDB ID (ids.tmdb), its episodes under their TMDB IDs (theirs, or
+// found by their IMDb ID); "" for a title skipped quietly: an extra, a
+// local title, a season or an episode under TheTVDB, a series TMDB
+// doesn't know (no ids.tmdb), an episode that matches none of Overfin's.
+func (t *msfpTx) peerKeyOf(peer string, v *msfp.VideoTitle) (string, error) {
+	k, ok := wire.ParseVideoKey(v.Key)
+	switch {
+	case !ok, k.Kind == "extra", k.Scheme == wire.SchemeLocal:
+		return "", nil
+	case k.Scheme == wire.SchemeTMDB:
+		return v.Key, nil
+	case k.Kind == "series":
+		id, err := strconv.ParseInt(v.IDs["tmdb"], 10, 64)
+		if err != nil || id <= 0 {
+			return "", nil
+		}
+		return "series/tmdb/" + strconv.FormatInt(id, 10), nil
+	case k.Kind != "episode":
+		return "", nil // a season in TheTVDB's order: Overfin's are TMDB's
+	}
+	// An episode of a TheTVDB-keyed series: under the series' key here,
+	// by its own TMDB ID, else by its IMDb ID among the series' episodes.
+	var series string
+	err := t.tx.QueryRowContext(t.ctx, `SELECT title_key FROM peer_titles WHERE peer_id = ? AND peer_key = ?`,
+		peer, k.Series()).Scan(&series)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	seriesID := strings.TrimPrefix(series, "series/tmdb/")
+	if id, err := strconv.ParseInt(v.IDs["tmdb"], 10, 64); err == nil && id > 0 {
+		return series + "/e" + strconv.FormatInt(id, 10), nil
+	}
+	if imdb := v.IDs["imdb"]; wire.OtherID("imdb", imdb) {
+		var id int64
+		err := t.tx.QueryRowContext(t.ctx, `SELECT tmdb_id FROM episode_imdb WHERE series = ? AND imdb = ?`, seriesID, imdb).Scan(&id)
+		if err == nil {
+			return series + "/e" + strconv.FormatInt(id, 10), nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+	}
+	return "", nil
+}
+
+// PutPeerTitles keeps a paired server's titles as received, under the
+// keys Overfin knows them by (peerKeyOf), each film's and episode's
+// copies with it (MSFP video section 3.2), its kind from its key. When
+// each arrived is kept for "recently added": a title is new from the day
+// this server first saw it, the first reading's titles counting as old
+// (what the paired server held already isn't new here).
 func (t *msfpTx) PutPeerTitles(peer string, reading int64, titles []msfp.Title) error {
 	if len(titles) == 0 {
 		return nil
 	}
-	stmt, err := t.tx.PrepareContext(t.ctx, `INSERT INTO peer_titles (peer_id, title_key, kind, library_id, audio, subtitles, with_keys, ids, video, added_at, seen)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	stmt, err := t.tx.PrepareContext(t.ctx, `INSERT INTO peer_titles (peer_id, title_key, peer_key, kind, library_id, audio, subtitles, with_keys, ids, copies, added_at, seen)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (peer_id, title_key) DO UPDATE SET kind = excluded.kind, library_id = excluded.library_id,
 			audio = excluded.audio, subtitles = excluded.subtitles, with_keys = excluded.with_keys, ids = excluded.ids,
-			video = excluded.video, seen = max(seen, excluded.seen)`)
+			copies = excluded.copies, seen = max(seen, excluded.seen)
+		WHERE peer_titles.peer_key IS excluded.peer_key`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
-	// When each arrived is kept: what the peer held already isn't new.
+	// The first reading: nothing kept of the peer from a reading before.
+	var before bool
+	if err := t.tx.QueryRowContext(t.ctx, `SELECT EXISTS (SELECT 1 FROM peer_titles WHERE peer_id = ? AND seen != ?)`,
+		peer, reading).Scan(&before); err != nil {
+		return err
+	}
 	now := t.now().Unix()
+	if !before {
+		now = 0
+	}
+	kinds := map[string]string{}
 	for _, title := range titles {
 		v, ok := title.(*msfp.VideoTitle)
 		if !ok || len(v.Libraries) != 1 {
 			return errNotVideo
 		}
-		var ids, video any
+		key, err := t.peerKeyOf(peer, v)
+		if err != nil {
+			return err
+		}
+		if key == "" {
+			continue
+		}
+		k, _ := wire.ParseVideoKey(key)
+		var ids, copies, peerKey any
 		if len(v.IDs) > 0 {
 			b, _ := json.Marshal(v.IDs)
 			ids = string(b)
 		}
-		// The title's languages and picture, from its copies (msfp-go's
-		// revised v0 sends no summary); the copies themselves are kept
-		// from the federation phase on (plan phase 7).
-		if best, ok := v.BestCopy(); ok {
-			if p, ok := copyPicture(best); ok {
-				b, _ := json.Marshal(p)
-				video = string(b)
+		if len(v.Copies) > 0 {
+			b, err := json.Marshal(v.Copies)
+			if err != nil {
+				return err
 			}
+			copies = string(b)
 		}
-		if _, err := stmt.ExecContext(t.ctx, peer, v.Key, v.Kind, v.Libraries[0], jsonList(v.AudioLanguages()), jsonList(v.SubtitleLanguages()),
-			jsonList(v.With), ids, video, now, reading); err != nil {
+		if key != v.Key {
+			peerKey = v.Key
+		}
+		with := v.With
+		if peerKey != nil {
+			with = nil // their keys, not Overfin's
+		}
+		if _, err := stmt.ExecContext(t.ctx, peer, key, peerKey, k.Kind, v.Libraries[0], jsonList(v.AudioLanguages()),
+			jsonList(v.SubtitleLanguages()), jsonList(with), ids, copies, now, reading); err != nil {
+			return err
+		}
+		if k.Kind == "movie" || k.Kind == "series" {
+			kinds[v.Libraries[0]] = map[string]string{"movie": "movies", "series": "tvshows"}[k.Kind]
+		}
+	}
+	// A library is typed by its first titles (msfp-go's revised v0 sends
+	// no library kind), for the site's menu.
+	for library, kind := range kinds {
+		if err := t.exec(`UPDATE peer_wants SET kind = ? WHERE peer_id = ? AND library_id = ? AND kind = ''`, kind, peer, library); err != nil {
 			return err
 		}
 	}
@@ -482,22 +574,25 @@ func (t *msfpTx) EndReading(peer string, reading int64) error {
 	return t.exec(`DELETE FROM peer_titles WHERE peer_id = ? AND seen < ?`, peer, reading)
 }
 
+// DropPeerTitles drops titles by the paired server's keys.
 func (t *msfpTx) DropPeerTitles(peer string, keys []string) error {
 	if len(keys) == 0 {
 		return nil
 	}
 	list := jsonOrEmpty(keys)
-	if err := t.followPeerKeys(peer, `d.title_key IN (SELECT value FROM json_each(?))`,
-		`k.title_key NOT IN (SELECT value FROM json_each(?))`, list, list); err != nil {
+	if err := t.followPeerKeys(peer, `coalesce(d.peer_key, d.title_key) IN (SELECT value FROM json_each(?))`,
+		`coalesce(k.peer_key, k.title_key) NOT IN (SELECT value FROM json_each(?))`, list, list); err != nil {
 		return err
 	}
-	return t.exec(`DELETE FROM peer_titles WHERE peer_id = ? AND title_key IN (SELECT value FROM json_each(?))`, peer, list)
+	return t.exec(`DELETE FROM peer_titles WHERE peer_id = ? AND coalesce(peer_key, title_key) IN (SELECT value FROM json_each(?))`, peer, list)
 }
 
 // followPeerKeys moves what profiles did with a peer's films and series
 // about to go (dropped, of peer_titles d) to the peer's title of the same
 // kind with the same IMDb ID that stays (kept, of peer_titles k): the
 // peer's copy under a new key, TMDB having merged its entry into another.
+// The IMDb IDs are those Overfin holds for the titles (catalog_titles;
+// proposal 17 sends none with a TMDB key), else those the peer sent.
 // Its history follows, as for a library title (MoveGone); one that would
 // go to two titles stays, and so does one the library or another peer
 // still has (the library's is retired by its own refresh).
@@ -511,13 +606,16 @@ func (t *msfpTx) followPeerKeys(peer, dropped, kept string, droppedArg, keptArg 
 		}
 		moves = append(moves, m)
 		return nil
-	}, `SELECT d.title_key, min(k.title_key) FROM peer_titles d
-		JOIN peer_titles k ON k.peer_id = d.peer_id AND k.kind = d.kind AND k.title_key != d.title_key
-			AND json_extract(k.ids, '$.imdb') = json_extract(d.ids, '$.imdb')
-		WHERE d.peer_id = ? AND d.kind IN ('movie', 'series') AND d.ids IS NOT NULL AND `+dropped+` AND `+kept+`
+	}, `WITH imdb AS (
+			SELECT p.title_key, p.kind, p.seen, p.peer_key, coalesce(c.imdb, json_extract(p.ids, '$.imdb')) AS imdb FROM peer_titles p
+			LEFT JOIN catalog_titles c ON c.kind = p.kind AND c.tmdb = substr(p.title_key, length(p.kind) + 7)
+			WHERE p.peer_id = ? AND p.kind IN ('movie', 'series'))
+		SELECT d.title_key, min(k.title_key) FROM imdb d
+		JOIN imdb k ON k.kind = d.kind AND k.title_key != d.title_key AND k.imdb = d.imdb
+		WHERE d.imdb IS NOT NULL AND `+dropped+` AND `+kept+`
 			AND NOT EXISTS (SELECT 1 FROM catalog_items i WHERE i.title_key = d.title_key)
-			AND NOT EXISTS (SELECT 1 FROM peer_titles o WHERE o.title_key = d.title_key AND o.peer_id != d.peer_id)
-		GROUP BY d.title_key HAVING count(DISTINCT k.title_key) = 1`, peer, droppedArg, keptArg)
+			AND NOT EXISTS (SELECT 1 FROM peer_titles o WHERE o.title_key = d.title_key AND o.peer_id != ?)
+		GROUP BY d.title_key HAVING count(DISTINCT k.title_key) = 1`, peer, droppedArg, keptArg, peer)
 	if err != nil {
 		return err
 	}
@@ -532,18 +630,17 @@ func (t *msfpTx) followPeerKeys(peer, dropped, kept string, droppedArg, keptArg 
 	return nil
 }
 
+// peerTitles reads a peer's titles back as the engine kept them: by the
+// peer's own keys, with their copies.
 func (t *msfpTx) peerTitles(query string, args ...any) ([]msfp.Title, error) {
 	var out []msfp.Title
 	err := t.each(func(rows *sql.Rows) error {
 		var v msfp.VideoTitle
 		var library string
-		var with, ids sql.NullString
-		if err := rows.Scan(&v.Key, &v.Kind, &library, &with, &ids); err != nil {
+		var with, ids, copies sql.NullString
+		if err := rows.Scan(&v.Key, &v.Kind, &library, &with, &ids, &copies); err != nil {
 			return err
 		}
-		// No copies: peer_titles keeps a summary only (languages,
-		// picture) until the federation phase (plan phase 7) keeps
-		// each title's copies.
 		v.Libraries = []string{library}
 		v.With = mergeTags(nil, with.String)
 		if ids.Valid {
@@ -551,22 +648,61 @@ func (t *msfpTx) peerTitles(query string, args ...any) ([]msfp.Title, error) {
 				return err
 			}
 		}
+		if copies.Valid {
+			if err := json.Unmarshal([]byte(copies.String), &v.Copies); err != nil {
+				return err
+			}
+		}
 		out = append(out, &v)
 		return nil
-	}, `SELECT title_key, kind, library_id, with_keys, ids FROM peer_titles `+query, args...)
+	}, `SELECT coalesce(peer_key, title_key) AS key, kind, library_id, with_keys, ids, copies FROM peer_titles `+query, args...)
 	return out, err
 }
 
 func (t *msfpTx) PeerTitles(peer, after string, limit int) ([]msfp.Title, error) {
-	return t.peerTitles(`WHERE peer_id = ? AND title_key > ? ORDER BY title_key LIMIT ?`, peer, after, limit)
+	return t.peerTitles(`WHERE peer_id = ? AND coalesce(peer_key, title_key) > ? ORDER BY key LIMIT ?`, peer, after, limit)
 }
 
 func (t *msfpTx) PeerTitle(peer, key string) (msfp.Title, error) {
-	titles, err := t.peerTitles(`WHERE peer_id = ? AND title_key = ?`, peer, key)
+	titles, err := t.peerTitles(`WHERE peer_id = ? AND coalesce(peer_key, title_key) = ?`, peer, key)
 	if err != nil || len(titles) == 0 {
 		return nil, err
 	}
 	return titles[0], nil
+}
+
+// ---- Downloads (msfp.DownloadsTx) ---------------------------------------------
+
+var _ msfp.DownloadsTx = (*msfpTx)(nil)
+
+func (t *msfpTx) Downloads() ([]msfp.DownloadRecord, error) {
+	var out []msfp.DownloadRecord
+	err := t.each(func(rows *sql.Rows) error {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return err
+		}
+		var d msfp.DownloadRecord
+		if err := json.Unmarshal([]byte(raw), &d); err != nil {
+			return err
+		}
+		out = append(out, d)
+		return nil
+	}, `SELECT record FROM msfp_downloads ORDER BY viewer, id`)
+	return out, err
+}
+
+func (t *msfpTx) PutDownload(d msfp.DownloadRecord) error {
+	b, err := json.Marshal(d)
+	if err != nil {
+		return err
+	}
+	return t.exec(`INSERT INTO msfp_downloads (viewer, id, peer, record) VALUES (?, ?, ?, ?)
+		ON CONFLICT (viewer, id) DO UPDATE SET peer = excluded.peer, record = excluded.record`, d.Viewer, d.ID, d.Peer, string(b))
+}
+
+func (t *msfpTx) DeleteDownload(viewer bool, id string) error {
+	return t.exec(`DELETE FROM msfp_downloads WHERE viewer = ? AND id = ?`, viewer, id)
 }
 
 // ---- Groups (msfp.GroupsTx) ---------------------------------------------------

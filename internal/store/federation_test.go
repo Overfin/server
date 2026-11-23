@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
 )
 
 // What we offer and want is per peer, replaced whole, and goes with it.
@@ -83,6 +84,22 @@ func TestPeerTitles(t *testing.T) {
 	if err := s.RefreshTitleKeys(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// Heat's two files, as the copy index read them.
+	for n, langs := range map[int][2][]string{1: {{"en"}}, 2: {{"en", "fr-CA"}, {"fr"}}} {
+		item := fmt.Sprintf("%032x", n)
+		c := wire.Copy{DurationMs: 60_000, MediaType: "video/matroska", Size: 1000}
+		for i, l := range langs[0] {
+			c.AudioTracks = append(c.AudioTracks, wire.CopyAudio{ID: fmt.Sprintf("a%d", i+1), Codec: "aac", Channels: 2, Language: l})
+		}
+		for _, l := range langs[1] {
+			c.SubtitleTracks = append(c.SubtitleTracks, wire.CopySubtitle{ID: "s9", Format: "subrip", Language: l})
+		}
+		if err := s.PutCopy(ctx, IndexedCopy{CopyID: fmt.Sprintf("v%026d", n), ItemID: item, SourceID: item,
+			Fingerprint: "x1-" + item, ETag: fmt.Sprintf("etag%018d", n), Size: 1000, Parts: 1, Facts: c,
+			Streams: map[string]int{"a1": 1, "a2": 2, "s9": 9}}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	cat := MSFPCatalog{S: s}
 	page, err := cat.Titles(ctx, []string{"films", "films4k"}, "", 1)
 	if err != nil || len(page.Titles) != 1 || page.Titles[0].Common().Key != "movie/tmdb/14160" || !page.More ||
@@ -97,7 +114,6 @@ func TestPeerTitles(t *testing.T) {
 	}
 	// Its languages: both copies'.
 	t.Run("own copies' languages", func(t *testing.T) {
-		t.Skip("federation off until phase 7")
 		heat := page.Titles[0].(*msfp.VideoTitle)
 		if a, s := heat.AudioLanguages(), heat.SubtitleLanguages(); len(a) != 2 || a[0] != "en" || a[1] != "fr-CA" || len(s) != 1 || s[0] != "fr" {
 			t.Fatalf("languages: %v %v", a, s)
@@ -246,7 +262,8 @@ func TestHeldByPeers(t *testing.T) {
 
 // Listings read paired servers' films and series too: not for a profile
 // limited to some libraries, nor one a tag of theirs is hidden from; an
-// entry keeps its ID while wanted, and a title its arrival while held.
+// entry keeps its ID while wanted, and a title its arrival while held
+// (the first reading's, old).
 func TestPeerListing(t *testing.T) {
 	s, ctx := openTest(t), context.Background()
 	now := time.Unix(1_000_000, 0)
@@ -302,15 +319,20 @@ func TestPeerListing(t *testing.T) {
 	// Read again later: the entry and the arrival are kept.
 	now = now.Add(time.Hour)
 	s.SetPeerWants(ctx, p.ID, []PeerLibrary{{ID: "x", Name: "Movies", Kind: "movies"}, {ID: "y", Name: "Series", Kind: "tvshows"}})
-	s.SetPeerTitles(ctx, p.ID, []PeerTitle{{Key: "movie/tmdb/1", Kind: "movie", Library: "x"}, {Key: "movie/tmdb/2", Kind: "movie", Library: "x"}})
+	s.SetPeerTitles(ctx, p.ID, []PeerTitle{{Key: "movie/tmdb/1", Kind: "movie", Library: "x"}, {Key: "movie/tmdb/2", Kind: "movie", Library: "x"},
+		{Key: "movie/tmdb/4", Kind: "movie", Library: "x"}})
 	again, _ := s.MenuLibraries(ctx)
 	if len(again) != 1 || again[0].ID != menu[0].ID || again[0].Name != "Movies (A)" {
 		t.Fatalf("menu again: %+v (was %+v)", again, menu)
 	}
-	var added int64
+	// "Recently added" from first sight: the first reading's titles count
+	// as old (the paired server held them already); one first seen in a
+	// later reading arrived then.
+	var added, later int64
 	s.read.QueryRow(`SELECT added_at FROM peer_titles WHERE title_key = 'movie/tmdb/1'`).Scan(&added)
-	if added != 1_000_000 {
-		t.Fatalf("arrival: %d", added)
+	s.read.QueryRow(`SELECT added_at FROM peer_titles WHERE title_key = 'movie/tmdb/4'`).Scan(&later)
+	if added != 0 || later != 1_003_600 {
+		t.Fatalf("arrivals: %d %d", added, later)
 	}
 	if got := list(ListQuery{Sort: "latest"}); len(got) != 2 {
 		t.Fatalf("latest: %v", got)
@@ -338,8 +360,9 @@ func TestPeerListing(t *testing.T) {
 // What a paired server is told of each title (MSFP video, sections 3 and
 // 4): TMDB's keys only, never a title known by IMDb's or TheTVDB's ID; an
 // episode of a file holding several, the others it holds (with); films,
-// series and episodes, their other IDs as TMDB gives them. And the copy
-// of an episode a file holds after its first is that file's item.
+// episodes, their other IDs as TMDB gives them (films and series keyed by
+// TMDB none: proposal 17); films and episodes, their copies, and the copy
+// of an episode a file holds after its first is that file's.
 func TestPeerTitlesVideoMembers(t *testing.T) {
 	s, ctx := openTest(t), context.Background()
 	id := func(n int) string { return fmt.Sprintf("%032x", n) }
@@ -362,6 +385,20 @@ func TestPeerTitlesVideoMembers(t *testing.T) {
 	s.db.ExecContext(ctx, `INSERT INTO episode_imdb (series, tmdb_id, imdb, checked_at) VALUES ('1399', 63056, 'tt1480055', 0), ('1399', 63057, 'bad', 0)`)
 	if err := s.RefreshTitleKeys(ctx); err != nil {
 		t.Fatal(err)
+	}
+	// Copies: the film's and the file of two episodes', read; the third
+	// episode's, a stacked film's two files (never offered).
+	for i, item := range []string{id(1), id(12), id(13)} {
+		parts := 1
+		if i == 2 {
+			parts = 2
+		}
+		c := IndexedCopy{CopyID: "v" + item[6:], ItemID: item, SourceID: item, Fingerprint: "x1-" + item, ETag: "etag" + item[14:],
+			Size: 1000, Parts: parts, Streams: map[string]int{"a1": 1},
+			Facts: wire.Copy{DurationMs: 60_000, MediaType: "video/matroska", Size: 1000, AudioTracks: []wire.CopyAudio{{ID: "a1", Codec: "aac", Channels: 2, Language: "en"}}}}
+		if err := s.PutCopy(ctx, c); err != nil {
+			t.Fatal(err)
+		}
 	}
 	cat := MSFPCatalog{S: s}
 	page, err := cat.Titles(ctx, []string{"lib"}, "", 100)
@@ -389,10 +426,11 @@ func TestPeerTitlesVideoMembers(t *testing.T) {
 	if w := byKey["series/tmdb/1399/s1/e3"].With; w != nil {
 		t.Errorf("an episode alone in its file: with %v", w)
 	}
-	if ids := byKey["movie/tmdb/603"].IDs; len(ids) != 1 || ids["imdb"] != "tt0133093" {
+	// Proposal 17: films and series keyed by TMDB carry no other IDs.
+	if ids := byKey["movie/tmdb/603"].IDs; ids != nil {
 		t.Errorf("film ids %v", ids)
 	}
-	if ids := byKey["series/tmdb/1399"].IDs; len(ids) != 2 || ids["imdb"] != "tt0944947" || ids["tvdb"] != "121361" {
+	if ids := byKey["series/tmdb/1399"].IDs; ids != nil {
 		t.Errorf("series ids %v", ids)
 	}
 	if ids := byKey["series/tmdb/1399/e63056"].IDs; len(ids) != 1 || ids["imdb"] != "tt1480055" {
@@ -411,14 +449,25 @@ func TestPeerTitlesVideoMembers(t *testing.T) {
 	if ids := byKey["series/tmdb/1399/e63057"].IDs; ids != nil {
 		t.Errorf("an IMDb ID not in its form sent: %v", ids)
 	}
-	// The second episode plays the file: its copy, of the library holding
-	// it, named by its video.
-	copies, err := cat.Copies(ctx, "series/tmdb/1399/e63057", []string{"lib"})
-	if err != nil || len(copies) != 1 || copies[0].Handle != id(12) || !slices.Equal(copies[0].Audio, []string{"en"}) || copies[0].Library != "lib" {
-		t.Errorf("copies %+v %v", copies, err)
+	// Each film and episode carries its copies from the copy index, their
+	// ID the copy's (the engine's handle): the second episode, the file's;
+	// a stacked film's, none. Series and seasons, none.
+	for key, want := range map[string]string{"movie/tmdb/603": "v" + id(1)[6:], "series/tmdb/1399/e63056": "v" + id(12)[6:],
+		"series/tmdb/1399/e63057": "v" + id(12)[6:]} {
+		if c := byKey[key].Copies; len(c) != 1 || c[0].ID != want || c[0].ETag != "etag"+want[9:] || len(c[0].AudioTracks) != 1 {
+			t.Errorf("%s copies %+v", key, c)
+		}
 	}
-	if copies, _ := cat.Copies(ctx, "series/tmdb/1399/e63057", []string{"other"}); len(copies) != 0 {
-		t.Errorf("copies in a library not asked for: %+v", copies)
+	for _, key := range []string{"series/tmdb/1399/s1/e3", "series/tmdb/1399", "series/tmdb/1399/s1"} {
+		if c := byKey[key].Copies; len(c) != 0 {
+			t.Errorf("%s copies %+v", key, c)
+		}
+	}
+	if c, ok, err := s.CopyByID(ctx, "v"+id(12)[6:]); err != nil || !ok || c.ItemID != id(12) {
+		t.Errorf("by its ID: %+v %v %v", c, ok, err)
+	}
+	if other, _ := cat.Titles(ctx, []string{"other"}, "", 100); len(other.Titles) != 0 {
+		t.Errorf("titles in a library not asked for: %+v", other.Titles)
 	}
 	// A page looked at whole is full, whatever was left out of it.
 	if page, _ := cat.Titles(ctx, []string{"lib"}, "", len(want)); !page.More {
@@ -476,10 +525,8 @@ func TestCatalogBumpSeq(t *testing.T) {
 	}
 }
 
-// Pictures (MSFP video section 3.2): each copy's, kept stepped, given to
-// the engine with the title; copies listed best first, so that play
-// without a version plays the one the title's picture describes; a new
-// picture is a change of the title; a peer's kept with its title.
+// Pictures: each item's, kept stepped (the title pages' summary); a new
+// picture is a change of the title.
 func TestPictures(t *testing.T) {
 	s, ctx := openTest(t), context.Background()
 	id := func(n int) string { return fmt.Sprintf("%032x", n) }
@@ -502,19 +549,10 @@ func TestPictures(t *testing.T) {
 	if err != nil || len(page.Titles) != 1 {
 		t.Fatal(err, page)
 	}
-	t.Run("own copies sent", func(t *testing.T) {
-		t.Skip("federation off until phase 7")
-		if c := page.Titles[0].(*msfp.VideoTitle).Copies; len(c) != 3 {
-			t.Errorf("copies: %+v", c)
-		}
-	})
-	copies, err := cat.Copies(ctx, "movie/tmdb/949", []string{"lib"})
-	var order []string
-	for _, c := range copies {
-		order = append(order, c.Handle)
-	}
-	if err != nil || !slices.Equal(order, []string{id(3), id(4), id(1), id(2)}) {
-		t.Errorf("copies: %v %v", order, err)
+	// Copies come from the copy index (TestPeerTitlesVideoMembers): none
+	// indexed here, none sent.
+	if c := page.Titles[0].(*msfp.VideoTitle).Copies; len(c) != 0 {
+		t.Errorf("copies: %+v", c)
 	}
 	head, _, _ := s.TitleChanges(ctx)
 	s.PutCatalog(ctx, []CatalogItem{{ID: id(1), Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "949", LibraryID: "lib", Height: 720}}, 1)

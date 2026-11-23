@@ -64,6 +64,14 @@ func EpisodeCopyID(key []byte, fileCopyID, titleKey string) string {
 	return "v" + strings.ToLower(idEncoding.EncodeToString(mac(key, "episode", fileCopyID, titleKey)[:16]))
 }
 
+// PeerCopyID is the ID Overfin's players know a paired server's copy by:
+// a keyed hash of the pairing, the title's key there and the paired
+// server's version ID, so that players see one kind of ID and never the
+// paired server's.
+func PeerCopyID(key []byte, peer, titleKey, version string) string {
+	return "v" + strings.ToLower(idEncoding.EncodeToString(mac(key, "peer", peer, titleKey, version)[:16]))
+}
+
 // ETag is the etag of the copy a file is: the first 22 characters of the
 // base64url keyed hash (keys.Etag) of its fingerprint. It changes when
 // the file does, and tells nothing across servers.

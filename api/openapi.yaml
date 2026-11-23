@@ -4477,6 +4477,33 @@ paths:
       responses:
         "200": {description: "Stopped, or already over. Signed."}
         "404": {description: "Not signed, or not a paired server."}
+
+  /federation/previews:
+    post:
+      operationId: federationPreviews
+      summary: A paired server's viewer's server asks a copy's seek-bar previews before a play
+      description: >-
+        Server to server, signed both ways (MSFP video, section 5.6): for
+        a copy of a title offered to the caller whose catalog gives a
+        previewLayout, a previews ticket of ten minutes, its sheets
+        fetched under /stream/{ticket}/trickplay/{sheet}, and the copy's
+        etag. Rate limited per paired server.
+      tags: [federation]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, versionId]
+              properties:
+                title: {type: string}
+                versionId: {type: string}
+      responses:
+        "200": {description: "The ticket and the copy's etag. Signed."}
+        "404": {description: "Not signed, not a paired server, or no such copy with previews."}
+        "429": {description: "Too many previews tickets. Signed."}
   /federation/group-sync:
     post:
       operationId: federationGroupSync

@@ -393,6 +393,8 @@ export interface Title extends TitleSummary {
    * picture's name and languages).
    */
   copies?: Copy[];
+  /** IDs of the copies paired servers hold (the player prefers this server's own). */
+  peers?: string[];
   /** What a play of copies goes by: the operator's bitrate cap, whether players may get the file itself (since 0.10). */
   limits?: { maxBitrateKbps?: number; originalFile: boolean };
   /** The audio and subtitle languages a play starts with: the title's choice, else the profile's (since 0.10). */
@@ -564,7 +566,7 @@ export interface PlayerOptions {
   env?: DeviceEnv;
   /** The fallback ladder's memory (fallbacks by default); null: none. */
   fallbacks?: typeof fallbacks | null;
-  /** IDs of copies on paired servers. */
+  /** IDs of copies on paired servers; by default the title page's. */
   peers?: string[];
   audioTrack?: string;
   subtitleTrack?: string;

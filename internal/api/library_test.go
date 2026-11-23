@@ -564,7 +564,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		}
 	}
 	lib := api.Library{Sessions: sessions, Provisioner: prov, Jellyfin: jf, CursorKey: []byte("cursor-key"), Service: service, Logger: logger,
-		Delivery: o.delivery, MaxBitrateKbps: o.maxBitrateKbps}
+		Delivery: o.delivery, MaxBitrateKbps: o.maxBitrateKbps, CopyKey: []byte("copy-key")}
 	if o.tmdb != nil {
 		src := o.tmdb
 		lib.Titles = catalog.NewTitles(func() catalog.TitleSource { return src }, st, logger, time.Hour, 0)
@@ -1602,7 +1602,7 @@ type fedCalls struct{ engine *msfp.Engine }
 func (fedCalls) Name() string { return "federation" }
 
 func (f fedCalls) Register(r *plugin.Registrar) error {
-	for _, call := range []string{"pair", "hello", "rotate", "revoke", "libraries", "titles", "play", "progress", "stop"} {
+	for _, call := range []string{"pair", "hello", "rotate", "revoke", "libraries", "titles", "play", "progress", "stop", "previews"} {
 		if err := r.HandlePublic("POST /api/v1/federation/"+call, f.engine.FederationHandler()); err != nil {
 			return err
 		}

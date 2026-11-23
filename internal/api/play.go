@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -164,11 +165,12 @@ func (pb Playback) play(w http.ResponseWriter, r *http.Request, members map[stri
 	// playback section 2.6); one the title doesn't have (any more): not
 	// found, for the player to read the title again.
 	i := slices.IndexFunc(copies, func(c store.IndexedCopy) bool { return c.CopyID == ask.req.VersionID })
-	switch {
-	case len(copies) == 0, ask.req.VersionID != "" && i < 0:
-		problem.Send(w, problem.NotFound, "")
+	if len(copies) == 0 || ask.req.VersionID != "" && i < 0 {
+		// A paired server's copy, or none.
+		pb.playPeerCopy(w, r, caller, t, ask)
 		return
-	case i < 0:
+	}
+	if i < 0 {
 		i = 0
 	}
 	c := copies[i]
@@ -217,6 +219,51 @@ func (pb Playback) play(w http.ResponseWriter, r *http.Request, members map[stri
 				pb.Logger.Warn("finding the next episode failed", "err", err) // a bonus: playback goes on
 			}
 			out.Next = next
+		}
+	}
+	s.View = out
+	pb.Tickets.Describe(s, describe(out.Title))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	writeOK(w, out)
+}
+
+// playPeerCopy plays a paired server's copy of t: the one the request
+// names, else the first (when this server has none). Not found when the
+// title has no such copy (any more): the player reads it again.
+func (pb Playback) playPeerCopy(w http.ResponseWriter, r *http.Request, caller *Caller, t *store.TitleInfo, ask playAsk) {
+	l, ctx, p := pb.Library, r.Context(), caller.Profile
+	theirs, err := l.peerCopies(ctx, p, t)
+	if err != nil {
+		l.storeError(w, err)
+		return
+	}
+	i := slices.IndexFunc(theirs, func(pc peerCopy) bool { return pc.ID == ask.req.VersionID })
+	if ask.req.VersionID == "" && len(theirs) > 0 {
+		i = 0
+	}
+	if i < 0 {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	pc := theirs[i]
+	s, got, ok := pb.playRemote(w, r, caller, remotePlay{copy: pc, req: ask.req, key: t.Ref.Key(), device: ask.device, reason: ask.reason})
+	if !ok {
+		return
+	}
+	out := playJSON{PlayAnswer: wire.PlayAnswer{ID: s.ID, Ticket: s.Ticket, Protocol: got.Protocol, Method: got.Method,
+		Etag: got.Etag, PositionMs: got.PositionMs, VersionID: pc.ID, AudioTrack: got.AudioTrack,
+		AudioRenditions: got.AudioRenditions, Subtitles: got.Subtitles, ReadTitleAgain: got.CopyChanged}}
+	if got.MaxBitrateKbps > 0 {
+		kbps := got.MaxBitrateKbps
+		out.MaxBitrateKbps = &kbps
+	}
+	if titles, err := l.titleSummaries(ctx, p, []string{t.Ref.Key()}); err == nil && len(titles) == 1 {
+		out.Title = &titles[0]
+		if t.Ref.Kind == "episode" {
+			if next, err := l.nextEpisode(ctx, p, t.Ref); err == nil {
+				out.Next = next
+			}
 		}
 	}
 	s.View = out
@@ -348,7 +395,7 @@ func (pb Playback) startPreviews(w http.ResponseWriter, r *http.Request) {
 	}
 	i := slices.IndexFunc(copies, func(c store.IndexedCopy) bool { return c.CopyID == req.VersionID })
 	if i < 0 {
-		problem.Send(w, problem.NotFound, "")
+		pb.startPeerPreviews(w, r, caller, t, req.VersionID)
 		return
 	}
 	c := copies[i]
@@ -364,4 +411,63 @@ func (pb Playback) startPreviews(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeOK(w, wire.PreviewsAnswer{Ticket: ticket, ETag: c.ETag})
+}
+
+// startPeerPreviews gives a paired server's copy's seek-bar previews
+// before it plays, as startPreviews does this server's: a ticket of this
+// server's, its sheets fetched from the paired server when asked
+// (Engine.PreviewSheet: never ahead, never for a whole library), kept by
+// the copy's etag and layout. Not found for a copy without previews.
+func (pb Playback) startPeerPreviews(w http.ResponseWriter, r *http.Request, caller *Caller, t *store.TitleInfo, versionID string) {
+	theirs, err := pb.Library.peerCopies(r.Context(), caller.Profile, t)
+	if err != nil {
+		pb.Library.storeError(w, err)
+		return
+	}
+	i := slices.IndexFunc(theirs, func(pc peerCopy) bool { return pc.ID == versionID })
+	if i < 0 || theirs[i].Copy.PreviewLayout == nil || pb.engine() == nil {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	pc := theirs[i]
+	l := pc.Copy.PreviewLayout
+	tp := jellyfin.Trickplay{Width: l.TileWidth, Height: l.TileHeight, Columns: l.Columns, Rows: l.Rows,
+		Count: l.TileCount, IntervalMs: l.IntervalMs}
+	if sheetCount(tp) == 0 {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	ticket, err := pb.Tickets.IssuePreviews(playback.PreviewTicket{SessionID: caller.Session.ID, ProfileID: caller.Profile.ID,
+		Trickplay: tp, Peer: pc.Source.Peer, Key: pc.Source.Key, Version: pc.Copy.ID, Etag: pc.Copy.ETag}, time.Now())
+	if errors.Is(err, playback.ErrTooManyPreviews) {
+		problem.Send(w, problem.RateLimited, "")
+		return
+	}
+	writeOK(w, wire.PreviewsAnswer{Ticket: ticket, ETag: pc.Copy.ETag})
+}
+
+// servePeerSheet serves a sheet of a paired server's copy's previews
+// under a previews ticket: fetched from it by the engine (checked and
+// re-encoded there), kept by the copy's etag and layout.
+func (pb Playback) servePeerSheet(w http.ResponseWriter, r *http.Request, pt playback.PreviewTicket, sheet string) {
+	n, ok := sheetNumber(&pt.Trickplay, sheet)
+	eng := pb.engine()
+	if !ok || eng == nil {
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	tp := pt.Trickplay
+	key := fmt.Sprintf("peer-previews/%s/%s/%dx%d-%dx%d-%d-%d/%d", pt.Peer, pt.Etag, tp.Width, tp.Height, tp.Columns, tp.Rows,
+		tp.IntervalMs, tp.Count, n)
+	data, err := pb.Library.Images.Fetched(r.Context(), key, func(ctx context.Context) ([]byte, error) {
+		return eng.PreviewSheet(ctx, pt.Peer, pt.Key, pt.Version, n)
+	})
+	if err != nil {
+		if r.Context().Err() == nil {
+			pb.Logger.Info("a paired server's preview sheet failed", "peer", pt.Peer, "err", err)
+		}
+		problem.Send(w, problem.NotFound, "")
+		return
+	}
+	writeSheet(w, data)
 }

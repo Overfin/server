@@ -2,7 +2,9 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"image/png"
@@ -10,6 +12,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/msfp-io/msfp-go/wire"
+	"github.com/overfin/server/internal/store"
 )
 
 // sheetStandIn stands in for B on its previews' sheets once given a body:
@@ -36,122 +42,96 @@ func jpegOf(t *testing.T, w, h int) []byte {
 	return b.Bytes()
 }
 
-// Members by their exact names: federation answers are read so.
-type previewSession struct {
-	ID     string `json:"id"`
-	Stream struct {
-		URL string `json:"url"`
-	} `json:"stream"`
-	Trickplay *struct {
-		TileWidth  int      `json:"tileWidth"`
-		TileHeight int      `json:"tileHeight"`
-		Columns    int      `json:"columns"`
-		Rows       int      `json:"rows"`
-		IntervalMs int      `json:"intervalMs"`
-		TileCount  int      `json:"tileCount"`
-		Sheets     []string `json:"sheets"`
-	} `json:"trickplay"`
-}
-
-// startOnA starts Heat on A, which only B has.
-func startOnA(t *testing.T, x *twoServers) (previewSession, string) {
+// sheetOnA fetches a sheet through A, as A's viewer.
+func sheetOnA(t *testing.T, x *twoServers, who, path string) (int, string) {
 	t.Helper()
-	status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
-	var s previewSession
-	json.Unmarshal([]byte(body), &s)
-	if status != 201 {
-		t.Fatalf("play on A: %d %s", status, body)
-	}
-	return s, body
+	return getAs(t, x.srvA, who, path)
 }
 
-// A paired server's previews are part of its playback: B offers them with
-// the playback's ticket (the engine's rules for it are msfp's tests); A
-// offers them at its own playback's route, each sheet fetched from B and
-// re-encoded, and refuses sheets that aren't what B announced.
+// A paired server's previews come with its copy's previewLayout in the
+// catalog; during a play, A serves them under its own playback's ticket,
+// each sheet fetched from B under B's (never ahead) and re-encoded, and
+// refuses sheets that aren't within the layout.
 func TestPeerPlaybackPreviews(t *testing.T) {
-	t.Skip("federation off until phase 7")
 	var standIn sheetStandIn
 	x := pairForPlayWith(t, standIn.wrap)
-
-	// A's viewer: the same previews, at A's own addresses.
-	s, body := startOnA(t, x)
-	tp := s.Trickplay
-	if tp == nil || tp.TileWidth != 320 || tp.TileHeight != 136 || tp.Rows != 10 || tp.IntervalMs != 10000 || len(tp.Sheets) != 7 ||
-		tp.Sheets[6] != "/api/v1/playback/"+s.ID+"/trickplay/6" || strings.Contains(body, x.srvB.URL) {
-		t.Fatalf("A's previews: %s", body)
-	}
-	if code, got := getAs(t, x.srvA, subject, tp.Sheets[6]); code != 200 || !strings.HasPrefix(got, "\xff\xd8") {
+	s := x.playPeer(t)
+	sheet := "/api/v1/stream/" + s.Ticket + "/trickplay/0"
+	if code, got := sheetOnA(t, x, subject, sheet); code != 200 || !strings.HasPrefix(got, "\xff\xd8") {
 		t.Fatalf("the sheet through A: %d", code)
 	}
-	if code, _ := getAs(t, x.srvA, "other-subject", tp.Sheets[6]); code != http.StatusNotFound {
+	if code, _ := sheetOnA(t, x, "other-subject", sheet); code != http.StatusNotFound {
 		t.Errorf("another account's: %d", code)
 	}
-	for _, bad := range []string{"7", "06", "-1"} {
-		if code, _ := getAs(t, x.srvA, subject, "/api/v1/playback/"+s.ID+"/trickplay/"+bad); code != http.StatusNotFound {
+	for _, bad := range []string{"1", "00", "-1"} {
+		if code, _ := sheetOnA(t, x, subject, "/api/v1/stream/"+s.Ticket+"/trickplay/"+bad); code != http.StatusNotFound {
 			t.Errorf("sheet %s: %d", bad, code)
 		}
 	}
-	// A's view of the playback says the same.
-	var view previewSession
-	if status := get(t, x.srvA, "/api/v1/playback/"+s.ID, &view); status != 200 || view.Trickplay == nil || view.Trickplay.Sheets[6] != tp.Sheets[6] {
-		t.Fatalf("A's view: %d %+v", status, view.Trickplay)
-	}
-
 	// What B sends, A re-encodes: nothing but the pixels comes through.
 	marker := "a trailer that is not pixels"
-	sheet := append(jpegOf(t, 64, 32), marker...)
-	standIn.body.Store(&sheet)
-	s, _ = startOnA(t, x)
-	if code, got := getAs(t, x.srvA, subject, s.Trickplay.Sheets[6]); code != 200 || !strings.HasPrefix(got, "\xff\xd8") || strings.Contains(got, marker) {
+	body := append(jpegOf(t, 64, 32), marker...)
+	standIn.body.Store(&body)
+	s = x.playPeer(t)
+	if code, got := sheetOnA(t, x, subject, "/api/v1/stream/"+s.Ticket+"/trickplay/0"); code != 200 || !strings.HasPrefix(got, "\xff\xd8") || strings.Contains(got, marker) {
 		t.Fatalf("a re-encoded sheet: %d, marker kept %v", code, strings.Contains(got, marker))
 	}
-	// Too many bytes, wider than a sheet of its tiles (10 × 320), not a
-	// JPEG: refused.
+	// Too many bytes, wider or taller than a sheet of its tiles (2 × 160,
+	// 2 × 90), not a JPEG: refused.
 	var pngSheet bytes.Buffer
 	png.Encode(&pngSheet, image.NewRGBA(image.Rect(0, 0, 64, 32)))
 	for name, bad := range map[string][]byte{
 		"too large": append(jpegOf(t, 64, 32), make([]byte, 9<<20)...),
-		"too wide":  jpegOf(t, 3201, 8),
-		"too tall":  jpegOf(t, 8, 1361),
+		"too wide":  jpegOf(t, 321, 8),
+		"too tall":  jpegOf(t, 8, 181),
 		"a PNG":     pngSheet.Bytes(),
 	} {
 		standIn.body.Store(&bad)
-		s, _ = startOnA(t, x)
-		if code, _ := getAs(t, x.srvA, subject, s.Trickplay.Sheets[6]); code != http.StatusNotFound {
+		s = x.playPeer(t)
+		if code, _ := sheetOnA(t, x, subject, "/api/v1/stream/"+s.Ticket+"/trickplay/0"); code != http.StatusNotFound {
 			t.Errorf("%s: %d", name, code)
 		}
 	}
 }
 
-// A paired server without previews for a copy, or with previews outside
-// what MSFP allows, plays without them, as an older Overfin's do.
-func TestPeerPlaybackWithoutPreviews(t *testing.T) {
-	t.Skip("federation off until phase 7")
+// Before a play, a paired server's copy's previews come on demand: A's
+// previews ticket (POST /previews, its session and profile only), each
+// sheet fetched from B when asked (MSFP's previews call and B's previews
+// ticket), kept by the copy's etag and layout; a copy without a
+// previewLayout has none.
+func TestPeerPreviewsBeforePlay(t *testing.T) {
+	ctx := context.Background()
 	x := pairForPlay(t)
-	x.fakeB.setTrickplay(true, nil)
-	s, body := startOnA(t, x)
-	if s.Trickplay != nil || strings.Contains(body, "trickplay") {
-		t.Fatalf("previews from a copy without: %s", body)
+	var page struct{ Copies []wire.Copy }
+	get(t, x.srvA, "/api/v1/titles/title_movie_tmdb_949", &page)
+	status, raw := post(t, x.srvA, "/api/v1/previews", `{"titleId":"title_movie_tmdb_949","versionId":"`+page.Copies[0].ID+`"}`)
+	var a struct{ Ticket, Etag string }
+	json.Unmarshal([]byte(raw), &a)
+	if status != 200 || a.Ticket == "" || a.Etag != page.Copies[0].ETag {
+		t.Fatalf("previews on A: %d %s", status, raw)
 	}
-	if code, _ := getAs(t, x.srvA, subject, "/api/v1/playback/"+s.ID+"/trickplay/0"); code != http.StatusNotFound {
-		t.Errorf("a sheet of none: %d", code)
+	if n := len(livePlaybacks(x.onB)); n != 0 {
+		t.Fatalf("a playback on B for previews: %d", n)
 	}
-	// With previews, they come.
-	x.fakeB.setTrickplay(false, nil)
-	if s, body = startOnA(t, x); s.Trickplay == nil || len(s.Trickplay.Sheets) != 7 {
-		t.Fatalf("previews: %s", body)
+	sheet := "/api/v1/stream/" + a.Ticket + "/trickplay/0"
+	if code, got := sheetOnA(t, x, subject, sheet); code != 200 || !strings.HasPrefix(got, "\xff\xd8") {
+		t.Fatalf("the sheet through A: %d", code)
 	}
-	// Sheets wider than 4,096 pixels, or more than 1,000 of them: none.
-	for name, set := range map[string]map[string]int{
-		"wide":  {"Width": 1000, "Height": 100, "TileWidth": 10, "TileHeight": 10, "ThumbnailCount": 645, "Interval": 10000},
-		"many":  {"Width": 320, "Height": 136, "TileWidth": 1, "TileHeight": 1, "ThumbnailCount": 1001, "Interval": 10000},
-		"right": {"Width": 320, "Height": 136, "TileWidth": 1, "TileHeight": 1, "ThumbnailCount": 1000, "Interval": 10000},
-	} {
-		x.fakeB.setTrickplay(false, set)
-		s, body = startOnA(t, x)
-		if got := s.Trickplay != nil; got != (name == "right") {
-			t.Errorf("%s: %s", name, body)
-		}
+	if code, _ := sheetOnA(t, x, "other-subject", sheet); code != http.StatusNotFound {
+		t.Errorf("another account's: %d", code)
+	}
+	if code, _ := sheetOnA(t, x, subject, "/api/v1/stream/"+a.Ticket+"/trickplay/1"); code != http.StatusNotFound {
+		t.Errorf("past the layout: %d", code)
+	}
+	// Up: a copy without previews.
+	putCopy(t, x.stB, fmt.Sprintf("%032x", 3), upCopy, 1)
+	x.stA.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "14160", Name: "Up", Year: 2009}, []byte(`{}`), time.Now())
+	x.a.ReadNow(ctx, x.bOnA.ID)
+	get(t, x.srvA, "/api/v1/titles/title_movie_tmdb_14160", &page)
+	if len(page.Copies) != 1 {
+		t.Fatalf("Up on A: %+v", page.Copies)
+	}
+	if status, _ := post(t, x.srvA, "/api/v1/previews", `{"titleId":"title_movie_tmdb_14160","versionId":"`+page.Copies[0].ID+`"}`); status != http.StatusNotFound {
+		t.Errorf("previews of a copy without: %d", status)
 	}
 }

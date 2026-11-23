@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/msfp-io/msfp-go"
 	"github.com/overfin/server/internal/delivery"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/playback"
@@ -38,6 +39,9 @@ type deliveryArgs struct {
 	trickplay *jellyfin.Trickplay
 	previews  string
 	creditsMs int64
+	// admit, for a paired server's playback, counts it by the pairing's
+	// limits (msfp.StartRequest.Admit) before this server's own.
+	admit func(method string) (msfp.Slot, error)
 }
 
 // openDelivery plays a copy through the executor: plans it (refusals
@@ -45,15 +49,36 @@ type deliveryArgs struct {
 // converted), makes it, and registers what its stream serves. It
 // answers w itself when it fails.
 func (pb Playback) openDelivery(w http.ResponseWriter, r *http.Request, c store.IndexedCopy, req delivery.Request, a deliveryArgs) (*playback.Stream, bool) {
-	ctx := r.Context()
-	if pb.Delivery == nil {
+	s, err := pb.startDelivery(r.Context(), c, req, a)
+	switch {
+	case err == nil:
+		return s, true
+	case errors.Is(err, playback.ErrStreamLimit):
+		problem.Send(w, problem.StreamLimitReached, "")
+	case errors.Is(err, playback.ErrServerBusy):
+		problem.Send(w, problem.ServerBusy, "")
+	case errors.Is(err, errNotPlayable):
 		problem.Send(w, problem.NotPlayable, "")
-		return nil, false
+	default:
+		pb.sendRefusal(w, err)
+	}
+	return nil, false
+}
+
+// errNotPlayable is a copy the executor can't play at all.
+var errNotPlayable = errors.New("api: not playable")
+
+// startDelivery is openDelivery's work, its failures as errors: a
+// delivery refused (*delivery.Refusal), a limit reached
+// (playback.ErrStreamLimit, ErrServerBusy, or a paired server's, from
+// its admit), errNotPlayable.
+func (pb Playback) startDelivery(ctx context.Context, c store.IndexedCopy, req delivery.Request, a deliveryArgs) (*playback.Stream, error) {
+	if pb.Delivery == nil {
+		return nil, errNotPlayable
 	}
 	plan, err := pb.Delivery.Plan(ctx, c, req)
 	if err != nil {
-		pb.sendRefusal(w, err)
-		return nil, false
+		return nil, err
 	}
 	play := a.auth
 	play.DeviceID = pb.Tickets.ReserveDevice("overfin-play")
@@ -62,25 +87,32 @@ func (pb Playback) openDelivery(w http.ResponseWriter, r *http.Request, c store.
 		Reason: a.reason, Trickplay: a.trickplay, Previews: a.previews, CreditsMs: a.creditsMs,
 		// Counted by what it will make, before anything starts.
 		Delivery: &delivery.Started{Plan: plan}}
+	// A paired server's: counted by its pairing's limits first (the
+	// engine's), then by this server's (Tickets.Admit), released when
+	// anything after refuses.
+	release := func() {}
+	if a.admit != nil {
+		slot, err := a.admit(plan.Method())
+		if err != nil {
+			pb.Tickets.ReleaseDevice(play.DeviceID)
+			return nil, err
+		}
+		release = slot.Release
+	}
 	replaced, err := pb.Tickets.Admit(s, plan.StartMs*10_000, time.Now(), a.lim, a.device)
-	switch {
-	case errors.Is(err, playback.ErrStreamLimit):
+	if err != nil {
+		release()
 		pb.Tickets.ReleaseDevice(play.DeviceID)
-		problem.Send(w, problem.StreamLimitReached, "")
-		return nil, false
-	case errors.Is(err, playback.ErrServerBusy):
-		pb.Tickets.ReleaseDevice(play.DeviceID)
-		problem.Send(w, problem.ServerBusy, "")
-		return nil, false
+		return nil, err
 	}
 	for _, old := range replaced {
 		pb.stopped(old, "taken-over")
 	}
 	started, err := pb.Delivery.Start(ctx, plan)
 	if err != nil {
+		release()
 		pb.Tickets.Remove(s, "stopped", "", time.Now())
-		pb.sendRefusal(w, err)
-		return nil, false
+		return nil, err
 	}
 	var media []byte
 	if started.Protocol == "hls" {
@@ -92,9 +124,9 @@ func (pb Playback) openDelivery(w http.ResponseWriter, r *http.Request, c store.
 			stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 			defer cancel()
 			_ = pb.Delivery.Stop(stopCtx, started)
+			release()
 			pb.Tickets.Remove(s, "stopped", "", time.Now())
-			problem.Send(w, problem.NotPlayable, "")
-			return nil, false
+			return nil, errNotPlayable
 		}
 		s.AddFiles(rw.Files)
 		media = rw.Body
@@ -102,7 +134,7 @@ func (pb Playback) openDelivery(w http.ResponseWriter, r *http.Request, c store.
 	pb.Tickets.SetDelivery(s, started, media)
 	pb.Logger.Info("playback started", "playback", s.ID, "delivery", plan.Kind, "method", plan.Method(),
 		"videoConverted", plan.VideoConverted, "audioConverted", plan.AudioConverted)
-	return s, true
+	return s, nil
 }
 
 // sendRefusal answers a refused delivery as MSFP does: 409

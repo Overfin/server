@@ -1,38 +1,44 @@
 package api
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/msfp-io/msfp-go"
-	"github.com/overfin/server/internal/jellyfin"
+	"github.com/msfp-io/msfp-go/wire"
+	"github.com/overfin/server/internal/delivery"
 	"github.com/overfin/server/internal/playback"
-	"github.com/overfin/server/internal/problem"
+	"github.com/overfin/server/internal/store"
 )
 
 // A paired server's viewer plays one of our titles (ROADMAP.md milestone
 // 6): the MSFP engine hears the paired server's play, checks the pairing,
-// finds our copies in the libraries offered to it, picks the copy and
-// the tracks, counts the pairing's limits, and asks this server to
-// describe the copy and start it (PeerHost, msfp.Playback). This server
-// plays it as it plays for its own people, Overfin's one Jellyfin account
-// playing as a device of the playback's own, within the server's
-// transcodes less those kept for its own people. Its media go through
-// the engine's checks to Serve (msfp.Media), by the playback's ID here
-// (its handle), never by a ticket of ours. Everything personal (what
-// they watch, where they are, their address) stays on their server.
+// finds the copy among the title's (the catalog gives each film and
+// episode its copies from the copy index, store.MSFPCatalog), picks the
+// audio, decides what is served (wire.Serve), counts the pairing's
+// limits, and asks this server to describe the copy and start it
+// (PeerHost, msfp.Playback). This server plays it through the same
+// executor as its own people's (package delivery): the file from disk,
+// or a remux or a transcode by the companion plugin, within the server's
+// transcodes less those kept for its own people. Its media go through the
+// engine's checks to Serve (msfp.Media), by the playback's ID here (its
+// handle), never by a ticket of ours. Everything personal (what they
+// watch, where they are, their address) stays on their server.
 
 // PeerHost is this server's playback and media for the engine: what the
 // paired servers' viewers play here. Current is the Playback in use now
-// (settings reloads make a new one).
+// (settings reloads make a new one); MayBurn is the operator's burn-in
+// switch for paired servers (off by default: rule 17).
 type PeerHost struct {
 	Current func() (Playback, bool)
+	MayBurn func() bool
 }
 
 var (
@@ -51,80 +57,68 @@ func (h PeerHost) playback() (Playback, error) {
 	return pb, nil
 }
 
-// Describe gives what the catalog doesn't say of a copy (msfp.CopyInfo:
-// fonts, tracks not served apart, forms): with msfp-go's revised v0 a
-// copy's tracks, length and previews' layout travel on the title
-// (wire.Copy), which this server doesn't fill yet. Federation is off on
-// this branch until plan phase 7, which describes copies from the copy
-// index; until then this checks only that Jellyfin has the copy.
+// copyOf is the copy index's copy a handle names (the copy ID the
+// catalog gave as its handle).
+func (pb Playback) copyOf(ctx context.Context, handle string) (store.IndexedCopy, error) {
+	c, ok, err := pb.Library.Provisioner.Store.CopyByID(ctx, handle)
+	switch {
+	case err != nil:
+		return store.IndexedCopy{}, msfp.ErrServerBusy
+	case !ok:
+		return store.IndexedCopy{}, msfp.ErrNotFound
+	}
+	return c, nil
+}
+
+// notApart are the subtitle formats never served apart (rule 17): DVD
+// and DVB pictures.
+var notApart = []string{"dvd_subtitle", "dvb_subtitle"}
+
+// Describe gives what the catalog doesn't say of a copy (msfp.CopyInfo):
+// no fonts (ASS is served as its text only, this release), and the
+// subtitle tracks not served apart: DVD and DVB pictures, and a track
+// Jellyfin's numbering doesn't map. Jellyfin isn't asked.
 func (h PeerHost) Describe(ctx context.Context, copy string) (msfp.CopyInfo, error) {
 	pb, err := h.playback()
 	if err != nil {
 		return msfp.CopyInfo{}, err
 	}
-	l := pb.Library
-	ja, uid, err := l.jf(ctx)
+	c, err := pb.copyOf(ctx, copy)
 	if err != nil {
-		return msfp.CopyInfo{}, msfp.ErrServerBusy
+		return msfp.CopyInfo{}, err
 	}
-	play := ja
-	play.DeviceID = pb.Tickets.ReserveDevice("overfin-play")
-	defer pb.Tickets.ReleaseDevice(play.DeviceID)
-	var pr jellyfin.PlaybackRequest
-	pr.DeviceProfile = playback.DeviceProfile(playback.Capabilities{}, 0)
-	info, err := l.Jellyfin.PlaybackInfo(ctx, play, uid, copy, pr)
-	switch {
-	case jellyfin.IsStatus(err, http.StatusNotFound):
-		return msfp.CopyInfo{}, msfp.ErrNotFound
-	case err != nil:
-		return msfp.CopyInfo{}, msfp.ErrServerBusy
-	case len(info.MediaSources) == 0:
-		return msfp.CopyInfo{}, msfp.ErrNotPlayable
+	var info msfp.CopyInfo
+	for _, t := range c.Facts.SubtitleTracks {
+		if _, mapped := c.Streams[t.ID]; !mapped || slices.Contains(notApart, t.Format) {
+			info.NotApart = append(info.NotApart, t.ID)
+		}
 	}
-	return msfp.CopyInfo{}, nil
+	return info, nil
 }
 
-// Start plays a copy for a paired server's viewer: Jellyfin is asked how
-// (by the viewer's device's capabilities, as the engine passes them),
-// the tracks the engine chose are applied, and the playback is admitted
-// by the pairing's limits (req.Admit, the engine's count) and then by
-// this server's transcodes, less those kept for its own people
-// (PeerTranscodeReserve). A remux that Progress later finds re-encoding
-// its video is moved into the pairing's transcodes by the slot Admit
-// gave (msfp.Slot.Transcoding), and stopped when none is left.
+// Start plays a copy for a paired server's viewer through the executor,
+// as the engine decided (req.Delivery, req.MediaType, req.Transcode, the
+// audio track), for its purpose (a download or a scan only within the
+// pairing's limits: req.Admit counts them), admitted by the pairing's
+// limits (req.Admit, the engine's count) and then by this server's
+// transcodes, less those kept for its own people (PeerTranscodeReserve).
+// A burned subtitle only with the operator's switch.
 func (h PeerHost) Start(ctx context.Context, req msfp.StartRequest) (msfp.Started, error) {
 	pb, err := h.playback()
 	if err != nil {
 		return msfp.Started{}, err
 	}
-	if req.AudioOnly {
-		// Overfin shares no music.
+	if req.AudioOnly || req.Parts > 1 {
+		// Overfin shares no music; a copy of several files isn't offered.
 		return msfp.Started{}, msfp.ErrNotPlayable
 	}
-	if req.Parts > 1 {
-		// A copy of several files must come whole, as HLS (MSFP media
-		// section 1); Jellyfin plays its parts one by one, as separate
-		// streams, so this server can't serve it as one yet.
-		return msfp.Started{}, msfp.ErrNotPlayable
-	}
-	l := pb.Library
-	ja, uid, err := l.jf(ctx)
+	c, err := pb.copyOf(ctx, req.Copy)
 	if err != nil {
-		return msfp.Started{}, msfp.ErrServerBusy
+		return msfp.Started{}, err
 	}
-	// msfp-go's revised v0 sends no device capabilities: the engine
-	// decides what is served (req.Delivery, req.Served). Until plan
-	// phase 7 runs it through the executor, Jellyfin is asked as for a
-	// device of no stated capabilities (federation is off on this
-	// branch: no engine calls this).
-	var caps playback.Capabilities
-	kbps := req.MaxBitrateKbps
-	var pr jellyfin.PlaybackRequest
-	pr.StartTimeTicks = req.StartMs * 10_000
-	pr.MaxStreamingBitrate = kbps * 1000
-	pr.DeviceProfile = playback.DeviceProfile(caps.Exact(), pr.MaxStreamingBitrate)
-	off := -1
-	pr.SubtitleStreamIndex = &off
+	play := wire.PlayRequest{Title: req.Title, Purpose: req.Purpose, Delivery: req.Delivery, MediaType: req.MediaType,
+		Transcode: req.Transcode, AudioRenditions: req.AudioRenditions, StartPositionMs: req.StartMs,
+		MaxBitrateKbps: req.MaxBitrateKbps, AudioTrack: req.AudioTrack, VersionID: c.CopyID}
 	// The server's transcodes less those kept for our own people; the
 	// pairing's streams and transcodes are the engine's (req.Admit).
 	var lim playback.Limits
@@ -137,32 +131,49 @@ func (h PeerHost) Start(ctx context.Context, req msfp.StartRequest) (msfp.Starte
 	}
 	lim.RefuseOverLimit = true
 	id := playback.PeerPrefix + req.Peer.ID
-	w := &recorder{header: http.Header{}}
-	r, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/", nil)
-	o, ok := pb.open(w, r, openArgs{req: startRequest{AudioTrack: req.AudioTrack,
-		StartPositionMs: req.StartMs}, pr: pr, kbps: kbps, item: req.Copy, uid: uid, ja: ja, lim: lim, device: req.Peer.Name,
-		accountID: id, profileID: id, sessionID: id, peerTracks: true, admit: req.Admit})
-	if !ok {
-		if w.err != nil {
-			return msfp.Started{}, w.err
-		}
-		return msfp.Started{}, w.refusal()
+	ja, _, err := pb.Library.jf(ctx)
+	if err != nil {
+		return msfp.Started{}, msfp.ErrServerBusy
 	}
-	s, out := o.stream, o.out
-	// Its previews, by the same set Describe gave.
-	pb.previews(ctx, s, ja, uid, func(int) string { return "" })
-	pb.Logger.Info("playback started for a paired server", "playback", s.ID, "peer", req.Peer.Name, "method", o.dec.Method,
-		"reasons", o.dec.Reasons(), "maxKbps", kbps)
-	s.View = out
+	a := deliveryArgs{lim: lim, device: req.Peer.Name, accountID: id, profileID: id, sessionID: id, auth: ja, admit: req.Admit}
+	if req.Purpose != wire.PurposeDownload && req.Purpose != wire.PurposeScan {
+		a.trickplay, a.previews = pb.ownPreviews(ctx, c)
+	}
+	a.creditsMs = pb.credits(ctx, c)
+	mayBurn := h.MayBurn != nil && h.MayBurn()
+	s, err := pb.startDelivery(ctx, c, delivery.Request{Play: play, CapKbps: req.MaxBitrateKbps, MayBurn: mayBurn}, a)
+	if err != nil {
+		return msfp.Started{}, peerStartError(err)
+	}
+	d := s.Delivery
+	pb.Logger.Info("playback started for a paired server", "playback", s.ID, "peer", req.Peer.Name, "purpose", req.Purpose,
+		"delivery", d.Plan.Kind, "method", d.Method())
 	// What plays, for the live view: the title (ours), the server playing
 	// it showing as the account (the control panel).
-	pb.Tickets.Describe(s, l.Provisioner.Store.ItemDescription(ctx, req.Copy))
-	if err := l.Jellyfin.ReportStart(ctx, s.Auth, pb.state(s, pb.Tickets.Snapshot(s))); err != nil {
-		pb.Logger.Warn("could not report a playback start", "playback", s.ID, "err", err)
+	pb.Tickets.Describe(s, pb.Library.Provisioner.Store.ItemDescription(ctx, c.ItemID))
+	return msfp.Started{Handle: s.ID, Method: d.Method(), Protocol: d.Protocol, PositionMs: d.Plan.StartMs}, nil
+}
+
+// peerStartError is a start's failure as the engine's error.
+func peerStartError(err error) error {
+	var me *msfp.Error
+	switch {
+	case errors.As(err, &me):
+		return err // the pairing's own limits (req.Admit)
+	case errors.Is(err, playback.ErrStreamLimit):
+		return msfp.ErrStreamLimitReached
+	case errors.Is(err, playback.ErrServerBusy):
+		return msfp.ErrServerBusy
+	case errors.Is(err, errNotPlayable):
+		return msfp.ErrNotPlayable
 	}
-	// msfp-go's revised v0 takes no media type, information or
-	// segments here: the copy's facts are the catalog's (plan phase 7).
-	return msfp.Started{Handle: s.ID, Method: o.dec.Method, Protocol: o.dec.Protocol, PositionMs: out.PositionMs}, nil
+	if rf := delivery.AsRefusal(err); rf != nil {
+		if rf.Status == http.StatusServiceUnavailable {
+			return msfp.ErrServerBusy
+		}
+		return msfp.ErrDeliveryRefused
+	}
+	return msfp.ErrServerBusy
 }
 
 // peerStream is a paired server's playback here, by its ID.
@@ -176,15 +187,17 @@ func (pb Playback) peerStream(handle string) (*playback.Stream, bool) {
 }
 
 // Progress is a paired server's viewer still watching: the playback here
-// isn't idle (IdleTimeout), and Jellyfin hears where it stands, as for
-// this server's own. msfp-go's revised v0 reports no pause: a peer's
-// playback shows as playing; a report without a position keeps the one
-// it had. Downloads' late reports and the stop's own report are plan
-// phase 7's (federation is off on this branch).
+// isn't idle (IdleTimeout), and the live view shows where it stands. A
+// report without a position keeps the one it had; a download's late
+// report (its playback over) changes nothing here: what they watch is
+// kept on their server.
 func (h PeerHost) Progress(ctx context.Context, rep msfp.Report) error {
 	pb, err := h.playback()
 	if err != nil {
 		return err
+	}
+	if rep.Late {
+		return nil
 	}
 	s, ok := pb.peerStream(rep.Handle)
 	if !ok {
@@ -195,14 +208,6 @@ func (h PeerHost) Progress(ctx context.Context, rep msfp.Report) error {
 		ticks = rep.PositionMs * 10_000
 	}
 	pb.Tickets.Progress(s, ticks, false, time.Now())
-	// Whether a remux really copies the video, as for our own people's;
-	// one that re-encodes counts in the pairing's transcodes (Start).
-	if pb.Tickets.Method(s) == "remux" {
-		s.Checked.Do(func() { go pb.checkRemux(s) })
-	}
-	if err := pb.Library.Jellyfin.ReportProgress(ctx, s.Auth, pb.state(s, pb.Tickets.Snapshot(s))); err != nil {
-		pb.Logger.Warn("could not report progress", "playback", s.ID, "err", err)
-	}
 	return nil
 }
 
@@ -234,16 +239,30 @@ func (h PeerHost) Stop(ctx context.Context, handle string, reason msfp.EndReason
 type peerStreamKey struct{}
 
 // Serve serves the media of a paired server's playback here, the engine
-// having checked its ticket and the request: Jellyfin's file, HLS
-// rewritten to MSFP media 1's subset, subtitles in stretches, PGS, and
-// previews' sheets, by the same code as this server's own.
+// having checked its ticket and the request: the file's bytes for the
+// engine's range, the executor's playlists and segments, subtitles in
+// stretches, PGS, and previews' sheets (a playback's, or a copy's under a
+// previews ticket: OfCopy), by the same code as this server's own. ASS,
+// fonts and whole text tracks aren't served this release (D7).
 func (h PeerHost) Serve(ctx context.Context, handle string, path msfp.MediaPath, rng *msfp.Range, out msfp.ResponseSink) error {
 	pb, err := h.playback()
 	if err != nil {
 		return err
 	}
+	if path.OfCopy {
+		return pb.serveCopySheet(ctx, handle, path, out)
+	}
 	s, ok := pb.peerStream(handle)
-	if !ok {
+	if !ok || path.Entry != 0 {
+		return msfp.ErrNotFound
+	}
+	switch path.Kind {
+	case msfp.MediaASS, msfp.MediaFont:
+		return msfp.ErrNotFound
+	case msfp.MediaFile:
+		return pb.servePeerFile(ctx, s, rng, out)
+	}
+	if path.Whole {
 		return msfp.ErrNotFound
 	}
 	r, err := http.NewRequestWithContext(context.WithValue(ctx, peerStreamKey{}, s), http.MethodGet, "/", nil)
@@ -258,9 +277,6 @@ func (h PeerHost) Serve(ctx context.Context, handle string, path msfp.MediaPath,
 	switch path.Kind {
 	case msfp.MediaMaster:
 		r.SetPathValue("name", "master.m3u8")
-		st.serve(w, r)
-	case msfp.MediaFile:
-		r.SetPathValue("name", "file")
 		st.serve(w, r)
 	case msfp.MediaPlaylist, msfp.MediaSegment:
 		r.SetPathValue("name", path.Name)
@@ -280,6 +296,77 @@ func (h PeerHost) Serve(ctx context.Context, handle string, path msfp.MediaPath,
 		return msfp.ErrNotFound
 	}
 	return w.result()
+}
+
+// servePeerFile writes a file delivery's bytes for the engine's range (the
+// whole file for none): the engine writes the status and the headers,
+// and counts what is sent (a scan's cap, a download's pace).
+func (pb Playback) servePeerFile(ctx context.Context, s *playback.Stream, rng *msfp.Range, out msfp.ResponseSink) error {
+	d := s.Delivery
+	if d == nil || d.Protocol != wire.ProtocolFile || pb.Delivery == nil {
+		return msfp.ErrNotFound
+	}
+	f, err := pb.Delivery.OpenFile(ctx, d)
+	if err != nil {
+		return msfp.ErrNotFound
+	}
+	defer f.Close()
+	first, n := int64(0), f.Info.Size()
+	if rng != nil {
+		first, n = rng.First, rng.Last-rng.First+1
+	}
+	if first < 0 || n < 0 || first+n > f.Info.Size() {
+		return msfp.ErrRangeNotSatisfiable
+	}
+	if _, err := f.Seek(first, io.SeekStart); err != nil {
+		return msfp.ErrNotFound
+	}
+	// While it flows, the playback is in use: a download is one long
+	// read.
+	pb.Tickets.Touch(s, time.Now())
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		tick := time.NewTicker(30 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case now := <-tick.C:
+				pb.Tickets.Touch(s, now)
+			case <-done:
+				return
+			}
+		}
+	}()
+	out.Start(http.StatusOK, d.Plan.Copy.Facts.MediaType, n, "")
+	_, err = io.CopyN(out, f, n)
+	return err
+}
+
+// serveCopySheet serves a sheet of a copy's previews under a previews
+// ticket (MSFP video section 5.6: the handle is the copy's), from the
+// previews Overfin made for its file.
+func (pb Playback) serveCopySheet(ctx context.Context, handle string, path msfp.MediaPath, out msfp.ResponseSink) error {
+	if path.Kind != msfp.MediaSheet || pb.Library.Previews == nil {
+		return msfp.ErrNotFound
+	}
+	c, err := pb.copyOf(ctx, handle)
+	if err != nil {
+		return err
+	}
+	tp, fp := pb.ownPreviews(ctx, c)
+	if tp == nil || path.Sheet < 0 || path.Sheet >= sheetCount(*tp) {
+		return msfp.ErrNotFound
+	}
+	l := pb.Library
+	data, err := l.Images.Fetched(ctx, fmt.Sprintf("previews/%s/%d", fp, path.Sheet),
+		func(context.Context) ([]byte, error) { return l.Previews.Store.Sheet(fp, path.Sheet) })
+	if err != nil {
+		return msfp.ErrNotFound
+	}
+	out.Start(http.StatusOK, "image/jpeg", int64(len(data)), "")
+	_, err = out.Write(data)
+	return err
 }
 
 // rangeHeader writes a range back as a Range header.
@@ -344,67 +431,4 @@ func (w *sinkWriter) result() error {
 		return msfp.ErrServerBusy
 	}
 	return msfp.ErrNotFound
-}
-
-// recorder keeps what open answers when it fails, for Start to give the
-// engine as its error.
-type recorder struct {
-	header http.Header
-	status int
-	body   bytes.Buffer
-	err    error
-}
-
-func (w *recorder) Header() http.Header { return w.header }
-
-func (w *recorder) WriteHeader(status int) {
-	if w.status == 0 {
-		w.status = status
-	}
-}
-
-func (w *recorder) Write(b []byte) (int, error) {
-	if w.status == 0 {
-		w.status = http.StatusOK
-	}
-	return w.body.Write(b)
-}
-
-// refusal is open's failure as the engine's error.
-func (w *recorder) refusal() error {
-	var p struct {
-		Type string `json:"type"`
-	}
-	json.Unmarshal(w.body.Bytes(), &p)
-	t := problem.Type(p.Type)
-	switch {
-	case t == problem.NotPlayable:
-		return msfp.ErrNotPlayable
-	case t == problem.StreamLimitReached:
-		return msfp.ErrStreamLimitReached
-	case t == problem.ServerBusy, w.status >= 500:
-		return msfp.ErrServerBusy
-	case w.status == http.StatusNotFound:
-		return msfp.ErrNotFound
-	}
-	return errors.New("api: a paired server's playback couldn't start")
-}
-
-// fileType is a file's media type by its container, as Jellyfin names it
-// ("mkv", "mp4,m4v"…): "" when unknown, the engine then sending none.
-//
-//lint:ignore U1000 unused while federation is off on this branch; phase 7 serves peers again.
-func fileType(container string) string {
-	first, _, _ := strings.Cut(strings.ToLower(container), ",")
-	switch first {
-	case "mp4", "m4v", "mov":
-		return "video/mp4"
-	case "mkv", "matroska":
-		return "video/x-matroska"
-	case "webm":
-		return "video/webm"
-	case "ts", "mpegts":
-		return "video/mp2t"
-	}
-	return ""
 }

@@ -1382,7 +1382,7 @@ export class Player {
     const decision = await chooseDelivery(page.copies, this.env, {
       versionId: this.choice.versionId, audioTrack: this.choice.audioTrack, audioLanguage: this.choice.audioLanguage,
       audio: page.wishes?.audio, language: this.options.audioLanguage, limits: page.limits, encoders: page.encoders,
-      maxBitrateKbps: this.choice.maxBitrateKbps, minLevel: this.minLevel, peers: this.options.peers, memory,
+      maxBitrateKbps: this.choice.maxBitrateKbps, minLevel: this.minLevel, peers: page.peers || this.options.peers, memory,
     });
     if (overtaken()) return null;
     let answer;

@@ -82,7 +82,10 @@ type titleDetail struct {
 	// Copies are a film's or an episode's copies the profile may see,
 	// MSFP's copy objects as they are, in Overfin's order (copies.go);
 	// Limits, Wishes and Encoders, Overfin's wrapper for a play of them.
-	Copies   []wire.Copy     `json:"copies,omitempty"`
+	Copies []wire.Copy `json:"copies,omitempty"`
+	// Peers are the IDs of the copies paired servers hold (Overfin's
+	// wrapper): the player prefers this server's own (D11).
+	Peers    []string        `json:"peers,omitempty"`
 	Limits   *playLimitsJSON `json:"limits,omitempty"`
 	Wishes   *wishesJSON     `json:"wishes,omitempty"`
 	Encoders *encodersJSON   `json:"encoders,omitempty"`

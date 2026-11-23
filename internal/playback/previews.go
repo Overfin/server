@@ -28,7 +28,11 @@ type PreviewTicket struct {
 	// layout.
 	Previews  string
 	Trickplay jellyfin.Trickplay
-	expires   time.Time
+	// Peer, Key, Version and Etag, for a paired server's copy: the
+	// pairing, the title's key and the copy's version ID there, and its
+	// etag (its sheets are fetched from it, kept by etag and layout).
+	Peer, Key, Version, Etag string
+	expires                  time.Time
 }
 
 // ErrTooManyPreviews: the session asked for too many previews tickets in

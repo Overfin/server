@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/api"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/store"
@@ -23,21 +25,30 @@ import (
 // for them through its playback (api.PeerHost), and theirs listed and
 // played on its site, through it.
 
-// Members by their exact names.
+// Members by their exact names: a play's answer, its stream built from
+// its ticket under this server's own route.
 type peerSession struct {
-	ID     string `json:"id"`
-	Method string `json:"method"`
-	Stream struct {
-		URL string `json:"url"`
-	} `json:"stream"`
-	VersionID string `json:"versionId"`
+	ID, Ticket, Protocol, Method, VersionID, AudioTrack, Etag string
+	Subtitles                                                 []wire.ServedSubtitle
+	Type, Detail                                              string // a problem's
 }
 
-// twoServers is B, holding a film, Heat, paired with A, which wants B's
-// films and knows of Heat.
+// URL is the playback's stream, as a player builds it (MSFP: from the
+// ticket).
+func (s peerSession) URL() string {
+	name := "master.m3u8"
+	if s.Protocol == "file" {
+		name = "file"
+	}
+	return "/api/v1/stream/" + s.Ticket + "/" + name
+}
+
+// twoServers is B, holding a film, Heat (the copy index's copy, played by
+// its executor: playedServer), paired with A, which wants B's films and
+// knows of Heat but holds no copy of it.
 type twoServers struct {
 	srvA, srvB *httptest.Server
-	fakeB      *fakeJellyfin
+	played     *played
 	stA, stB   *store.Store
 	a, b       *msfp.Engine
 	onB        *playback.Tickets
@@ -59,7 +70,7 @@ func pairForPlayWith(t *testing.T, wrapB func(http.Handler) http.Handler) *twoSe
 	t.Helper()
 	ctx := context.Background()
 	x := twoServers{endedOnB: make(chan msfp.PlaybackEnded, 16)}
-	x.srvB, x.fakeB = newServerWith(t, options{store: &x.stB, federation: &x.b, tickets: &x.onB, playback: &x.pbB, wrap: wrapB,
+	x.played = playedServer(t, options{federation: &x.b, playback: &x.pbB, wrap: wrapB,
 		events: func(ev msfp.Event) {
 			if e, ok := ev.(msfp.PlaybackEnded); ok {
 				select {
@@ -68,19 +79,31 @@ func pairForPlayWith(t *testing.T, wrapB func(http.Handler) http.Handler) *twoSe
 				}
 			}
 		}})
-	x.fakeB.setDirect(true)
-	x.stB.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "Heat", SortName: "heat",
-		TMDB: "949", LibraryID: "films", AudioTags: []string{"fr"}}}, 1)
-	x.stB.RefreshTitleKeys(ctx)
-	x.stB.SetLibraries(ctx, []store.Library{{ID: "films", Item: []byte(`{"Name":"Films","CollectionType":"movies"}`)}})
+	x.srvB, x.stB, x.onB = x.played.srv, x.played.st, x.played.tickets
+	id := func(n int) string { return fmt.Sprintf("%032x", n) }
+	x.stB.SetLibraries(ctx, []store.Library{{ID: id(0xf1), Item: []byte(`{"Name":"Films","CollectionType":"movies"}`)},
+		{ID: id(0xf2), Item: []byte(`{"Name":"Songs","CollectionType":"music"}`)}})
 	x.srvA, _ = newServerWith(t, options{store: &x.stA, federation: &x.a, playback: &x.pbA, fedName: "A"})
 	x.aOnB, x.bOnA = pairEngines(t, x.b, x.a)
-	if err := x.b.SetOffers(ctx, x.aOnB.ID, []string{"films"}); err != nil {
+	if err := x.b.SetOffers(ctx, x.aOnB.ID, []string{id(0xf1)}); err != nil {
 		t.Fatal(err)
 	}
 	wantAll(t, x.a, x.bOnA.ID)
+	x.stA.SetCatalogState(ctx, store.CatalogState{Pass: 1})
 	x.stA.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "949", Name: "Heat", Year: 1995}, []byte(`{}`), time.Now())
 	return &x
+}
+
+// putCopy puts a read copy of an item in the copy index, of parts files.
+func putCopy(t *testing.T, st *store.Store, item, copyID string, parts int) {
+	t.Helper()
+	c := store.IndexedCopy{CopyID: copyID, ItemID: item, SourceID: item, Fingerprint: "x1-" + item, ETag: "etag" + item[14:],
+		Size: 1000, Parts: parts, Streams: map[string]int{"v": 0, "a1": 1},
+		Facts: wire.Copy{DurationMs: 60_000, MediaType: "video/matroska", Size: 1000,
+			AudioTracks: []wire.CopyAudio{{ID: "a1", Codec: "aac", Codecs: "mp4a.40.2", Channels: 2, Language: "en"}}}}
+	if err := st.PutCopy(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // pairEngines pairs b with owner: owner makes a code, b redeems it,
@@ -153,46 +176,68 @@ func livePlaybacks(t *playback.Tickets) []*playback.Stream {
 	return t.Where(func(*playback.Stream) bool { return true })
 }
 
-// Someone on A plays a film only B has: A asks B, the stream comes
-// through A (the browser never asks B), A keeps where they are, B keeps
-// nothing personal, a restart under a 1-stream limit replaces the
-// playback there, and stopping on A ends it on B.
+// startOnA is A's viewer's play of Heat, with MSFP's play request body.
+func (x *twoServers) start(t *testing.T, body string) (int, peerSession) {
+	t.Helper()
+	status, raw := post(t, x.srvA, "/api/v1/playback", body)
+	var s peerSession
+	json.Unmarshal([]byte(raw), &s)
+	if status == 201 && (strings.Contains(raw, x.srvB.URL) || !strings.HasPrefix(s.ID, "play_")) {
+		t.Fatalf("play on A: %s", raw)
+	}
+	return status, s
+}
+
+// Someone on A plays a film only B has: A's title page lists B's copy,
+// under an ID of A's, said to be a paired server's; the play asks B with
+// the player's request, the stream comes through A (the browser never
+// asks B, nor gets B's ticket), B plays it through its executor (here
+// the baseline: the H.264 picture copied, its E-AC-3 converted), A keeps
+// where they are, B keeps nothing personal, another audio track under a
+// 1-stream limit replaces the playback there, and stopping on A ends it
+// on B.
 func TestPlayFromPeer(t *testing.T) {
-	t.Skip("federation off until phase 7")
 	ctx := context.Background()
 	x := pairForPlay(t)
-	srvA, srvB, stB, onB := x.srvA, x.srvB, x.stB, x.onB
+	srvA, stB, onB := x.srvA, x.stB, x.onB
 
-	// On A (which keeps TMDB's page of it), the film is there to play,
-	// though no library of A's has it.
-	var title struct {
-		Availability string
-		Playable     bool
+	var page struct {
+		Playable bool
+		Copies   []wire.Copy
+		Peers    []string
 	}
-	if status := get(t, srvA, "/api/v1/titles/title_movie_tmdb_949", &title); status != 200 || title.Availability != "available" || !title.Playable {
-		t.Fatalf("A's title page: %d %+v", status, title)
+	if status := get(t, srvA, "/api/v1/titles/title_movie_tmdb_949", &page); status != 200 || !page.Playable ||
+		len(page.Copies) != 1 || !slices.Equal(page.Peers, []string{page.Copies[0].ID}) {
+		t.Fatalf("A's title page: %d %+v", status, page)
+	}
+	c := page.Copies[0]
+	if c.ID == heatCopy || !strings.HasPrefix(c.ID, "v") || len(c.AudioTracks) != 2 || c.Video == nil || c.Video.Height != 1080 ||
+		c.PreviewLayout == nil || len(c.Segments) != 2 {
+		t.Fatalf("B's copy on A: %+v", c)
 	}
 
-	status, body := post(t, srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{},"audioLanguage":"fr"}`)
-	var s peerSession
-	json.Unmarshal([]byte(body), &s)
-	if status != 201 || !strings.HasPrefix(s.Stream.URL, "/api/v1/stream/") || strings.Contains(body, srvB.URL) || !strings.HasPrefix(s.ID, "play_") {
-		t.Fatalf("play on A: %d %s", status, body)
+	status, s := x.start(t, `{"titleId":"title_movie_tmdb_949","versionId":"`+c.ID+`"}`)
+	if status != 201 || s.VersionID != c.ID || s.Method != "transcode" || s.Protocol != "hls" || s.AudioTrack != "a1" || s.Etag == "" {
+		t.Fatalf("play on A: %d %+v", status, s)
 	}
-	// Its version, as B names it: an opaque ID of B's, never Jellyfin's.
-	if !strings.HasPrefix(s.VersionID, "ver_") || strings.Contains(s.VersionID, fmt.Sprintf("%032x", 1)) {
-		t.Fatalf("version: %q", s.VersionID)
+	if o := x.played.maker.last(); !o.Video.Copy || o.Audio.Copy || o.Audio.Codec != "aac" {
+		t.Fatalf("B's order: %+v", o)
 	}
-	if code, got := viewerGet(t, srvA, s.Stream.URL); code != 200 || got == "" {
+	// Subtitles served apart: SubRip as text, PGS as pictures; DVD
+	// pictures never apart (B's Describe).
+	if !slices.Equal(s.Subtitles, []wire.ServedSubtitle{{ID: "s3", Form: "text"}, {ID: "s4", Form: "picture"}}) {
+		t.Errorf("subtitles: %+v", s.Subtitles)
+	}
+	if code, got := viewerGet(t, srvA, s.URL()); code != 200 || !strings.HasPrefix(got, "#EXTM3U") {
 		t.Fatalf("the stream through A: %d %q", code, got)
 	}
 	// On B, a playback of A's, counted as the pairing's: B's ticket stays
 	// between the servers.
 	live := livePlaybacks(onB)
-	if len(live) != 1 || !strings.HasPrefix(live[0].AccountID, playback.PeerPrefix) {
+	if len(live) != 1 || !strings.HasPrefix(live[0].AccountID, playback.PeerPrefix) || live[0].Delivery == nil {
 		t.Fatalf("playbacks on B: %d", len(live))
 	}
-	if strings.Contains(body, live[0].Ticket) {
+	if live[0].Ticket == s.Ticket {
 		t.Fatal("the viewer got B's ticket")
 	}
 	if views := x.b.Playbacks(); len(views) != 1 || views[0].Handle != live[0].ID || views[0].PeerName != "A" {
@@ -206,37 +251,74 @@ func TestPlayFromPeer(t *testing.T) {
 	if err := x.b.SetLimits(ctx, x.aOnB.ID, msfp.Limits{Streams: 1, Transcodes: 1}); err != nil {
 		t.Fatal(err)
 	}
-	status, body = post(t, srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{},"audioLanguage":"fr"}`)
-	var restarted peerSession
-	json.Unmarshal([]byte(body), &restarted)
-	if status != 201 {
-		t.Fatalf("a restart under a 1-stream limit: %d %s", status, body)
+	status, restarted := x.start(t, `{"titleId":"title_movie_tmdb_949","versionId":"`+c.ID+`","audioTrack":"a2"}`)
+	if status != 201 || restarted.AudioTrack != "a2" || restarted.Method != "remux" {
+		t.Fatalf("a restart under a 1-stream limit: %d %+v", status, restarted)
 	}
-	if code, _ := viewerGet(t, srvA, s.Stream.URL); code != http.StatusNotFound {
+	if code, _ := viewerGet(t, srvA, s.URL()); code != http.StatusNotFound {
 		t.Errorf("the old playback's stream after the restart: %d", code)
 	}
 	if n := len(livePlaybacks(onB)); n != 1 {
 		t.Errorf("playbacks on B after the restart: %d", n)
 	}
-	if code, _ := viewerGet(t, srvA, restarted.Stream.URL); code != 200 {
+	if code, _ := viewerGet(t, srvA, restarted.URL()); code != 200 {
 		t.Errorf("the new playback's stream: %d", code)
 	}
 	if status, _ := post(t, srvA, "/api/v1/playback/"+restarted.ID+"/stop", `{"positionMs":600000}`); status != 204 {
 		t.Fatalf("stop: %d", status)
 	}
-	// B hears of the stop: its playback ends.
-	deadline := time.Now().Add(5 * time.Second)
-	for len(livePlaybacks(onB)) != 0 || len(x.b.Playbacks()) != 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("B's playbacks after A stopped: %d", len(livePlaybacks(onB)))
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitFor(t, "B's playbacks after A stopped", func() bool { return len(livePlaybacks(onB)) == 0 && len(x.b.Playbacks()) == 0 })
 	// Nothing personal kept on B, once stopped mid-film (recording runs
 	// in the background).
 	time.Sleep(300 * time.Millisecond)
 	if got, _ := stB.ContinueWatching(ctx, playback.PeerPrefix+x.aOnB.ID, 0, 10); len(got) != 0 {
 		t.Fatalf("B kept a position: %v", got)
+	}
+	// A copy B's catalog doesn't have (any more): not found, for the
+	// player to read the title again.
+	if status, _ := x.start(t, `{"titleId":"title_movie_tmdb_949","versionId":"vnonenonenonenonenonenonenone"}`); status != http.StatusNotFound {
+		t.Errorf("a copy of none: %d", status)
+	}
+}
+
+// The copy's file, through A by byte ranges (the engine's remote file),
+// with the copy's media type and etag; a read cut there (B's playback
+// ended: a long pause) reads on under a new playback of the same copy.
+func TestPeerFileRelayed(t *testing.T) {
+	x := pairForPlay(t)
+	var page struct{ Copies []wire.Copy }
+	get(t, x.srvA, "/api/v1/titles/title_movie_tmdb_949", &page)
+	status, s := x.start(t, `{"titleId":"title_movie_tmdb_949","versionId":"`+page.Copies[0].ID+`","delivery":"file"}`)
+	if status != 201 || s.Protocol != "file" || s.Method != "direct" {
+		t.Fatalf("file: %d %+v", status, s)
+	}
+	ranged := func(want int) {
+		t.Helper()
+		req, _ := http.NewRequest("GET", x.srvA.URL+s.URL(), nil)
+		req.Header.Set("Remote-User", subject)
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		req.Header.Set("Range", "bytes=10-19")
+		res, err := client(x.srvA, subject).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		if res.StatusCode != want || want == 206 && (string(b) != string(x.played.file[10:20]) ||
+			res.Header.Get("Content-Range") != fmt.Sprintf("bytes 10-19/%d", len(x.played.file)) ||
+			res.Header.Get("Content-Type") != "video/matroska") {
+			t.Fatalf("a range through A: %d %q %v", res.StatusCode, b, res.Header)
+		}
+	}
+	ranged(206)
+	// B ends it (its idle cleanup): A reads on under a new playback.
+	x.pbB.EndIdle(time.Now().Add(api.IdleTimeout + time.Minute))
+	if r := x.ending(t); r != msfp.EndExpired {
+		t.Fatalf("B's idle cleanup: %v", r)
+	}
+	ranged(206)
+	if n := len(livePlaybacks(x.onB)); n != 1 {
+		t.Fatalf("B's playbacks after the restart: %d", n)
 	}
 }
 
@@ -244,45 +326,26 @@ func TestPlayFromPeer(t *testing.T) {
 // playbacks here at once, both sides: A's viewer's stream stops (MSFP
 // playback, section 6.3).
 func TestPeerPlaybacksEndAtOnce(t *testing.T) {
-	t.Skip("federation off until phase 7")
 	ctx := context.Background()
 	x := pairForPlay(t)
-	play := func() peerSession {
-		status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
-		var s peerSession
-		json.Unmarshal([]byte(body), &s)
-		if status != 201 {
-			t.Fatalf("play: %d %s", status, body)
-		}
-		if code, _ := viewerGet(t, x.srvA, s.Stream.URL); code != 200 {
-			t.Fatalf("the stream: %d", code)
-		}
-		return s
-	}
-	s := play()
+	films := fmt.Sprintf("%032x", 0xf1)
+	s := x.playPeer(t)
 	if err := x.b.SetOffers(ctx, x.aOnB.ID, nil); err != nil {
 		t.Fatal(err)
 	}
-	// The engine refuses the ticket at once, and tells B's playback to
-	// stop, in the background.
-	deadline := time.Now().Add(5 * time.Second)
-	for len(livePlaybacks(x.onB)) != 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("the library no longer offered: B's playback still live")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if code, _ := viewerGet(t, x.srvA, s.Stream.URL); code != http.StatusNotFound {
+	waitFor(t, "the library no longer offered: B's playback still live", func() bool { return len(livePlaybacks(x.onB)) == 0 })
+	if code, _ := viewerGet(t, x.srvA, s.URL()); code != http.StatusNotFound {
 		t.Fatalf("the library no longer offered: the stream through A %d", code)
 	}
-	if err := x.b.SetOffers(ctx, x.aOnB.ID, []string{"films"}); err != nil {
+	if err := x.b.SetOffers(ctx, x.aOnB.ID, []string{films}); err != nil {
 		t.Fatal(err)
 	}
-	s = play()
+	wantAll(t, x.a, x.bOnA.ID)
+	s = x.playPeer(t)
 	if err := x.a.End(ctx, x.bOnA.ID); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := viewerGet(t, x.srvA, s.Stream.URL); code != http.StatusNotFound {
+	if code, _ := viewerGet(t, x.srvA, s.URL()); code != http.StatusNotFound {
 		t.Fatalf("the pairing ended: the stream through A %d", code)
 	}
 	var mine []*playback.Stream
@@ -300,7 +363,6 @@ func TestPeerPlaybacksEndAtOnce(t *testing.T) {
 // from B is an entry of the menu, "Films (B)" (or A's own name for it),
 // listing B's films; all titles list both films, each once.
 func TestPeerTitlesListed(t *testing.T) {
-	t.Skip("federation off until phase 7")
 	ctx := context.Background()
 	var stB, stA *store.Store
 	var b, a *msfp.Engine
@@ -309,6 +371,8 @@ func TestPeerTitlesListed(t *testing.T) {
 		TMDB: "949", LibraryID: "films"}, {ID: fmt.Sprintf("%032x", 2), Kind: "movie", Name: "Up", SortName: "up",
 		TMDB: "14160", LibraryID: "films"}}, 1)
 	stB.RefreshTitleKeys(ctx)
+	putCopy(t, stB, fmt.Sprintf("%032x", 1), "vheatheatheatheatheatheathe", 1)
+	putCopy(t, stB, fmt.Sprintf("%032x", 2), "vupupupupupupupupupupupupup", 1)
 	stB.SetLibraries(ctx, []store.Library{{ID: "films", Item: []byte(`{"Name":"Films","CollectionType":"movies"}`)},
 		{ID: "songs", Item: []byte(`{"Name":"Songs","CollectionType":"music"}`)}})
 	srvA, _ := newServerWith(t, options{store: &stA, federation: &a, fedName: "A"})
@@ -391,65 +455,52 @@ func TestPeerTitlesListed(t *testing.T) {
 	}
 }
 
-// B refusing a playback tells A why, and A its viewer: a title B can't
-// play isn't playable, B's limit for A reached is busy.
+// B refusing a playback tells A why, and A its viewer: a delivery B
+// won't make is refused (the player steps down), B's limit for A reached
+// is busy.
 func TestPeerRefusalsToldApart(t *testing.T) {
-	t.Skip("federation off until phase 7")
 	ctx := context.Background()
 	x := pairForPlay(t)
-	start := func() (int, string) {
-		status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
-		var p struct{ Type string }
-		json.Unmarshal([]byte(body), &p)
-		return status, p.Type
-	}
-	x.fakeB.mu.Lock()
-	x.fakeB.notPlayable = true
-	x.fakeB.mu.Unlock()
-	if status, typ := start(); status != http.StatusConflict || typ != "not-playable" {
-		t.Fatalf("a title B can't play: %d %s", status, typ)
-	}
-	x.fakeB.mu.Lock()
-	x.fakeB.notPlayable = false
-	x.fakeB.mu.Unlock()
-	if err := x.b.SetLimits(ctx, x.aOnB.ID, msfp.Limits{}); err != nil {
-		t.Fatal(err)
-	}
-	if status, typ := start(); status != http.StatusServiceUnavailable || typ != "server-busy" {
-		t.Fatalf("B's limit for A reached: %d %s", status, typ)
-	}
-}
-
-// A copy of several files (Jellyfin's stacked parts) is one copy in MSFP,
-// to be served whole as HLS; B can't serve it as one, so it isn't
-// playable (MSFP playback section 1, media section 1).
-func TestPeerCopyOfSeveralParts(t *testing.T) {
-	t.Skip("federation off until phase 7")
-	x := pairForPlay(t)
-	x.fakeB.mu.Lock()
-	x.fakeB.parts = 2
-	x.fakeB.mu.Unlock()
-	status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
-	var p struct{ Type string }
-	json.Unmarshal([]byte(body), &p)
-	if status != http.StatusConflict || p.Type != "not-playable" {
-		t.Fatalf("a copy of two parts: %d %s", status, body)
+	var page struct{ Copies []wire.Copy }
+	get(t, x.srvA, "/api/v1/titles/title_movie_tmdb_949", &page)
+	v := page.Copies[0].ID
+	if status, s := x.start(t, `{"titleId":"title_movie_tmdb_949","versionId":"`+v+`","delivery":"transcode","transcode":{"videoCodec":"av1"}}`); status != http.StatusConflict || s.Type != "delivery-refused" {
+		t.Fatalf("a codec B doesn't make: %d %+v", status, s)
 	}
 	if n := len(livePlaybacks(x.onB)); n != 0 {
 		t.Errorf("playbacks on B: %d", n)
 	}
-	x.fakeB.mu.Lock()
-	x.fakeB.parts = 0
-	x.fakeB.mu.Unlock()
-	if status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`); status != 201 {
-		t.Fatalf("a copy of one file: %d %s", status, body)
+	if err := x.b.SetLimits(ctx, x.aOnB.ID, msfp.Limits{}); err != nil {
+		t.Fatal(err)
+	}
+	if status, s := x.start(t, `{"titleId":"title_movie_tmdb_949","versionId":"`+v+`"}`); status != http.StatusServiceUnavailable || s.Type != "server-busy" {
+		t.Fatalf("B's limit for A reached: %d %+v", status, s)
+	}
+}
+
+// A copy of several files (Jellyfin's stacked parts) is one copy in MSFP,
+// to be served whole; B can't serve it as one, so it isn't offered: a
+// film B holds only so has no copy on A.
+func TestPeerCopyOfSeveralParts(t *testing.T) {
+	ctx := context.Background()
+	x := pairForPlay(t)
+	putCopy(t, x.stB, fmt.Sprintf("%032x", 3), upCopy, 2) // Up, now two files
+	x.stA.SetTitleDetails(ctx, store.Title{Kind: "movie", TMDB: "14160", Name: "Up", Year: 2009}, []byte(`{}`), time.Now())
+	if _, err := x.a.ReadNow(ctx, x.bOnA.ID); err != nil {
+		t.Fatal(err)
+	}
+	var page struct{ Copies []wire.Copy }
+	if get(t, x.srvA, "/api/v1/titles/title_movie_tmdb_14160", &page); len(page.Copies) != 0 {
+		t.Fatalf("a copy of two parts offered: %+v", page.Copies)
+	}
+	if status, _ := x.start(t, `{"titleId":"title_movie_tmdb_14160"}`); status != http.StatusNotFound {
+		t.Fatalf("a copy of two parts: %d", status)
 	}
 }
 
 // B's host refusing A's play unsigned (a gateway's plain 429) is busy
 // for now to A's viewer, not "can't be played".
 func TestPeerPlayUnansweredIsBusy(t *testing.T) {
-	t.Skip("federation off until phase 7")
 	x := pairForPlayWith(t, func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/api/v1/federation/play" {
@@ -460,59 +511,38 @@ func TestPeerPlayUnansweredIsBusy(t *testing.T) {
 			h.ServeHTTP(w, r)
 		})
 	})
-	status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
-	var p struct{ Type string }
-	_ = json.Unmarshal([]byte(body), &p)
-	if status != http.StatusServiceUnavailable || p.Type != "server-busy" {
-		t.Fatalf("an unsigned 429 from B's host: %d %s", status, p.Type)
+	if status, s := x.start(t, `{"titleId":"title_movie_tmdb_949"}`); status != http.StatusServiceUnavailable || s.Type != "server-busy" {
+		t.Fatalf("an unsigned 429 from B's host: %d %+v", status, s)
 	}
 }
 
 // B says it can't be called (MSFP core section 7.5): A connects to it no
 // more, its viewers' playback from B among them, which ends at once.
 func TestRemotePlaybackEndsWhenPeerUncallable(t *testing.T) {
-	t.Skip("federation off until phase 7")
 	ctx := context.Background()
 	x := pairForPlay(t)
-	status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
-	var s peerSession
-	json.Unmarshal([]byte(body), &s)
-	if status != 201 {
-		t.Fatalf("play: %d %s", status, body)
-	}
-	if code, _ := viewerGet(t, x.srvA, s.Stream.URL); code != 200 {
-		t.Fatalf("the stream through A: %d", code)
-	}
+	s := x.playPeer(t)
 	if err := x.b.SetUncallable(ctx, true); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
+	waitFor(t, "B still callable on A", func() bool {
 		p, _ := x.a.Peer(ctx, x.bOnA.ID)
-		if p.Inbound == msfp.InboundNo {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("B still callable on A: %+v", p)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if code, _ := viewerGet(t, x.srvA, s.Stream.URL); code != http.StatusNotFound {
+		return p.Inbound == msfp.InboundNo
+	})
+	if code, _ := viewerGet(t, x.srvA, s.URL()); code != http.StatusNotFound {
 		t.Fatalf("A still relays B's stream, B saying it can't be called: %d", code)
 	}
 }
 
-// playPeer starts A's viewer's playback of B's film, and fetches its
-// stream once.
+// playPeer starts A's viewer's playback of B's film (its first copy, the
+// baseline), and fetches its stream once.
 func (x *twoServers) playPeer(t *testing.T) peerSession {
 	t.Helper()
-	status, body := post(t, x.srvA, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","capabilities":{}}`)
-	var s peerSession
-	json.Unmarshal([]byte(body), &s)
+	status, s := x.start(t, `{"titleId":"title_movie_tmdb_949"}`)
 	if status != 201 {
-		t.Fatalf("play: %d %s", status, body)
+		t.Fatalf("play: %d %+v", status, s)
 	}
-	if code, _ := viewerGet(t, x.srvA, s.Stream.URL); code != 200 {
+	if code, _ := viewerGet(t, x.srvA, s.URL()); code != 200 {
 		t.Fatalf("the stream: %d", code)
 	}
 	return s
@@ -542,31 +572,26 @@ func waitFor(t *testing.T, what string, ok func() bool) {
 	}
 }
 
-// A's viewer's progress reaches B at the first report, and a pause at
-// once: B's live view (the control panel's Now playing) shows where the
-// paired server's viewer is.
+// A's viewer's progress reaches B at the first report: B's live view
+// (the control panel's Now playing) shows where the paired server's
+// viewer is (MSFP's progress carries no pause: shown playing).
 func TestPeerProgressShownByOwner(t *testing.T) {
-	t.Skip("federation off until phase 7")
 	x := pairForPlay(t)
 	s := x.playPeer(t)
-	onB := func(positionMs int64, paused bool) func() bool {
+	onB := func(positionMs int64) func() bool {
 		return func() bool {
 			live := x.onB.Live(time.Now())
-			return len(live) == 1 && live[0].PositionMs == positionMs && live[0].Paused == paused
+			return len(live) == 1 && live[0].PositionMs == positionMs && !live[0].Paused
 		}
 	}
 	if status, body := post(t, x.srvA, "/api/v1/playback/"+s.ID+"/progress", `{"positionMs":600000}`); status != 204 {
 		t.Fatalf("progress: %d %s", status, body)
 	}
-	waitFor(t, "B's live view after the first report", onB(600_000, false))
+	waitFor(t, "B's live view after the first report", onB(600_000))
 	if status, _ := post(t, x.srvA, "/api/v1/playback/"+s.ID+"/progress", `{"positionMs":610000,"paused":true}`); status != 204 {
 		t.Fatal("progress")
 	}
-	waitFor(t, "B's live view after a pause", onB(610_000, true))
-	if status, _ := post(t, x.srvA, "/api/v1/playback/"+s.ID+"/progress", `{"positionMs":610000}`); status != 204 {
-		t.Fatal("progress")
-	}
-	waitFor(t, "B's live view after the resume", onB(610_000, false))
+	waitFor(t, "B's live view after a pause", onB(610_000))
 	if v := x.b.Playbacks(); len(v) != 1 || v[0].State != "active" {
 		t.Errorf("B's engine's playbacks: %+v", v)
 	}
@@ -576,7 +601,6 @@ func TestPeerProgressShownByOwner(t *testing.T) {
 // (stop): the viewer's player stopping, A's idle cleanup, the viewer
 // signing out.
 func TestPeerPlaybackEndsWithViewer(t *testing.T) {
-	t.Skip("federation off until phase 7")
 	x := pairForPlay(t)
 	s := x.playPeer(t)
 	if status, _ := post(t, x.srvA, "/api/v1/playback/"+s.ID+"/stop", `{"positionMs":5000}`); status != 204 {
@@ -606,7 +630,6 @@ func TestPeerPlaybackEndsWithViewer(t *testing.T) {
 // expiry, the operator's stop the operator's; A's viewer's player stops
 // at its next report.
 func TestPeerPlaybackEndedByOwner(t *testing.T) {
-	t.Skip("federation off until phase 7")
 	x := pairForPlay(t)
 	s := x.playPeer(t)
 	x.pbB.EndIdle(time.Now().Add(api.IdleTimeout + time.Minute))
@@ -628,41 +651,47 @@ func TestPeerPlaybackEndedByOwner(t *testing.T) {
 	}
 }
 
-// A remux of B's that turns out to re-encode its video counts in the
-// pairing's transcodes (msfp.Slot.Transcoding): with one left, it plays
-// on; with none, B stops it.
-func TestPeerRemuxThatReencodes(t *testing.T) {
-	t.Skip("federation off until phase 7")
-	for _, transcodes := range []int{1, 0} {
-		t.Run(fmt.Sprint("transcodes=", transcodes), func(t *testing.T) {
-			ctx := context.Background()
-			x := pairForPlay(t)
-			x.fakeB.setDirect(false)
-			x.fakeB.setRemux(true, true)
-			if err := x.b.SetLimits(ctx, x.aOnB.ID, msfp.Limits{Streams: 2, Transcodes: transcodes}); err != nil {
-				t.Fatal(err)
-			}
-			s := x.playPeer(t)
-			if v := x.b.Playbacks(); len(v) != 1 || v[0].Method != "remux" {
-				t.Fatalf("B's playbacks: %+v", v)
-			}
-			if status, _ := post(t, x.srvA, "/api/v1/playback/"+s.ID+"/progress", `{"positionMs":600000}`); status != 204 {
-				t.Fatal("progress")
-			}
-			waitFor(t, "B's check of the remux", func() bool { return x.fakeB.called("GET /Sessions") == 1 })
-			if transcodes == 0 {
-				if r := x.ending(t); r != msfp.EndOperator {
-					t.Errorf("over the pairing's transcodes: %v", r)
-				}
-				return
-			}
-			waitFor(t, "B counting it a transcode", func() bool {
-				live := livePlaybacks(x.onB)
-				return len(live) == 1 && x.onB.Method(live[0]) == "transcode"
-			})
-			if v := x.b.Playbacks(); len(v) != 1 {
-				t.Errorf("B's playbacks: %+v", v)
-			}
-		})
+// Downloads and scans of B's copies, within the pairing's limits only (0,
+// none, by default: D13), kept for their late reports (msfp_downloads);
+// a burned subtitle never without B's operator's switch.
+func TestPeerDownloadsWithinLimits(t *testing.T) {
+	ctx := context.Background()
+	x := pairForPlay(t)
+	key := "movie/tmdb/949"
+	if _, err := x.a.Play(ctx, x.bOnA.ID, msfp.PlayRequest{Title: key, Purpose: msfp.PurposeDownload, Delivery: msfp.DeliveryFile}); err == nil {
+		t.Fatal("a download with no downloads allowed")
+	}
+	if _, err := x.a.Play(ctx, x.bOnA.ID, msfp.PlayRequest{Title: key, Purpose: msfp.PurposeScan, Delivery: msfp.DeliveryFile}); err == nil {
+		t.Fatal("a scan with no scans allowed")
+	}
+	if err := x.b.SetLimits(ctx, x.aOnB.ID, msfp.Limits{Streams: 2, Transcodes: 1, Downloads: 1, ScansPerDay: 5}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "A told of B's limits", func() bool {
+		v, err := x.a.Check(ctx, x.bOnA.ID)
+		return err == nil && v.TheirLimits != nil && v.TheirLimits.Downloads == 1
+	})
+	rp, err := x.a.Play(ctx, x.bOnA.ID, msfp.PlayRequest{Title: key, Purpose: msfp.PurposeDownload, Delivery: msfp.DeliveryFile})
+	if err != nil || rp.Protocol != "file" || rp.Size != int64(len(x.played.file)) {
+		t.Fatalf("a download: %+v %v", rp, err)
+	}
+	var kept []msfp.DownloadRecord
+	x.stB.MSFP().Read(ctx, func(tx msfp.Tx) error {
+		kept, err = tx.(msfp.DownloadsTx).Downloads()
+		return err
+	})
+	if len(kept) != 1 || kept[0].Viewer || kept[0].Peer != x.aOnB.ID {
+		t.Fatalf("B's downloads kept: %+v %v", kept, err)
+	}
+	if _, err := x.a.Play(ctx, x.bOnA.ID, msfp.PlayRequest{Title: key, Purpose: msfp.PurposeDownload, Delivery: msfp.DeliveryFile}); err == nil {
+		t.Fatal("a second download at once, one allowed")
+	}
+	if rp, err := x.a.Play(ctx, x.bOnA.ID, msfp.PlayRequest{Title: key, Purpose: msfp.PurposeScan, Delivery: msfp.DeliveryFile}); err != nil || rp.ScanBytes == 0 {
+		t.Fatalf("a scan: %+v %v", rp, err)
+	}
+	_, err = x.a.Play(ctx, x.bOnA.ID, msfp.PlayRequest{Title: key, Delivery: msfp.DeliveryTranscode,
+		Transcode: &msfp.TranscodeTargets{BurnSubtitle: "s3"}})
+	if !errors.Is(err, msfp.ErrDeliveryRefused) {
+		t.Fatalf("a burned subtitle: %v", err)
 	}
 }
