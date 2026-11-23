@@ -37,6 +37,34 @@ const videoFilesPage = 500
 // with an administrator's key; each page goes to each, in turn, until
 // it returns false.
 func (c *Client) VideoFiles(ctx context.Context, admin Auth, each func(VideoFile) bool) error {
+	return c.videoFiles(ctx, admin, nil, each)
+}
+
+// VideoFileOf is one version's file (an item's media source), as
+// VideoFiles lists it; a 404 StatusError when it has none.
+func (c *Client) VideoFileOf(ctx context.Context, admin Auth, itemID, sourceID string) (VideoFile, error) {
+	item, err := NormalizeID(itemID)
+	if err != nil {
+		return VideoFile{}, err
+	}
+	var found *VideoFile
+	err = c.videoFiles(ctx, admin, url.Values{"ids": {item}}, func(f VideoFile) bool {
+		if f.ItemID == item && f.SourceID == sourceID {
+			found = &f
+			return false
+		}
+		return true
+	})
+	if err != nil {
+		return VideoFile{}, err
+	}
+	if found == nil {
+		return VideoFile{}, &StatusError{Op: "a video file", Status: 404}
+	}
+	return *found, nil
+}
+
+func (c *Client) videoFiles(ctx context.Context, admin Auth, extra url.Values, each func(VideoFile) bool) error {
 	for start := 0; ; start += videoFilesPage {
 		var page struct {
 			Items []struct {
@@ -61,6 +89,9 @@ func (c *Client) VideoFiles(ctx context.Context, admin Auth, each func(VideoFile
 		v := url.Values{"recursive": {"true"}, "includeItemTypes": {"Movie,Episode"}, "isMissing": {"false"},
 			"fields": {"MediaSources,Trickplay"}, "enableImages": {"false"}, "enableUserData": {"false"},
 			"startIndex": {strconv.Itoa(start)}, "limit": {strconv.Itoa(videoFilesPage)}, "sortBy": {"DateCreated"}, "sortOrder": {"Descending"}}
+		for k, vs := range extra {
+			v[k] = vs
+		}
 		if err := c.get(ctx, "video files", "/Items", admin, v, &page); err != nil {
 			return err
 		}

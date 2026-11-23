@@ -25,6 +25,10 @@ var streamClient = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
+// StreamUserAgent is the user agent of Overfin's media requests to
+// Jellyfin, the one its plugin's deliveries are started with.
+const StreamUserAgent = "Overfin"
+
 // Open starts fetching a stream: a media file, a playlist or a segment. path
 // and query come from Overfin's own stream state, never from the client;
 // rangeHeader is the client's Range header, already checked. The caller
@@ -42,6 +46,10 @@ func (c *Client) open(ctx context.Context, client *http.Client, a Auth, path str
 		return nil, err
 	}
 	req.Header.Set("Authorization", c.header(a))
+	// Jellyfin names a transcode's files after the request's user agent
+	// too: Overfin's plugin starts its deliveries with this one, so the
+	// segments Overfin asks are that transcode's, not another's.
+	req.Header.Set("User-Agent", StreamUserAgent)
 	if rangeHeader != "" {
 		req.Header.Set("Range", rangeHeader)
 	}
