@@ -50,6 +50,8 @@ type Keeper struct {
 	Every  time.Duration
 	Logger *slog.Logger
 	now    func() time.Time
+	// refused is how many files the last pass left out (said once).
+	refused int
 }
 
 // Run keeps the index until ctx ends: a pass now, then every Every, or at
@@ -110,6 +112,9 @@ func (k *Keeper) pass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if libs.Empty() {
+		return nil // no library folder (yet): nothing read, nothing forgotten
+	}
 	failed, err := k.DB.CopyProbesFailedSince(ctx, start.Add(-retryAfter))
 	if err != nil {
 		return err
@@ -153,9 +158,10 @@ func (k *Keeper) pass(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if refused > 0 {
+	if refused > 0 && refused != k.refused {
 		k.Logger.Warn("copy index: files outside the libraries' folders, or not regular files, left out", "files", refused)
 	}
+	k.refused = refused
 	listed = distinct(listed)
 	for _, v := range listed {
 		seen[[2]string{v.f.ItemID, v.f.SourceID}] = true
