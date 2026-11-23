@@ -29,3 +29,7 @@ require (
 // pushed, so the build reads the local checkout. On release day this
 // line goes and the require above names the released version.
 replace github.com/msfp-io/msfp-go => /home/c0pt3r/Projects/msfp-go
+
+// Until release day: overfin-web's branch on the same model (its SDK this
+// one's), from the local checkout too.
+replace github.com/overfin/web => /home/c0pt3r/Projects/overfin-web
