@@ -49,6 +49,10 @@
     streams: number;
     transcodes: number;
     bitrateKbps: number;
+    downloads: number;
+    downloadsPerDay: number;
+    downloadKbps: number;
+    scansPerDay: number;
   }
   interface Lib {
     id: string;
@@ -152,12 +156,12 @@
   }
 
   const n = (v: unknown) => Number(v) || 0;
-  const limitsOut = (l: Limits) => ({ streams: n(l.streams), transcodes: n(l.transcodes), bitrateKbps: n(l.bitrateKbps) });
+  const limitsOut = (l: Limits) => ({ streams: n(l.streams), transcodes: n(l.transcodes), bitrateKbps: n(l.bitrateKbps), downloads: n(l.downloads), downloadsPerDay: n(l.downloadsPerDay), downloadKbps: n(l.downloadKbps), scansPerDay: n(l.scansPerDay) });
 
   async function create() {
     try {
       const ours = await api<Lib[]>('GET', '/admin/api/federation/libraries');
-      editing = { name: '', capPerDay: 5, accept: false, ours, offer: [], limits: { streams: 2, transcodes: 1, bitrateKbps: 0 }, more: false, shows: [], hidden: [] };
+      editing = { name: '', capPerDay: 5, accept: false, ours, offer: [], limits: { streams: 2, transcodes: 1, bitrateKbps: 0, downloads: 0, downloadsPerDay: 0, downloadKbps: 0, scansPerDay: 0 }, more: false, shows: [], hidden: [] };
     } catch (err) {
       toast(message(err), true);
     }
@@ -532,6 +536,18 @@
       </Setting>
       <Setting label="Bitrate cap (kbps)" hint="0: no cap.">
         {#snippet children(ids)}<input type="number" min="0" bind:value={editing!.limits.bitrateKbps} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+      </Setting>
+      <Setting label="Downloads at once" hint="Copies the group's members may save to watch offline, at the same time. 0: no downloads.">
+        {#snippet children(ids)}<input type="number" min="0" max="1000" bind:value={editing!.limits.downloads} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+      </Setting>
+      <Setting label="Downloads a day" hint="0: no daily cap besides the one above.">
+        {#snippet children(ids)}<input type="number" min="0" max="10000" bind:value={editing!.limits.downloadsPerDay} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+      </Setting>
+      <Setting label="Download speed cap (kbps)" hint="For each download. 0: no cap.">
+        {#snippet children(ids)}<input type="number" min="0" max="1000000" bind:value={editing!.limits.downloadKbps} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+      </Setting>
+      <Setting label="Scans a day" hint="Reads of a file's start, so that a member's media server can list it (never to watch it). 0: no scan access.">
+        {#snippet children(ids)}<input type="number" min="0" max="1000000" bind:value={editing!.limits.scansPerDay} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
       </Setting>
     {/if}
     {#if editing.group && !editing.group.joining}

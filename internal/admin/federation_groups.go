@@ -171,8 +171,7 @@ func (p *Panel) groupProblem(w http.ResponseWriter, doing string, err error) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
 			"detail": "A group needs a name (80 characters at most); members wait 0 to 30 days; each inviter brings in 1 to 100 servers a day."})
 	case errors.Is(err, msfp.ErrInvalidLimits):
-		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
-			"detail": "Streams and transcodes go from 0 to 50, with no more transcodes than streams; the bitrate cap from 0 (none) to 1,000,000 kbps."})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": limitsDetail})
 	case errors.Is(err, msfp.ErrNoWayIn):
 		writeJSON(w, http.StatusConflict, map[string]string{"type": "no-way-in",
 			"detail": "This server has no pairing through this group any more: nothing it sends reaches the other members, and nothing from them reaches it."})
@@ -222,7 +221,7 @@ func (p *Panel) createGroup(w http.ResponseWriter, r *http.Request, s *session) 
 		return
 	}
 	if req.Limits != nil {
-		l := msfp.Limits{Streams: req.Limits.Streams, Transcodes: req.Limits.Transcodes, BitrateKbps: req.Limits.BitrateKbps}
+		l := req.Limits.limits()
 		if err := eng.SetGroupPool(ctx, g.ID, l); err != nil {
 			p.groupProblem(w, "setting a new group's limits", err)
 			return
@@ -376,7 +375,7 @@ func (p *Panel) setGroupSharing(w http.ResponseWriter, r *http.Request, s *sessi
 	}
 	p.groupAction(w, r, s, "changing what a group is offered", func(eng *msfp.Engine, id string) error {
 		ctx := r.Context()
-		l := msfp.Limits{Streams: req.Limits.Streams, Transcodes: req.Limits.Transcodes, BitrateKbps: req.Limits.BitrateKbps}
+		l := req.Limits.limits()
 		if err := eng.SetGroupPool(ctx, id, l); err != nil {
 			return err
 		}

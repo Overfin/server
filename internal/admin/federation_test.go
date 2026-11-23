@@ -168,7 +168,6 @@ func TestFederationUnavailable(t *testing.T) {
 // Sharing from the panels: A offers Films to B; B sees it and wants it;
 // each list counts it; a server not paired yet has no sharing.
 func TestSharingPanel(t *testing.T) {
-	t.Skip("federation off until phase 7")
 	ctx := context.Background()
 	a, fa, dbA := fedPanel(t, "A")
 	b, fb, _ := fedPanel(t, "B")
@@ -195,8 +194,18 @@ func TestSharingPanel(t *testing.T) {
 	if rec := a.do("PUT", "/admin/api/federation/peers/"+bOnA.ID+"/sharing", `{"offer":["films"],"want":[],"limits":{"streams":4,"transcodes":2,"bitrateKbps":12000}}`, nil); rec.Code != 204 {
 		t.Fatalf("A offers: %d %s", rec.Code, rec.Body)
 	}
-	if rec := a.do("GET", "/admin/api/federation/peers/"+bOnA.ID+"/sharing", "", nil); !strings.Contains(rec.Body.String(), `"limits":{"streams":4,"transcodes":2,"bitrateKbps":12000}`) {
+	if rec := a.do("GET", "/admin/api/federation/peers/"+bOnA.ID+"/sharing", "", nil); !strings.Contains(rec.Body.String(), `"limits":{"streams":4,"transcodes":2,"bitrateKbps":12000,"downloads":0,`) {
 		t.Fatalf("A's limits: %s", rec.Body)
+	}
+	// Downloads and scans, per pairing (D13): none by default, as set.
+	if rec := a.do("PUT", "/admin/api/federation/peers/"+bOnA.ID+"/sharing", `{"offer":["films"],"want":[],"limits":{"streams":4,"transcodes":2,"bitrateKbps":12000,"downloads":2,"downloadsPerDay":5,"downloadKbps":8000,"scansPerDay":100}}`, nil); rec.Code != 204 {
+		t.Fatalf("A's downloads: %d %s", rec.Code, rec.Body)
+	}
+	if v, _ := fa.Peer(ctx, bOnA.ID); v.Limits.Downloads != 2 || v.Limits.DownloadsPerDay != 5 || v.Limits.DownloadKbps != 8000 || v.Limits.ScansPerDay != 100 {
+		t.Fatalf("A's downloads and scans: %+v", v.Limits)
+	}
+	if rec := a.do("PUT", "/admin/api/federation/peers/"+bOnA.ID+"/sharing", `{"offer":["films"],"want":[],"limits":{"streams":4,"transcodes":2,"bitrateKbps":0,"downloads":-1}}`, nil); rec.Code != 400 {
+		t.Fatalf("downloads below 0: %d %s", rec.Code, rec.Body)
 	}
 	rec = b.do("GET", "/admin/api/federation/peers/"+aOnB.ID+"/sharing", "", nil)
 	var sh struct {

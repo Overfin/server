@@ -70,6 +70,10 @@
     streams: number;
     transcodes: number;
     bitrateKbps: number;
+    downloads: number;
+    downloadsPerDay: number;
+    downloadKbps: number;
+    scansPerDay: number;
   }
   interface Sharing {
     ours: Lib[];
@@ -138,7 +142,7 @@
   // Joining a group: what this server shares with it, and its limits.
   let joinOffer = $state<string[]>([]);
   let joinLibs = $state<Lib[]>([]);
-  let joinLimits = $state<Limits>({ streams: 2, transcodes: 1, bitrateKbps: 0 });
+  let joinLimits = $state<Limits>({ streams: 2, transcodes: 1, bitrateKbps: 0, downloads: 0, downloadsPerDay: 0, downloadKbps: 0, scansPerDay: 0 });
   let pairing = $state(false);
   // Sharing with a paired server: what we offer, what we want.
   let sharingWith = $state<Peer | null>(null);
@@ -147,7 +151,7 @@
   let want = $state<string[]>([]);
   // Your names for the wanted libraries' entries on the site, by ID.
   let labels = $state<Record<string, string>>({});
-  let limits = $state<Limits>({ streams: 2, transcodes: 1, bitrateKbps: 0 });
+  let limits = $state<Limits>({ streams: 2, transcodes: 1, bitrateKbps: 0, downloads: 0, downloadsPerDay: 0, downloadKbps: 0, scansPerDay: 0 });
   // This server's keys: the next key shown once exported; changing the
   // key, or revoking it, in a window, with the next key pasted back when
   // it isn't on the server.
@@ -296,7 +300,7 @@
   async function read() {
     const p = await api<Preview>('POST', '/admin/api/federation/preview', { code: pasted });
     joinOffer = [];
-    joinLimits = { streams: 2, transcodes: 1, bitrateKbps: 0 };
+    joinLimits = { streams: 2, transcodes: 1, bitrateKbps: 0, downloads: 0, downloadsPerDay: 0, downloadKbps: 0, scansPerDay: 0 };
     joinLibs = p.groupName ? await api<Lib[]>('GET', '/admin/api/federation/libraries').catch(() => []) : [];
     setTimeout(() => (preview = p), 0);
   }
@@ -306,7 +310,7 @@
     try {
       const n = (v: unknown) => Number(v) || 0;
       await api('POST', '/admin/api/federation/peers', preview?.groupName
-        ? { code: pasted, offer: joinOffer, limits: { streams: n(joinLimits.streams), transcodes: n(joinLimits.transcodes), bitrateKbps: n(joinLimits.bitrateKbps) } }
+        ? { code: pasted, offer: joinOffer, limits: { streams: n(joinLimits.streams), transcodes: n(joinLimits.transcodes), bitrateKbps: n(joinLimits.bitrateKbps), downloads: n(joinLimits.downloads), downloadsPerDay: n(joinLimits.downloadsPerDay), downloadKbps: n(joinLimits.downloadKbps), scansPerDay: n(joinLimits.scansPerDay) } }
         : { code: pasted });
       toast(preview?.groupName ? `Sent. Once its owner accepts, this server joins "${preview.groupName}".` : "Sent. Now waiting for the other server's owner to accept.");
       preview = null;
@@ -390,7 +394,7 @@
       offer,
       want,
       labels: Object.fromEntries(want.map((id) => [id, (labels[id] ?? '').trim()])),
-      limits: { streams: n(limits.streams), transcodes: n(limits.transcodes), bitrateKbps: n(limits.bitrateKbps) },
+      limits: { streams: n(limits.streams), transcodes: n(limits.transcodes), bitrateKbps: n(limits.bitrateKbps), downloads: n(limits.downloads), downloadsPerDay: n(limits.downloadsPerDay), downloadKbps: n(limits.downloadKbps), scansPerDay: n(limits.scansPerDay) },
     });
     toast('Sharing saved.');
     await load();
@@ -520,7 +524,7 @@
 
 
   const limitsText = (l: Limits) =>
-    `${plural(l.streams, 'stream')} at once, ${plural(l.transcodes, 'transcode')} among them, ${l.bitrateKbps ? `${l.bitrateKbps} kbps at most` : 'no bitrate cap'}`;
+    `${plural(l.streams, 'stream')} at once, ${plural(l.transcodes, 'transcode')} among them, ${l.bitrateKbps ? `${l.bitrateKbps} kbps at most` : 'no bitrate cap'}, ${l.downloads ? `${plural(l.downloads, 'download')} at once` : 'no downloads'}, ${l.scansPerDay ? `${plural(l.scansPerDay, 'scan')} a day` : 'no scans'}`;
 
   const shareText = (p: Peer) =>
     `Offers ${plural(p.offers, 'library', 'libraries')} · wants ${p.wants}${p.wants ? ` (${plural(p.titles, 'title')})` : ''}` +
@@ -867,6 +871,18 @@
     </Setting>
     <Setting label="Bitrate cap (kbps)" hint="0: no cap.">
       {#snippet children(ids)}<input type="number" min="0" bind:value={limits.bitrateKbps} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+    </Setting>
+    <Setting label="Downloads at once" hint={`Copies ${sharingWith.name}'s people may save to watch offline, at the same time. 0: no downloads.`}>
+      {#snippet children(ids)}<input type="number" min="0" max="1000" bind:value={limits.downloads} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+    </Setting>
+    <Setting label="Downloads a day" hint={`0: no daily cap besides the one above.`}>
+      {#snippet children(ids)}<input type="number" min="0" max="10000" bind:value={limits.downloadsPerDay} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+    </Setting>
+    <Setting label="Download speed cap (kbps)" hint={`For each download. 0: no cap.`}>
+      {#snippet children(ids)}<input type="number" min="0" max="1000000" bind:value={limits.downloadKbps} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
+    </Setting>
+    <Setting label="Scans a day" hint={`Reads of a file's start, so that ${sharingWith.name}'s media server can list it (never to watch it). 0: no scan access.`}>
+      {#snippet children(ids)}<input type="number" min="0" max="1000000" bind:value={limits.scansPerDay} aria-labelledby={ids.label} aria-describedby={ids.hint} />{/snippet}
     </Setting>
     {/if}
   </FormModal>

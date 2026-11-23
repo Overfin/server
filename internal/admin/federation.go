@@ -120,17 +120,36 @@ type refusedJSON struct {
 	At          string `json:"at"`
 }
 
-// limitsJSON is what a pairing may use (MSFP playback section 5), as the
-// panel shows and sets it: always these three numbers.
+// limitsJSON is what a pairing or a group's pool may use (MSFP playback
+// sections 5, 7 and 8), as the panel shows and sets it, per pairing and
+// per pool, never for the whole server (D13): streams at once,
+// transcodes among them, the bitrate cap; downloads at once (0: none,
+// the default), downloads a day (0: no daily cap besides that), each
+// download's speed cap (0: none); scans a day (0: no scan access, the
+// default).
 type limitsJSON struct {
-	Streams     int `json:"streams"`
-	Transcodes  int `json:"transcodes"`
-	BitrateKbps int `json:"bitrateKbps"`
+	Streams         int `json:"streams"`
+	Transcodes      int `json:"transcodes"`
+	BitrateKbps     int `json:"bitrateKbps"`
+	Downloads       int `json:"downloads"`
+	DownloadsPerDay int `json:"downloadsPerDay"`
+	DownloadKbps    int `json:"downloadKbps"`
+	ScansPerDay     int `json:"scansPerDay"`
 }
 
 func limitsOf(l msfp.Limits) limitsJSON {
-	return limitsJSON{Streams: l.Streams, Transcodes: l.Transcodes, BitrateKbps: l.BitrateKbps}
+	return limitsJSON{Streams: l.Streams, Transcodes: l.Transcodes, BitrateKbps: l.BitrateKbps,
+		Downloads: l.Downloads, DownloadsPerDay: l.DownloadsPerDay, DownloadKbps: l.DownloadKbps, ScansPerDay: l.ScansPerDay}
 }
+
+// limits are the panel's numbers as the engine's limits.
+func (l limitsJSON) limits() msfp.Limits {
+	return msfp.Limits{Streams: l.Streams, Transcodes: l.Transcodes, BitrateKbps: l.BitrateKbps,
+		Downloads: l.Downloads, DownloadsPerDay: l.DownloadsPerDay, DownloadKbps: l.DownloadKbps, ScansPerDay: l.ScansPerDay}
+}
+
+// limitsDetail says what the panel's limits may be.
+const limitsDetail = "Streams and transcodes go from 0 to 1,000, with no more transcodes than streams; the bitrate and download speed caps from 0 (none) to 1,000,000 kbps; downloads at once from 0 (none) to 1,000, a day from 0 (no daily cap) to 10,000; scans a day from 0 (none) to 1,000,000."
 
 // stamp is t for the panel, "" for the zero time (never).
 func stamp(t time.Time) string {
@@ -473,7 +492,7 @@ func (p *Panel) usePairingCode(w http.ResponseWriter, r *http.Request, s *sessio
 	}
 	if pv.Group != "" {
 		if req.Limits != nil {
-			l := msfp.Limits{Streams: req.Limits.Streams, Transcodes: req.Limits.Transcodes, BitrateKbps: req.Limits.BitrateKbps}
+			l := req.Limits.limits()
 			if err := eng.SetGroupPool(ctx, pv.Group, l); err != nil {
 				p.Logger.Warn("federation: the limits for a group being joined couldn't be set", "group", pv.Group, "error", err)
 			}
@@ -672,13 +691,17 @@ func (p *Panel) ourLibraries(w http.ResponseWriter, r *http.Request, _ *session)
 	type lib struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
-		// Kind: msfp-go's revised v0 sends no library kind; "" until plan
-		// phase 7 types a library by its first titles.
+		// Kind: Jellyfin's (MSFP sends no library kind).
 		Kind string `json:"kind"`
+	}
+	kinds, err := p.Store.LibraryKinds(r.Context())
+	if err != nil {
+		p.fail(w, "listing this server's libraries", err)
+		return
 	}
 	out := []lib{}
 	for _, l := range libs {
-		out = append(out, lib{ID: l.ID, Name: l.Name})
+		out = append(out, lib{ID: l.ID, Name: l.Name, Kind: kinds[l.ID]})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -817,8 +840,8 @@ func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
 	type lib struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
-		// Kind: msfp-go's revised v0 sends no library kind; "" until plan
-		// phase 7 types a library by its first titles.
+		// Kind: ours, Jellyfin's; theirs, as their first titles typed it
+		// (MSFP sends no library kind).
 		Kind   string `json:"kind"`
 		Picked bool   `json:"picked"`
 		// Gone: we want it, and the other server no longer offers it.
@@ -828,9 +851,19 @@ func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
 		Label string `json:"label,omitempty"`
 		Shown string `json:"shown,omitempty"`
 	}
+	ourKinds, err := p.Store.LibraryKinds(ctx)
+	if err != nil {
+		p.fail(w, "listing this server's libraries", err)
+		return
+	}
+	theirKinds, err := p.Store.PeerWantKinds(ctx, peer.ID)
+	if err != nil {
+		p.fail(w, "reading wants", err)
+		return
+	}
 	outOurs := []lib{}
 	for _, l := range ours {
-		outOurs = append(outOurs, lib{ID: l.ID, Name: l.Name, Picked: l.Offered})
+		outOurs = append(outOurs, lib{ID: l.ID, Name: l.Name, Kind: ourKinds[l.ID], Picked: l.Offered})
 	}
 	theirs, err := eng.TheirLibraries(ctx, peer.ID)
 	reachable := err == nil
@@ -851,7 +884,7 @@ func (p *Panel) sharing(w http.ResponseWriter, r *http.Request, _ *session) {
 	}
 	outTheirs := []lib{}
 	for _, l := range theirs {
-		outTheirs = append(outTheirs, lib{ID: l.ID, Name: l.Name, Picked: l.Wanted, Gone: l.Gone,
+		outTheirs = append(outTheirs, lib{ID: l.ID, Name: l.Name, Kind: theirKinds[l.ID], Picked: l.Wanted, Gone: l.Gone,
 			Label: labels[l.ID], Shown: l.Name + " (" + peer.Name + ")"})
 	}
 	out := map[string]any{"ours": outOurs, "theirs": outTheirs, "reachable": reachable,
@@ -886,11 +919,9 @@ func (p *Panel) setSharing(w http.ResponseWriter, r *http.Request, s *session) {
 		return
 	}
 	if req.Limits != nil {
-		l := msfp.Limits{Streams: req.Limits.Streams, Transcodes: req.Limits.Transcodes, BitrateKbps: req.Limits.BitrateKbps}
-		err := eng.SetLimits(ctx, peer.ID, l)
+		err := eng.SetLimits(ctx, peer.ID, req.Limits.limits())
 		if errors.Is(err, msfp.ErrInvalidLimits) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request",
-				"detail": "Streams and transcodes go from 0 to 50, with no more transcodes than streams; the bitrate cap from 0 (none) to 1,000,000 kbps."})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"type": "invalid-request", "detail": limitsDetail})
 			return
 		}
 		if err != nil {
