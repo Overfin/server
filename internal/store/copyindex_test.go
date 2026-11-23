@@ -221,6 +221,19 @@ func TestCopyProbes(t *testing.T) {
 	if err != nil || !ok || !bytes.Equal(got.Raw, raw) || got.ProbeVersion != 3 || got.MediaType != "video/mp4" || got.Size != 5 {
 		t.Fatalf("read back: %v %v", ok, err)
 	}
+	if got.FramesPending {
+		t.Error("frames pending, not asked")
+	}
+	p.FramesPending = true
+	if err := s.PutCopyProbe(ctx, p, now); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := s.CopyProbeOf(ctx, p.Fingerprint); !got.FramesPending {
+		t.Error("frames pending not kept")
+	}
+	if pending, err := s.CopyProbesPendingFrames(ctx); err != nil || len(pending) != 1 || !pending[p.Fingerprint] {
+		t.Errorf("pending frames: %v %v", pending, err)
+	}
 	if err := s.ForgetCopyProbes(ctx, now.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}

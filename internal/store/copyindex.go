@@ -409,6 +409,9 @@ type CopyProbe struct {
 	MediaType    string
 	Size         int64
 	Raw          []byte
+	// FramesPending: its HDR picture's first frames are still to read
+	// (an imported probe made without them).
+	FramesPending bool
 }
 
 // maxRawProbe bounds a kept probe, unpacked (the probe's own output cap).
@@ -424,10 +427,11 @@ func (s *Store) PutCopyProbe(ctx context.Context, p CopyProbe, now time.Time) er
 	if err := zw.Close(); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO copy_probes (fingerprint, probe_version, media_type, size, raw, at)
-		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (fingerprint) DO UPDATE SET probe_version = excluded.probe_version,
-		media_type = excluded.media_type, size = excluded.size, raw = excluded.raw, at = excluded.at`,
-		p.Fingerprint, p.ProbeVersion, p.MediaType, p.Size, buf.Bytes(), now.Unix())
+	_, err := s.db.ExecContext(ctx, `INSERT INTO copy_probes (fingerprint, probe_version, media_type, size, raw, at, frames_pending)
+		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (fingerprint) DO UPDATE SET probe_version = excluded.probe_version,
+		media_type = excluded.media_type, size = excluded.size, raw = excluded.raw, at = excluded.at,
+		frames_pending = excluded.frames_pending`,
+		p.Fingerprint, p.ProbeVersion, p.MediaType, p.Size, buf.Bytes(), now.Unix(), p.FramesPending)
 	if err == nil {
 		_, err = s.db.ExecContext(ctx, `DELETE FROM copy_probe_failed WHERE fingerprint = ?`, p.Fingerprint)
 	}
@@ -437,8 +441,8 @@ func (s *Store) PutCopyProbe(ctx context.Context, p CopyProbe, now time.Time) er
 // CopyProbeOf is a file's kept probe, unpacked; ok is false when none is.
 func (s *Store) CopyProbeOf(ctx context.Context, fingerprint string) (p CopyProbe, ok bool, err error) {
 	var packed []byte
-	err = s.read.QueryRowContext(ctx, `SELECT probe_version, media_type, size, raw FROM copy_probes WHERE fingerprint = ?`,
-		fingerprint).Scan(&p.ProbeVersion, &p.MediaType, &p.Size, &packed)
+	err = s.read.QueryRowContext(ctx, `SELECT probe_version, media_type, size, raw, frames_pending FROM copy_probes
+		WHERE fingerprint = ?`, fingerprint).Scan(&p.ProbeVersion, &p.MediaType, &p.Size, &packed, &p.FramesPending)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CopyProbe{}, false, nil
 	}
@@ -458,6 +462,19 @@ func (s *Store) CopyProbeOf(ctx context.Context, fingerprint string) (p CopyProb
 	}
 	p.Fingerprint = fingerprint
 	return p, true, nil
+}
+
+// CopyProbesPendingFrames are the fingerprints of the kept probes whose
+// first frames are still to read (CopyProbe.FramesPending).
+func (s *Store) CopyProbesPendingFrames(ctx context.Context) (map[string]bool, error) {
+	out := map[string]bool{}
+	err := s.each(ctx, func(rows *sql.Rows) error {
+		var fp string
+		err := rows.Scan(&fp)
+		out[fp] = true
+		return err
+	}, `SELECT fingerprint FROM copy_probes WHERE frames_pending = 1`)
+	return out, err
 }
 
 // ForgetCopyProbes deletes the probes and failures of files no copy has,
