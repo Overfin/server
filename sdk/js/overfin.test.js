@@ -1,6 +1,6 @@
 // Tests for overfin.js, with Node's own test runner:
 //   node --test sdk/js/overfin.test.js
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   Overfin, OverfinError, Player, deviceEnv, chooseDelivery, audioMenu, subtitleMenu, forcedFor, subtitlesFor,
@@ -355,6 +355,42 @@ test('closed while starting: what the start gets is stopped, nothing plays', asy
   await settle();
   assert.equal(player.playback, null);
   assert.ok(calls.some((c) => c.url === '/api/v1/playback/pb1/stop'));
+});
+
+// ranges is a video's buffered ranges.
+const ranges = (list) => ({ length: list.length, start: (i) => list[i][0], end: (i) => list[i][1] });
+
+test('a stream waiting in a hole before its first pictures jumps to them, when near', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const video = fakeVideo();
+    const player = new Player(new Overfin(), video, 'title_movie_tmdb_1', { startMs: 0, env: chrome() });
+    const waitAt = (kind, t, list) => {
+      player.playback = { delivery: { kind } };
+      video.currentTime = t;
+      video.buffered = ranges(list);
+      player.jumpHole();
+      mock.timers.tick(1500);
+      return video.currentTime;
+    };
+    // A copy cut in equal parts: the part asked for starts at 6 s, its
+    // first keyframe comes at 12.54 s.
+    assert.equal(waitAt('transcode', 9.67, [[12.54, 46.1]]), 12.59);
+    // Already where pictures are, or nothing near: it stays.
+    assert.equal(waitAt('remux', 20, [[12.54, 46.1]]), 20);
+    assert.equal(waitAt('transcode', 100, [[130, 140]]), 100);
+    // A file is the browser's to fill.
+    assert.equal(waitAt('file', 9.67, [[12.54, 46.1]]), 9.67);
+    // Started there, autoplay waiting for pictures (paused until then): it
+    // jumps too.
+    Object.assign(video, { paused: true, autoplay: true, readyState: 1 });
+    assert.equal(waitAt('transcode', 9.67, [[12.54, 46.1]]), 12.59);
+    // Paused by the viewer: nothing moves.
+    Object.assign(video, { autoplay: false, readyState: 4 });
+    assert.equal(waitAt('transcode', 9.67, [[12.54, 46.1]]), 9.67);
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test('quality: a bitrate limit restarts the stream at the same place with it', async () => {
@@ -1115,9 +1151,10 @@ test('the ladder: a play that never gets going steps down; a file\'s chosen audi
   video.emit('loadedmetadata');
   assert.deepEqual(video.audioTracks.map((a) => a.enabled), [false, true]);
   await player.close();
-  // A file that plays nothing, not paused, steps down after a while.
+  // A file that plays nothing steps down after a while: autoplay still
+  // waiting for its first pictures (the video says paused until then).
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const stuck = fakeVideo();
+  const stuck = Object.assign(fakeVideo(), { paused: true, autoplay: true, readyState: 1 });
   const p2 = await new Overfin().play(stuck, 'title_movie_tmdb_5', { env: chrome(), startMs: 0, fallbacks: null, Hls: fakeHls(stuck, []), audioTrack: 'a1' });
   assert.equal(p2.playback.delivery.kind, 'file');
   t.mock.timers.tick(15_000);

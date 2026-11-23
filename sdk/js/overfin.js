@@ -1239,7 +1239,8 @@ export class Player {
         this.pausedAt = 0;
       },
       timeupdate: () => { this.settled(); this.fillSubtitles(); this.watchTrial(); },
-      seeking: () => this.fillSubtitles(),
+      waiting: () => this.jumpHole(),
+      seeking: () => { this.fillSubtitles(); this.jumpHole(); },
       seeked: () => { this.settled(); this.report(); },
       // A direct stream cut short: the browser says error, or ends the
       // video where its data stopped. Not the end of the title.
@@ -1347,7 +1348,7 @@ export class Player {
     const run = this.starts;
     this.stall = setTimeout(() => {
       const tr = this.trial;
-      if (run !== this.starts || !tr || tr.done || this.video.paused) return;
+      if (run !== this.starts || !tr || tr.done || !this.shouldPlay()) return;
       if (this.video.currentTime * 1000 - tr.fromMs < 500) this.stepDown('stalled');
     }, decision.level <= 1 ? TRIAL_STALL : TRIAL_STALL * 3);
     this.options.onStart?.(pb);
@@ -1683,10 +1684,39 @@ export class Player {
     return this.start(at);
   }
 
+  // jumpHole: a stream that copies the picture starts each part at a
+  // keyframe, which may come seconds after where the part says it starts
+  // (Jellyfin cuts such streams of files other than Matroska in equal
+  // parts, whatever their keyframes): started or sought there, the video
+  // waits (or seeks) in a hole before the first picture. hls.js jumps
+  // holes of up to 2 s; the player jumps to the picture when it's near
+  // (HOLE_JUMP).
+  jumpHole() {
+    clearTimeout(this.hole);
+    if (this.playback?.delivery?.kind === 'file') return;
+    this.hole = setTimeout(() => {
+      const v = this.video, t = v.currentTime;
+      if (this.closed || !this.shouldPlay() || !v.buffered) return;
+      for (let i = 0; i < v.buffered.length; i++) {
+        const start = v.buffered.start(i);
+        if (start <= t && t < v.buffered.end(i) - 0.1) return;
+        if (start > t && start - t <= HOLE_JUMP) { v.currentTime = start + 0.05; return; }
+      }
+    }, HOLE_WAIT);
+  }
+
+  // shouldPlay: playing, or about to (autoplay waiting for its first
+  // pictures: the video says paused until then).
+  shouldPlay() {
+    const v = this.video;
+    return !v.paused || (v.autoplay && v.readyState < 3);
+  }
+
   teardown() {
     clearInterval(this.timer);
     this.timer = null;
     clearTimeout(this.stall);
+    clearTimeout(this.hole);
     for (const [event, fn] of Object.entries(this.handlers)) this.video.removeEventListener(event, fn);
     if (this.hls) { this.hls.destroy(); this.hls = null; }
   }
@@ -2092,6 +2122,10 @@ const TRIAL_PLAYED = 3_000;
 // A file or a remux that played nothing this long after it started, while
 // it should play, failed (three times as long for a conversion).
 const TRIAL_STALL = 15_000;
+// A stream waiting HOLE_WAIT in a hole before pictures at most HOLE_JUMP
+// seconds ahead jumps to them (jumpHole).
+const HOLE_WAIT = 1_500;
+const HOLE_JUMP = 15;
 
 // silent says whether the browser decoded no audio at all of what played:
 // Firefox's mozHasAudio, Chromium's and Safari's decoded byte count; false
