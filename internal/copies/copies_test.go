@@ -225,6 +225,12 @@ func id(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
 // with their files, and a keeper over them.
 func keeperSetup(t *testing.T) (*Keeper, *store.Store, string) {
 	t.Helper()
+	return keeperSetupN(t, 5)
+}
+
+// keeperSetupN is keeperSetup with films 0 to n-1.
+func keeperSetupN(t *testing.T, films int) (*Keeper, *store.Store, string) {
+	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
 	box, _ := seal.New(bytes.Repeat([]byte{9}, 32))
@@ -234,7 +240,7 @@ func keeperSetup(t *testing.T) (*Keeper, *store.Store, string) {
 	}
 	t.Cleanup(func() { db.Close() })
 	var items []store.CatalogItem
-	for n := range 5 {
+	for n := range films {
 		items = append(items, store.CatalogItem{ID: id(n), Kind: "movie", Name: "F", SortName: "f", TMDB: string(rune('1' + n)),
 			AudioTags: []string{"de"}})
 	}
