@@ -57,10 +57,10 @@ func (h PeerHost) playback() (Playback, error) {
 	return pb, nil
 }
 
-// copyOf is the copy index's copy a handle names (store.PeerHandle: the
-// copy ID and the library of the place the catalog gave it through).
-func (pb Playback) copyOf(ctx context.Context, handle string) (store.IndexedCopy, error) {
-	c, ok, err := pb.Library.Provisioner.Store.CopyByHandle(ctx, handle)
+// copyOf is the copy index's copy a handle names (its copy ID), through
+// a place of a library offered to the peer (store.CopyByHandle).
+func (pb Playback) copyOf(ctx context.Context, peer msfp.PeerRef, handle string) (store.IndexedCopy, error) {
+	c, ok, err := pb.Library.Provisioner.Store.CopyByHandle(ctx, handle, peer.Libraries)
 	switch {
 	case err != nil:
 		return store.IndexedCopy{}, msfp.ErrServerBusy
@@ -78,12 +78,12 @@ var notApart = []string{"dvd_subtitle", "dvb_subtitle"}
 // no fonts (ASS is served as its text only, this release), and the
 // subtitle tracks not served apart: DVD and DVB pictures, and a track
 // Jellyfin's numbering doesn't map. Jellyfin isn't asked.
-func (h PeerHost) Describe(ctx context.Context, copy string) (msfp.CopyInfo, error) {
+func (h PeerHost) Describe(ctx context.Context, peer msfp.PeerRef, copy string) (msfp.CopyInfo, error) {
 	pb, err := h.playback()
 	if err != nil {
 		return msfp.CopyInfo{}, err
 	}
-	c, err := pb.copyOf(ctx, copy)
+	c, err := pb.copyOf(ctx, peer, copy)
 	if err != nil {
 		return msfp.CopyInfo{}, err
 	}
@@ -112,7 +112,7 @@ func (h PeerHost) Start(ctx context.Context, req msfp.StartRequest) (msfp.Starte
 		// Overfin shares no music; a copy of several files isn't offered.
 		return msfp.Started{}, msfp.ErrNotPlayable
 	}
-	c, err := pb.copyOf(ctx, req.Copy)
+	c, err := pb.copyOf(ctx, req.Peer, req.Copy)
 	if err != nil {
 		return msfp.Started{}, err
 	}
@@ -245,13 +245,13 @@ type peerStreamKey struct{}
 // stretches, PGS, and previews' sheets (a playback's, or a copy's under a
 // previews ticket: OfCopy), by the same code as this server's own, a
 // text track whole too. ASS and fonts aren't served this release (D7).
-func (h PeerHost) Serve(ctx context.Context, handle string, path msfp.MediaPath, rng *msfp.Range, out msfp.ResponseSink) error {
+func (h PeerHost) Serve(ctx context.Context, peer msfp.PeerRef, handle string, path msfp.MediaPath, rng *msfp.Range, out msfp.ResponseSink) error {
 	pb, err := h.playback()
 	if err != nil {
 		return err
 	}
 	if path.OfCopy {
-		return pb.serveCopySheet(ctx, handle, path, out)
+		return pb.serveCopySheet(ctx, peer, handle, path, out)
 	}
 	s, ok := pb.peerStream(handle)
 	if !ok || path.Entry != 0 {
@@ -350,11 +350,11 @@ func (pb Playback) servePeerFile(ctx context.Context, s *playback.Stream, rng *m
 // serveCopySheet serves a sheet of a copy's previews under a previews
 // ticket (MSFP video section 5.6: the handle is the copy's), from the
 // previews Overfin made for its file.
-func (pb Playback) serveCopySheet(ctx context.Context, handle string, path msfp.MediaPath, out msfp.ResponseSink) error {
+func (pb Playback) serveCopySheet(ctx context.Context, peer msfp.PeerRef, handle string, path msfp.MediaPath, out msfp.ResponseSink) error {
 	if path.Kind != msfp.MediaSheet || pb.Library.Previews == nil {
 		return msfp.ErrNotFound
 	}
-	c, err := pb.copyOf(ctx, handle)
+	c, err := pb.copyOf(ctx, peer, handle)
 	if err != nil {
 		return err
 	}

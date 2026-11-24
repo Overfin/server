@@ -450,12 +450,12 @@ func TestPeerTitlesVideoMembers(t *testing.T) {
 		t.Errorf("an IMDb ID not in its form sent: %v", ids)
 	}
 	// Each film and episode carries its copies from the copy index, their
-	// ID the engine's handle (the copy's ID and its place's library): the
+	// ID the engine's handle (the copy's ID, wherever its file is): the
 	// second episode, the file's; a stacked film's, none. Series and
 	// seasons, none.
 	for key, want := range map[string]string{"movie/tmdb/603": "v" + id(1)[6:], "series/tmdb/1399/e63056": "v" + id(12)[6:],
 		"series/tmdb/1399/e63057": "v" + id(12)[6:]} {
-		if c := byKey[key].Copies; len(c) != 1 || c[0].ID != want+"-lib" || c[0].ETag != "etag"+want[9:] || len(c[0].AudioTracks) != 1 {
+		if c := byKey[key].Copies; len(c) != 1 || c[0].ID != want || c[0].ETag != "etag"+want[9:] || len(c[0].AudioTracks) != 1 {
 			t.Errorf("%s copies %+v", key, c)
 		}
 	}
@@ -464,13 +464,18 @@ func TestPeerTitlesVideoMembers(t *testing.T) {
 			t.Errorf("%s copies %+v", key, c)
 		}
 	}
-	if c, ok, err := s.CopyByHandle(ctx, "v"+id(12)[6:]+"-lib"); err != nil || !ok || c.ItemID != id(12) {
+	// A handle is found through a library offered, never another.
+	handle := "v" + id(12)[6:]
+	if c, ok, err := s.CopyByHandle(ctx, handle, []string{"other", "lib"}); err != nil || !ok || c.ItemID != id(12) {
 		t.Errorf("by its handle: %+v %v %v", c, ok, err)
 	}
-	for _, h := range []string{"v" + id(12)[6:], "v" + id(12)[6:] + "-other"} {
-		if _, ok, err := s.CopyByHandle(ctx, h); err != nil || ok {
-			t.Errorf("handle %q: found in a library it doesn't name", h)
+	for _, libs := range [][]string{{"other"}, nil} {
+		if _, ok, err := s.CopyByHandle(ctx, handle, libs); err != nil || ok {
+			t.Errorf("found with libraries %v, which don't hold it", libs)
 		}
+	}
+	if _, ok, _ := s.CopyByHandle(ctx, handle+"-lib", []string{"lib"}); ok {
+		t.Error("a handle with a library found")
 	}
 	if other, _ := cat.Titles(ctx, []string{"other"}, "", 100); len(other.Titles) != 0 {
 		t.Errorf("titles in a library not asked for: %+v", other.Titles)

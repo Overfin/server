@@ -141,31 +141,9 @@ func (s *Store) ItemCopies(ctx context.Context, itemID string) ([]IndexedCopy, e
 // order, then the first by its path (Place), then by Jellyfin's IDs; its
 // slot is where the copy first comes.
 func (s *Store) ItemsCopies(ctx context.Context, items []string) ([]IndexedCopy, error) {
-	libs, err := s.Libraries(ctx)
+	better, err := s.placeOrder(ctx)
 	if err != nil {
 		return nil, err
-	}
-	order := map[string]int{}
-	for i, l := range libs {
-		order[l.ID] = i
-	}
-	rank := func(c IndexedCopy) int {
-		if i, ok := order[c.Library]; ok {
-			return i
-		}
-		return len(libs) // a library the index doesn't know: last
-	}
-	better := func(a, b IndexedCopy) bool {
-		if ra, rb := rank(a), rank(b); ra != rb {
-			return ra < rb
-		}
-		if a.Place != b.Place {
-			return a.Place < b.Place
-		}
-		if a.ItemID != b.ItemID {
-			return a.ItemID < b.ItemID
-		}
-		return a.SourceID < b.SourceID
 	}
 	var out []IndexedCopy
 	slot := map[string]int{}
@@ -189,6 +167,38 @@ func (s *Store) ItemsCopies(ctx context.Context, items []string) ([]IndexedCopy,
 		}
 	}
 	return out, nil
+}
+
+// placeOrder says which of two places of the same copy it is served
+// through: the first library in the operator's order, then the first by
+// its path (Place), then by Jellyfin's IDs.
+func (s *Store) placeOrder(ctx context.Context) (better func(a, b IndexedCopy) bool, err error) {
+	libs, err := s.Libraries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	order := map[string]int{}
+	for i, l := range libs {
+		order[l.ID] = i
+	}
+	rank := func(c IndexedCopy) int {
+		if i, ok := order[c.Library]; ok {
+			return i
+		}
+		return len(libs) // a library the index doesn't know: last
+	}
+	return func(a, b IndexedCopy) bool {
+		if ra, rb := rank(a), rank(b); ra != rb {
+			return ra < rb
+		}
+		if a.Place != b.Place {
+			return a.Place < b.Place
+		}
+		if a.ItemID != b.ItemID {
+			return a.ItemID < b.ItemID
+		}
+		return a.SourceID < b.SourceID
+	}, nil
 }
 
 // CopySegments are a version's skip markers; nil when none were read.

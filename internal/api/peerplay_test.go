@@ -498,6 +498,58 @@ func TestPeerCopyOfSeveralParts(t *testing.T) {
 	}
 }
 
+// A copy's handle is its copy ID alone: the version ID A sees of it stays
+// the same when its file moves to another library B offers A, and still
+// plays; B's host finds a handle only through a library offered to the
+// peer asking.
+func TestPeerCopyKeepsItsIDAcrossLibraries(t *testing.T) {
+	ctx := context.Background()
+	x := pairForPlay(t)
+	id := func(n int) string { return fmt.Sprintf("%032x", n) }
+	films, more := id(0xf1), id(0xf3)
+	x.stB.SetLibraries(ctx, []store.Library{{ID: films, Item: []byte(`{"Name":"Films","CollectionType":"movies"}`)},
+		{ID: id(0xf2), Item: []byte(`{"Name":"Songs","CollectionType":"music"}`)},
+		{ID: more, Item: []byte(`{"Name":"More","CollectionType":"movies"}`)}})
+	if err := x.b.SetOffers(ctx, x.aOnB.ID, []string{films, more}); err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, x.a, x.bOnA.ID)
+	var before struct{ Copies []wire.Copy }
+	if get(t, x.srvA, "/api/v1/titles/title_movie_tmdb_949", &before); len(before.Copies) != 1 {
+		t.Fatalf("Heat on A: %+v", before.Copies)
+	}
+	// Heat's file now in More.
+	if err := x.stB.PutCatalog(ctx, []store.CatalogItem{{ID: id(1), Kind: "movie", Name: "Heat", SortName: "heat", TMDB: "949",
+		LibraryID: more, SegmentsRead: true}}, 1); err != nil {
+		t.Fatal(err)
+	}
+	x.stB.RefreshTitleKeys(ctx)
+	cat := store.MSFPCatalog{S: x.stB}
+	inFilms, _ := cat.Titles(ctx, []string{films}, "", 100)
+	inMore, _ := cat.Titles(ctx, []string{more}, "", 100)
+	if !slices.ContainsFunc(inMore.Titles, func(t msfp.Title) bool { return t.Common().Key == "movie/tmdb/949" }) ||
+		slices.ContainsFunc(inFilms.Titles, func(t msfp.Title) bool { return t.Common().Key == "movie/tmdb/949" }) {
+		t.Fatal("Heat not moved to More on B")
+	}
+	if _, err := x.a.ReadNow(ctx, x.bOnA.ID); err != nil {
+		t.Fatal(err)
+	}
+	var after struct{ Copies []wire.Copy }
+	if get(t, x.srvA, "/api/v1/titles/title_movie_tmdb_949", &after); len(after.Copies) != 1 || after.Copies[0].ID != before.Copies[0].ID {
+		t.Fatalf("Heat's copy on A after the move: %+v, before %+v", after.Copies, before.Copies)
+	}
+	if status, s := x.start(t, `{"titleId":"title_movie_tmdb_949","versionId":"`+after.Copies[0].ID+`"}`); status != 201 {
+		t.Fatalf("play after the move: %d %+v", status, s)
+	}
+	host := api.PeerHost{Current: func() (api.Playback, bool) { return x.pbB, true }}
+	if _, err := host.Describe(ctx, msfp.PeerRef{ID: x.aOnB.ID, Libraries: []string{more}}, heatCopy); err != nil {
+		t.Errorf("Describe through More: %v", err)
+	}
+	if _, err := host.Describe(ctx, msfp.PeerRef{ID: x.aOnB.ID, Libraries: []string{films}}, heatCopy); !errors.Is(err, msfp.ErrNotFound) {
+		t.Errorf("Describe through Films, which no longer holds it: %v", err)
+	}
+}
+
 // B's host refusing A's play unsigned (a gateway's plain 429) is busy
 // for now to A's viewer, not "can't be played".
 func TestPeerPlayUnansweredIsBusy(t *testing.T) {

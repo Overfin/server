@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -64,39 +63,52 @@ func (c MSFPCatalog) Titles(ctx context.Context, libraries []string, after strin
 	return msfp.TitlePage{Titles: titles, More: more}, err
 }
 
-// PeerHandle is the engine's handle of a copy as a paired server is
-// given it: its copy ID and the library of the place it is served
-// through, so that a paired server's play is served through a place of a
-// library it was offered, never through another place of the same file.
-// It never leaves: the engine sends its own version ID, a keyed hash of
-// it (stable while the file stays in that library).
-func PeerHandle(c IndexedCopy) string { return c.CopyID + "-" + c.Library }
-
 // CopyByHandle is the copy index's copy a paired server's play names by
-// the handle the catalog gave (PeerHandle): the place of that copy in
-// that library, the first by its path (Place), then by Jellyfin's IDs;
-// ok is false when the index has none.
-func (s *Store) CopyByHandle(ctx context.Context, handle string) (c IndexedCopy, ok bool, err error) {
-	id, library, found := strings.Cut(handle, "-")
-	if !found {
-		return IndexedCopy{}, false, nil
+// the handle the catalog gave, its copy ID (which never leaves: the
+// engine sends its own version ID, a keyed hash of it, the same wherever
+// the file is), served through a place of one of the libraries offered
+// to that server (msfp.PeerRef.Libraries), never through another: the
+// one the catalog lists it by (ItemsCopies: the first library in the
+// operator's order, then the first by its path, then by Jellyfin's IDs).
+// ok is false when the copy is in none of them.
+func (s *Store) CopyByHandle(ctx context.Context, copyID string, libraries []string) (c IndexedCopy, ok bool, err error) {
+	libs, err := json.Marshal(libraries)
+	if err != nil {
+		return IndexedCopy{}, false, err
 	}
-	c, err = scanCopy(s.read.QueryRowContext(ctx, `SELECT `+copyColumns+` FROM catalog_copies
-		WHERE copy_id = ? AND coalesce((SELECT i.library_id FROM catalog_items i WHERE i.id = catalog_copies.item_id), '') = ?
-		ORDER BY place, item_id, source_id LIMIT 1`, id, library))
-	if errors.Is(err, sql.ErrNoRows) {
-		return IndexedCopy{}, false, nil
+	var places []IndexedCopy
+	err = s.each(ctx, func(rows *sql.Rows) error {
+		c, err := scanCopy(rows)
+		if err == nil {
+			places = append(places, c)
+		}
+		return err
+	}, `SELECT `+copyColumns+` FROM catalog_copies WHERE copy_id = ?
+		AND coalesce((SELECT i.library_id FROM catalog_items i WHERE i.id = catalog_copies.item_id), '') IN (SELECT value FROM json_each(?))`,
+		copyID, string(libs))
+	if err != nil || len(places) == 0 {
+		return IndexedCopy{}, false, err
 	}
-	return c, err == nil, err
+	better, err := s.placeOrder(ctx)
+	if err != nil {
+		return IndexedCopy{}, false, err
+	}
+	c = places[0]
+	for _, p := range places[1:] {
+		if better(p, c) {
+			c = p
+		}
+	}
+	return c, true, nil
 }
 
 // ShareableCopy is a copy as paired servers are given it (MSFP video
 // section 3.2): MSFP's copy object, its ID the engine's handle of it
-// (PeerHandle, which never leaves: the engine sends its own version ID),
+// (its copy ID, which never leaves: the engine sends its own version ID),
 // with its previews' layout and skip markers.
 func (s *Store) ShareableCopy(ctx context.Context, c IndexedCopy) (wire.Copy, error) {
 	w := c.Facts
-	w.ID, w.ETag, w.PreviewLayout = PeerHandle(c), c.ETag, c.PreviewLayout
+	w.ID, w.ETag, w.PreviewLayout = c.CopyID, c.ETag, c.PreviewLayout
 	if w.AudioTracks == nil {
 		w.AudioTracks = []wire.CopyAudio{}
 	}

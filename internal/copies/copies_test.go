@@ -300,8 +300,8 @@ func TestSamePathTwoLibraries(t *testing.T) {
 // one copy ID, a row for each place, ranked by path; players get it once,
 // through the first library in the libraries' order they may see, then
 // the first path; a profile allowed one library only gets it through
-// that library's place, and a paired server through the library its
-// handle names.
+// that library's place, and a paired server through a library offered
+// to it, its handle the bare copy ID.
 func TestSameFileTwoLibraries(t *testing.T) {
 	ctx := context.Background()
 	k, db, media := keeperSetup(t)
@@ -363,10 +363,18 @@ func TestSameFileTwoLibraries(t *testing.T) {
 		if err != nil || len(cs) != 1 || cs[0].ItemID != item || cs[0].CopyID != want {
 			t.Errorf("allowed %s only: %+v %v", lib, cs, err)
 		}
-		c, ok, err := db.CopyByHandle(ctx, store.PeerHandle(cs[0]))
+		c, ok, err := db.CopyByHandle(ctx, want, []string{lib})
 		if err != nil || !ok || c.ItemID != item {
 			t.Errorf("handle through %s: %+v %v %v", lib, c, ok, err)
 		}
+	}
+	// A paired server offered both libraries: the place the catalog lists
+	// it by (lib-more first, then its first path); offered neither, none.
+	if c, ok, err := db.CopyByHandle(ctx, want, []string{"lib-films", "lib-more"}); err != nil || !ok || c.ItemID != id(2) {
+		t.Errorf("handle through both: %+v %v %v", c, ok, err)
+	}
+	if _, ok, err := db.CopyByHandle(ctx, want, []string{"lib-other"}); err != nil || ok {
+		t.Errorf("handle through a library not holding it: %v %v", ok, err)
 	}
 	// The same pass again: nothing changes.
 	head := changes(t, db)
