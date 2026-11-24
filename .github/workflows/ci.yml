@@ -37,6 +37,10 @@ jobs:
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
       - name: Tests
+        # /tmp is never a library folder (files.Own), so the tests' own
+        # folders go elsewhere.
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: go test -race -timeout 30m ./...
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
