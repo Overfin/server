@@ -5,7 +5,7 @@ go 1.26.11
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/msfp-io/msfp-go v0.8.0
-	github.com/overfin/web v0.99.22
+	github.com/overfin/web v0.99.23
 	golang.org/x/crypto v0.59.0
 	modernc.org/sqlite v1.62.0
 )

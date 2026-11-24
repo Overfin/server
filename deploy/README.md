@@ -17,8 +17,8 @@ plugin. [How it's built, and why](../docs/architecture.md).
 
 ```sh
 mkdir overfin && cd overfin
-curl -fsSLO https://raw.githubusercontent.com/overfin/server/v0.10.2/deploy/compose.yaml
-curl -fsSL -o .env https://raw.githubusercontent.com/overfin/server/v0.10.2/deploy/.env.example
+curl -fsSLO https://raw.githubusercontent.com/overfin/server/v0.10.3/deploy/compose.yaml
+curl -fsSL -o .env https://raw.githubusercontent.com/overfin/server/v0.10.3/deploy/.env.example
 ```
 
 In `compose.yaml`, change `/srv/media` on the media line to your media
