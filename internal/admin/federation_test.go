@@ -308,3 +308,29 @@ func TestFederationPanelUncallable(t *testing.T) {
 		t.Fatalf("the list: %s", rec.Body)
 	}
 }
+
+// TestReadFailedOf: the panel gets the engine's code for a failed reading
+// of a peer's titles, the problem type for a signed refusal only, and
+// nothing for a reading that worked or a code this build doesn't know.
+func TestReadFailedOf(t *testing.T) {
+	at := time.Date(2026, 11, 23, 20, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		in   *msfp.LastReading
+		want *readFailedJSON
+	}{
+		{nil, nil},
+		{&msfp.LastReading{At: at}, nil},
+		{&msfp.LastReading{At: at, Failure: "something-new"}, nil},
+		{&msfp.LastReading{At: at, Failure: msfp.ReadOlderDraft, Refusal: "not-found"},
+			&readFailedJSON{Failure: "older-draft", At: "2026-11-23T20:00:00Z"}},
+		{&msfp.LastReading{At: at, Failure: msfp.ReadRefused, Refusal: "rate-limited"},
+			&readFailedJSON{Failure: "refused", Refusal: "rate-limited", At: "2026-11-23T20:00:00Z"}},
+		{&msfp.LastReading{At: at, Failure: msfp.ReadRefused},
+			&readFailedJSON{Failure: "refused", At: "2026-11-23T20:00:00Z"}},
+	} {
+		got := readFailedOf(c.in)
+		if (got == nil) != (c.want == nil) || got != nil && *got != *c.want {
+			t.Errorf("readFailedOf(%+v) = %+v, want %+v", c.in, got, c.want)
+		}
+	}
+}

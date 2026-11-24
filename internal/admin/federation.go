@@ -86,6 +86,11 @@ type peerJSON struct {
 	Inbound     string `json:"inbound,omitempty"`
 	CallsFailed bool   `json:"callsFailed,omitempty"`
 
+	// ReadFailed is why the last reading of its titles failed, left out
+	// when it read or none ended since the start (msfp.PeerView.Reading):
+	// the engine's codes only, never an address or anything it wrote.
+	ReadFailed *readFailedJSON `json:"readFailed,omitempty"`
+
 	// Relations (MSFP core section 7.7). Groups are the IDs of the groups
 	// this pairing was made or kept through; Individual, whether the two
 	// are also paired directly (both want it); Asked, this server asked to
@@ -100,6 +105,29 @@ type peerJSON struct {
 	Asked        bool   `json:"asked,omitempty"`
 	Asks         bool   `json:"asks,omitempty"`
 	KeepChoice   bool   `json:"keepChoice,omitempty"`
+}
+
+// readFailedJSON is why a reading of a peer's titles failed: one of
+// msfp.ReadFailures, when it ended, and for "refused" the MSFP problem
+// type of its signed refusal ("" when it gave another one).
+type readFailedJSON struct {
+	Failure string `json:"failure"`
+	Refusal string `json:"refusal,omitempty"`
+	At      string `json:"at"`
+}
+
+// readFailedOf is a peer's last reading for the panel: nil when it read,
+// or for a code this build doesn't know (shown as nothing rather than
+// as the engine's raw words).
+func readFailedOf(r *msfp.LastReading) *readFailedJSON {
+	if r == nil || r.Failure == "" || !slices.Contains(msfp.ReadFailures, r.Failure) {
+		return nil
+	}
+	j := &readFailedJSON{Failure: string(r.Failure), At: stamp(r.At)}
+	if r.Failure == msfp.ReadRefused {
+		j.Refusal = r.Refusal
+	}
+	return j
 }
 
 // movingJSON is a peer's new address, being checked: since when that
@@ -179,6 +207,7 @@ func peerOf(v msfp.PeerView) peerJSON {
 	if v.Inbound != msfp.InboundYes && v.Inbound != "" {
 		j.Inbound = string(v.Inbound)
 	}
+	j.ReadFailed = readFailedOf(v.Reading)
 	return j
 }
 

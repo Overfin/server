@@ -7,6 +7,7 @@
   import { Card, Field, FormModal, Modal, Setting, Badge, Empty, Notice, Tabs, ask, toast } from '@overfin/ui';
   import { api } from '../lib/api';
   import { ago, day, message, plural, when } from '../lib/format';
+  import { readingLang, readingText, type ReadFailed } from '../lib/reading';
 
   export interface Member {
     id: string;
@@ -22,6 +23,8 @@
     refused?: boolean;
     asked?: boolean;
     me?: boolean;
+    // readFailed: why the last reading of its titles failed.
+    readFailed?: ReadFailed;
   }
   export interface Group {
     id: string;
@@ -378,6 +381,7 @@
                       <div class="name">{m.name || 'A server'} {#if m.role !== 'member'}<Badge kind="info">{roleName[m.role]}</Badge>{/if}{#if open.heir === m.id} <Badge>Heir</Badge>{/if}</div>
                       <div class="hint">{m.invitedBy ? `invited by ${m.invitedBy}, ` : ''}joined {day(m.joinedAt)}</div>
                       <div><code class="fingerprint">{m.fingerprint}</code></div>
+                      {#if readingText(m.readFailed)}<div class="hint" lang={readingLang}>{readingText(m.readFailed)}</div>{/if}
                       <div class="hint only-narrow">{linkText(m)}</div>
                       <div class="only-narrow narrow-actions">{@render memberActions(m)}</div>
                     </td>

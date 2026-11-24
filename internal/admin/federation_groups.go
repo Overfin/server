@@ -65,6 +65,9 @@ type groupMemberJSON struct {
 	// Individual: also paired directly with it.
 	Individual bool `json:"individual,omitempty"`
 	Me         bool `json:"me,omitempty"`
+	// ReadFailed is why the last reading of its titles through that
+	// pairing failed (peerJSON's).
+	ReadFailed *readFailedJSON `json:"readFailed,omitempty"`
 }
 
 type groupBanJSON struct {
@@ -119,6 +122,7 @@ func groupOf(v msfp.GroupView, peers []msfp.PeerView) groupJSON {
 		if p, ok := byID[m.Peer]; ok {
 			mj.Paired = p.State == msfp.Paired
 			mj.Individual = p.Individual
+			mj.ReadFailed = readFailedOf(p.Reading)
 		}
 		j.Members = append(j.Members, mj)
 	}

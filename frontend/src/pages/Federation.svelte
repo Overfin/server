@@ -10,6 +10,7 @@
   import { api } from '../lib/api';
   import { ago, day, when, message, plural } from '../lib/format';
   import FederationGroups, { type Group, type JoinWaiting } from './FederationGroups.svelte';
+  import { readingLang, readingText, type ReadFailed } from '../lib/reading';
 
   interface Peer {
     id: string;
@@ -45,6 +46,9 @@
     // this server's last calls to it couldn't connect.
     inbound?: 'no' | 'confirming';
     callsFailed?: boolean;
+    // readFailed: why the last reading of its titles failed (the engine's
+    // code), left out when it read.
+    readFailed?: ReadFailed;
     // Relations (MSFP core section 7.7): the groups this pairing was made
     // or kept through; individual, also paired directly; asked, this server
     // asked to pair directly; asks, the other server asks; keepChoice, its
@@ -671,7 +675,7 @@
         <tbody>
           {#each direct as p (p.id)}
             <tr>
-              <td><div class="name">{p.name}</div><div class="hint address">{p.address}{#if p.address.startsWith('http://')}{' · plain http (test setting)'}{/if}</div>{#if p.groups?.length}<div class="hint">{p.individual ? 'Also in ' : 'Through '}{groupNames(p)}</div>{/if}{#if addressText(p)}<div class="hint">{addressText(p)}</div>{/if}<div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
+              <td><div class="name">{p.name}</div><div class="hint address">{p.address}{#if p.address.startsWith('http://')}{' · plain http (test setting)'}{/if}</div>{#if p.groups?.length}<div class="hint">{p.individual ? 'Also in ' : 'Through '}{groupNames(p)}</div>{/if}{#if addressText(p)}<div class="hint">{addressText(p)}</div>{/if}{#if readingText(p.readFailed)}<div class="hint" lang={readingLang}>{readingText(p.readFailed)}</div>{/if}<div class="only-narrow">{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint only-narrow">{shareText(p)}</div>{/if}</td>
               <td class="hide-narrow"><div>{stateText(p)}</div>{#if p.state === 'paired'}<div class="hint">{shareText(p)}</div>{/if}{#if p.seenAt}<div class="hint">heard from {ago(p.seenAt)}</div>{/if}</td>
               <td class="hide-narrow">{#if p.inbound === 'no'}<div><Badge kind="info">Can't be called</Badge></div>{/if}<div><Badge kind={keyState(p).kind}>{keyState(p).text}</Badge></div><div><code class="fingerprint">{p.fingerprint}</code></div>{#if keyText(p)}<div class="hint key-text">{keyText(p)}</div>{/if}</td>
               <td class="row-actions">
