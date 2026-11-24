@@ -28,8 +28,8 @@ a mounted network share. It needs Docker with Compose:
 
 ```sh
 mkdir overfin && cd overfin
-curl -fsSLO https://raw.githubusercontent.com/overfin/server/v0.10.3/deploy/compose.yaml
-curl -fsSL -o .env https://raw.githubusercontent.com/overfin/server/v0.10.3/deploy/.env.example
+curl -fsSLO https://raw.githubusercontent.com/overfin/server/v0.10.4/deploy/compose.yaml
+curl -fsSL -o .env https://raw.githubusercontent.com/overfin/server/v0.10.4/deploy/.env.example
 # in compose.yaml, change /srv/media to where your films and series are, then:
 docker compose up -d
 ```
