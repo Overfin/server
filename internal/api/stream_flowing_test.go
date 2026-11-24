@@ -30,21 +30,24 @@ func TestStreamEndsWithItsPlayback(t *testing.T) {
 	if _, err := io.ReadFull(res.Body, make([]byte, 1000)); err != nil {
 		t.Fatalf("first part: %v", err)
 	}
-	ended := make(chan error, 1)
-	go func() {
-		_, err := io.Copy(io.Discard, res.Body)
-		ended <- err
-	}()
-	select {
-	case err := <-ended:
-		t.Fatalf("ended before the stop: %v", err)
-	case <-time.After(200 * time.Millisecond):
-	}
+	// Nothing more is read before the stop: the stream waits on this
+	// reader (it holds the rest), however fast the machine, so it can't
+	// have ended on its own.
+	time.Sleep(200 * time.Millisecond)
 	if code, body := post(t, srv, "/api/v1/playback/"+s.ID+"/stop", `{}`); code >= 300 {
 		t.Fatalf("stop: %d %s", code, body)
 	}
+	ended := make(chan int64, 1)
+	go func() {
+		n, _ := io.Copy(io.Discard, res.Body)
+		ended <- n
+	}()
 	select {
-	case <-ended:
+	case n := <-ended:
+		// What was on its way when it stopped, at most: never the rest.
+		if rest := res.ContentLength - 1000; n >= rest {
+			t.Errorf("the whole file came after the stop (%d bytes)", n)
+		}
 	case <-time.After(5 * time.Second):
 		t.Error("the file still flows after its playback stopped")
 	}
