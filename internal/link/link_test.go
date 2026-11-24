@@ -558,7 +558,7 @@ func TestSecondConnection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go again.connect(ctx, p)
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(15 * time.Second) // the race detector on a slow runner
 	for !g.Status().Since.After(first) && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
