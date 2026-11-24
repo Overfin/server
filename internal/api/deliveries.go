@@ -146,12 +146,15 @@ func (pb Playback) sendRefusal(w http.ResponseWriter, err error) {
 		pb.Logger.Error("a delivery failed", "err", err)
 		problem.Send(w, problem.Internal, "")
 	case rf.Status == http.StatusServiceUnavailable:
+		pb.Logger.Info("a delivery refused: the server is busy", "why", rf.Why)
 		problem.Send(w, problem.ServerBusy, "")
 	case rf.Status == http.StatusBadRequest:
 		problem.Send(w, problem.InvalidRequest, "")
 	default:
-		// The closed code says why, for the player's information panel;
-		// never free text from upstream.
+		// The closed code says why, for the player's information panel
+		// and the log (no title, no account); never free text from
+		// upstream.
+		pb.Logger.Info("a delivery refused", "why", rf.Why)
 		problem.Send(w, problem.DeliveryRefused, rf.Why)
 	}
 }

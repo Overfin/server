@@ -666,3 +666,56 @@ func TestKeeperRetriesFailedPass(t *testing.T) {
 		}
 	}
 }
+
+// A minimal copy carries the dynamic range Jellyfin read, so a converted
+// HDR picture is ordered tone mapped; an older minimal copy without it is
+// made again, one already right is left.
+func TestMinimalRange(t *testing.T) {
+	for _, c := range []struct {
+		rng, typ string
+		want     int
+	}{{"HDR", "HDR10", wire.TransferPQ}, {"HDR", "DOVIWithHDR10", wire.TransferPQ}, {"HDR", "HLG", wire.TransferHLG},
+		{"SDR", "SDR", 0}, {"", "", 0}} {
+		f := atmosFile()
+		f.Size = 1000
+		f.Streams[1].VideoRange, f.Streams[1].VideoRangeType = c.rng, c.typ
+		m, _ := Minimal(f)
+		m = served(t, m)
+		got := 0
+		if m.Video.Colour != nil && m.Video.Colour.Transfer != nil {
+			got = *m.Video.Colour.Transfer
+		}
+		if got != c.want || m.Video.HighDynamicRange() != (c.want != 0) {
+			t.Errorf("%s/%s: transfer %d, want %d", c.rng, c.typ, got, c.want)
+		}
+	}
+
+	ctx := context.Background()
+	k, db, media := keeperSetup(t)
+	write(t, filepath.Join(media, "hdr.mkv"), []byte("an hdr film"))
+	f := atmosFile()
+	f.ItemID, f.SourceID, f.Path = id(0), id(0), filepath.Join(media, "hdr.mkv")
+	k.Files = fakeFiles{f}.list
+	if err := k.pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c, ok, _ := db.CopyOf(ctx, id(0), id(0))
+	if !ok || !c.Minimal || c.Facts.Video == nil || c.Facts.Video.HighDynamicRange() {
+		t.Fatalf("sdr minimal copy: %+v %v", c, ok)
+	}
+	f.Streams[1].VideoRange, f.Streams[1].VideoRangeType = "HDR", "HDR10"
+	k.Files = fakeFiles{f}.list
+	if err := k.pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c, _, _ = db.CopyOf(ctx, id(0), id(0))
+	if !c.Minimal || c.Facts.Video == nil || !c.Facts.Video.HighDynamicRange() {
+		t.Fatalf("minimal copy not made again with its range: %+v", c.Facts.Video)
+	}
+	// As kept, the same as made: not made again at each pass.
+	m, _ := Minimal(f)
+	m.Size = c.Facts.Size
+	if !sameFacts(c.Facts, m) {
+		t.Errorf("kept %+v, made %+v", c.Facts, m)
+	}
+}

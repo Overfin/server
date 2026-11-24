@@ -1,7 +1,9 @@
 package copies
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"slices"
@@ -281,7 +283,11 @@ func (k *Keeper) refresh(ctx context.Context, v version, failed map[string]bool)
 	canProbe := k.Prober != nil && !failed[v.fingerprint]
 	same := ok && old.CopyID == v.copyID && old.Fingerprint == v.fingerprint && old.Position == v.position && old.Place == v.place &&
 		old.Externals == extHash && old.Parts == max(v.f.Parts, 1)
-	if same && (!old.Minimal && old.ProbeVersion >= Version || old.Minimal && !canProbe) {
+	// A minimal copy is made again when Jellyfin's data says more of it
+	// (an older Overfin's, without its dynamic range).
+	m := k.minimal(v, layout, extHash)
+	stale := ok && old.Minimal && !sameFacts(old.Facts, m.Facts)
+	if same && !stale && (!old.Minimal && old.ProbeVersion >= Version || old.Minimal && !canProbe) {
 		if !equalLayout(old.PreviewLayout, layout) {
 			return false, k.DB.SetCopyLayout(ctx, v.f.ItemID, v.f.SourceID, layout)
 		}
@@ -304,8 +310,8 @@ func (k *Keeper) refresh(ctx context.Context, v version, failed map[string]bool)
 			return kept.ProbeVersion < Version && canProbe, nil
 		}
 	}
-	if !same {
-		if err := k.DB.PutCopy(ctx, k.minimal(v, layout, extHash)); err != nil {
+	if !same || stale {
+		if err := k.DB.PutCopy(ctx, m); err != nil {
 			return false, err
 		}
 	} else if !equalLayout(old.PreviewLayout, layout) {
@@ -314,6 +320,13 @@ func (k *Keeper) refresh(ctx context.Context, v version, failed map[string]bool)
 		}
 	}
 	return canProbe, nil
+}
+
+// sameFacts says whether two copies' facts are the same, as kept.
+func sameFacts(a, b wire.Copy) bool {
+	ja, errA := json.Marshal(a)
+	jb, errB := json.Marshal(b)
+	return errA == nil && errB == nil && bytes.Equal(ja, jb)
 }
 
 func equalLayout(a, b *wire.PreviewLayout) bool {

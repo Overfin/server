@@ -246,7 +246,7 @@ func textSubtitle(codec string) bool {
 
 // Minimal is the copy Jellyfin's data describes, for a file not probed
 // yet or whose probe failed (video section 3.2): its size, duration,
-// container as a media type, picture size and codec, and audio tracks
+// container as a media type, picture size, codec and dynamic range, and audio tracks
 // with their languages, without codecs strings, so it is never played as
 // it is (the baseline plays it). Its track IDs are file indexes as
 // Jellyfin's suggest them. Its size is Jellyfin's; the caller sets the
@@ -282,7 +282,7 @@ func Minimal(f jellyfin.VideoFile) (wire.Copy, map[string]int) {
 	if v := jf["Video"]; len(v) > 0 && v[0].Width > 0 && v[0].Height > 0 && v[0].Width <= wire.MaxVideoSide && v[0].Height <= wire.MaxVideoSide {
 		picture = true
 		if codec := strings.ToLower(v[0].Codec); wire.Token(codec) {
-			c.Video = &wire.VideoStream{Codec: codec, Width: v[0].Width, Height: v[0].Height}
+			c.Video = &wire.VideoStream{Codec: codec, Width: v[0].Width, Height: v[0].Height, Colour: rangeOf(v[0])}
 			streams["v"] = v[0].Index
 		}
 	}
@@ -309,6 +309,22 @@ func Minimal(f jellyfin.VideoFile) (wire.Copy, map[string]int) {
 		streams[a.ID] = s.Index
 	}
 	return c, streams
+}
+
+// rangeOf is the dynamic range Jellyfin read of a picture, as the
+// transfer that makes it (video section 3.6): HLG, else PQ for any other
+// high range (HDR10, HDR10+, Dolby Vision); nil when SDR or unknown. A
+// converted copy is then tone mapped, as Jellyfin does (the delivery
+// checks what it made against that).
+func rangeOf(s jellyfin.MediaStream) *wire.VideoColour {
+	if s.VideoRange != "HDR" {
+		return nil
+	}
+	t := wire.TransferPQ
+	if strings.Contains(s.VideoRangeType, "HLG") {
+		t = wire.TransferHLG
+	}
+	return &wire.VideoColour{Transfer: &t}
 }
 
 // ---- Raw probes ----------------------------------------------------------------
