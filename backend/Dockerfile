@@ -46,8 +46,8 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags=
 # plugin-source, for branch and test builds), built against the Jellyfin
 # below.
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0.404@sha256:fe0fd4e93bd2fbb47c883b7a6369e5c8d3db8bf01cdc5981f6ee35fbdf3ff4fb AS plugin
-ARG PLUGIN_COMMIT=72c2d7a6cf8a93132c6fcc16e607fe8b901920a3
-ARG PLUGIN_VERSION=0.8.0
+ARG PLUGIN_COMMIT=810ee693923f207c05ab65b0120262b5cdb8f0ac
+ARG PLUGIN_VERSION=0.9.0
 COPY --from=plugin-source /sr[c] /local/src/
 RUN if [ -d /local/src/Overfin.Jellyfin ]; then \
       mkdir /plugin && cp -r /local/src /plugin/src && rm -rf /plugin/src/*/bin /plugin/src/*/obj && cd /plugin; \
