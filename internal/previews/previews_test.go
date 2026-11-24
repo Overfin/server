@@ -285,3 +285,28 @@ func TestKeeperPass(t *testing.T) {
 		t.Error("a file's previews deleted")
 	}
 }
+
+// A failed pass (Jellyfin still starting) is tried again soon, not an
+// Every later.
+func TestKeeperRetriesFailedPass(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tries := make(chan struct{}, 10)
+	k := &Keeper{Store: st, Every: time.Hour, retry: 10 * time.Millisecond, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		On: func(context.Context) (bool, error) {
+			tries <- struct{}{}
+			return false, context.DeadlineExceeded
+		}}
+	go k.Run(ctx)
+	for i := range 2 {
+		select {
+		case <-tries:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("pass %d never came", i+1)
+		}
+	}
+}

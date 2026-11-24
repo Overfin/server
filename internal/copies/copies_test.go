@@ -645,3 +645,24 @@ func TestKeeperProbes(t *testing.T) {
 		t.Errorf("failed: %v", failed)
 	}
 }
+
+// A failed pass (Jellyfin still starting) is tried again soon, not an
+// Every later.
+func TestKeeperRetriesFailedPass(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tries := make(chan struct{}, 10)
+	k := &Keeper{Every: time.Hour, retry: 10 * time.Millisecond, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Libraries: func(context.Context) (files.Libraries, error) {
+			tries <- struct{}{}
+			return files.Libraries{}, context.DeadlineExceeded
+		}}
+	go k.Run(ctx)
+	for i := range 2 {
+		select {
+		case <-tries:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("pass %d never came", i+1)
+		}
+	}
+}

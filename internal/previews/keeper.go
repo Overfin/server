@@ -60,20 +60,25 @@ type Keeper struct {
 	Every  time.Duration
 	Logger *slog.Logger
 	now    func() time.Time
+	// retry is failedWait's wait, for tests.
+	retry time.Duration
 }
 
-// Run keeps previews until ctx ends: a pass now, then every Every, or at
-// once when woken (Wake: the panel switched them on).
+// Run keeps previews until ctx ends: a pass now, then every Every (a
+// minute after a failed one), or at once when woken (Wake: the panel
+// switched them on).
 func (k *Keeper) Run(ctx context.Context) {
 	k.Store.clearMaking()
 	for {
+		wait := k.Every
 		if err := k.pass(ctx); err != nil && ctx.Err() == nil {
 			k.Logger.Warn("seek-bar previews", "err", err)
+			wait = min(wait, k.failedWait())
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(k.Every):
+		case <-time.After(wait):
 		case <-k.woken():
 		}
 	}
@@ -86,6 +91,16 @@ func (k *Keeper) Wake() {
 	case k.woken() <- struct{}{}:
 	default:
 	}
+}
+
+// failedWait is how long a failed pass waits for the next: a minute, not
+// Every (Jellyfin still starting answers late, and the index stays empty
+// until a pass gets through).
+func (k *Keeper) failedWait() time.Duration {
+	if k.retry > 0 {
+		return k.retry
+	}
+	return time.Minute
 }
 
 func (k *Keeper) woken() chan struct{} {
