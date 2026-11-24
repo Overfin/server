@@ -54,7 +54,7 @@ Overfin doesn't tie your friends to Overfin.
   facts read from the files (length, container, picture size and range,
   codecs, audio and subtitle tracks with their languages, chapters, skip
   markers): never file names, paths, track or version names, or people. A title known here only by
-  another site's ID than TMDB's isn't shared. The IDs a server gives
+  another site's ID, not TMDB's, isn't shared. The IDs a server gives
   others (its libraries', its versions', its playbacks' and their
   tickets) are its own, and tell nothing of its files or of Jellyfin.
 - **Only what's yours to share.** A server only ever offers its own
@@ -335,7 +335,7 @@ too much, by fault or on purpose, with fixed limits nobody needs to set:
 federation calls per address (an IPv6 /64 counting as one) before any signature (50 a second, bursts
 of 400), per paired server (20 a second, bursts of 200), for all of them
 together (200 a second, bursts of 2,000), `play` per paired server (30 a
-minute, 20 at once), and requests at once (8 per paired server, 64 in
+minute, bursts of 20), and requests at once (8 per paired server, 64 in
 all, each with a short queue). Media has its own: 8 fetches at once per
 playback and 64 per paired server, on both sides. Normal use (catalog
 reads, playback, seek-bar previews) stays far below them. Past one, the
@@ -353,8 +353,9 @@ paired gets a plain 404. Nonces are kept in memory, so a request signed
 before a server started is refused: a paired server whose clock runs
 behind is refused for that long after each start (keep both clocks set by
 the network). A compromised paired server can't reach your data or your
-people. The full rules are SECURITY.md's 94 to 100, 136, for keys, 137
-and 138, for addresses, 139, and for servers that can't be called, 140.
+people. The full rules are [SECURITY.md](../SECURITY.md)'s 94 to 100 and 136;
+for keys, 137 and 138; for addresses, 139; and for servers that can't be
+called, 140.
 
 Paired servers say, each time they check on each other, which versions of
 the protocol and of its parts (catalog, playback, media, video) they

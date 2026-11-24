@@ -60,9 +60,10 @@ publish that port (the commented line in `compose.yaml`): it answers
 private addresses only, and works when the internet is down. Its sign-in
 is apart from the domain's (plain http has its own cookies).
 
-Without a domain, set the site's address in the control panel to the
-machine's LAN address (`http://<the machine>`): invitations and emails
-give it.
+Without a domain, set the site's address to the machine's LAN address
+(`http://<the machine>`), as `site.url` in `overfin.toml` (see the
+[install guide](../docs/install.md#on-the-internet-with-https)):
+invitations and emails give it.
 
 A forgotten control panel password:
 

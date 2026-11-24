@@ -122,8 +122,9 @@ The main gaps (details in [ROADMAP.md](../ROADMAP.md)):
 - A TV app and an iPhone app, and a sign-in for native apps. On Android,
   [Overfin for Android](https://github.com/overfin/android) shows a server's
   site in an app.
-- Emails beyond accounts (confirming an address, a new password,
-  invitations and notices about accounts are there).
+- Emails beyond accounts and federation (confirming an address, a new
+  password, invitations, notices about accounts, pairing codes and
+  pairing requests are there).
 - SDKs other than JavaScript.
 
 The API specification also describes endpoints that aren't served yet; they
@@ -235,7 +236,7 @@ few a day, as one Seerr user of its own named "Overfin" (give it the Request
 permission, and auto-approval if you like). Seerr never learns who wished
 for what, and people never need Seerr itself: keep it private on your
 network, reachable by Overfin and you only. Requests made before wishlists
-became wishes; the Seerr users accounts had then stay in Seerr, for you to
+became wishes; the Seerr users that accounts had then stay in Seerr, for you to
 delete there. Switching from one to the other hands every open wish to the
 new one, in its next turns: what the old one said of them (requested,
 downloading, not found) is forgotten, and what it had started there goes on

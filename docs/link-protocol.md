@@ -4,7 +4,7 @@ How Overfin's gateway (the part facing the internet) and its backend (the
 data, the control panel, Jellyfin) talk, as the code does it today: each
 message, each check, each limit, and the guarantees a test can check.
 [architecture.md](architecture.md) says why there are two parts; the
-promises are SECURITY.md's (rules 120 to 135). This document says how they
+promises are [SECURITY.md](../SECURITY.md)'s (rules 119 to 135). This document says how they
 hold, what's tested, and what isn't yet.
 
 Written 2026-11-13 from the code (`internal/link`, `internal/gateway`,

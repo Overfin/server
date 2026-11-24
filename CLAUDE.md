@@ -50,7 +50,8 @@ limits); apps, official or not, use only its public API. MIT, public.
   for others to add.
 
 ## Layout
-- `cmd/overfin`: entry point
+- `cmd/overfin-backend`, `cmd/overfin-gateway`: the entry points of the
+  two images; `cmd/overfin`: Overfin and overfin-web in one program
 - `overfin`: Overfin itself (startup, the gateway, wiring every feature)
 - `frontend/`: the control panel and the setup page (Svelte), built into
   `internal/admin/dist`

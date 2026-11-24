@@ -22,10 +22,10 @@ and `docker compose up -d`.
 
 Go with the standard library and four dependencies (a TOML parser, a
 pure-Go SQLite, the Go team's golang.org/x/crypto for getting
-certificates from Let's Encrypt, and filippo.io/edwards25519, the group
-arithmetic inside the standard library's Ed25519, for MSFP's strict key
-and signature checks), besides overfin-web, which the official
-build bundles. CI runs formatting, vet, staticcheck, govulncheck, the tests
+certificates from Let's Encrypt, and [msfp-go](https://github.com/msfp-io/msfp-go),
+MSFP's engine, which brings filippo.io/edwards25519, the group arithmetic
+inside the standard library's Ed25519, for MSFP's strict key and signature
+checks), besides overfin-web, which the official build bundles. CI runs formatting, vet, staticcheck, govulncheck, the tests
 with the race detector, and a check that the API specification matches the
 routes.
 

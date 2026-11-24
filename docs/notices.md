@@ -11,6 +11,12 @@ sends one where the page says, saved or not. End dates are checked every
 hour; a notice about one is sent once per end date, and one that fails is
 logged, not sent again.
 
+One email is on by default: when another server asks to pair with this
+one, or to join one of your groups, the admins are emailed once per
+request, saying which server asks for what (Notices, Federation: "Email the
+admins when a server asks"). Like the other emails, it needs Overfin's own
+sign-in and an email server; it goes to no webhook.
+
 The webhook gets a JSON `POST` (no redirects followed, 10 seconds at most),
 with the event in an `X-Overfin-Event` header too:
 

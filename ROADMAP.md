@@ -367,8 +367,8 @@ own do), so a title looks the same wherever it is.
      backdrop and logo, its seasons' posters and its episodes' stills, from
      TMDB, kept by title key and refreshed in the background (five months
      at most), in the language set in the panel (which also gives
-     discovery's text). Items carry it wherever they're shown, Jellyfin's
-     own images only where TMDB has none (milestone 5 removes that), and an
+     discovery's text). Items carry it wherever they're shown (since
+     milestone 5, never Jellyfin's own images, even where TMDB has none), and an
      image is served only to a profile that may see a title it belongs to. Jellyfin's image fetchers
      can then be off. ~~Next: people's photos.~~ Done: cast and people's
      pages show TMDB's photos (milestone 5).

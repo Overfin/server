@@ -64,7 +64,7 @@ try {
 }
 ```
 
-Copy `overfin.js` (and `overfin.d.ts` for TypeScript) into your site. The
+Copy `overfin.js` (and `overfin.d.ts` for TypeScript) into your site.
 [overfin-web](https://github.com/overfin/web) is built on it and shows every part in
 use. The API itself is specified in [api/openapi.yaml](../../api/openapi.yaml).
 

@@ -28,7 +28,7 @@ network security expert. So the rules come in two kinds:
     (rule 99): read at its own address, or set by the operator
     (`site.certificates`).
   - **Cookies** (rule 26) follow HTTPS: `__Host-` and `Secure` with it,
-    without both without it, since browsers refuse them there.
+    neither without it, since browsers refuse them there.
   - **Where the gateway runs** (rule 119): beside the backend, always,
     for the LAN or the internet, and optionally one more on another
     machine; its settings are environment variables: its domain, the
@@ -423,7 +423,8 @@ anyone. Paired servers are not trusted at all (rule 94).
     among what the profile may see), never a score or what makes it up.
 62. No analytics, no telemetry, no calls home. Overfin contacts only what
     the operator set up: Jellyfin, Seerr, TMDB, IMDb, the identity
-    provider, the email server, the notice webhook, paired servers.
+    provider, the email server, the notice webhook, paired servers, and
+    Let's Encrypt for the gateway's own certificate (`OVERFIN_DOMAIN`).
 63. Client addresses are used in memory (limits) and never stored or
     passed on, paired servers included (rule 97).
 64. Overfin never sends a browser to a third party, except the identity
@@ -433,8 +434,8 @@ anyone. Paired servers are not trusted at all (rule 94).
     activity.
     - Exception: a wish's state may hint that someone else wished for the
       title (rule 72).
-66. Deleting an account deletes everything Overfin holds about it. Seerr users
-    accounts had before wishlists stay in Seerr for the operator to delete;
+66. Deleting an account deletes everything Overfin holds about it. The Seerr
+    users that accounts had before wishlists stay in Seerr for the operator to delete;
     Overfin no longer uses them.
 67. Overfin offers no hooks for extra data collection. Operators who want
     more collect it with their own tools.
@@ -678,7 +679,7 @@ anyone. Paired servers are not trusted at all (rule 94).
 98. A server never acts for another beyond what was shared, and never
     hands one paired server's data to another.
 99. Servers pair over `https://` only; a plain `http://` address is
-    refused, but for the test setting `federation.test_plain_http`, off by
+    refused, except with the test setting `federation.test_plain_http`, off by
     default and never for a server in use, which the panel shows. A
     server accepts a peer's certificate when a public
     authority vouches for it, or when the peer named it, by its public

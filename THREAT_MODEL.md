@@ -28,7 +28,7 @@ in front) or a remote one, over the link [119, 120].
 |---|---|
 | Visitors, logged in or not | No |
 | The website built on Overfin | Partly: it may have bugs, so Overfin limits what a broken site can do |
-| The reverse proxy and identity provider, when there are | Yes, for the identity and client IP they assert |
+| The reverse proxy and identity provider, when present | Yes, for the identity and client IP they assert |
 | Overfin's gateway, to its backend | Partly: it may be compromised, so the backend checks every session itself and trusts only the client address it gives [123, 126] |
 | Other Overfin servers (federation) | No: each proves who it is and gets only what was shared with it [94, 96] |
 | Other sites on the same domain (sibling subdomains) | No |
@@ -47,7 +47,7 @@ in front) or a remote one, over the link [119, 120].
 | Another server, weak or compromised | Reach into servers that share with it | Peers untrusted, authenticated, limited to what was shared [94–100]; a server that can't be called is never connected to, its address never resolving [140] |
 | Thief of a server's federation key | Act as that server toward its peers, move them to a key or an address of the thief's | Revocation suspends the key at every peer; peers follow only the key committed in advance, whose seed can be kept offline [137, 138]; a new address only once it answers under the key, which revocation ends [139] |
 | Attacker-controlled media or metadata | Run code in the browser, reach the internal network, exhaust memory | Untrusted-data rules [10–18] |
-| Network observer | See who watches what, catch passwords or links | TLS (a secure default: without HTTPS, everything travels in clear), nothing personal in URLs [71] |
+| Network observer | See who watches what, catch passwords or links | TLS (recommended: without HTTPS, everything travels in clear), nothing personal in URLs [71] |
 | An app the operator gave a key | Per-person activity | Totals only, for the scopes an admin ticked; keys kept as hashes, revocable [61, 85] |
 | Thief of a database or backup | Tokens, identities, PINs | Encryption and keyed PIN hashes [30], pseudonyms [70], minimal data [58] |
 
@@ -92,8 +92,8 @@ Nothing is enforced by the UI.
   are reserved for the owner profile [38, 74, 75].
 - **Escaping a kids profile:** PINs are checked on the server, wrong guesses
   slow down and then require the owner to log in again, and the client never
-  picks who acts upstream [8, 32, 34]. Kids can only wish for titles
-  for their age (from ratings in any country), and titles without one are refused [40, 41].
+  picks who acts upstream [8, 32, 34]. Kids can only see and wish for titles
+  for their age (Overfin's own, from TMDB's ratings), and titles without one are hidden [40, 41].
 - **Exhausting resources:** stream, transcode and rate limits, fixed image
   sizes [47, 48]. Limits fail gently and never cut off another user [49]. Faking
   `X-Forwarded-For` doesn't dodge rate limits, because the client IP comes only
@@ -208,7 +208,7 @@ server the operator doesn't fully trust. Suppose an attacker controls it.
 - **Kids profiles are only as strong as the PINs on the adult profiles.** PINs
   are optional; without them, a child can switch to an adult profile.
 - **Deleting an account doesn't delete everything elsewhere.** What
-  Overfin holds goes, but the Seerr users accounts had before wishlists
+  Overfin holds goes, but the Seerr users that accounts had before wishlists
   stay in Seerr until the operator deletes them there [66].
 - **Catalog searches reach TMDB.** With the TMDB catalog enabled, what users
   search for in the catalog is sent from the server to TMDB. Browsers never
