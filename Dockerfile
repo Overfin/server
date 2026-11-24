@@ -4,26 +4,12 @@
 # docker build -t overfin-gateway .
 # The build runs on the builder's own platform and cross-compiles for the
 # target, so images for other architectures build without emulation.
-# Branch and test builds give unreleased modules' local checkouts as named
-# build contexts, as backend/Dockerfile says (msfp-go-source,
-# overfin-web-source); a release build gives none.
-
-FROM scratch AS msfp-go-source
-FROM scratch AS overfin-web-source
-
 FROM --platform=$BUILDPLATFORM golang:1.27.0@sha256:4013ae0f9e7994f8535c58c811f8f863fbed38b72e0d51e6592156f758d66146 AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
-COPY --from=msfp-go-source / /deps/msfp-go/
-COPY --from=overfin-web-source /go.mo[d] /go.su[m] /web.g[o] /deps/overfin-web/
-COPY --from=overfin-web-source /dis[t] /deps/overfin-web/dist/
-COPY --from=overfin-web-source /src/lib/sd[k] /deps/overfin-web/src/lib/sdk/
-RUN for m in msfp-io/msfp-go=msfp-go overfin/web=overfin-web; do \
-      if [ -f "/deps/${m#*=}/go.mod" ]; then go mod edit -replace "github.com/${m%=*}=/deps/${m#*=}"; fi; \
-    done && mkdir -p /deps && cp go.mod /deps/go.mod && go mod download
+RUN go mod download
 COPY . .
-RUN cp /deps/go.mod go.mod
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o /overfin-gateway ./cmd/overfin-gateway
 # The final image has no shell, so its folders are prepared here: its data,

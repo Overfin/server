@@ -14,7 +14,7 @@ name: overfin
 services:
   gateway:
     container_name: overfin-gateway
-    image: ${OVERFIN_GATEWAY_IMAGE:-ghcr.io/overfin/overfin-gateway:${OVERFIN_VERSION:-0.10.0}}
+    image: ${OVERFIN_GATEWAY_IMAGE:-ghcr.io/overfin/overfin-gateway:${OVERFIN_VERSION:-0.10.1}}
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
@@ -38,7 +38,7 @@ services:
 
   backend:
     container_name: overfin-backend
-    image: ${OVERFIN_BACKEND_IMAGE:-ghcr.io/overfin/overfin-backend:${OVERFIN_VERSION:-0.10.0}}
+    image: ${OVERFIN_BACKEND_IMAGE:-ghcr.io/overfin/overfin-backend:${OVERFIN_VERSION:-0.10.1}}
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
