@@ -196,17 +196,6 @@ export interface TitleQuery {
   cursor?: string;
 }
 
-export interface Capabilities {
-  containers?: string[];
-  videoCodecs?: string[];
-  audioCodecs?: string[];
-  maxHeight?: number;
-  hdr?: string[];
-  subtitles?: string[];
-  maxAudioChannels?: number;
-  maxBitrateKbps?: number;
-}
-
 export interface Track {
   id: string;
   /** The language's name in itself: "Français (Canada)", "日本語"; "?" when unknown. */
@@ -457,12 +446,12 @@ export interface TitlePage {
 
 export interface Playback {
   id: string;
-  /** A play of a copy: its ticket, the addresses built from it (streamUrls). */
-  ticket?: string;
-  protocol?: 'hls' | 'file';
-  /** The copy playing (a play of a copy), and how it plays. */
-  copy?: Copy;
-  delivery?: PlaybackDelivery;
+  /** Its ticket, the addresses built from it (streamUrls). */
+  ticket: string;
+  protocol: 'hls' | 'file';
+  /** The copy playing, and how it plays. */
+  copy: Copy;
+  delivery: PlaybackDelivery;
   /** What plays; absent when the server has no title for the item yet. */
   title?: TitleSummary;
   method: 'direct' | 'remux' | 'transcode' | string;
@@ -487,8 +476,6 @@ export interface Playback {
   trickplay?: Trickplay;
   /** For an episode, the one after it (it may not be playable); absent at the end. */
   next?: TitleSummary;
-  /** How it's served: why the server converts it (no reasons: played as it is), and what the file holds. */
-  info?: PlaybackInfo;
 }
 
 /** How a play of a copy plays: chooseDelivery()'s decision, as the information panel shows it. */
@@ -520,15 +507,6 @@ export interface TranscodeTargets {
 export type Reason = 'as-is' | 'container' | 'audio-track' | 'audio-codec' | 'video-codec' | 'picture-range' | 'bitrate'
   | 'fallback' | 'quirk' | 'in-doubt';
 
-export interface PlaybackInfo {
-  /** The media server's reasons, such as 'AudioCodecNotSupported' or 'VideoRangeTypeNotSupported'. */
-  reasons?: string[];
-  container?: string;
-  bitrateKbps?: number;
-  video?: { codec?: string; profile?: string; width?: number; height?: number; bitDepth?: number; range?: string; bitrateKbps?: number };
-  audio?: { codec?: string; channels?: number; language?: string; bitrateKbps?: number };
-}
-
 export interface Trickplay {
   tileWidth: number;
   tileHeight: number;
@@ -537,22 +515,6 @@ export interface Trickplay {
   intervalMs: number;
   tileCount: number;
   sheets: string[];
-}
-
-export interface PlaybackRequest {
-  /** What to play: the server picks the copy. */
-  titleId?: string;
-  /** A particular copy, instead. */
-  itemId?: string;
-  capabilities: Capabilities;
-  startPositionMs?: number;
-  versionId?: string;
-  /** The language to start in, when the video has it and no audioTrack is given. */
-  audioLanguage?: string;
-  audioTrack?: string;
-  subtitleTrack?: string;
-  maxBitrateKbps?: number;
-  device?: string;
 }
 
 export interface PlayerOptions {
@@ -572,8 +534,6 @@ export interface PlayerOptions {
   subtitleTrack?: string;
   /** The language to start in (the app's), when the video has it and no audioTrack is given. */
   audioLanguage?: string;
-  /** What the browser can play; detected by default. */
-  capabilities?: Capabilities;
   /** Every (re)start, with the playback: tracks, segments, method. */
   onStart?: (playback: Playback) => void;
   /** Another device took over; player.continueHere() takes it back. */
@@ -603,7 +563,7 @@ export class Player {
   setAudioTrack(id: string): Promise<unknown>;
   /** Plays another copy of the title at the same place (a play of a copy). */
   setVersion(id: string): Promise<Playback | null>;
-  /** The decision the playback plays by, or null for a title without copies. */
+  /** The decision the playback plays by, or null before it plays. */
   readonly delivery: Decision | null;
   setSubtitleTrack(id: string | null): Promise<unknown>;
   segmentAt(ms?: number): Segment | null;
@@ -622,7 +582,6 @@ export class Player {
   readonly maxBitrate: number;
 }
 
-export function capabilities(): Capabilities;
 
 /** What a device plays, as deviceEnv() reads it once per page. */
 export interface DeviceEnv {
@@ -875,7 +834,8 @@ export class Overfin {
   profileWishing(profileId: string): Promise<{ on: boolean }>;
   setProfileWishing(profileId: string, on: boolean): Promise<{ on: boolean }>;
 
-  startPlayback(request: PlaybackRequest | Record<string, unknown>): Promise<Playback>;
+  /** MSFP's play request (playRequest() builds it); the answer, MSFP's playback object. */
+  startPlayback(request: Record<string, unknown>): Promise<Record<string, unknown>>;
   /** A copy's seek-bar previews before it plays (since 0.10). */
   previews(titleId: string, versionId: string): Promise<{ ticket: string; etag: string }>;
   playback(id: string): Promise<Playback>;
