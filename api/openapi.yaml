@@ -891,10 +891,10 @@ paths:
         needs that profile's `pin` if it has one (the people using other
         profiles don't know the account's login). Kids profiles get
         `owner-only`, since their data is in the owner's export. Secrets (tokens, PIN
-        hashes, keys) are never included. Each profile's watch history
-        (watched, in progress, favorites, with external IDs) is read from the
-        media server for the download, and comes with what Overfin keeps
-        about each of the profile's titles (`titles`).
+        hashes, keys) are never included. Each profile's watch history is
+        what Overfin keeps about each of its titles (`titles`), where it
+        stopped, whether it watched it, how many times and when last, its
+        favorites.
       tags: [account]
       requestBody:
         content:

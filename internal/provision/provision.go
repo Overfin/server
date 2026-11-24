@@ -338,9 +338,6 @@ func (p *Provisioner) CopyIn(ctx context.Context, id identity.Identity, from *je
 		err = p.Store.MergePersonal(ctx, owner.ID, states)
 	}
 	if err == nil {
-		err = p.Store.MarkImported(ctx, owner.ID, now)
-	}
-	if err == nil {
 		err = hooks.after(ctx, acct, owner)
 	}
 	if err != nil {
@@ -394,78 +391,18 @@ func (p *Provisioner) AddProfile(ctx context.Context, accountID string, np store
 	return p.Store.AddProfile(ctx, accountID, np, maxProfiles)
 }
 
-// Unrestrict lifts any rating limit from a profile's Jellyfin user: Overfin
-// holds kids profiles to its own ratings, and Jellyfin's would hide
-// titles Overfin allows.
-func (p *Provisioner) Unrestrict(ctx context.Context, jellyfinUserID string) error {
-	admin := jellyfin.Auth{Token: p.AdminKey, DeviceID: "overfin-admin"}
-	policy, err := p.Jellyfin.UserPolicy(ctx, admin, jellyfinUserID)
-	if err != nil {
-		return err
-	}
-	if !policy.Limited() {
-		return nil
-	}
-	policy.Unlimited()
-	return p.Jellyfin.SetUserPolicy(ctx, admin, jellyfinUserID, policy)
-}
-
-// Relogin gives a profile's Jellyfin user a new random password and logs in
-// with it, returning a fresh token: for recovering after the secret key was
-// lost. Only for users Overfin created; an adopted user's password is its
-// owner's, and is never touched.
-func (p *Provisioner) Relogin(ctx context.Context, jellyfinUserID, username string) (string, error) {
-	if !strings.HasPrefix(username, "of-") {
-		return "", fmt.Errorf("provision: %s was adopted, not created by Overfin", username)
-	}
-	admin := jellyfin.Auth{Token: p.AdminKey, DeviceID: "overfin-admin"}
-	password := randomSecret()
-	if err := p.Jellyfin.SetPassword(ctx, admin, jellyfinUserID, password); err != nil {
-		return "", err
-	}
-	// Same device ID as before: Jellyfin replaces the old session.
-	token, _, err := p.Jellyfin.Authenticate(ctx, DeviceID(jellyfinUserID), username, password)
-	return token, err
-}
-
 // DeleteAccount deletes an account and everything Overfin holds about it,
-// watch history included, and the Jellyfin users of its profiles from
-// before Overfin's one Jellyfin account, first: a failure deletes nothing
-// here, and a retry picks up where it stopped. It returns the account's
-// profiles, as they were.
+// watch history included. It returns the account's profiles, as they were.
 func (p *Provisioner) DeleteAccount(ctx context.Context, accountID string) ([]*store.Profile, error) {
 	profiles, err := p.Store.Profiles(ctx, accountID)
 	if err != nil {
 		return nil, err
-	}
-	for _, pr := range profiles {
-		if err := p.DeleteJellyfinUser(ctx, pr.JellyfinUserID); err != nil {
-			return nil, err
-		}
 	}
 	if err := p.Store.DeleteAccount(ctx, accountID); err != nil {
 		return nil, err
 	}
 	p.Logger.Info("account deleted", "account", p.logID(accountID))
 	return profiles, nil
-}
-
-// DeleteJellyfinUser deletes a profile's Jellyfin user, with its watch
-// history. A user already gone counts as deleted.
-func (p *Provisioner) DeleteJellyfinUser(ctx context.Context, jellyfinUserID string) error {
-	if jellyfinUserID == "" {
-		return nil // a profile without one
-	}
-	admin := jellyfin.Auth{Token: p.AdminKey, DeviceID: "overfin-admin"}
-	if err := p.Jellyfin.DeleteUser(ctx, admin, jellyfinUserID); err != nil && !jellyfin.IsStatus(err, http.StatusNotFound) {
-		return err
-	}
-	return nil
-}
-
-// DeviceID is the stable Jellyfin device ID of a profile's Jellyfin user.
-func DeviceID(jellyfinUserID string) string {
-	return "overfin-" + jellyfinUserID
 }
 
 // rollback deletes a Jellyfin user created by a failed attempt. It uses its

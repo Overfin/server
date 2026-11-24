@@ -46,11 +46,15 @@ func TestExportMyData(t *testing.T) {
 	if res.StatusCode != 200 || !strings.Contains(res.Header.Get("Content-Disposition"), "attachment") {
 		t.Fatalf("export: %d %s", res.StatusCode, res.Header.Get("Content-Disposition"))
 	}
-	for _, want := range []string{`"account":{"id":"acct_`, `"owner":true`, `"watchHistory":[{`, `"titles":[`, `"name":"Movie 0"`, `"sessions":[{`,
+	for _, want := range []string{`"account":{"id":"acct_`, `"owner":true`, `"titles":[`, `"sessions":[{`,
 		`"kidsTitles":true`, `"theme":"dark"`, `"wishesArrived":{"movie/tmdb/949":"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("export lacks %s: %s", want, body)
 		}
+	}
+	// Nothing is read from Jellyfin for it: profiles have no user there.
+	if strings.Contains(body, "watchHistory") {
+		t.Errorf("export reads a Jellyfin history: %s", body)
 	}
 	// Never secrets (rule 75).
 	for _, secret := range []string{token, "pin_hash", "jellyfinToken", "of-test"} {

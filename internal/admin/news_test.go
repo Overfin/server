@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,8 +24,8 @@ func TestNews(t *testing.T) {
 		t.Fatalf("first: %d %s", rec.Code, rec.Body)
 	}
 	since := got.Now
-	a1, _, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "A", JellyfinUserID: strings.Repeat("a", 32), JellyfinUsername: "of-1", JellyfinToken: "t"})
-	a2, _, _ := db.CreateAccount(ctx, "person-2", store.NewOwner{Name: "B", JellyfinUserID: strings.Repeat("b", 32), JellyfinUsername: "of-2", JellyfinToken: "t"})
+	a1, _, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "A"})
+	a2, _, _ := db.CreateAccount(ctx, "person-2", store.NewOwner{Name: "B"})
 	db.SetAccountLabel(ctx, a2.ID, "Bob")
 	rec = b.do("GET", "/admin/api/news?since="+strconv.FormatInt(since, 10), "", nil)
 	got = newsJSON{}

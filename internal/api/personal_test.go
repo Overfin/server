@@ -31,7 +31,6 @@ func TestPersonalData(t *testing.T) {
 	st.RefreshTitleKeys(ctx)
 	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
 	owner := ownerID(t, srv)
-	st.MarkImported(ctx, owner, time.Now())
 
 	type page struct {
 		Items []struct {

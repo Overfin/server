@@ -22,7 +22,7 @@ import (
 func TestValuation(t *testing.T) {
 	ctx := context.Background()
 	p, b, db, _ := signedInPanel(t)
-	_, prof, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", JellyfinUsername: "of-1", JellyfinToken: "t"})
+	_, prof, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main"})
 	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
 	db.PutCatalog(ctx, []store.CatalogItem{
 		{ID: id(0), Kind: "movie", Name: "Watched", SortName: "watched", TMDB: "1", RuntimeMs: 6_000_000},
@@ -70,7 +70,7 @@ func TestValuation(t *testing.T) {
 		t.Errorf("one account: most %+v, least %+v", preview["most"], preview["least"])
 	}
 	// With a second account watching it, it still leads.
-	_, prof2, _ := db.CreateAccount(ctx, "person-2", store.NewOwner{Name: "Other", JellyfinUserID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", JellyfinUsername: "of-2", JellyfinToken: "t"})
+	_, prof2, _ := db.CreateAccount(ctx, "person-2", store.NewOwner{Name: "Other"})
 	db.RecordPlay(ctx, prof2.ID, "movie/tmdb/1", id(0), 0, true, time.Now())
 	p.valued.m = nil // measured again, not from a few seconds ago
 	ask()

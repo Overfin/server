@@ -690,13 +690,6 @@ func (p Profiles) remove(w http.ResponseWriter, r *http.Request) {
 	if !p.Sessions.RequireFresh(w, c) {
 		return
 	}
-	// Jellyfin first: if that fails, the profile stays and can be deleted
-	// again, rather than leaving a history nobody can reach or erase.
-	if err := p.Provisioner.DeleteJellyfinUser(ctx, pr.JellyfinUserID); err != nil {
-		p.Logger.Error("deleting a profile's Jellyfin user failed", "err", err)
-		problem.Send(w, problem.Internal, "")
-		return
-	}
 	if err := p.Store.DeleteProfile(ctx, c.Account.ID, pr.ID); err != nil {
 		p.Logger.Error("deleting a profile failed", "err", err)
 		problem.Send(w, problem.Internal, "")

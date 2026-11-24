@@ -80,15 +80,14 @@ Every rule not named here is a hard rule.
    of its own, the plugin's; Overfin reports nothing of it to Jellyfin's
    sessions. A file Overfin serves from disk has no Jellyfin session at
    all.
-6. A profile brought over with a Jellyfin user of its own, from before
-   Overfin's one account, keeps that user's token for one use only:
-   reading that profile's history, when it's brought over and for its data
-   download (rule 75).
+6. Profiles have no Jellyfin user, and no Jellyfin token, of their own:
+   Overfin's one account serves them all (rule 4). A history from another
+   Jellyfin server is read signed in there as its owner, once, and nothing
+   of that sign-in is kept (rule 87).
 7. The Jellyfin admin key is used only for: setup; the checks and
    settings at each start (rule 113); provisioning, including a new token
-   for Overfin's account when Jellyfin refuses the old one; the control
-   panel; and deleting the Jellyfin users from before Overfin's one account
-   (rule 66).
+   for Overfin's account when Jellyfin refuses the old one; and the
+   control panel.
 8. Seerr calls use Seerr's API key, acting as Overfin's own Seerr user
    (rule 70). No client ever chooses who acts for it upstream.
 9. Upstream tokens never reach a browser or an app, stream addresses and
@@ -434,8 +433,7 @@ anyone. Paired servers are not trusted at all (rule 94).
     activity.
     - Exception: a wish's state may hint that someone else wished for the
       title (rule 72).
-66. Deleting an account deletes everything Overfin holds about it, and its
-    profiles' Jellyfin users from before Overfin's one account. Seerr users
+66. Deleting an account deletes everything Overfin holds about it. Seerr users
     accounts had before wishlists stay in Seerr for the operator to delete;
     Overfin no longer uses them.
 67. Overfin offers no hooks for extra data collection. Operators who want
@@ -453,8 +451,8 @@ anyone. Paired servers are not trusted at all (rule 94).
 69. Overfin has no social features: no relations between people, comments,
     likes or messages. Operators who want them build them in their own
     backend, signing people in with the same identity provider.
-70. Overfin's Jellyfin users have opaque names (`overfin-service-…`, and
-    `of-…` from before), never real names or emails. Wishes sent to Seerr go
+70. Overfin's Jellyfin users have opaque names (`overfin-service-…`),
+    never real names or emails. Wishes sent to Seerr go
     as one Seerr user of Overfin's own, named "Overfin", whose address is on
     `.invalid` and as whom no one can sign in: Seerr learns what was wished
     for, never who wished it. Seerr users from before wishlists hold the

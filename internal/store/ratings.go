@@ -358,24 +358,6 @@ func (s *Store) TitleReleases(ctx context.Context, keys []string) (map[string]Re
 	return out, rows.Err()
 }
 
-// KidsProfiles lists every kids profile.
-func (s *Store) KidsProfiles(ctx context.Context) ([]*Profile, error) {
-	rows, err := s.read.QueryContext(ctx, profileSelect+` WHERE kind = 'kids'`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*Profile
-	for rows.Next() {
-		p, err := s.scanProfile(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
-}
-
 // TitleRelease returns when a film or a series came out, as last fetched:
 // its first release and when it could first be watched at home
 // (YYYY-MM-DD, "" when TMDB doesn't say); ok is false when it wasn't

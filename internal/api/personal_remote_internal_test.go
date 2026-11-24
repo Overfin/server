@@ -27,8 +27,7 @@ func TestRemoteCopyWithMarksBoth(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	acct, _, err := st.CreateAccount(ctx, "sub", store.NewOwner{Name: "Main", JellyfinUserID: strings.Repeat("a", 32),
-		JellyfinUsername: "u", JellyfinToken: "t"})
+	acct, _, err := st.CreateAccount(ctx, "sub", store.NewOwner{Name: "Main"})
 	if err != nil {
 		t.Fatal(err)
 	}

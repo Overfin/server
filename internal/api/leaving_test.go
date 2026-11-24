@@ -29,8 +29,6 @@ func TestLeavingSoon(t *testing.T) {
 	}, 1)
 	st.RefreshTitleKeys(ctx)
 	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
-	owner := ownerID(t, srv)
-	st.MarkImported(ctx, owner, time.Now())
 	var me struct{ ActiveProfile struct{ ID string } }
 	get(t, srv, "/api/v1/me", &me)
 	prof := me.ActiveProfile.ID
@@ -94,7 +92,6 @@ func TestSharedFileRow(t *testing.T) {
 	}, 1)
 	st.RefreshTitleKeys(ctx)
 	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
-	st.MarkImported(ctx, ownerID(t, srv), time.Now())
 	var season struct {
 		Episodes []struct {
 			ID, Name   string

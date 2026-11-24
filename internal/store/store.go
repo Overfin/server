@@ -274,23 +274,18 @@ func scanAccount(sc scanner) (*Account, error) {
 	return &a, nil
 }
 
-// Profile is one profile of an account. Only a profile that brought a
-// Jellyfin user of its own (an adopted account) has JellyfinUserID and
-// JellyfinToken (the plain token, opened from its sealed form; it never
-// leaves the server): Overfin's one Jellyfin account serves everyone.
+// Profile is one profile of an account. Profiles have no Jellyfin user of
+// their own: Overfin's one Jellyfin account serves everyone.
 type Profile struct {
 	// TextLanguage is its account's language, for titles' texts: set when
 	// a request's caller is known, never stored.
-	TextLanguage     string
-	ID               string
-	AccountID        string
-	Name             string
-	Kind             string // "standard" or "kids"
-	Owner            bool
-	JellyfinUserID   string
-	JellyfinUsername string
-	JellyfinToken    string
-	Language         string
+	TextLanguage string
+	ID           string
+	AccountID    string
+	Name         string
+	Kind         string // "standard" or "kids"
+	Owner        bool
+	Language     string
 	// MaxAge is a kids profile's age: it sees titles for that age at most
 	// (films and series alike); nil until chosen, when it sees nothing.
 	MaxAge *int
@@ -316,10 +311,7 @@ type Profile struct {
 
 // NewOwner describes the owner profile created with an account.
 type NewOwner struct {
-	Name             string
-	JellyfinUserID   string
-	JellyfinUsername string
-	JellyfinToken    string
+	Name string
 }
 
 // CreateAccount creates an account and its owner profile together: an
@@ -329,7 +321,6 @@ func (s *Store) CreateAccount(ctx context.Context, subject string, owner NewOwne
 	acct := &Account{ID: ids.New(ids.Account), Subject: subject, Created: now}
 	prof := &Profile{
 		ID: ids.New(ids.Profile), AccountID: acct.ID, Name: owner.Name, Kind: "standard", Owner: true,
-		JellyfinUserID: owner.JellyfinUserID, JellyfinUsername: owner.JellyfinUsername, JellyfinToken: owner.JellyfinToken,
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -343,7 +334,7 @@ func (s *Store) CreateAccount(ctx context.Context, subject string, owner NewOwne
 		acct.ID, subject, now.Unix()); err != nil {
 		return nil, nil, fmt.Errorf("store: creating account: %w", err)
 	}
-	if err := insertProfile(ctx, tx, s.box, prof, now); err != nil {
+	if err := insertProfile(ctx, tx, prof, now); err != nil {
 		return nil, nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -352,19 +343,12 @@ func (s *Store) CreateAccount(ctx context.Context, subject string, owner NewOwne
 	return acct, prof, nil
 }
 
-func insertProfile(ctx context.Context, tx *sql.Tx, box *seal.Box, p *Profile, now time.Time) error {
-	// A profile has a Jellyfin user of its own only when it brought one
-	// (an adopted account); Overfin's one account serves the others.
-	var sealed any
-	if p.JellyfinUserID != "" {
-		sealed = box.Seal([]byte(p.JellyfinToken), p.ID)
-	}
+func insertProfile(ctx context.Context, tx *sql.Tx, p *Profile, now time.Time) error {
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO profiles (id, account_id, name, kind, owner, jellyfin_user_id,
-			jellyfin_username, jellyfin_token, language, max_age, libraries, blocked_tags, categories, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.AccountID, p.Name, p.Kind, boolInt(p.Owner), nullable(p.JellyfinUserID),
-		nullable(p.JellyfinUsername), sealed, nullable(p.Language), p.MaxAge,
+		INSERT INTO profiles (id, account_id, name, kind, owner, language, max_age, libraries, blocked_tags,
+			categories, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.AccountID, p.Name, p.Kind, boolInt(p.Owner), nullable(p.Language), p.MaxAge,
 		jsonList(p.Libraries), jsonList(p.BlockedTags), jsonList(p.Categories), now.Unix())
 	if err != nil {
 		return fmt.Errorf("store: creating profile: %w", err)
@@ -403,8 +387,8 @@ func (s *Store) Profiles(ctx context.Context, accountID string) ([]*Profile, err
 }
 
 const profileSelect = `
-	SELECT id, account_id, name, kind, owner, jellyfin_user_id, jellyfin_username,
-		jellyfin_token, language, max_age, libraries, blocked_tags, pin_hash IS NOT NULL, created_at,
+	SELECT id, account_id, name, kind, owner, language, max_age, libraries, blocked_tags,
+		pin_hash IS NOT NULL, created_at,
 		subtitle_language, theme, categories, kids_titles, audio_language
 	FROM profiles`
 
@@ -414,28 +398,17 @@ type scanner interface{ Scan(dest ...any) error }
 func (s *Store) scanProfile(sc scanner) (*Profile, error) {
 	var p Profile
 	var owner int
-	var sealed []byte
-	var language, jfUser, jfName, subtitles, theme, audio sql.NullString
+	var language, subtitles, theme, audio sql.NullString
 	var maxAge sql.NullInt64
 	var kidsTitles *bool
 	var libraries, tags, categories *string
 	var created int64
-	err := sc.Scan(&p.ID, &p.AccountID, &p.Name, &p.Kind, &owner, &jfUser,
-		&jfName, &sealed, &language, &maxAge, &libraries, &tags, &p.HasPIN, &created, &subtitles, &theme, &categories, &kidsTitles, &audio)
+	err := sc.Scan(&p.ID, &p.AccountID, &p.Name, &p.Kind, &owner, &language, &maxAge, &libraries, &tags, &p.HasPIN, &created, &subtitles, &theme, &categories, &kidsTitles, &audio)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
-	}
-	p.JellyfinUserID, p.JellyfinUsername = jfUser.String, jfName.String
-	if sealed != nil {
-		token, err := s.box.Open(sealed, p.ID)
-		if err != nil {
-			// Tampered with, moved from another row, or a different key.
-			return nil, fmt.Errorf("store: profile %s: %w", p.ID, err)
-		}
-		p.JellyfinToken = string(token)
 	}
 	p.Owner = owner == 1
 	p.Language, p.SubtitleLanguage, p.Theme = language.String, subtitles.String, theme.String
@@ -578,17 +551,14 @@ var ErrNameTaken = errors.New("store: profile name already used in this account"
 // ErrProfileLimit is returned when an account has as many profiles as allowed.
 var ErrProfileLimit = errors.New("store: profile limit reached")
 
-// NewProfile describes an additional profile and its Jellyfin user.
+// NewProfile describes an additional profile.
 type NewProfile struct {
-	Name             string
-	Kind             string   // "standard" or "kids"
-	MaxAge           *int     // a kids profile's
-	Categories       []string // nil: every category's titles
-	Libraries        []string // nil: every library
-	BlockedTags      []string
-	JellyfinUserID   string
-	JellyfinUsername string
-	JellyfinToken    string
+	Name        string
+	Kind        string   // "standard" or "kids"
+	MaxAge      *int     // a kids profile's
+	Categories  []string // nil: every category's titles
+	Libraries   []string // nil: every library
+	BlockedTags []string
 }
 
 // AddProfile creates a profile in an account, refusing a name already used
@@ -613,11 +583,10 @@ func (s *Store) AddProfile(ctx context.Context, accountID string, np NewProfile,
 	}
 	p := &Profile{
 		ID: ids.New(ids.Profile), AccountID: accountID, Name: np.Name, Kind: np.Kind,
-		JellyfinUserID: np.JellyfinUserID, JellyfinUsername: np.JellyfinUsername, JellyfinToken: np.JellyfinToken,
 		MaxAge: np.MaxAge, Categories: np.Categories,
 		Libraries: np.Libraries, BlockedTags: np.BlockedTags,
 	}
-	if err := insertProfile(ctx, tx, s.box, p, s.now().UTC()); err != nil {
+	if err := insertProfile(ctx, tx, p, s.now().UTC()); err != nil {
 		return nil, err
 	}
 	return p, tx.Commit()
@@ -1088,45 +1057,6 @@ func (s *Store) SetKeyCheck(ctx context.Context, check []byte) error {
 	return err
 }
 
-// Unreadable is a profile whose Jellyfin token can't be opened with the
-// current key.
-type Unreadable struct {
-	ProfileID        string
-	JellyfinUserID   string
-	JellyfinUsername string
-}
-
-// UnreadableTokens lists the profiles whose Jellyfin token can't be opened.
-func (s *Store) UnreadableTokens(ctx context.Context) ([]Unreadable, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT id, jellyfin_user_id, jellyfin_username, jellyfin_token FROM profiles
-		WHERE jellyfin_token IS NOT NULL`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Unreadable
-	for rows.Next() {
-		var u Unreadable
-		var sealed []byte
-		var name sql.NullString
-		if err := rows.Scan(&u.ProfileID, &u.JellyfinUserID, &name, &sealed); err != nil {
-			return nil, err
-		}
-		if _, err := s.box.Open(sealed, u.ProfileID); err != nil {
-			u.JellyfinUsername = name.String
-			out = append(out, u)
-		}
-	}
-	return out, rows.Err()
-}
-
-// SetJellyfinToken replaces a profile's Jellyfin token.
-func (s *Store) SetJellyfinToken(ctx context.Context, profileID, token string) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE profiles SET jellyfin_token = ? WHERE id = ?`,
-		s.box.Seal([]byte(token), profileID), profileID)
-	return oneRow(res, err)
-}
-
 // ForgetSealed removes what can't be used after a key change: PINs (keyed
 // with the old key) and logins (their refresh tokens were sealed with it).
 func (s *Store) ForgetSealed(ctx context.Context) (pins, logins int64, err error) {
@@ -1141,21 +1071,6 @@ func (s *Store) ForgetSealed(ctx context.Context) (pins, logins int64, err error
 	}
 	logins, _ = res.RowsAffected()
 	return pins, logins, nil
-}
-
-// Linked is a profile whose Jellyfin user was adopted in "link" mode: it
-// still has its own name and password.
-type Linked struct {
-	ProfileID      string
-	JellyfinUserID string
-}
-
-// SetJellyfinUser records a profile's Jellyfin user's new name and token,
-// after a move.
-func (s *Store) SetJellyfinUser(ctx context.Context, profileID, username, token string) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE profiles SET jellyfin_username = ?, jellyfin_token = ? WHERE id = ?`,
-		username, s.box.Seal([]byte(token), profileID), profileID)
-	return oneRow(res, err)
 }
 
 // ---- Account deletion -----------------------------------------------------------------

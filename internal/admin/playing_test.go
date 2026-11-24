@@ -41,7 +41,7 @@ func (f *fakePlaying) EndPlayback(id string) bool {
 func TestNowPlaying(t *testing.T) {
 	ctx := context.Background()
 	p, b, db, _ := signedInPanel(t)
-	acct, owner, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", JellyfinUsername: "of-1", JellyfinToken: "t"})
+	acct, owner, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main"})
 	peer := msfp.PeerRecord{ID: "pb", Key: bytes.Repeat([]byte{7}, 32), Address: "https://b.example.org", Name: "Films de B", State: msfp.Paired}
 	putPeer(t, db, peer)
 	f := &fakePlaying{live: []playback.Live{

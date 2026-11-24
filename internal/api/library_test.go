@@ -60,7 +60,7 @@ const (
 	partnerToken = "partner-token"
 )
 
-// fakeJellyfin serves 7 movies and checks every call uses the profile's token.
+// fakeJellyfin serves 7 movies and checks every call uses the service account's token.
 type fakeJellyfin struct {
 	mu        sync.Mutex
 	badAuth   int
@@ -338,9 +338,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		{Certification: "PG", Position: 2}, {Certification: "PG-13", Position: 3}}})
 	st.SetRatingScales(context.Background(), "series", map[string][]store.RatingLevel{"US": {
 		{Certification: "TV-Y", Meaning: "All children", Position: 1}, {Certification: "TV-PG", Position: 3}}})
-	acct, _, err := st.CreateAccount(context.Background(), subject, store.NewOwner{
-		Name: "Main", JellyfinUserID: jfUser, JellyfinUsername: "of-test", JellyfinToken: jfToken,
-	})
+	acct, _, err := st.CreateAccount(context.Background(), subject, store.NewOwner{Name: "Main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,11 +358,8 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 	if o.template != nil {
 		*o.template = tmpl.ID
 	}
-	// A second account, to check tickets don't work across accounts. Its
-	// Jellyfin token differs, so the fake refuses its Jellyfin calls.
-	if _, _, err := st.CreateAccount(context.Background(), "other-subject", store.NewOwner{
-		Name: "Main", JellyfinUserID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", JellyfinUsername: "of-other", JellyfinToken: "other-token",
-	}); err != nil {
+	// A second account, to check tickets don't work across accounts.
+	if _, _, err := st.CreateAccount(context.Background(), "other-subject", store.NewOwner{Name: "Main"}); err != nil {
 		t.Fatal(err)
 	}
 

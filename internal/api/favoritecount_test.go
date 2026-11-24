@@ -22,8 +22,7 @@ func TestNoFavoriteCount(t *testing.T) {
 		t.Fatalf("mark: %d", code)
 	}
 	for n := 1; n <= 3; n++ {
-		_, p, err := st.CreateAccount(ctx, fmt.Sprintf("other-%d", n), store.NewOwner{Name: "O", JellyfinUserID: strings.Repeat(fmt.Sprint(n), 32),
-			JellyfinUsername: fmt.Sprintf("of-o%d", n), JellyfinToken: "t"})
+		_, p, err := st.CreateAccount(ctx, fmt.Sprintf("other-%d", n), store.NewOwner{Name: "O"})
 		if err != nil {
 			t.Fatal(err)
 		}

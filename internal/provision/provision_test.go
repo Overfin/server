@@ -161,7 +161,7 @@ func TestFirstVisitProvisionsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	// No Jellyfin user of its own: Overfin's one account serves everyone.
-	if !prof.Owner || prof.JellyfinUserID != "" || prof.JellyfinToken != "" || prof.Name != OwnerProfileName {
+	if !prof.Owner || prof.Name != OwnerProfileName {
 		t.Errorf("owner profile = %+v", prof)
 	}
 	if len(fake.created) != 0 {
@@ -175,7 +175,7 @@ func TestFirstVisitProvisionsOnce(t *testing.T) {
 	}
 	// Another profile: none either.
 	kid, err := p.AddProfile(ctx, acct.ID, store.NewProfile{Name: "Kid", Kind: "kids"}, 0)
-	if err != nil || kid.JellyfinUserID != "" || len(fake.created) != 0 {
+	if err != nil || kid.Kind != "kids" || len(fake.created) != 0 {
 		t.Errorf("another profile: %+v %v, created %v", kid, err, fake.created)
 	}
 }
@@ -264,15 +264,12 @@ func TestCopyIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prof.JellyfinUserID != "" || !prof.Owner {
+	if !prof.Owner {
 		t.Errorf("profile = %+v", prof)
 	}
 	got, err := p.Store.PersonalStates(ctx, prof.ID, []string{"movie/tmdb/949", "series/tmdb/1399/s1/e2"})
 	if err != nil || !got["movie/tmdb/949"].Played || got["movie/tmdb/949"].PlayCount != 2 || got["series/tmdb/1399/s1/e2"].PositionMs != 60_000 {
 		t.Errorf("history = %+v, %v", got, err)
-	}
-	if imported, _ := p.Store.Imported(ctx, prof.ID); !imported {
-		t.Error("the profile would be imported from this server's Jellyfin too")
 	}
 	// Nothing changed on the other server, and Overfin signed out there.
 	if len(fake.created) != 0 || fake.aliceName != "alice" || fake.alicePw != alicePass || fake.alicePolicy != nil || fake.logouts != 1 {

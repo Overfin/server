@@ -94,11 +94,11 @@ func TestExpiry(t *testing.T) {
 	admin, _ := db.CreateUser(ctx, "admin@example.org", true)
 	person, _ := db.CreateUser(ctx, "alex@example.org", false)
 	_ = admin
-	acct, _, _ := db.CreateAccount(ctx, person.Subject, store.NewOwner{Name: "Alex", JellyfinUserID: strings.Repeat("a", 32), JellyfinUsername: "of-1", JellyfinToken: "t"})
+	acct, _, _ := db.CreateAccount(ctx, person.Subject, store.NewOwner{Name: "Alex"})
 	db.SetAccountExpiry(ctx, acct.ID, now.Add(3*24*time.Hour))
 	// Another, with no end, and one ending later than the days set.
-	db.CreateAccount(ctx, "nobody", store.NewOwner{Name: "B", JellyfinUserID: strings.Repeat("b", 32), JellyfinUsername: "of-2", JellyfinToken: "t"})
-	far, _, _ := db.CreateAccount(ctx, "far", store.NewOwner{Name: "C", JellyfinUserID: strings.Repeat("c", 32), JellyfinUsername: "of-3", JellyfinToken: "t"})
+	db.CreateAccount(ctx, "nobody", store.NewOwner{Name: "B"})
+	far, _, _ := db.CreateAccount(ctx, "far", store.NewOwner{Name: "C"})
 	db.SetAccountExpiry(ctx, far.ID, now.AddDate(0, 0, 30))
 
 	// Off: nothing.
@@ -182,7 +182,7 @@ func TestExpiryWaitsForEmail(t *testing.T) {
 	now := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 	db.CreateUser(ctx, "admin@example.org", true)
 	person, _ := db.CreateUser(ctx, "alex@example.org", false)
-	acct, _, _ := db.CreateAccount(ctx, person.Subject, store.NewOwner{Name: "Alex", JellyfinUserID: strings.Repeat("a", 32), JellyfinUsername: "of-1", JellyfinToken: "t"})
+	acct, _, _ := db.CreateAccount(ctx, person.Subject, store.NewOwner{Name: "Alex"})
 	db.SetAccountExpiry(ctx, acct.ID, now.Add(3*24*time.Hour))
 	db.SetNoticeSettings(ctx, store.NoticeSettings{Expiring: true, Days: 7, Admins: true, Person: true})
 	if err := n.Check(ctx, now); err != nil {
@@ -201,7 +201,7 @@ func TestExpiryWaitsForEmail(t *testing.T) {
 func TestJoined(t *testing.T) {
 	ctx := context.Background()
 	n, db, _, h, url := setup(t)
-	acct, _, _ := db.CreateAccount(ctx, "s", store.NewOwner{Name: "Sam", JellyfinUserID: strings.Repeat("a", 32), JellyfinUsername: "of-1", JellyfinToken: "t"})
+	acct, _, _ := db.CreateAccount(ctx, "s", store.NewOwner{Name: "Sam"})
 	db.SetNoticeSettings(ctx, store.NoticeSettings{Joined: true, Days: 7, Webhook: url})
 	n.Joined(acct)
 	deadline := time.Now().Add(5 * time.Second)
@@ -233,7 +233,7 @@ func TestJoinedFromInvitation(t *testing.T) {
 	n, db, m, _, _ := setup(t)
 	db.CreateUser(ctx, "admin@example.org", true)
 	person, _ := db.CreateUser(ctx, "bob@example.org", false)
-	acct, _, _ := db.CreateAccount(ctx, person.Subject, store.NewOwner{Name: "Bobby", JellyfinUserID: strings.Repeat("b", 32), JellyfinUsername: "of-2", JellyfinToken: "t"})
+	acct, _, _ := db.CreateAccount(ctx, person.Subject, store.NewOwner{Name: "Bobby"})
 	db.SetAccountLabel(ctx, acct.ID, "Bob")
 	acct, _ = db.AccountByID(ctx, acct.ID)
 	db.SetNoticeSettings(ctx, store.NoticeSettings{Joined: true, Days: 7, Admins: true})

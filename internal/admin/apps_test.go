@@ -15,14 +15,14 @@ import (
 func TestApps(t *testing.T) {
 	ctx := context.Background()
 	p, b, db, _ := signedInPanel(t)
-	acct, prof, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", JellyfinUsername: "of-1", JellyfinToken: "t"})
+	acct, prof, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main"})
 	db.PutCatalog(ctx, []store.CatalogItem{{ID: strings.Repeat("0", 31) + "a", Kind: "movie", Name: "Heat", SortName: "h", TMDB: "949", IMDb: "tt0113277"}}, 1)
 	db.RefreshTitleKeys(ctx)
 	for range 3 {
 		db.RecordPlay(ctx, prof.ID, "movie/tmdb/949", "", 0, true, time.Date(2026, 10, 20, 21, 0, 0, 0, time.UTC))
 	}
 	// The same person keeps it as a favorite on two profiles.
-	kid, err := db.AddProfile(ctx, acct.ID, store.NewProfile{Name: "Kid", Kind: "standard", JellyfinUserID: strings.Repeat("9", 32), JellyfinUsername: "of-9", JellyfinToken: "t9"}, 0)
+	kid, err := db.AddProfile(ctx, acct.ID, store.NewProfile{Name: "Kid", Kind: "standard"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestApps(t *testing.T) {
 	}
 	// A second account watches it: the totals grow, the time it changed
 	// only by its day.
-	_, prof2, _ := db.CreateAccount(ctx, "person-2", store.NewOwner{Name: "Other", JellyfinUserID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", JellyfinUsername: "of-2", JellyfinToken: "t"})
+	_, prof2, _ := db.CreateAccount(ctx, "person-2", store.NewOwner{Name: "Other"})
 	db.RecordPlay(ctx, prof2.ID, "movie/tmdb/949", "", 0, true, time.Date(2026, 10, 19, 21, 0, 0, 0, time.UTC))
 	// Statistics are kept a minute: asked again at once, the same.
 	if rec := app.do("GET", "/apps/v1/watch-stats", "", map[string]string{"Authorization": "Bearer " + made.Key}); !strings.Contains(rec.Body.String(), `"viewers":1`) {

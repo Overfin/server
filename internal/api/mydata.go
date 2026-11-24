@@ -1,24 +1,19 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"github.com/overfin/server/internal/playback"
 	"net/http"
 	"time"
 
-	"github.com/overfin/server/internal/jellyfin"
-	"github.com/overfin/server/internal/library"
 	"github.com/overfin/server/internal/problem"
-	"github.com/overfin/server/internal/provision"
 	"github.com/overfin/server/internal/store"
 )
 
 // ---- Deleting an account ----------------------------------------------------
 
 // deleteAccount deletes the account and everything Overfin holds about it
-// (rule 66), with the Jellyfin users of its profiles from before Overfin's
-// one Jellyfin account. Owner only, after a fresh login.
+// (rule 66). Owner only, after a fresh login.
 func (a Account) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	c := a.Sessions.Current(w, r)
 	if c == nil {
@@ -119,8 +114,6 @@ type exportProfileJSON struct {
 	// Tracks are the audio and subtitles it chose while watching a title
 	// (by title key): languages, subtitles "" when turned off.
 	Tracks map[string]exportTracksJSON `json:"tracks,omitempty"`
-	// WatchHistory is read from the media server for this download.
-	WatchHistory []exportItemJSON `json:"watchHistory"`
 	// Titles is what Overfin keeps about what the profile did with each
 	// title: where it stopped, whether it watched it, how many times and
 	// when last, its favorites.
@@ -145,11 +138,6 @@ type exportTitleJSON struct {
 	Favorite     bool   `json:"favorite"`
 }
 
-type exportItemJSON struct {
-	library.ItemSummary
-	ExternalIDs map[string]string `json:"externalIds,omitempty"`
-}
-
 type exportSessionJSON struct {
 	ID           string `json:"id"`
 	Device       string `json:"device,omitempty"`
@@ -159,8 +147,8 @@ type exportSessionJSON struct {
 }
 
 // export answers with what Overfin holds about the account (from the owner
-// profile) or about the active profile only (from any other), plus the watch
-// history read live, never secrets (rule 75). The whole account needs the
+// profile) or about the active profile only (from any other), never
+// secrets (rule 75). The whole account needs the
 // account holder's fresh login; a profile's own data needs only that
 // profile's PIN, if it has one: the people using other profiles don't know
 // the account's login, and without a PIN the profile is open to anyone at
@@ -229,12 +217,6 @@ func (a Account) export(w http.ResponseWriter, r *http.Request) {
 	names := map[string]string{}
 	for _, p := range profiles {
 		names[p.ID] = p.Name
-		history, err := a.history(ctx, p)
-		if err != nil {
-			a.Logger.Error("reading watch history for an export failed", "err", err)
-			problem.Send(w, problem.Internal, "")
-			return
-		}
 		kept, err := a.Sessions.Store.AllPersonal(ctx, p.ID)
 		if err != nil {
 			a.Logger.Error("reading a profile's titles for an export failed", "err", err)
@@ -316,7 +298,7 @@ func (a Account) export(w http.ResponseWriter, r *http.Request) {
 			AudioLanguage: p.AudioLanguage, SubtitleLanguage: p.SubtitleLanguage, Tracks: trackChoices,
 			MaxAge: p.MaxAge, Categories: p.Categories, Libraries: p.Libraries, BlockedTags: p.BlockedTags,
 			KidsTitles: p.KidsTitles, Theme: p.Theme, HasPIN: p.HasPIN, CreatedAt: p.Created.Format(time.RFC3339),
-			WatchHistory: history, Titles: titles, Modules: mods, OutOfContinue: hidden,
+			Titles: titles, Modules: mods, OutOfContinue: hidden,
 			Wishlist: wishlist, WishesOff: wishesOff, WishesArrived: arrived,
 		})
 	}
@@ -340,54 +322,4 @@ func (a Account) export(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Disposition", `attachment; filename="my-data.json"`)
 	writeOK(w, out)
-}
-
-// historyLimit caps what one export reads per list, per profile.
-const historyLimit = 10_000
-
-// history reads a profile's watched, in-progress and favorite items from
-// Jellyfin, with its own token: only a profile that brought a Jellyfin user
-// of its own has any there (Overfin's one account plays for the others,
-// and what they do is Overfin's, in Titles). Jellyfin's filters combine
-// with "and", so it takes one pass each.
-func (a Account) history(ctx context.Context, p *store.Profile) ([]exportItemJSON, error) {
-	out := []exportItemJSON{}
-	if p.JellyfinUserID == "" {
-		return out, nil
-	}
-	own := jellyfin.Auth{Token: p.JellyfinToken, DeviceID: provision.DeviceID(p.JellyfinUserID)}
-	jf := a.Provisioner.Jellyfin
-	yes := true
-	passes := []jellyfin.ItemQuery{
-		{IsPlayed: &yes},
-		{Resumable: true},
-		{IsFavorite: &yes},
-	}
-	seen := map[string]bool{}
-	for _, q := range passes {
-		q.Recursive, q.SortBy, q.Descending, q.ExtraFields = true, "DatePlayed", true, "ProviderIds"
-		for start := 0; start < historyLimit; start += 500 {
-			q.StartIndex, q.Limit = start, 500
-			page, err := jf.Items(ctx, own, p.JellyfinUserID, q)
-			if jellyfin.IsStatus(err, http.StatusUnauthorized) || jellyfin.IsStatus(err, http.StatusNotFound) {
-				return out, nil // not on this server (any more)
-			}
-			if err != nil {
-				return nil, err
-			}
-			for i := range page.Items {
-				raw := &page.Items[i]
-				s, ok := library.Summary(raw)
-				if !ok || seen[s.ID] {
-					continue
-				}
-				seen[s.ID] = true
-				out = append(out, exportItemJSON{ItemSummary: s, ExternalIDs: library.ExternalIDs(raw.ProviderIds)})
-			}
-			if len(page.Items) < 500 {
-				break
-			}
-		}
-	}
-	return out, nil
 }

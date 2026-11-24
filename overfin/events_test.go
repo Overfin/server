@@ -28,7 +28,7 @@ func TestEventsAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	acct, prof, err := db.CreateAccount(ctx, "subject", store.NewOwner{Name: "Me", JellyfinUserID: "jf", JellyfinUsername: "of", JellyfinToken: "tok"})
+	acct, prof, err := db.CreateAccount(ctx, "subject", store.NewOwner{Name: "Me"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -48,7 +48,6 @@ import (
 	"github.com/overfin/server/internal/notices"
 	"github.com/overfin/server/internal/oidc"
 	"github.com/overfin/server/internal/outbound"
-	"github.com/overfin/server/internal/personal"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/previews"
 	"github.com/overfin/server/internal/proof"
@@ -228,7 +227,7 @@ func run(logger *slog.Logger) error {
 	}
 	configPath := flag.String("config", defaultPath, "path to the configuration file")
 	recoverTokens := flag.Bool("recover-tokens", false,
-		"after the secret key was lost: give every profile a fresh Jellyfin token sealed with the current key, then exit")
+		"after the secret key was lost: hand Overfin's Jellyfin over again if needed, reset PINs and logins, accept the current key, then exit")
 	importFlag := flag.Bool("import-people", false,
 		"before moving to managed sign-in: let everyone the identity provider ([connector]) has sign in with their email, keeping their accounts, then exit")
 	passwordFor := flag.String("set-password", "",
@@ -363,7 +362,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	if *recoverTokens {
-		return runRecovery(cfg, db, moduleDBs, k, logger)
+		return runRecovery(cfg, db, k, logger)
 	}
 	if *importFlag {
 		return importPeople(context.Background(), cfg, db, os.Stdout)
@@ -964,8 +963,6 @@ func run(logger *slog.Logger) error {
 	// The collections the library's films belong to, with their films.
 	go (&catalog.Collections{Store: db, Source: gw.collectionSource, Titles: sh.titles, Logger: logger,
 		Every: 15 * time.Minute, Pause: 100 * time.Millisecond}).Run(ctx)
-	go unrestrictKids(ctx, db, gw.Provisioner, logger)
-	// Each profile's data, brought over from Jellyfin once.
 	// With Pocket ID, Overfin sets up its own client and groups there.
 	if cn := cfg.Connector; cn.Kind == "pocketid" && cfg.OIDC.Enabled() {
 		go setUpPocketID(ctx, cfg, logger)
@@ -980,7 +977,6 @@ func run(logger *slog.Logger) error {
 			a, _, err := sh.service.Auth(ctx)
 			return a, err
 		}}).Run(ctx)
-	go (&personal.Importer{Jellyfin: sh.jf, Store: db, Logger: logger, Every: 10 * time.Minute}).Run(ctx)
 	go sh.notices.Run(ctx)
 
 	if a := cfg.Admin; a.Enabled() || managed {
@@ -1124,23 +1120,18 @@ func newShared(cfg *config.Config, db *store.Store, moduleDBs map[string]*sql.DB
 // runRecovery runs -recover-tokens. It needs Overfin's Jellyfin: Overfin's
 // key for it was sealed with the lost secret key too, so the operator hands
 // it over again, in the terminal (SECURITY.md rule 110).
-func runRecovery(cfg *config.Config, db *store.Store, moduleDBs map[string]*sql.DB, k *keys.Keys, logger *slog.Logger) error {
+func runRecovery(cfg *config.Config, db *store.Store, k *keys.Keys, logger *slog.Logger) error {
 	ctx := context.Background()
-	url, key, saved, err := db.Jellyfin(ctx)
+	_, _, saved, err := db.Jellyfin(ctx)
 	switch {
 	case err != nil:
-		if url, key, err = handOverInTerminal(ctx, db, cfg.Jellyfin.URL, os.Stdin, os.Stderr); err != nil {
+		if _, _, err = handOverInTerminal(ctx, db, cfg.Jellyfin.URL, os.Stdin, os.Stderr); err != nil {
 			return err
 		}
 	case !saved:
 		return errors.New("nothing to recover: no Jellyfin set up yet")
 	}
-	cfg.Jellyfin.URL, cfg.Secrets.JellyfinAdminKey = url, key
-	sh, err := newShared(cfg, db, moduleDBs, k, logger)
-	if err != nil {
-		return err
-	}
-	return recoverTokensWith(ctx, logger, db, newProvisioner(cfg, sh), k.Check)
+	return forgetOldKey(ctx, logger, db, k.Check)
 }
 
 // hsts tells browsers to come back over HTTPS only, for a year: on a site
@@ -1236,32 +1227,10 @@ func purgeExpired(ctx context.Context, db *store.Store, logger *slog.Logger) {
 	}
 }
 
-// recoverTokensWith gives every profile whose Jellyfin token can't be read (sealed
-// with a lost key) a fresh one sealed with the current key, then makes the
-// current key the database's key. Profiles keep their Jellyfin users, so
-// their history. PINs and logins, tied to the old key, are reset.
-func recoverTokensWith(ctx context.Context, logger *slog.Logger, db *store.Store, prov *provision.Provisioner, check []byte) error {
-	broken, err := db.UnreadableTokens(ctx)
-	if err != nil {
-		return err
-	}
-	logger.Info("recovery: profiles with unreadable tokens", "count", len(broken))
-	failed := 0
-	for _, u := range broken {
-		token, err := prov.Relogin(ctx, u.JellyfinUserID, u.JellyfinUsername)
-		if err == nil {
-			err = db.SetJellyfinToken(ctx, u.ProfileID, token)
-		}
-		if err != nil {
-			failed++
-			logger.Error("recovery: profile not recovered", "profile", prov.LogID(u.ProfileID), "err", err)
-			continue
-		}
-		logger.Info("recovery: profile recovered", "profile", prov.LogID(u.ProfileID))
-	}
-	if failed > 0 {
-		return fmt.Errorf("recovery: %d profiles not recovered; the key stays unaccepted, fix and run again", failed)
-	}
+// forgetOldKey ends what the lost secret key sealed and can't be read
+// again (PINs and logins, reset), then makes the current key the
+// database's key.
+func forgetOldKey(ctx context.Context, logger *slog.Logger, db *store.Store, check []byte) error {
 	pins, logins, err := db.ForgetSealed(ctx)
 	if err != nil {
 		return err
@@ -1271,37 +1240,6 @@ func recoverTokensWith(ctx context.Context, logger *slog.Logger, db *store.Store
 	}
 	logger.Info("recovery: done; PINs cleared and everyone logs in again", "pins", pins, "logins", logins)
 	return nil
-}
-
-// unrestrictKids lifts Jellyfin's rating limits from kids profiles' users,
-// set by Overfin before it had its own ratings: Overfin applies those now.
-// What fails is tried again ten minutes later.
-func unrestrictKids(ctx context.Context, db *store.Store, prov func() *provision.Provisioner, logger *slog.Logger) {
-	for {
-		kids, err := db.KidsProfiles(ctx)
-		failed := err != nil
-		for _, p := range kids {
-			if p.JellyfinUserID == "" {
-				continue // none of its own: nothing to lift
-			}
-			err = prov().Unrestrict(ctx, p.JellyfinUserID)
-			if jellyfin.IsStatus(err, http.StatusNotFound) {
-				err = nil // not on this server: nothing to lift
-			}
-			if err != nil {
-				failed = true
-			}
-		}
-		if !failed {
-			return
-		}
-		logger.Warn("could not lift Jellyfin's limits from kids profiles yet", "err", err)
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(10 * time.Minute):
-		}
-	}
 }
 
 // setUpPocketID makes sure Pocket ID has Overfin's client (its ID, secret

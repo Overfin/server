@@ -149,12 +149,6 @@ func (c *Client) Authenticate(ctx context.Context, deviceID, username, password 
 	return out.AccessToken, id, nil
 }
 
-// Limited says whether a policy has a rating limit.
-func (p Policy) Limited() bool {
-	blocked, _ := p["BlockUnratedItems"].([]any)
-	return p["MaxParentalRating"] != nil || p["MaxParentalSubRating"] != nil || len(blocked) > 0
-}
-
 // Unlimited removes any rating ceiling.
 func (p Policy) Unlimited() {
 	p["MaxParentalRating"] = nil

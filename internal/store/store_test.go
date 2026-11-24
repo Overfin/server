@@ -29,8 +29,8 @@ func openTest(t testing.TB) *Store {
 	return s
 }
 
-func owner(n string) NewOwner {
-	return NewOwner{Name: "Me", JellyfinUserID: "jf-" + n, JellyfinUsername: "of-" + n, JellyfinToken: "token-" + n}
+func owner(string) NewOwner {
+	return NewOwner{Name: "Me"}
 }
 
 func TestAccountAndOwnerProfile(t *testing.T) {
@@ -54,7 +54,7 @@ func TestAccountAndOwnerProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !p.Owner || p.JellyfinToken != "token-1" {
+	if !p.Owner || p.Name != "Me" {
 		t.Errorf("profile = %+v", p)
 	}
 
@@ -75,39 +75,14 @@ func TestProfileOfAnotherAccountIsNotFound(t *testing.T) {
 	}
 }
 
-func TestTokensAreSealedAndBoundToTheirRow(t *testing.T) {
-	ctx := context.Background()
-	s := openTest(t)
-	a, aProf, _ := s.CreateAccount(ctx, "subject-a", owner("a"))
-	_, bProf, _ := s.CreateAccount(ctx, "subject-b", owner("b"))
-
-	var stored []byte
-	if err := s.db.QueryRow(`SELECT jellyfin_token FROM profiles WHERE id = ?`, aProf.ID).Scan(&stored); err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(stored, []byte("token-a")) {
-		t.Fatal("token stored in plain text")
-	}
-
-	// Someone with write access copies b's sealed token into a's row.
-	if _, err := s.db.Exec(`UPDATE profiles SET jellyfin_token = (SELECT jellyfin_token FROM profiles WHERE id = ?) WHERE id = ?`,
-		bProf.ID, aProf.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Profile(ctx, a.ID, aProf.ID); err == nil {
-		t.Error("a token moved from another profile was accepted")
-	}
-}
-
 func TestOneOwnerPerAccount(t *testing.T) {
 	ctx := context.Background()
 	s := openTest(t)
 	a, _, _ := s.CreateAccount(ctx, "subject-a", owner("a"))
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO profiles (id, account_id, name, kind, owner, jellyfin_user_id,
-			jellyfin_username, jellyfin_token, created_at)
-		VALUES (?, ?, 'Second', 'standard', 1, 'jf-x', 'of-x', x'00', 0)`,
+		INSERT INTO profiles (id, account_id, name, kind, owner, created_at)
+		VALUES (?, ?, 'Second', 'standard', 1, 0)`,
 		ids.New(ids.Profile), a.ID)
 	if err == nil {
 		t.Error("the database accepted a second owner profile")
@@ -205,8 +180,8 @@ func TestNewerDatabaseRefused(t *testing.T) {
 	}
 }
 
-func newProfile(name, n string) NewProfile {
-	return NewProfile{Name: name, Kind: "standard", JellyfinUserID: "jf-" + n, JellyfinUsername: "of-" + n, JellyfinToken: "t-" + n}
+func newProfile(name, _ string) NewProfile {
+	return NewProfile{Name: name, Kind: "standard"}
 }
 
 func TestProfilesInAnAccount(t *testing.T) {
@@ -282,10 +257,9 @@ func TestKeyCheckAndRecovery(t *testing.T) {
 	if err := s.CheckKey(ctx, []byte("old")); err != nil {
 		t.Fatalf("first check records it: %v", err)
 	}
-	_, prof, _ := s.CreateAccount(ctx, "subject", owner("1"))
 	s.Close()
 
-	// The key was lost: a new one doesn't pass, and the token can't be read.
+	// The key was lost: a new one doesn't pass.
 	newBox, _ := seal.New(bytes.Repeat([]byte{2}, 32))
 	s, err = Open(ctx, path, newBox)
 	if err != nil {
@@ -295,26 +269,13 @@ func TestKeyCheckAndRecovery(t *testing.T) {
 	if err := s.CheckKey(ctx, []byte("new")); !errors.Is(err, ErrWrongKey) {
 		t.Fatalf("new key accepted: %v", err)
 	}
-	broken, err := s.UnreadableTokens(ctx)
-	if err != nil || len(broken) != 1 || broken[0].ProfileID != prof.ID || broken[0].JellyfinUsername != "of-1" {
-		t.Fatalf("unreadable = %+v, %v", broken, err)
-	}
 
-	// Recovery: a fresh token, then the new key is the database's.
-	if err := s.SetJellyfinToken(ctx, prof.ID, "fresh"); err != nil {
-		t.Fatal(err)
-	}
-	if broken, _ := s.UnreadableTokens(ctx); len(broken) != 0 {
-		t.Errorf("still unreadable: %+v", broken)
-	}
+	// Recovery: the new key is the database's.
 	if err := s.SetKeyCheck(ctx, []byte("new")); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CheckKey(ctx, []byte("new")); err != nil {
 		t.Errorf("after recovery: %v", err)
-	}
-	if p, err := s.Profile(ctx, prof.AccountID, prof.ID); err != nil || p.JellyfinToken != "fresh" {
-		t.Errorf("profile after recovery: %+v %v", p, err)
 	}
 }
 
@@ -652,14 +613,5 @@ func TestPersonal(t *testing.T) {
 	h := got["movie/tmdb/949"]
 	if len(got) != 1 || !h.Played || h.PlayCount != 2 || h.PositionMs != 60_000 || !h.Favorite || !h.LastPlayedAt.Equal(at) {
 		t.Errorf("merged: %+v", got)
-	}
-
-	// Imports, once per profile.
-	if todo, _ := s.ProfilesToImport(ctx); len(todo) != 1 {
-		t.Fatalf("to import: %d", len(todo))
-	}
-	s.MarkImported(ctx, p.ID, at)
-	if todo, _ := s.ProfilesToImport(ctx); len(todo) != 0 {
-		t.Errorf("imported twice: %d", len(todo))
 	}
 }

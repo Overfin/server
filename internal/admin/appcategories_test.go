@@ -19,7 +19,7 @@ func TestAppCategories(t *testing.T) {
 	now := time.Now()
 	var accts, profs []string
 	for _, s := range []string{"1", "2"} {
-		acct, prof, _ := db.CreateAccount(ctx, "person-"+s, store.NewOwner{Name: "Main", JellyfinUserID: strings.Repeat(s, 32), JellyfinUsername: "of-" + s, JellyfinToken: "t"})
+		acct, prof, _ := db.CreateAccount(ctx, "person-"+s, store.NewOwner{Name: "Main"})
 		accts, profs = append(accts, acct.ID), append(profs, prof.ID)
 	}
 	for i := range accts {

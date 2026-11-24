@@ -60,7 +60,7 @@ func TestAccounts(t *testing.T) {
 	playing := &fakePlaying{}
 	p.Playing = playing
 	b.h = p.Handler()
-	acct, owner, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", JellyfinUsername: "of-1", JellyfinToken: "t"})
+	acct, owner, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main"})
 	_ = db.SetPIN(ctx, acct.ID, owner.ID, []byte("hash"))
 	_ = db.RecordPIN(ctx, owner.ID, 5, time.Now(), time.Now().Add(time.Hour))
 	sess, _, _ := db.CreateSession(ctx, acct.ID, owner.ID, "Firefox on Linux", time.Hour)
@@ -125,8 +125,9 @@ func TestAccounts(t *testing.T) {
 	if _, err := db.AccountByID(ctx, acct.ID); err == nil {
 		t.Error("account still there")
 	}
-	if !strings.Contains(strings.Join(*calls, " "), "DELETE /Users/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") {
-		t.Errorf("Jellyfin user not deleted: %v", *calls)
+	// Profiles have no Jellyfin user: nothing to delete there.
+	if strings.Contains(strings.Join(*calls, " "), "DELETE /Users/") {
+		t.Errorf("a Jellyfin user was deleted: %v", *calls)
 	}
 }
 
@@ -157,7 +158,7 @@ func (f *fakeDirectory) People(context.Context) (map[string]connector.Person, er
 func TestAccountsWithNames(t *testing.T) {
 	ctx := context.Background()
 	p, b, db, _ := signedInPanel(t)
-	db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", JellyfinUsername: "of-1", JellyfinToken: "t"})
+	db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main"})
 	dir := &fakeDirectory{people: map[string]connector.Person{"person-1": {Username: "alice", Name: "Alice", Active: true}}}
 	p.Directory = dir
 
@@ -177,7 +178,7 @@ func TestAccountsWithNames(t *testing.T) {
 func TestTemplates(t *testing.T) {
 	ctx := context.Background()
 	_, b, db, _ := signedInPanel(t)
-	acct, _, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", JellyfinUsername: "of-1", JellyfinToken: "t"})
+	acct, _, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main"})
 
 	body := b.do("GET", "/admin/api/templates", "", nil).Body.String()
 	if !strings.Contains(body, `"name":"Default","maxStreams":1,"maxProfiles":5,"reserveStreams":false,"accounts":1,"default":true`) {
@@ -366,7 +367,7 @@ func TestLanguagesMoveTheRatingsCountry(t *testing.T) {
 func TestPanelNames(t *testing.T) {
 	ctx := context.Background()
 	_, b, db, _ := signedInPanel(t)
-	acct, _, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", JellyfinUsername: "of-1", JellyfinToken: "t"})
+	acct, _, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main"})
 	// 37 characters, 43 bytes.
 	const long = "Séries et émissions éducatives à télé"
 

@@ -71,7 +71,7 @@ func TestPicks(t *testing.T) {
 	defer st.Close()
 	ctx := context.Background()
 	now := time.Now()
-	acct, prof, err := st.CreateAccount(ctx, "subject-1", store.NewOwner{Name: "Me", JellyfinUserID: "jf-1", JellyfinUsername: "of-1", JellyfinToken: "token-1"})
+	acct, prof, err := st.CreateAccount(ctx, "subject-1", store.NewOwner{Name: "Me"})
 	if err != nil {
 		t.Fatal(err)
 	}

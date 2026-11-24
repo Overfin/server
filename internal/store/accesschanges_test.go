@@ -45,7 +45,7 @@ func TestAccessChanges(t *testing.T) {
 			t.Errorf("%s: not counted", st.name)
 		}
 	}
-	other, err := s.AddProfile(ctx, acct.ID, NewProfile{Name: "Kid", Kind: "standard", JellyfinUserID: "jf-2", JellyfinUsername: "of-2", JellyfinToken: "t-2"}, 5)
+	other, err := s.AddProfile(ctx, acct.ID, NewProfile{Name: "Kid", Kind: "standard"}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}

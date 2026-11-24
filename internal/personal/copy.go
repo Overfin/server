@@ -1,3 +1,6 @@
+// Package personal reads what someone did on another Jellyfin server (what
+// they watched, where they stopped, their favorites), signed in as them
+// there, so Overfin can copy it into one of their profiles here.
 package personal
 
 import (
@@ -11,12 +14,9 @@ import (
 	"github.com/overfin/server/internal/store"
 )
 
-// FromServer reads what a user did on another Jellyfin server (what they
-// watched, where they stopped, their favorites), named by title keys so it
-// joins with this server's titles whatever their item IDs: a film by its
-// TMDB or IMDb ID, a show by its TMDB, TVDB or IMDb ID, an episode by its
-// show's and its numbers (store.TitleKeys). What can't be named that way
-// is left out; skipped counts it.
+// pageSize is how many items one request reads.
+const pageSize = 500
+
 // copyLimit bounds each list read from the other server (watched,
 // started, favorites): far above a real history.
 const copyLimit = 100_000
@@ -24,6 +24,12 @@ const copyLimit = 100_000
 // ErrTooMuch: the other server sent more than any history holds.
 var ErrTooMuch = errors.New("personal: the other server sent too many items")
 
+// FromServer reads what a user did on another Jellyfin server (what they
+// watched, where they stopped, their favorites), named by title keys so it
+// joins with this server's titles whatever their item IDs: a film by its
+// TMDB or IMDb ID, a show by its TMDB, TVDB or IMDb ID, an episode by its
+// show's and its numbers (store.TitleKeys). What can't be named that way
+// is left out; skipped counts it.
 func FromServer(ctx context.Context, jf *jellyfin.Client, a jellyfin.Auth, userID string) (states []store.Personal, skipped int, err error) {
 	items := map[string]jellyfin.RawItem{}
 	played, favorite := true, true

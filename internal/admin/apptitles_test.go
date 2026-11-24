@@ -37,14 +37,14 @@ func TestAppTitles(t *testing.T) {
 	var profs []string
 	var firstAcct *store.Account
 	for _, s := range []string{"1", "2"} {
-		acct, prof, _ := db.CreateAccount(ctx, "person-"+s, store.NewOwner{Name: "Main", JellyfinUserID: strings.Repeat(s, 32), JellyfinUsername: "of-" + s, JellyfinToken: "t"})
+		acct, prof, _ := db.CreateAccount(ctx, "person-"+s, store.NewOwner{Name: "Main"})
 		profs = append(profs, prof.ID)
 		if firstAcct == nil {
 			firstAcct = acct
 		}
 	}
 	// A second profile of the first account: still one person.
-	kid, err := db.AddProfile(ctx, firstAcct.ID, store.NewProfile{Name: "Kid", Kind: "standard", JellyfinUserID: strings.Repeat("9", 32), JellyfinUsername: "of-9", JellyfinToken: "t9"}, 0)
+	kid, err := db.AddProfile(ctx, firstAcct.ID, store.NewProfile{Name: "Kid", Kind: "standard"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,10 +204,10 @@ func TestAppTitlesWishedListed(t *testing.T) {
 	p, b, db, _ := signedInPanel(t)
 	var accts, profs []string
 	for _, s := range []string{"1", "2"} {
-		acct, prof, _ := db.CreateAccount(ctx, "person-"+s, store.NewOwner{Name: "Main", JellyfinUserID: strings.Repeat(s, 32), JellyfinUsername: "of-" + s, JellyfinToken: "t"})
+		acct, prof, _ := db.CreateAccount(ctx, "person-"+s, store.NewOwner{Name: "Main"})
 		accts, profs = append(accts, acct.ID), append(profs, prof.ID)
 	}
-	kid, err := db.AddProfile(ctx, accts[0], store.NewProfile{Name: "Kid", Kind: "standard", JellyfinUserID: strings.Repeat("9", 32), JellyfinUsername: "of-9", JellyfinToken: "t9"}, 0)
+	kid, err := db.AddProfile(ctx, accts[0], store.NewProfile{Name: "Kid", Kind: "standard"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestAppTitlesWishedListed(t *testing.T) {
 	app := &browser{h: b.h, cookies: map[string]string{}}
 	// A disabled account's wish doesn't count (nor does it in the
 	// valuation): 14, asked for by a disabled third only, isn't listed.
-	third, thirdProf, _ := db.CreateAccount(ctx, "person-3", store.NewOwner{Name: "Main", JellyfinUserID: strings.Repeat("3", 32), JellyfinUsername: "of-3", JellyfinToken: "t"})
+	third, thirdProf, _ := db.CreateAccount(ctx, "person-3", store.NewOwner{Name: "Main"})
 	ask(third.ID, thirdProf.ID, "movie/tmdb/14")
 	if err := db.SetAccountDisabled(ctx, third.ID, true); err != nil {
 		t.Fatal(err)
@@ -264,7 +264,7 @@ func TestAppTitlesPagesWhileChanging(t *testing.T) {
 	ctx := context.Background()
 	p, b, db, _ := signedInPanel(t)
 	now := time.Now()
-	_, prof, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main", JellyfinUserID: strings.Repeat("1", 32), JellyfinUsername: "of-1", JellyfinToken: "t"})
+	_, prof, _ := db.CreateAccount(ctx, "person-1", store.NewOwner{Name: "Main"})
 	id := func(n int) string { return strings.Repeat("0", 31) + string(rune('a'+n)) }
 	var items []store.CatalogItem
 	for i, name := range []string{"Alpha", "Beta", "Gamma"} {

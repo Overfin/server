@@ -14,7 +14,7 @@ func TestWatchStats(t *testing.T) {
 	ctx := context.Background()
 	acct1, prof1, _ := s.CreateAccount(ctx, "subject-1", owner("1"))
 	_, prof2, _ := s.CreateAccount(ctx, "subject-2", owner("2"))
-	kid, err := s.AddProfile(ctx, acct1.ID, NewProfile{Name: "Kid", Kind: "standard", JellyfinUserID: "u9", JellyfinUsername: "of-9", JellyfinToken: "t9"}, 0)
+	kid, err := s.AddProfile(ctx, acct1.ID, NewProfile{Name: "Kid", Kind: "standard"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

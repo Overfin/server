@@ -21,7 +21,7 @@ func setup(t *testing.T) (*Checker, *time.Time, string, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	a, p, err := s.CreateAccount(ctx, "subject", store.NewOwner{Name: "Me", JellyfinUserID: "jf", JellyfinUsername: "of", JellyfinToken: "t"})
+	a, p, err := s.CreateAccount(ctx, "subject", store.NewOwner{Name: "Me"})
 	if err != nil {
 		t.Fatal(err)
 	}

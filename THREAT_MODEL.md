@@ -208,8 +208,7 @@ server the operator doesn't fully trust. Suppose an attacker controls it.
 - **Kids profiles are only as strong as the PINs on the adult profiles.** PINs
   are optional; without them, a child can switch to an adult profile.
 - **Deleting an account doesn't delete everything elsewhere.** What
-  Overfin holds goes, with the Jellyfin users of profiles from before
-  Overfin's one account, but the Seerr users accounts had before wishlists
+  Overfin holds goes, but the Seerr users accounts had before wishlists
   stay in Seerr until the operator deletes them there [66].
 - **Catalog searches reach TMDB.** With the TMDB catalog enabled, what users
   search for in the catalog is sent from the server to TMDB. Browsers never
