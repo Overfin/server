@@ -4,8 +4,8 @@ go 1.26.11
 
 require (
 	github.com/BurntSushi/toml v1.6.0
-	github.com/msfp-io/msfp-go v0.7.1
-	github.com/overfin/web v0.99.21
+	github.com/msfp-io/msfp-go v0.8.0
+	github.com/overfin/web v0.99.22
 	golang.org/x/crypto v0.59.0
 	modernc.org/sqlite v1.62.0
 )
@@ -24,12 +24,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
-
-// Until release day: msfp-go's revised v0 (branch revision) is not
-// pushed, so the build reads the local checkout. On release day this
-// line goes and the require above names the released version.
-replace github.com/msfp-io/msfp-go => /home/c0pt3r/Projects/msfp-go
-
-// Until release day: overfin-web's branch on the same model (its SDK this
-// one's), from the local checkout too.
-replace github.com/overfin/web => /home/c0pt3r/Projects/overfin-web
