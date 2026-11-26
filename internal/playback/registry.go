@@ -7,6 +7,7 @@ import (
 	"errors"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,7 +17,6 @@ import (
 	"github.com/overfin/server/internal/delivery"
 	"github.com/overfin/server/internal/ids"
 	"github.com/overfin/server/internal/jellyfin"
-	"github.com/overfin/server/internal/tracks"
 )
 
 // Stream is one active playback, as Overfin keeps it. Playback state is
@@ -44,7 +44,7 @@ type Stream struct {
 	// Trickplay is the layout of the seek-bar previews offered with it,
 	// if any; Previews, the fingerprint Overfin keeps them by ("" for a
 	// paired server's, fetched from there).
-	Trickplay *jellyfin.Trickplay
+	Trickplay *wire.PreviewLayout
 	Previews  string
 	// Remote, for a title a paired server holds: the playback is there,
 	// its stream fetched from there; this one keeps the profile's side
@@ -105,26 +105,15 @@ func (s *Stream) File(name string) (Upstream, bool) {
 	return u, ok
 }
 
-// TextSubtitle reports whether index is a text subtitle track of the
-// stream's version, the only kind served as WebVTT. For a delivery, index
-// is the copy's track number (s<n>).
-func (s *Stream) TextSubtitle(index int) bool {
+// Subtitle is how subtitle track index (s<n>) of the stream's copy is
+// served apart (delivery.SubtitleServing): text as WebVTT, pictures (PGS)
+// as the track itself, checked (CheckPGS); none for a playback that
+// isn't a delivery's.
+func (s *Stream) Subtitle(index int) wire.SubtitleServing {
 	if d := s.Delivery; d != nil {
-		t, ok := d.Subtitle("s" + strconv.Itoa(index))
-		return ok && wire.ServedForms[t.Format].Form == wire.FormText
+		return d.SubtitleServing("s" + strconv.Itoa(index))
 	}
-	return false
-}
-
-// PictureSubtitle reports whether index is a subtitle track of pictures
-// (PGS) of the stream's version, served as the track itself, checked
-// (CheckPGS).
-func (s *Stream) PictureSubtitle(index int) bool {
-	if d := s.Delivery; d != nil {
-		t, ok := d.Subtitle("s" + strconv.Itoa(index))
-		return ok && tracks.IsPGS(t.Format)
-	}
-	return false
+	return wire.SubtitleServing{}
 }
 
 // JellyfinSubtitle is Jellyfin's index of a subtitle track for the plugin's
@@ -569,13 +558,19 @@ func (t *Tickets) Latest(sessionID, profileID string, now time.Time) (*Stream, b
 	return best, best != nil
 }
 
-// Idle lists playbacks with no activity for longer than idle, and those past
-// their maximum age.
+// Idle lists this server's own playbacks with no activity for longer than
+// idle, and those past their maximum age. A paired server's viewer's are
+// never listed: the MSFP engine ends them as MSFP says (MSFP playback
+// section 6.3: a download never idles, a scan has a life of its own), and
+// stops them here (PeerHost.Stop).
 func (t *Tickets) Idle(now time.Time, idle time.Duration) []*Stream {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	var out []*Stream
 	for _, s := range t.byID {
+		if strings.HasPrefix(s.SessionID, PeerPrefix) {
+			continue
+		}
 		if now.Sub(s.lastSeen) > idle || !t.live(s, now) {
 			out = append(out, s)
 		}

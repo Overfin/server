@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/overfin/server/internal/jellyfin"
+	"github.com/msfp-io/msfp-go/wire"
 )
 
 // Previews tickets (MSFP video section 5.6, Overfin's players' previews
@@ -27,7 +27,7 @@ type PreviewTicket struct {
 	// Previews is the fingerprint the sheets are kept by; Trickplay, their
 	// layout.
 	Previews  string
-	Trickplay jellyfin.Trickplay
+	Trickplay wire.PreviewLayout
 	// Peer, Key, Version and Etag, for a paired server's copy: the
 	// pairing, the title's key and the copy's version ID there, and its
 	// etag (its sheets are fetched from it, kept by etag and layout).

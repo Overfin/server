@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -54,6 +55,8 @@ type twoServers struct {
 	onB        *playback.Tickets
 	aOnB, bOnA msfp.PeerView
 	pbA, pbB   api.Playback
+	// clockB moves B's engine's clock ahead (idleOnB).
+	clockB atomic.Int64
 	// endedOnB are B's engine's endings of A's playbacks, as they come
 	// (the first 16).
 	endedOnB chan msfp.PlaybackEnded
@@ -70,7 +73,7 @@ func pairForPlayWith(t *testing.T, wrapB func(http.Handler) http.Handler) *twoSe
 	t.Helper()
 	ctx := context.Background()
 	x := twoServers{endedOnB: make(chan msfp.PlaybackEnded, 16)}
-	x.played = playedServer(t, options{federation: &x.b, playback: &x.pbB, wrap: wrapB,
+	x.played = playedServer(t, options{federation: &x.b, playback: &x.pbB, wrap: wrapB, clockShift: &x.clockB,
 		events: func(ev msfp.Event) {
 			if e, ok := ev.(msfp.PlaybackEnded); ok {
 				select {
@@ -312,7 +315,7 @@ func TestPeerFileRelayed(t *testing.T) {
 	}
 	ranged(206)
 	// B ends it (its idle cleanup): A reads on under a new playback.
-	x.pbB.EndIdle(time.Now().Add(api.IdleTimeout + time.Minute))
+	x.idleOnB()
 	if r := x.ending(t); r != msfp.EndExpired {
 		t.Fatalf("B's idle cleanup: %v", r)
 	}
@@ -612,6 +615,14 @@ func (x *twoServers) ending(t *testing.T) msfp.EndReason {
 	}
 }
 
+// idleOnB has B's engine see A's playbacks there unused past MSFP's idle
+// end (wire.IdleEnd), as if that time passed: its own expiry ends them,
+// within a second (its tick). Once per test: its clock stays ahead, within
+// MSFP's skew.
+func (x *twoServers) idleOnB() {
+	x.clockB.Add(int64(wire.IdleEnd + 30*time.Second))
+}
+
 // waitFor waits until ok says yes.
 func waitFor(t *testing.T, what string, ok func() bool) {
 	t.Helper()
@@ -684,7 +695,7 @@ func TestPeerPlaybackEndsWithViewer(t *testing.T) {
 func TestPeerPlaybackEndedByOwner(t *testing.T) {
 	x := pairForPlay(t)
 	s := x.playPeer(t)
-	x.pbB.EndIdle(time.Now().Add(api.IdleTimeout + time.Minute))
+	x.idleOnB()
 	if r := x.ending(t); r != msfp.EndExpired {
 		t.Errorf("B's idle cleanup: %v", r)
 	}

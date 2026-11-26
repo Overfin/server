@@ -4,10 +4,10 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"time"
 
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/files"
 )
 
@@ -38,26 +38,15 @@ func (e *Executor) OpenFile(ctx context.Context, s *Started) (*files.File, error
 	return f, nil
 }
 
-// oneRange is a Range header of one range of bytes: from a byte, to
-// one, both, or the last bytes ("bytes=-500").
-var oneRange = regexp.MustCompile(`^bytes=(\d{1,15})?-(\d{1,15})?$`)
-
-// ValidRange says whether a Range header asks one range of bytes, in
-// order: never several, nor "bytes=-", nor "bytes=5-3", nor "bytes=-0".
-func ValidRange(h string) bool {
-	m := oneRange.FindStringSubmatch(h)
-	switch {
-	case m == nil, m[1] == "" && m[2] == "":
-		return false
-	case m[1] == "":
-		n, _ := strconv.ParseInt(m[2], 10, 64)
-		return n > 0
-	case m[2] == "":
+// validRange says whether a Range header, if any, is one of MSFP's three
+// forms (media section 2.1): never several ranges, "bytes=-", "bytes=5-3"
+// or "bytes=-0".
+func validRange(h string) bool {
+	if h == "" {
 		return true
 	}
-	a, _ := strconv.ParseInt(m[1], 10, 64)
-	b, _ := strconv.ParseInt(m[2], 10, 64)
-	return a <= b
+	_, ok := wire.ParseRange(h)
+	return ok
 }
 
 // ServeFile answers a request for a file delivery's bytes from f: the
@@ -65,17 +54,13 @@ func ValidRange(h string) bool {
 // copy's media type and etag, until done is closed (the playback over).
 // Nothing else of the file goes out: no name, no time.
 func ServeFile(w http.ResponseWriter, r *http.Request, s *Started, f *files.File, done <-chan struct{}) {
-	if rh := r.Header.Get("Range"); rh != "" && !ValidRange(rh) {
+	if rh := r.Header.Get("Range"); !validRange(rh) {
 		w.Header().Set("Content-Range", "bytes */"+strconv.FormatInt(f.Info.Size(), 10))
 		w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
 		return
 	}
 	h := w.Header()
-	mediaType := s.Plan.Copy.Facts.MediaType
-	if mediaType == "" {
-		mediaType = "application/octet-stream"
-	}
-	h.Set("Content-Type", mediaType)
+	h.Set("Content-Type", wire.RelayedFileType(s.Plan.Copy.Facts.MediaType))
 	if etag := s.Plan.Copy.ETag; etag != "" {
 		h.Set("ETag", strconv.Quote(etag))
 	}

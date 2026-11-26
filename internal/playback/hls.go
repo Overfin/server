@@ -3,40 +3,29 @@ package playback
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"net/url"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
+
+	"github.com/msfp-io/msfp-go/wire"
 )
 
 // A delivery's media playlist, made by Jellyfin through Overfin's plugin,
 // is parsed, never searched and replaced (SECURITY.md rule 14). Every URI
-// in it may carry Jellyfin's token; each one is replaced by a neutral name, and the real URL stays on the server. Tags
-// outside an allow-list are dropped, including any that point to other URIs
-// (alternate renditions, subtitles, keys, I-frame playlists).
-
-// Limits on what Overfin accepts from Jellyfin.
-const (
-	maxPlaylistBytes = 2 << 20
-	maxSegments      = 50_000
-)
+// in it may carry Jellyfin's token; each one is replaced by a neutral name,
+// and the real URL stays on the server. Tags outside MSFP's media subset
+// are dropped (alternate renditions, subtitles, keys, I-frame playlists).
 
 // ErrBadPlaylist: a playlist Overfin can't vouch for.
 var ErrBadPlaylist = errors.New("playback: unexpected playlist content")
 
 var (
-	// Tags allowed through.
-	variantTags = []string{"EXTM3U", "EXT-X-VERSION", "EXT-X-TARGETDURATION", "EXT-X-MEDIA-SEQUENCE",
-		"EXT-X-PLAYLIST-TYPE", "EXT-X-INDEPENDENT-SEGMENTS", "EXTINF", "EXT-X-DISCONTINUITY",
-		"EXT-X-ENDLIST", "EXT-X-MAP"}
-
-	tagLine = regexp.MustCompile(`^#(EXT[A-Z0-9-]*)(:[\x20-\x7e]*)?$`)
 	// URIs as Jellyfin writes them, relative to the playlist.
 	segmentURI = regexp.MustCompile(`^hls1/([A-Za-z0-9_-]{1,32})/(-?[0-9]{1,6})\.(mp4|m4s|ts|aac|mp3)$`)
 	mapURI     = regexp.MustCompile(`^#EXT-X-MAP:URI="([^"]*)"$`)
-	// A segment's duration, as MSFP's check of a media playlist reads it
-	// (msfp wire): a number, its title after a comma, if any.
-	extinfLine = regexp.MustCompile(`^#EXTINF:(\d+(?:\.\d+)?)(?:,.*)?$`)
 	// Where those URIs may lead on Jellyfin.
 	allowedRoute = regexp.MustCompile(`(?i)^/(videos|audio)/[0-9a-f-]{32,36}/([A-Za-z0-9_-]{1,32}\.m3u8|hls1/[A-Za-z0-9_-]{1,32}/-?[0-9]{1,6}\.(mp4|m4s|ts|aac|mp3))$`)
 )
@@ -51,7 +40,7 @@ type Rewritten struct {
 // RewriteVariant rewrites a variant playlist. Segments become seg0.mp4,
 // seg1.mp4... and the initialization segment init.mp4.
 func RewriteVariant(body []byte, upstream Upstream) (*Rewritten, error) {
-	return rewrite(body, upstream, variantTags, func(uri string, n int) (string, *regexp.Regexp) {
+	return rewrite(body, upstream, wire.MediaSubset, func(uri string, n int) (string, *regexp.Regexp) {
 		m := segmentURI.FindStringSubmatch(stripQuery(uri))
 		if m == nil {
 			return "", segmentURI
@@ -69,27 +58,23 @@ func stripQuery(uri string) string {
 }
 
 // rewrite does the work for both kinds. name gives the neutral name for the
-// nth URI and the pattern the URI's path must match.
+// nth URI and the pattern the URI's path must match. Overfin only renames
+// here: what is sent is then checked as MSFP checks a paired server's
+// media playlist (wire.FilterPlaylist), the one check of playlists, for
+// this server's players as for its peers.
 func rewrite(body []byte, upstream Upstream, tags []string,
 	name func(uri string, n int) (string, *regexp.Regexp)) (*Rewritten, error) {
 
-	if len(body) > maxPlaylistBytes {
+	// As read, before any token is taken out.
+	if len(body) > wire.MaxPlaylist {
 		return nil, ErrBadPlaylist
 	}
-	lines := strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "#EXTM3U" {
-		return nil, ErrBadPlaylist
-	}
-
 	out := Rewritten{Files: map[string]Upstream{}}
 	var b bytes.Buffer
 	count := 0
 	// resolve turns a URI from the playlist into a checked upstream URL and
 	// records it under its neutral name.
 	resolve := func(uri string) (string, error) {
-		if count >= maxSegments {
-			return "", ErrBadPlaylist
-		}
 		neutral, pattern := name(uri, count)
 		u, err := url.Parse(uri)
 		if err != nil || neutral == "" || u.IsAbs() || u.Host != "" || u.User != nil || u.Fragment != "" ||
@@ -105,17 +90,18 @@ func rewrite(body []byte, upstream Upstream, tags []string,
 		return neutral, nil
 	}
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSuffix(line, "\r")
 		switch {
 		case line == "":
 			continue
 		case strings.HasPrefix(line, "#"):
-			m := tagLine.FindStringSubmatch(line)
-			if m == nil || !contains(tags, m[1]) {
-				continue // comments and unknown tags are dropped
+			tag, _, _ := strings.Cut(line, ":")
+			if !slices.Contains(tags, tag) {
+				continue // comments and tags outside the subset are dropped
 			}
-			if m[1] == "EXT-X-MAP" {
+			switch tag {
+			case "#EXT-X-MAP":
 				mm := mapURI.FindStringSubmatch(line)
 				if mm == nil {
 					return nil, ErrBadPlaylist
@@ -125,18 +111,11 @@ func rewrite(body []byte, upstream Upstream, tags []string,
 					return nil, err
 				}
 				line = `#EXT-X-MAP:URI="` + neutral + `"`
-			} else if m[1] == "EXTINF" {
-				// The duration only: a segment's title is free text, which
-				// could hold what a paired server's check refuses (a uri=);
-				// without a comma, all of it would be title. A duration
-				// that isn't a number: a playlist Overfin can't vouch for.
-				d := extinfLine.FindStringSubmatch(line)
-				if d == nil {
-					return nil, ErrBadPlaylist
-				}
-				line = "#EXTINF:" + d[1] + ","
-			} else if strings.Contains(strings.ToUpper(line), "URI=") || strings.Contains(line, "://") {
-				continue // any other tag pointing elsewhere, in any case, is dropped
+			case "#EXTINF":
+				// The duration only (checked below): a segment's title is
+				// free text, Jellyfin's to write.
+				d, _, _ := strings.Cut(line, ",")
+				line = d + ","
 			}
 			b.WriteString(line + "\n")
 		default:
@@ -147,15 +126,10 @@ func rewrite(body []byte, upstream Upstream, tags []string,
 			b.WriteString(neutral + "\n")
 		}
 	}
-	out.Body = b.Bytes()
-	return &out, nil
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
+	checked, err := wire.FilterPlaylist(b.Bytes(), tags, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrBadPlaylist, err)
 	}
-	return false
+	out.Body = checked
+	return &out, nil
 }

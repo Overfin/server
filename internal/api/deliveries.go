@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/delivery"
 	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/playback"
@@ -36,7 +37,7 @@ type deliveryArgs struct {
 	// trickplay and previews, the copy's seek-bar previews Overfin made
 	// (nil and "" without); creditsMs, where its final credits start.
 	reason    string
-	trickplay *jellyfin.Trickplay
+	trickplay *wire.PreviewLayout
 	previews  string
 	creditsMs int64
 	// admit, for a paired server's playback, counts it by the pairing's
@@ -213,7 +214,7 @@ func (s Stream) serveDelivery(w http.ResponseWriter, r *http.Request, st *playba
 }
 
 func writePlaylist(w http.ResponseWriter, body []byte) {
-	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Content-Type", wire.HLSType)
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	_, _ = w.Write(body)
 }

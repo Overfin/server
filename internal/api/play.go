@@ -12,7 +12,6 @@ import (
 
 	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/delivery"
-	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/library"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/problem"
@@ -301,14 +300,9 @@ func servedSubtitles(s *playback.Stream, c store.IndexedCopy) []wire.ServedSubti
 		if !ok {
 			continue
 		}
-		if _, mapped := s.JellyfinSubtitle(n); !mapped {
-			continue
-		}
-		switch {
-		case s.TextSubtitle(n):
-			out = append(out, wire.ServedSubtitle{ID: t.ID, Form: wire.FormText})
-		case s.PictureSubtitle(n):
-			out = append(out, wire.ServedSubtitle{ID: t.ID, Form: wire.FormPicture})
+		if how := s.Subtitle(n); how.Apart() {
+			how.ASS = false // its text only, to this server's players
+			out = append(out, how.Entry(t.ID))
 		}
 		if len(out) == wire.MaxServedSubtitles {
 			break
@@ -320,7 +314,7 @@ func servedSubtitles(s *playback.Stream, c store.IndexedCopy) []wire.ServedSubti
 // ownPreviews are a copy's seek-bar previews when Overfin made some for
 // its file (never Jellyfin's): their layout and the fingerprint they're
 // kept by; nil and "" otherwise.
-func (pb Playback) ownPreviews(ctx context.Context, c store.IndexedCopy) (*jellyfin.Trickplay, string) {
+func (pb Playback) ownPreviews(ctx context.Context, c store.IndexedCopy) (*wire.PreviewLayout, string) {
 	if c.PreviewLayout == nil {
 		return nil, ""
 	}
@@ -328,9 +322,9 @@ func (pb Playback) ownPreviews(ctx context.Context, c store.IndexedCopy) (*jelly
 	if !ok {
 		return nil, ""
 	}
-	tp := &jellyfin.Trickplay{Width: own.Width, Height: own.Height, Columns: own.Columns, Rows: own.Rows,
-		Count: own.Count, IntervalMs: own.IntervalMs}
-	if sheetCount(*tp) == 0 {
+	tp := &wire.PreviewLayout{TileWidth: own.Width, TileHeight: own.Height, Columns: own.Columns, Rows: own.Rows,
+		TileCount: own.Count, IntervalMs: own.IntervalMs}
+	if tp.SheetCount() == 0 {
 		return nil, ""
 	}
 	return tp, fp
@@ -432,10 +426,8 @@ func (pb Playback) startPeerPreviews(w http.ResponseWriter, r *http.Request, cal
 		return
 	}
 	pc := theirs[i]
-	l := pc.Copy.PreviewLayout
-	tp := jellyfin.Trickplay{Width: l.TileWidth, Height: l.TileHeight, Columns: l.Columns, Rows: l.Rows,
-		Count: l.TileCount, IntervalMs: l.IntervalMs}
-	if sheetCount(tp) == 0 {
+	tp := *pc.Copy.PreviewLayout
+	if tp.SheetCount() == 0 {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -459,8 +451,8 @@ func (pb Playback) servePeerSheet(w http.ResponseWriter, r *http.Request, pt pla
 		return
 	}
 	tp := pt.Trickplay
-	key := fmt.Sprintf("peer-previews/%s/%s/%dx%d-%dx%d-%d-%d/%d", pt.Peer, pt.Etag, tp.Width, tp.Height, tp.Columns, tp.Rows,
-		tp.IntervalMs, tp.Count, n)
+	key := fmt.Sprintf("peer-previews/%s/%s/%dx%d-%dx%d-%d-%d/%d", pt.Peer, pt.Etag, tp.TileWidth, tp.TileHeight, tp.Columns, tp.Rows,
+		tp.IntervalMs, tp.TileCount, n)
 	data, err := pb.Library.Images.Fetched(r.Context(), key, func(ctx context.Context) ([]byte, error) {
 		return eng.PreviewSheet(ctx, pt.Peer, pt.Key, pt.Version, n)
 	})

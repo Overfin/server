@@ -371,6 +371,29 @@ func (s *Started) JellyfinIndex(track string) (int, bool) {
 	return n, ok
 }
 
+// notApart are the subtitle formats never served apart (rule 17): DVD
+// and DVB pictures.
+var notApart = []string{"dvd_subtitle", "dvb_subtitle"}
+
+// SubtitleServing is how this server serves a subtitle track of a copy
+// apart, to its own players as to its peers: as MSFP serves its format
+// (wire.ServeSubtitle), never DVD or DVB pictures (rule 17), nor a track
+// Jellyfin's numbering doesn't map (mapped false).
+func SubtitleServing(format string, mapped bool) wire.SubtitleServing {
+	return wire.ServeSubtitle(format, "", !mapped || slices.Contains(notApart, format))
+}
+
+// SubtitleServing is how the copy's subtitle track id is served apart
+// (SubtitleServing); none for a track it hasn't.
+func (s *Started) SubtitleServing(id string) wire.SubtitleServing {
+	t, ok := s.Subtitle(id)
+	if !ok {
+		return wire.SubtitleServing{}
+	}
+	_, mapped := s.JellyfinIndex(id)
+	return SubtitleServing(t.Format, mapped)
+}
+
 // Subtitle is one of the copy's subtitle tracks, by its ID.
 func (s *Started) Subtitle(id string) (wire.CopySubtitle, bool) {
 	for _, t := range s.Plan.Copy.Facts.SubtitleTracks {
