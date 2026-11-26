@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -132,13 +133,38 @@ func TestPersonalData(t *testing.T) {
 	}
 
 	// Next Up: after episode 1, episode 2; once 2 is marked watched, 3.
-	st.SetPlayed(ctx, owner, map[string]string{"series/tmdb/70523/s1/e1": id(11)}, true, time.Now())
+	st.SetPlayed(ctx, owner, map[string]string{"series/tmdb/70523/s1/e1": id(11)}, true, time.Now().Add(-2*time.Second))
 	if next := list("/api/v1/titles/continue"); len(next.Items) != 1 || next.Items[0].ID != "title_series_tmdb_70523_s1_e2" {
 		t.Fatalf("next up: %+v", next)
 	}
-	st.SetPlayed(ctx, owner, map[string]string{"series/tmdb/70523/s1/e2": id(12)}, true, time.Now().Add(time.Second))
+	st.SetPlayed(ctx, owner, map[string]string{"series/tmdb/70523/s1/e2": id(12)}, true, time.Now().Add(-time.Second))
 	if next := list("/api/v1/titles/continue"); len(next.Items) != 1 || next.Items[0].ID != "title_series_tmdb_70523_s1_e3" {
 		t.Errorf("next up after 2: %+v", next)
+	}
+	// Its next episode taken out by hand: the series leaves Continue
+	// Watching, until the profile watches it again.
+	if code, body := put(t, srv, "DELETE", "/api/v1/titles/title_series_tmdb_70523_s1_e3/progress", ""); code != 200 {
+		t.Fatalf("forget an episode: %d %s", code, body)
+	}
+	if cw := list("/api/v1/titles/continue"); len(cw.Items) != 0 {
+		t.Errorf("the series still in Continue Watching: %+v", cw)
+	}
+	// Not interested: a film or a series only; a title that isn't, 404.
+	for path, want := range map[string]int{
+		"/api/v1/titles/title_series_tmdb_70523_s1_e3/not-interested": 400,
+		"/api/v1/titles/title_movie_tmdb_999999/not-interested":       404,
+		"/api/v1/titles/title_movie_tmdb_999999/progress":             404,
+	} {
+		method := "PUT"
+		if strings.HasSuffix(path, "/progress") {
+			method = "DELETE"
+		}
+		if code, body := put(t, srv, method, path, ""); code != want {
+			t.Errorf("%s %s: %d %s, want %d", method, path, code, body, want)
+		}
+	}
+	if code, _ := put(t, srv, "PUT", "/api/v1/titles/title_series_tmdb_70523/not-interested", ""); code != 204 {
+		t.Errorf("a series not interested: %d", code)
 	}
 
 	// The profile forgets it all.
