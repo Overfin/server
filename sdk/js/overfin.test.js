@@ -882,6 +882,18 @@ test('Dolby Vision: profile 5 only where the browser takes its dvh1 string; prof
   assert.deepEqual([d8.delivery, d8.mediaType], ['remux', 'video/mp4']);
 });
 
+test('HDR10+ refused by decodingInfo is shown as HDR10: the picture copied, the audio alone converted', async () => {
+  // Chromium: smpteSt2094-40 unsupported, smpteSt2086 fine, no E-AC-3.
+  const env = chrome({ decode: (cfg) => ({ supported: cfg.video.hdrMetadataType !== 'smpteSt2094-40' }) });
+  const re = copy({ mbps: 4.5, video: { ...hevcHDR10, codecs: 'hvc1.2.4.H150.90', width: 3832, height: 1600, hdr: ['hdr10plus'], dv: { profile: 8, level: 6, compatibility: 1 } },
+    audio: [{ codec: 'eac3', channels: 6, language: 'fr', default: true }, { codec: 'eac3', channels: 6, language: 'en' }] });
+  const d = await chooseDelivery([re], env, { encoders, ...noMemory });
+  assert.deepEqual([d.level, d.delivery, d.transcode?.videoCodec, d.transcode?.audioCodec], [2, 'transcode', 'copy', 'aac']);
+  // Refused as HDR10 too: the picture converted.
+  const none = chrome({ decode: (cfg) => ({ supported: !cfg.video.transferFunction }) });
+  assert.equal((await chooseDelivery([re], none, { encoders, ...noMemory })).level, 3);
+});
+
 test('the audio-track rule: a file only when the browser plays the chosen track, else a remux', async () => {
   const c = copy({ mediaType: 'video/mp4', audio: [
     { codec: 'aac', codecs: 'mp4a.40.2', channels: 2, language: 'en', default: true, original: true },

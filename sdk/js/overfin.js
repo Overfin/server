@@ -785,7 +785,12 @@ async function videoPlays(copy, env, form) {
         transferFunction: range === 'hlg' ? 'hlg' : 'pq', colorGamut: 'rec2020' },
     };
     if (range === 'hdr10') config.video.hdrMetadataType = (v.hdr || []).includes('hdr10plus') ? 'smpteSt2094-40' : 'smpteSt2086';
-    const info = await env.decode(config);
+    let info = await env.decode(config);
+    // An HDR10+ picture is HDR10 too: a device that refuses its dynamic
+    // metadata shows it as HDR10 (Chromium refuses smpteSt2094-40).
+    if (info && info.supported === false && config.video.hdrMetadataType === 'smpteSt2094-40') {
+      info = await env.decode({ ...config, video: { ...config.video, hdrMetadataType: 'smpteSt2086' } });
+    }
     if (info && info.supported === false) return { ok: false, reason: 'picture-range', codecs: tested, range, decodes: true };
   }
   return { ok: true, reason: '', codecs: tested, range, dv };
