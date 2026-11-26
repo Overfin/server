@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"io"
 	"log/slog"
 	"net/http"
@@ -74,6 +76,18 @@ type fakeJellyfin struct {
 	partnerSeesAll bool
 	users          map[string]string // created users: name -> ID (the first gets partnerJF)
 	segRanges      []string          // the Range headers of segment 0's fetches ("" for none)
+	ancestors      int               // the libraries of items asked
+}
+
+// unindexedTag is the Primary image tag of items 7 (a song) and 8 (a film),
+// which Jellyfin has and the index doesn't.
+var unindexedTag = fmt.Sprintf("%032x", 0x7a9)
+
+// smallJPEG is a 4×4 JPEG, as Jellyfin sends images.
+func smallJPEG() []byte {
+	var b bytes.Buffer
+	jpeg.Encode(&b, image.NewRGBA(image.Rect(0, 0, 4, 4)), nil)
+	return b.Bytes()
 }
 
 // tsSegment is Heat's delivery's first segment, as the fake serves it.
@@ -158,7 +172,7 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f.lastQury = q
 	if q.Get("userId") != userJF && (!f.partnerSeesAll || q.Get("userId") != partnerJF) && !strings.HasPrefix(r.URL.Path, "/MediaSegments/") &&
-		!strings.HasPrefix(strings.ToLower(r.URL.Path), "/videos/") {
+		!strings.HasPrefix(strings.ToLower(r.URL.Path), "/videos/") && !strings.Contains(r.URL.Path, "/Images/") {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -196,6 +210,13 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"ImageTags": map[string]string{"Primary": fmt.Sprintf("%032x", 7)}})
 	case r.URL.Path == "/Items/"+fmt.Sprintf("%032x", 1):
 		json.NewEncoder(w).Encode(movie(0))
+	case r.URL.Path == "/Items/"+fmt.Sprintf("%032x", 7), r.URL.Path == "/Items/"+fmt.Sprintf("%032x", 8):
+		kind := map[bool]string{true: "Audio", false: "Movie"}[strings.HasSuffix(r.URL.Path, "7")]
+		json.NewEncoder(w).Encode(map[string]any{"Id": strings.TrimPrefix(r.URL.Path, "/Items/"), "Type": kind,
+			"ImageTags": map[string]string{"Primary": unindexedTag}})
+	case r.URL.Path == "/Items/"+fmt.Sprintf("%032x", 7)+"/Images/Primary/0", r.URL.Path == "/Items/"+fmt.Sprintf("%032x", 8)+"/Images/Primary/0":
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Write(smallJPEG())
 	case r.URL.Path == "/Videos/"+fmt.Sprintf("%032x", 1)+"/hls1/main/0.ts":
 		f.segRanges = append(f.segRanges, r.Header.Get("Range"))
 		w.Header().Set("Content-Type", "application/octet-stream") // never passed on as it is
@@ -215,6 +236,7 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}})
 	case strings.HasPrefix(r.URL.Path, "/Items/") && strings.HasSuffix(r.URL.Path, "/Ancestors"):
 		// Items 6 and up are in the music library, the others in films.
+		f.ancestors++
 		n, _ := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/Items/"), "/Ancestors"), 16, 64)
 		lib := 0xf1
 		if n >= 6 {
@@ -424,6 +446,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		lib.Previews = o.previews(st)
 	}
 	lib.Images = images.New(jf, 1<<20)
+	lib.Folders = api.NewFolderCache()
 	lib.Images.ArtworkDir = o.artworkDir
 	if o.seerr != nil {
 		extra = append(extra, &api.Discovery{Library: lib, Store: st})

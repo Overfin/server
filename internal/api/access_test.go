@@ -155,3 +155,75 @@ func TestArtworkOnTitles(t *testing.T) {
 		t.Errorf("invented path: %d", code)
 	}
 }
+
+// An item the index doesn't have (a song, a film not indexed yet) shows its
+// images by its library, asked of Jellyfin once; a profile limited to other
+// libraries gets a 404. With tags hidden, a film not indexed yet is hidden
+// (its keywords aren't known), a song isn't.
+func TestImagesOfItemsOutsideTheIndex(t *testing.T) {
+	var st *store.Store
+	srv, fake := newServerWith(t, options{store: &st})
+	fake.partnerSeesAll = true
+	ctx := context.Background()
+	films, music := fmt.Sprintf("%032x", 0xf1), fmt.Sprintf("%032x", 0xf2)
+	st.PutCatalog(ctx, []store.CatalogItem{{ID: fmt.Sprintf("%032x", 1), Kind: "movie", Name: "1", SortName: "1", LibraryID: films}}, 1)
+	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
+	owner := ownerID(t, srv)
+	_, body := post(t, srv, "/api/v1/profiles", `{"name":"Partner"}`)
+	var partner struct{ ID string }
+	json.Unmarshal([]byte(body), &partner)
+
+	song := "/api/v1/images/img_" + fmt.Sprintf("%032x", 7) + "_primary_0_" + unindexedTag
+	film := "/api/v1/images/img_" + fmt.Sprintf("%032x", 8) + "_primary_0_" + unindexedTag
+	limit := func(patch string) {
+		t.Helper()
+		post(t, srv, "/api/v1/profiles/"+owner+"/activate", `{}`)
+		if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+partner.ID, patch); code != 200 {
+			t.Fatalf("%s: %d %s", patch, code, body)
+		}
+		post(t, srv, "/api/v1/profiles/"+partner.ID+"/activate", `{}`)
+	}
+	ancestors := func() int {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return fake.ancestors
+	}
+	expect := func(path string, want int) {
+		t.Helper()
+		if code := get(t, srv, path, nil); code != want {
+			t.Errorf("%s: %d, want %d", path, code, want)
+		}
+	}
+
+	// No limit: both, nothing asked of their libraries.
+	expect(song, 200)
+	expect(film, 200)
+	if n := ancestors(); n != 0 {
+		t.Errorf("libraries asked with no limit: %d", n)
+	}
+
+	// Films only: the song is in music, refused; asked once, remembered.
+	limit(`{"libraries":["lib_` + films + `"]}`)
+	expect(song, 404)
+	expect(song, 404)
+	if n := ancestors(); n != 1 {
+		t.Errorf("the song's library asked %d times, want once", n)
+	}
+	// Music only: the song shows, its library not asked again.
+	limit(`{"libraries":["lib_` + music + `"]}`)
+	expect(song, 200)
+	if n := ancestors(); n != 1 {
+		t.Errorf("asked again: %d", n)
+	}
+
+	// Tags hidden, every library: the film no keyword is known of is
+	// hidden, the song isn't.
+	limit(`{"libraries":null,"blockedTags":["horror"]}`)
+	expect(film, 404)
+	expect(song, 200)
+
+	// A tag the item doesn't have, a size that isn't one: 404.
+	expect("/api/v1/images/img_"+fmt.Sprintf("%032x", 7)+"_primary_0_"+fmt.Sprintf("%032x", 1), 404)
+	expect(song+"?size=huge", 404)
+	expect(song+"?width=200", 404)
+}
