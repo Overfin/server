@@ -227,3 +227,68 @@ func TestImagesOfItemsOutsideTheIndex(t *testing.T) {
 	expect(song+"?size=huge", 404)
 	expect(song+"?width=200", 404)
 }
+
+// A title's rank, for a profile limited to some libraries, is its place
+// among the titles it may see: one it may not see isn't counted, a title
+// with two copies counts once; the owner sees the server's rank.
+func TestRankAmongWhatAProfileSees(t *testing.T) {
+	var st *store.Store
+	srv, fake := newServerWith(t, options{store: &st})
+	fake.partnerSeesAll = true
+	ctx := context.Background()
+	films, music := fmt.Sprintf("%032x", 0xf1), fmt.Sprintf("%032x", 0xf2)
+	// Films ranked 1 to 4; 3 only in music; 2 in both.
+	var items []store.CatalogItem
+	ranks := map[string]store.TitleRank{}
+	for i, lib := range []string{films, films, music, films, music} {
+		tmdb := fmt.Sprint(i + 1)
+		if i == 4 {
+			tmdb = "2"
+		}
+		items = append(items, store.CatalogItem{ID: fmt.Sprintf("%032x", i+1), Kind: "movie", Name: tmdb, SortName: tmdb, TMDB: tmdb, LibraryID: lib})
+		ranks["movie/tmdb/"+tmdb] = store.TitleRank{Kind: "movie", Rank: i + 1}
+	}
+	ranks["movie/tmdb/2"] = store.TitleRank{Kind: "movie", Rank: 2}
+	st.PutCatalog(ctx, items, 1)
+	st.RefreshTitleKeys(ctx)
+	st.SetCatalogState(ctx, store.CatalogState{Pass: 1})
+	if err := st.SetTitleRanks(ctx, ranks); err != nil {
+		t.Fatal(err)
+	}
+	rank := func(tmdb string) *int {
+		t.Helper()
+		var title struct{ Rank *int }
+		if code := get(t, srv, "/api/v1/titles/title_movie_tmdb_"+tmdb, &title); code != 200 {
+			t.Fatalf("film %s: %d", tmdb, code)
+		}
+		return title.Rank
+	}
+	if r := rank("4"); r == nil || *r != 4 {
+		t.Errorf("the owner's rank of 4: %v", r)
+	}
+	owner := ownerID(t, srv)
+	_, body := post(t, srv, "/api/v1/profiles", `{"name":"Partner"}`)
+	var partner struct{ ID string }
+	json.Unmarshal([]byte(body), &partner)
+	if code, body := put(t, srv, "PATCH", "/api/v1/profiles/"+partner.ID, `{"libraries":["lib_`+films+`"]}`); code != 200 {
+		t.Fatalf("limit: %d %s", code, body)
+	}
+	post(t, srv, "/api/v1/profiles/"+partner.ID+"/activate", `{}`)
+	for tmdb, want := range map[string]int{"1": 1, "2": 2, "4": 3} {
+		if r := rank(tmdb); r == nil || *r != want {
+			t.Errorf("the partner's rank of %s: %v, want %d", tmdb, r, want)
+		}
+	}
+	// Both libraries, by name: film 2's two copies count once.
+	post(t, srv, "/api/v1/profiles/"+owner+"/activate", `{}`)
+	put(t, srv, "PATCH", "/api/v1/profiles/"+partner.ID, `{"libraries":["lib_`+films+`","lib_`+music+`"]}`)
+	post(t, srv, "/api/v1/profiles/"+partner.ID+"/activate", `{}`)
+	if r := rank("4"); r == nil || *r != 4 {
+		t.Errorf("the partner's rank of 4 in both libraries: %v, want 4", r)
+	}
+	post(t, srv, "/api/v1/profiles/"+owner+"/activate", `{}`)
+	st.SetTitleRanks(ctx, nil)
+	if r := rank("4"); r != nil {
+		t.Errorf("no ranks: %v", *r)
+	}
+}
