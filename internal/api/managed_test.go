@@ -1300,3 +1300,41 @@ func TestStepUpNotLockedByOthersGuesses(t *testing.T) {
 		t.Errorf("confirming where she's signed in: %d %v", c, out)
 	}
 }
+
+// Changing the password takes a sign-in confirmed in the last few minutes:
+// past that, step-up-required with where to confirm it, and the password
+// stays; nobody signed in, not authenticated.
+func TestManagedPasswordNeedsAFreshSignIn(t *testing.T) {
+	var st *store.Store
+	srv, _ := newServerWith(t, options{managed: true, store: &st, freshFor: time.Millisecond})
+	ctx := context.Background()
+	ann, _ := st.CreateUser(ctx, "ann@example.org", false)
+	hash, _ := password.Hash("a long password 1")
+	st.SetPassword(ctx, ann.Subject, hash)
+	change := func(c *http.Client) (int, map[string]any) {
+		req, _ := http.NewRequest("PUT", srv.URL+"/api/v1/me/password", strings.NewReader(`{"password":"a new one, 2026"}`))
+		req.Header.Set("Content-Type", "application/json")
+		res, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var out map[string]any
+		json.NewDecoder(res.Body).Decode(&out)
+		return res.StatusCode, out
+	}
+	if code, out := change(newBrowser(srv)); code != 401 || out["type"] != "not-authenticated" {
+		t.Errorf("nobody signed in: %d %v", code, out)
+	}
+	b := newBrowser(srv)
+	if c, out := signinPost(t, b, srv, "/api/v1/signin", checked(t, srv, map[string]any{"email": "ann@example.org", "password": "a long password 1"})); c != 200 {
+		t.Fatalf("signing in: %d %v", c, out)
+	}
+	time.Sleep(5 * time.Millisecond)
+	if code, out := change(b); code != 403 || out["type"] != "step-up-required" || out["stepUp"] != "login" || out["stepUpUrl"] != api.StepUpPath {
+		t.Errorf("a stale sign-in: %d %v", code, out)
+	}
+	if u, _ := st.UserBySubject(ctx, ann.Subject); u == nil || !password.Check(u.PasswordHash, "a long password 1") {
+		t.Error("the password changed on a stale sign-in")
+	}
+}
