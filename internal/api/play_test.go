@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/msfp-io/msfp-go/wire"
+	"github.com/overfin/server/internal/api"
 	"github.com/overfin/server/internal/delivery"
 	"github.com/overfin/server/internal/files"
 	"github.com/overfin/server/internal/playback"
@@ -33,6 +34,8 @@ type testMaker struct {
 	orders  []delivery.Order
 	stopped []string
 	fail    error // what Start answers instead, when set
+	pinged  []string
+	pingErr error // what Ping answers, when set
 }
 
 func (m *testMaker) Encoders(context.Context) (delivery.Encoders, error) { return m.enc, nil }
@@ -61,7 +64,12 @@ func (m *testMaker) Start(_ context.Context, o delivery.Order) (*delivery.Made, 
 	return made, nil
 }
 
-func (m *testMaker) Ping(context.Context, string) error { return nil }
+func (m *testMaker) Ping(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pinged = append(m.pinged, id)
+	return m.pingErr
+}
 
 func (m *testMaker) Stop(_ context.Context, id string) error {
 	m.mu.Lock()
@@ -701,5 +709,50 @@ func TestTranscodesCounted(t *testing.T) {
 	post(t, p.srv, "/api/v1/playback/"+tv+"/stop", `{"positionMs":0}`)
 	if n := p.tickets.Transcodes(); n != 0 {
 		t.Errorf("after its stop: %d", n)
+	}
+}
+
+// The plugin's deliveries of live playbacks kept alive: each transcode
+// pinged, a file's playback (no delivery there) not; a ping failing
+// leaves the playback be; a delivery the plugin no longer has ends its
+// playback here.
+func TestDeliveriesPinged(t *testing.T) {
+	var pb api.Playback
+	p := playedServer(t, options{maxStreams: 4, playback: &pb})
+	startDelivery(t, p.srv, "Laptop", `"delivery":"file"`)
+	tv := startPlayback(t, p.srv, "TV")
+	pinged := func() []string {
+		p.maker.mu.Lock()
+		defer p.maker.mu.Unlock()
+		out := p.maker.pinged
+		p.maker.pinged = nil
+		return out
+	}
+	pb.PingDeliveries(time.Now())
+	if !eventually(t, func() bool { p.maker.mu.Lock(); defer p.maker.mu.Unlock(); return len(p.maker.pinged) == 1 }) {
+		t.Fatalf("pinged: %v", pinged())
+	}
+	pinged()
+	p.maker.mu.Lock()
+	p.maker.pingErr = errors.New("plugin: 500")
+	p.maker.mu.Unlock()
+	pb.PingDeliveries(time.Now())
+	eventually(t, func() bool { p.maker.mu.Lock(); defer p.maker.mu.Unlock(); return len(p.maker.pinged) == 1 })
+	time.Sleep(50 * time.Millisecond)
+	if code, _ := getAs(t, p.srv, subject, "/api/v1/playback/"+tv); code != 200 {
+		t.Errorf("a failed ping ended the playback: %d", code)
+	}
+	p.maker.mu.Lock()
+	p.maker.pingErr = delivery.ErrGone
+	p.maker.mu.Unlock()
+	pb.PingDeliveries(time.Now())
+	if !eventually(t, func() bool {
+		code, _ := getAs(t, p.srv, subject, "/api/v1/playback/"+tv)
+		return code == http.StatusGone
+	}) {
+		t.Error("a delivery gone at the plugin left its playback")
+	}
+	if n := len(p.tickets.Live(time.Now())); n != 1 {
+		t.Errorf("playbacks left: %d, want the file's", n)
 	}
 }
