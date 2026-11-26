@@ -1240,3 +1240,24 @@ test('a step-up only ever goes to a page of this site, with where to come back',
     globalThis.location = was;
   }
 });
+
+test("a stream cut short ends more than 5 s before its title's end; the title's length first, else the video's", () => {
+  const video = fakeVideo();
+  const player = new Player(new Overfin(), video, 'title_movie_tmdb_1', { startMs: 0, env: chrome() });
+  player.playback = { id: 'pb1', durationMs: 1_000_000 };
+  for (const [at, cut] of [[100, true], [994, true], [995.5, false], [1000, false]]) {
+    video.currentTime = at;
+    assert.equal(player.cutShort(), cut, `at ${at}`);
+  }
+  // Without the title's length: the video's, when it knows one.
+  player.playback = { id: 'pb1' };
+  video.duration = 600;
+  video.currentTime = 300;
+  assert.equal(player.cutShort(), true);
+  video.duration = Infinity; // a live stream's
+  assert.equal(player.cutShort(), false);
+  video.duration = NaN;
+  assert.equal(player.cutShort(), false);
+  player.playback = null;
+  assert.equal(player.cutShort(), false);
+});
