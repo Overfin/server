@@ -34,6 +34,9 @@ var (
 	// URIs as Jellyfin writes them, relative to the playlist.
 	segmentURI = regexp.MustCompile(`^hls1/([A-Za-z0-9_-]{1,32})/(-?[0-9]{1,6})\.(mp4|m4s|ts|aac|mp3)$`)
 	mapURI     = regexp.MustCompile(`^#EXT-X-MAP:URI="([^"]*)"$`)
+	// A segment's duration, as MSFP's check of a media playlist reads it
+	// (msfp wire): a number, its title after a comma, if any.
+	extinfLine = regexp.MustCompile(`^#EXTINF:(\d+(?:\.\d+)?)(?:,.*)?$`)
 	// Where those URIs may lead on Jellyfin.
 	allowedRoute = regexp.MustCompile(`(?i)^/(videos|audio)/[0-9a-f-]{32,36}/([A-Za-z0-9_-]{1,32}\.m3u8|hls1/[A-Za-z0-9_-]{1,32}/-?[0-9]{1,6}\.(mp4|m4s|ts|aac|mp3))$`)
 )
@@ -124,10 +127,14 @@ func rewrite(body []byte, upstream Upstream, tags []string,
 				line = `#EXT-X-MAP:URI="` + neutral + `"`
 			} else if m[1] == "EXTINF" {
 				// The duration only: a segment's title is free text, which
-				// could hold what a paired server's check refuses (a uri=).
-				if d, _, ok := strings.Cut(line, ","); ok {
-					line = d + ","
+				// could hold what a paired server's check refuses (a uri=);
+				// without a comma, all of it would be title. A duration
+				// that isn't a number: a playlist Overfin can't vouch for.
+				d := extinfLine.FindStringSubmatch(line)
+				if d == nil {
+					return nil, ErrBadPlaylist
 				}
+				line = "#EXTINF:" + d[1] + ","
 			} else if strings.Contains(strings.ToUpper(line), "URI=") || strings.Contains(line, "://") {
 				continue // any other tag pointing elsewhere, in any case, is dropped
 			}
