@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/overfin/server/internal/config"
 	"github.com/overfin/server/internal/emails"
@@ -204,5 +205,62 @@ func TestSendSample(t *testing.T) {
 	}
 	if err := g.SendSample(ctx, "reset", "nobody@example.org"); err == nil || !strings.Contains(err.Error(), "didn't go through") {
 		t.Errorf("refused by the server: %v", err)
+	}
+}
+
+// Only this site's invitation links, and only pairing codes, go out by
+// the site's email: anything else is refused before it's written, so the
+// site's address never carries someone else's link.
+func TestOnlyOwnLinksAndCodesEmailed(t *testing.T) {
+	ctx := context.Background()
+	box, _ := seal.New(bytes.Repeat([]byte{4}, 32))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "o.db"), box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	cfg.Site.URL = "https://media.example.org/"
+	g := &gateway{sh: &shared{db: db, emails: &emails.Writer{Store: db, Logger: logger}, logger: logger}, cfg: cfg}
+	if err := g.SendInvitation(ctx, "a@example.org", "https://media.example.org/invite/x"); err == nil || !strings.Contains(err.Error(), "off") {
+		t.Errorf("email off: %v", err)
+	}
+	if g.CanSendMail() {
+		t.Error("can send with email off")
+	}
+	port, took := smtpServer(t)
+	if _, err := g.SetMail(ctx, config.Mail{Host: "127.0.0.1", Port: port, TLS: "none", From: "o@example.org"}, "", "admin@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	took()
+	if !g.CanSendMail() {
+		t.Error("can't send with email on")
+	}
+	for _, link := range []string{"https://evil.example.net/invite/x", "https://media.example.org/signin", "https://media.example.org.evil.net/invite/x",
+		"http://media.example.org/invite/x", "https://media.example.org/invite"} {
+		if err := g.SendInvitation(ctx, "a@example.org", link); err == nil || !strings.Contains(err.Error(), "isn't one of this site's") {
+			t.Errorf("%s: %v", link, err)
+		}
+	}
+	if err := g.SendInvitation(ctx, "a@example.org", "https://media.example.org/invite/abc"); err != nil {
+		t.Errorf("this site's: %v", err)
+	}
+	expires := time.Now().Add(24 * time.Hour)
+	for _, code := range []string{"https://evil.example.net", "msfp-pair-1.x", "msfp-pair-0." + strings.Repeat("a", 1200), ""} {
+		if err := g.SendPairingCode(ctx, "b@example.org", code, "", expires); err == nil || !strings.Contains(err.Error(), "isn't a pairing code") {
+			t.Errorf("%.30s: %v", code, err)
+		}
+	}
+	if err := g.SendPairingCode(ctx, "b@example.org", "msfp-pair-0.abc", "Friends", expires); err != nil {
+		t.Errorf("a code: %v", err)
+	}
+	if got := took(); len(got) != 2 || !strings.Contains(got[0], "a@example.org") || !strings.Contains(got[1], "b@example.org") {
+		t.Errorf("sent: %q", got)
+	}
+	// A site without an address of its own sends no invitation at all.
+	g.cfg = &config.Config{}
+	if err := g.SendInvitation(ctx, "a@example.org", "/invite/abc"); err == nil {
+		t.Error("an invitation from a site without an address")
 	}
 }
