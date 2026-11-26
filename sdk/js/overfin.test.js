@@ -882,6 +882,23 @@ test('Dolby Vision: profile 5 only where the browser takes its dvh1 string; prof
   assert.deepEqual([d8.delivery, d8.mediaType], ['remux', 'video/mp4']);
 });
 
+test('Vorbis a browser plays in WebM only: a WebM file as it is; in Matroska, no remux, the audio converted', async () => {
+  // Firefox-like: Vorbis in WebM, never in MP4.
+  const env = firefox({ containers: ['video/mp4', 'video/webm', 'audio/webm'], audio: ['mp4a.40.2', 'vorbis', 'Opus', 'opus'] });
+  const { mse, canPlay } = env;
+  const noMp4Vorbis = (t) => /^(audio|video)\/mp4/.test(t) && /vorbis/i.test(t);
+  env.mse = (t) => !noMp4Vorbis(t) && mse(t);
+  env.canPlay = (t) => (noMp4Vorbis(t) ? '' : canPlay(t));
+  const vp9 = { codec: 'vp9', codecs: 'vp09.00.40.08', width: 1920, height: 1080, bitDepth: 8 };
+  const audio = [{ codec: 'vorbis', channels: 2, language: 'en', default: true }];
+  const webm = copy({ mediaType: 'video/webm', video: vp9, audio });
+  assert.equal((await chooseDelivery([webm], env, { encoders, ...noMemory })).delivery, 'file');
+  const mkv = copy({ mediaType: 'video/matroska', video: { codec: 'h264', codecs: 'avc1.640028', width: 1920, height: 1080, bitDepth: 8 }, audio });
+  const d = await chooseDelivery([mkv], env, { encoders, ...noMemory });
+  assert.notEqual(d.delivery, 'remux');
+  assert.equal(d.transcode?.audioCodec, 'aac');
+});
+
 test('HDR10+ refused by decodingInfo is shown as HDR10: the picture copied, the audio alone converted', async () => {
   // Chromium: smpteSt2094-40 unsupported, smpteSt2086 fine, no E-AC-3.
   const env = chrome({ decode: (cfg) => ({ supported: cfg.video.hdrMetadataType !== 'smpteSt2094-40' }) });
