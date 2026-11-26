@@ -680,3 +680,26 @@ func TestDeliveryFailuresAnswered(t *testing.T) {
 		t.Errorf("playbacks left after failures: %d", len(live))
 	}
 }
+
+// What counts as a transcode (the seek-bar previews wait while one runs):
+// the picture converted only; a file and a remux don't; a stopped one no
+// longer does.
+func TestTranscodesCounted(t *testing.T) {
+	p := playedServer(t, options{maxStreams: 4})
+	startDelivery(t, p.srv, "Laptop", `"delivery":"file"`)
+	startDelivery(t, p.srv, "Phone", `"delivery":"remux","mediaType":"video/mp4"`)
+	if o := p.maker.last(); !o.Video.Copy {
+		t.Fatalf("the remux's order: %+v", o)
+	}
+	if n := p.tickets.Transcodes(); n != 0 {
+		t.Fatalf("a file and a remux: %d transcodes", n)
+	}
+	tv := startPlayback(t, p.srv, "TV")
+	if n := p.tickets.Transcodes(); n != 1 {
+		t.Errorf("with a transcode: %d", n)
+	}
+	post(t, p.srv, "/api/v1/playback/"+tv+"/stop", `{"positionMs":0}`)
+	if n := p.tickets.Transcodes(); n != 0 {
+		t.Errorf("after its stop: %d", n)
+	}
+}
