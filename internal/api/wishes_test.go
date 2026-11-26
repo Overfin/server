@@ -20,6 +20,7 @@ type wishlistOut struct {
 		Title       struct{ ID string }
 		State       string
 		ReleaseDate string
+		NextTry     string
 	}
 	Arrived []struct{ ID string }
 }
@@ -94,6 +95,23 @@ func TestWishlist(t *testing.T) {
 	st.SetWishState(ctx, store.WishState{Title: "movie/tmdb/100", State: store.WishUnreleased, ReleaseOn: "2027-01-01"})
 	if got := list(); got.Items[2].State != "unreleased" || got.Items[2].ReleaseDate != "2027-01-01" {
 		t.Errorf("a state: %+v", got.Items[2])
+	}
+	next := time.Date(2027, 2, 3, 4, 5, 6, 0, time.FixedZone("x", 3600))
+	for _, c := range []struct {
+		set        store.WishState
+		state, try string
+	}{
+		{store.WishState{State: store.WishRequested, SeerrRequest: 7}, "requested", ""},
+		{store.WishState{State: store.WishNotFound, NextTry: next}, "notFound", "2027-02-03T03:05:06Z"},
+		{store.WishState{State: store.WishNotFound}, "notFound", ""},
+		{store.WishState{State: store.WishDownloading}, "downloading", ""},
+		{store.WishState{}, "waiting", ""},
+	} {
+		c.set.Title = "movie/tmdb/100"
+		st.SetWishState(ctx, c.set)
+		if got := list().Items[2]; got.State != c.state || got.NextTry != c.try || got.ReleaseDate != "" {
+			t.Errorf("%+v: %+v, want %s %q", c.set, got, c.state, c.try)
+		}
 	}
 	// Removing the series removes its seasons.
 	if code, _ := put(t, srv, "DELETE", "/api/v1/me/wishlist/title_series_tmdb_1399", ""); code != 204 {
