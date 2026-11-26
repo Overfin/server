@@ -747,3 +747,44 @@ func TestPeerDownloadsWithinLimits(t *testing.T) {
 		t.Fatalf("a burned subtitle: %v", err)
 	}
 }
+
+// Tracks chosen while watching B's copy are kept on A, for the title, by
+// the languages B's copy lists; a track it doesn't have changes nothing;
+// no subtitles kept as such; B keeps nothing of it.
+func TestPeerTracksKeptOnA(t *testing.T) {
+	ctx := context.Background()
+	x := pairForPlay(t)
+	s := x.playPeer(t)
+	tracks := "/api/v1/playback/" + s.ID + "/tracks"
+	owner := ownerID(t, x.srvA)
+	kept := func() store.TitleTracks {
+		t.Helper()
+		tt, err := x.stA.TitleTracks(ctx, owner, "movie/tmdb/949")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tt
+	}
+	for _, body := range []string{`{"audioTrack":"a2"}`, `{"subtitleTrack":"s3"}`} {
+		if code, b := put(t, x.srvA, "PUT", tracks, body); code != http.StatusNoContent {
+			t.Fatalf("%s: %d %s", body, code, b)
+		}
+	}
+	if tt := kept(); tt.Audio != "fr" || tt.Subtitles == nil || *tt.Subtitles != "fr" {
+		t.Errorf("kept: %q %v, want fr fr", tt.Audio, tt.Subtitles)
+	}
+	if code, _ := put(t, x.srvA, "PUT", tracks, `{"audioTrack":"a9","subtitleTrack":"s9"}`); code != http.StatusNoContent {
+		t.Errorf("tracks B's copy hasn't: %d", code)
+	}
+	if tt := kept(); tt.Audio != "fr" || *tt.Subtitles != "fr" {
+		t.Errorf("after unknown tracks: %q %q", tt.Audio, *tt.Subtitles)
+	}
+	put(t, x.srvA, "PUT", tracks, `{"audioTrack":"a1","subtitleTrack":""}`)
+	if tt := kept(); tt.Audio != "en" || tt.Subtitles == nil || *tt.Subtitles != "" {
+		t.Errorf("after a1 and none: %q %v", tt.Audio, tt.Subtitles)
+	}
+	all, err := x.stB.AllTitleTracks(ctx, ownerID(t, x.srvB))
+	if err != nil || len(all) != 0 {
+		t.Errorf("B kept: %v %v", all, err)
+	}
+}
