@@ -1214,3 +1214,29 @@ test('the ladder leaves alone what isn\'t the device\'s failure: a network error
   assert.ok(calls.filter((x) => x.url === '/api/v1/playback').every((x) => x.body.delivery === 'file'));
   await player.close();
 });
+
+test('a step-up only ever goes to a page of this site, with where to come back', () => {
+  const was = globalThis.location;
+  globalThis.location = { origin: 'https://media.example.org', pathname: '/movies', search: '?sort=name', hash: '', href: '' };
+  try {
+    const overfin = new Overfin();
+    const err = (stepUpUrl) => new OverfinError(403, { type: 'step-up-required', status: 403, stepUpUrl });
+    overfin.stepUp(err('/api/v1/auth/step-up'));
+    assert.equal(globalThis.location.href, 'https://media.example.org/api/v1/auth/step-up?return=%2Fmovies%3Fsort%3Dname');
+    overfin.stepUp(err('https://media.example.org/signin?fresh=1'), '/account');
+    assert.equal(globalThis.location.href, 'https://media.example.org/signin?fresh=1&return=%2Faccount');
+    for (const away of ['https://evil.example.net/step-up', '//evil.example.net/x', 'javascript:alert(1)', 'https://media.example.org.evil.net/']) {
+      globalThis.location.href = '';
+      assert.throws(() => overfin.stepUp(err(away)), /no step-up/, away);
+      assert.equal(globalThis.location.href, '', away);
+    }
+    assert.throws(() => overfin.stepUp(new OverfinError(403, { type: 'step-up-required', status: 403 })), /no step-up/);
+    assert.throws(() => overfin.stepUp(undefined), /no step-up/);
+    // The login address carries where to come back, encoded.
+    assert.equal(overfin.loginUrl('/item/x?a=1&b=2'), '/api/v1/login?return=%2Fitem%2Fx%3Fa%3D1%26b%3D2');
+    assert.equal(overfin.imageUrl({ url: '/api/v1/images/img_1' }, 'large'), '/api/v1/images/img_1?size=large');
+    assert.equal(overfin.imageUrl(undefined), '');
+  } finally {
+    globalThis.location = was;
+  }
+});
