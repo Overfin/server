@@ -130,6 +130,20 @@ func TestPeerSegmentThroughA(t *testing.T) {
 			t.Errorf("%s asked of Jellyfin as %q", h, asked)
 		}
 	}
+	// Jellyfin failing under B: refusing it, a not found for A's viewer;
+	// failing otherwise, busy; never Jellyfin's own words.
+	for status, want := range map[int]int{403: 404, 404: 404, 500: 503, 502: 503} {
+		x.played.fake.mu.Lock()
+		x.played.fake.segStatus = status
+		x.played.fake.mu.Unlock()
+		code, body := viewerGet(t, x.srvA, base+seg)
+		if code != want || strings.Contains(body, "/media") {
+			t.Errorf("Jellyfin answering %d: A's viewer got %d %q, want %d", status, code, body, want)
+		}
+	}
+	x.played.fake.mu.Lock()
+	x.played.fake.segStatus = 0
+	x.played.fake.mu.Unlock()
 }
 
 func live0Ticket(t *testing.T, x *twoServers) string {

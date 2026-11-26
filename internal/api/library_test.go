@@ -77,6 +77,7 @@ type fakeJellyfin struct {
 	users          map[string]string // created users: name -> ID (the first gets partnerJF)
 	segRanges      []string          // the Range headers of segment 0's fetches ("" for none)
 	ancestors      int               // the libraries of items asked
+	segStatus      int               // when set, what segment 0's fetch answers instead
 }
 
 // unindexedTag is the Primary image tag of items 7 (a song) and 8 (a film),
@@ -219,6 +220,11 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Write(smallJPEG())
 	case r.URL.Path == "/Videos/"+fmt.Sprintf("%032x", 1)+"/hls1/main/0.ts":
 		f.segRanges = append(f.segRanges, r.Header.Get("Range"))
+		if f.segStatus != 0 {
+			w.WriteHeader(f.segStatus)
+			io.WriteString(w, `{"secret":"/media/films/heat.mkv"}`)
+			return
+		}
 		w.Header().Set("Content-Type", "application/octet-stream") // never passed on as it is
 		http.ServeContent(w, r, "0.ts", time.Time{}, strings.NewReader(tsSegment))
 	case r.URL.Path == "/videos/"+fmt.Sprintf("%032x", 1)+"/hls1/main/0.mp4":
