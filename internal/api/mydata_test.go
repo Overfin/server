@@ -33,6 +33,17 @@ func TestExportMyData(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// What the profile did with titles: one half watched, one watched and
+	// a favorite, tracks chosen, a series taken out of Continue Watching.
+	owner := ownerID(t, srv)
+	at := time.Date(2026, 11, 20, 20, 0, 0, 0, time.UTC)
+	st.RecordPlay(ctx, owner, "movie/tmdb/14160", "", 1_800_000, false, at)
+	st.SetPlayed(ctx, owner, map[string]string{"movie/tmdb/680": ""}, true, at)
+	st.SetFavorite(ctx, owner, "movie/tmdb/680", "", true, at)
+	st.SetTitleAudio(ctx, owner, "series/tmdb/1399", "fr")
+	st.SetTitleSubtitles(ctx, owner, "series/tmdb/1399", "")
+	st.DismissContinue(ctx, owner, store.TitleRef{Kind: "series", Source: "tmdb", ID: "70523"}, at)
+
 	req, _ := http.NewRequest("POST", srv.URL+"/api/v1/me/export", strings.NewReader("{}"))
 	req.Header.Set("Remote-User", subject)
 	req.Header.Set("Content-Type", "application/json")
@@ -47,7 +58,9 @@ func TestExportMyData(t *testing.T) {
 		t.Fatalf("export: %d %s", res.StatusCode, res.Header.Get("Content-Disposition"))
 	}
 	for _, want := range []string{`"account":{"id":"acct_`, `"owner":true`, `"titles":[`, `"sessions":[{`,
-		`"kidsTitles":true`, `"theme":"dark"`, `"wishesArrived":{"movie/tmdb/949":"`} {
+		`"kidsTitles":true`, `"theme":"dark"`, `"wishesArrived":{"movie/tmdb/949":"`,
+		`"title":"movie/tmdb/14160","positionMs":1800000`, `"title":"movie/tmdb/680"`, `"favorite":true`, `"played":true`,
+		`"series/tmdb/1399":{"audio":"fr","subtitles":""}`, `"series/tmdb/70523":"2026-11-20T20:00:00Z"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("export lacks %s: %s", want, body)
 		}
