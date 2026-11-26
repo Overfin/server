@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -31,6 +32,7 @@ type testMaker struct {
 	enc     delivery.Encoders
 	orders  []delivery.Order
 	stopped []string
+	fail    error // what Start answers instead, when set
 }
 
 func (m *testMaker) Encoders(context.Context) (delivery.Encoders, error) { return m.enc, nil }
@@ -39,6 +41,9 @@ func (m *testMaker) Start(_ context.Context, o delivery.Order) (*delivery.Made, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.orders = append(m.orders, o)
+	if m.fail != nil {
+		return nil, m.fail
+	}
 	made := &delivery.Made{ID: fmt.Sprintf("%032x", len(m.orders)), Segments: o.Segments, AudioIndex: -1,
 		Playlist: []byte("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:6.0,\nhls1/main/0.ts\n#EXT-X-ENDLIST\n")}
 	if v := o.Video; v != nil {
@@ -642,5 +647,36 @@ func TestDeliverySubtitles(t *testing.T) {
 	// Another account gets nothing.
 	if code, _ := getAs(t, p.srv, "other-subject", base+"subtitles/s3/whole"); code != http.StatusNotFound {
 		t.Errorf("another account: %d", code)
+	}
+}
+
+// A delivery the maker can't start, answered as MSFP does: busy, 503
+// server-busy; refused, 409 with its closed code; a request it calls
+// malformed, 400; any other failure, 500, its text never sent.
+func TestDeliveryFailuresAnswered(t *testing.T) {
+	p := playedServer(t, options{})
+	for _, c := range []struct {
+		fail         error
+		status       int
+		kind, detail string
+	}{
+		{&delivery.Refusal{Status: 503, Problem: "server-busy", Why: "encoders-full"}, 503, "server-busy", ""},
+		{&delivery.Refusal{Status: 409, Problem: "delivery-refused", Why: "no-encoder"}, 409, "delivery-refused", "no-encoder"},
+		{&delivery.Refusal{Status: 400, Problem: "invalid-request", Why: "x"}, 400, "invalid-request", ""},
+		{errors.New("plugin: /media/films/heat.mkv unreadable"), 500, "", ""},
+	} {
+		p.maker.mu.Lock()
+		p.maker.fail = c.fail
+		p.maker.mu.Unlock()
+		code, body := post(t, p.srv, "/api/v1/playback", `{"titleId":"title_movie_tmdb_949","versionId":"`+heatCopy+
+			`","delivery":"remux","mediaType":"video/mp4","device":"tv"}`)
+		var pr struct{ Type, Detail string }
+		json.Unmarshal([]byte(body), &pr)
+		if code != c.status || (c.kind != "" && pr.Type != c.kind) || pr.Detail != c.detail || strings.Contains(body, "/media") {
+			t.Errorf("%v: %d %s, want %d %s %q", c.fail, code, body, c.status, c.kind, c.detail)
+		}
+	}
+	if live := p.tickets.Live(time.Now()); len(live) != 0 {
+		t.Errorf("playbacks left after failures: %d", len(live))
 	}
 }
