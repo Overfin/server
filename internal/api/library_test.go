@@ -79,7 +79,6 @@ type fakeJellyfin struct {
 // tsSegment is Heat's delivery's first segment, as the fake serves it.
 const tsSegment = "TS-SEGMENT-ZERO-0123456789"
 
-
 func movie(i int) map[string]any {
 	return map[string]any{"Id": fmt.Sprintf("%032x", i+1), "Name": fmt.Sprintf("Movie %d", i), "Type": "Movie"}
 }

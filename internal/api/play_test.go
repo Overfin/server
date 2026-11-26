@@ -40,7 +40,7 @@ func (m *testMaker) Start(_ context.Context, o delivery.Order) (*delivery.Made, 
 	defer m.mu.Unlock()
 	m.orders = append(m.orders, o)
 	made := &delivery.Made{ID: fmt.Sprintf("%032x", len(m.orders)), Segments: o.Segments, AudioIndex: -1,
-		Playlist: []byte("#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:6.0,\nhls1/main/0.ts\n#EXT-X-ENDLIST\n")}
+		Playlist: []byte("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:6.0,\nhls1/main/0.ts\n#EXT-X-ENDLIST\n")}
 	if v := o.Video; v != nil {
 		made.VideoCopied = v.Copy
 		if !v.Copy {

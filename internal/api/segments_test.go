@@ -3,7 +3,10 @@ package api_test
 import (
 	"io"
 	"net/http"
+	"strings"
 	"testing"
+
+	"github.com/msfp-io/msfp-go/wire"
 )
 
 // A delivery's segments come from Jellyfin by the names in Overfin's own
@@ -61,4 +64,55 @@ func TestDeliverySegments(t *testing.T) {
 	if code, _ := getAs(t, p.srv, "someone-else", base+"seg0.ts"); code != http.StatusNotFound && code != http.StatusUnauthorized && code != http.StatusForbidden {
 		t.Errorf("another person: %d", code)
 	}
+}
+
+// A paired server's segments, through A: A's viewer reads A's playlists,
+// whose names A gives, and gets B's segment, fetched by A's engine from B
+// (B's ticket never leaves A), B's from Jellyfin.
+func TestPeerSegmentThroughA(t *testing.T) {
+	x := pairForPlay(t)
+	var page struct{ Copies []wire.Copy }
+	get(t, x.srvA, "/api/v1/titles/title_movie_tmdb_949", &page)
+	status, s := x.start(t, `{"titleId":"title_movie_tmdb_949","versionId":"`+page.Copies[0].ID+`","delivery":"remux","mediaType":"video/mp2t"}`)
+	if status != 201 || s.Protocol != "hls" {
+		t.Fatalf("remux from B: %d %+v", status, s)
+	}
+	base := "/api/v1/stream/" + s.Ticket + "/"
+	code, master := viewerGet(t, x.srvA, base+"master.m3u8")
+	if code != 200 {
+		t.Fatalf("master: %d", code)
+	}
+	media := ""
+	for _, l := range strings.Split(master, "\n") {
+		if l != "" && !strings.HasPrefix(l, "#") {
+			media = l
+			break
+		}
+	}
+	code, list := viewerGet(t, x.srvA, base+media)
+	if code != 200 {
+		t.Fatalf("media playlist %q: %d %s\nmaster: %s", media, code, list, master)
+	}
+	seg := ""
+	for _, l := range strings.Split(list, "\n") {
+		if l != "" && !strings.HasPrefix(l, "#") {
+			seg = l
+			break
+		}
+	}
+	if seg == "" || strings.Contains(seg, live0Ticket(t, x)) || strings.Contains(seg, "/") {
+		t.Fatalf("A's segment name: %q", seg)
+	}
+	if code, body := viewerGet(t, x.srvA, base+seg); code != 200 || body != tsSegment {
+		t.Errorf("segment through A: %d %q", code, body)
+	}
+}
+
+func live0Ticket(t *testing.T, x *twoServers) string {
+	t.Helper()
+	live := livePlaybacks(x.onB)
+	if len(live) != 1 {
+		t.Fatalf("B's playbacks: %d", len(live))
+	}
+	return live[0].Ticket
 }
