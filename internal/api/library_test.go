@@ -73,7 +73,12 @@ type fakeJellyfin struct {
 	// first, instead of an empty one.
 	partnerSeesAll bool
 	users          map[string]string // created users: name -> ID (the first gets partnerJF)
+	segRanges      []string          // the Range headers of segment 0's fetches ("" for none)
 }
+
+// tsSegment is Heat's delivery's first segment, as the fake serves it.
+const tsSegment = "TS-SEGMENT-ZERO-0123456789"
+
 
 func movie(i int) map[string]any {
 	return map[string]any{"Id": fmt.Sprintf("%032x", i+1), "Name": fmt.Sprintf("Movie %d", i), "Type": "Movie"}
@@ -192,6 +197,10 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"ImageTags": map[string]string{"Primary": fmt.Sprintf("%032x", 7)}})
 	case r.URL.Path == "/Items/"+fmt.Sprintf("%032x", 1):
 		json.NewEncoder(w).Encode(movie(0))
+	case r.URL.Path == "/Videos/"+fmt.Sprintf("%032x", 1)+"/hls1/main/0.ts":
+		f.segRanges = append(f.segRanges, r.Header.Get("Range"))
+		w.Header().Set("Content-Type", "application/octet-stream") // never passed on as it is
+		http.ServeContent(w, r, "0.ts", time.Time{}, strings.NewReader(tsSegment))
 	case r.URL.Path == "/videos/"+fmt.Sprintf("%032x", 1)+"/hls1/main/0.mp4":
 		w.Header().Set("Content-Type", "video/mp4")
 		fmt.Fprint(w, "SEGMENT-ZERO")
