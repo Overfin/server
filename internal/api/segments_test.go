@@ -106,6 +106,30 @@ func TestPeerSegmentThroughA(t *testing.T) {
 	if code, body := viewerGet(t, x.srvA, base+seg); code != 200 || body != tsSegment {
 		t.Errorf("segment through A: %d %q", code, body)
 	}
+	// A range of it, in each of MSFP's three forms: B asks Jellyfin for
+	// it as written, A's viewer gets those bytes.
+	n := len(tsSegment)
+	for h, want := range map[string]string{"bytes=3-9": tsSegment[3:10], "bytes=5-": tsSegment[5:], "bytes=-4": tsSegment[n-4:]} {
+		req, _ := http.NewRequest("GET", x.srvA.URL+base+seg, nil)
+		req.Header.Set("Remote-User", subject)
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		req.Header.Set("Range", h)
+		res, err := client(x.srvA, subject).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != 206 || string(b) != want {
+			t.Errorf("%s through A: %d %q, want %q", h, res.StatusCode, b, want)
+		}
+		x.played.fake.mu.Lock()
+		asked := x.played.fake.segRanges[len(x.played.fake.segRanges)-1]
+		x.played.fake.mu.Unlock()
+		if asked != h {
+			t.Errorf("%s asked of Jellyfin as %q", h, asked)
+		}
+	}
 }
 
 func live0Ticket(t *testing.T, x *twoServers) string {
