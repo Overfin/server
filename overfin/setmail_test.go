@@ -169,3 +169,40 @@ func TestSetMail(t *testing.T) {
 		t.Errorf("sent with email in the file: %q", got)
 	}
 }
+
+// A sample of one of Overfin's emails: to the address asked, its link
+// one that works for nobody; an email that isn't one, or email off,
+// refused.
+func TestSendSample(t *testing.T) {
+	ctx := context.Background()
+	box, _ := seal.New(bytes.Repeat([]byte{4}, 32))
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "o.db"), box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	g := &gateway{sh: &shared{db: db, emails: &emails.Writer{Store: db, Logger: logger}, logger: logger}, cfg: &config.Config{}}
+	if err := g.SendSample(ctx, "reset", "admin@example.org"); err == nil || !strings.Contains(err.Error(), "off") {
+		t.Errorf("email off: %v", err)
+	}
+	port, took := smtpServer(t)
+	if _, err := g.SetMail(ctx, config.Mail{Host: "127.0.0.1", Port: port, TLS: "none", From: "o@example.org"}, "", "admin@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	took()
+	for _, name := range emails.Names {
+		if err := g.SendSample(ctx, name, "admin@example.org"); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if got := took(); len(got) != len(emails.Names) {
+		t.Errorf("samples sent: %d of %d", len(got), len(emails.Names))
+	}
+	if err := g.SendSample(ctx, "nope", "admin@example.org"); err == nil || !strings.Contains(err.Error(), "no such email") {
+		t.Errorf("an email that isn't: %v", err)
+	}
+	if err := g.SendSample(ctx, "reset", "nobody@example.org"); err == nil || !strings.Contains(err.Error(), "didn't go through") {
+		t.Errorf("refused by the server: %v", err)
+	}
+}
