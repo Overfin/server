@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -83,5 +84,16 @@ func TestCheckCompanionLive(t *testing.T) {
 	}
 	if err := checkCompanion(context.Background(), url, strings.TrimSpace(string(key))); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The image's Dockerfile builds the plugin this Overfin is made with.
+func TestDockerfilePluginVersion(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "backend", "Dockerfile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "\nARG PLUGIN_VERSION="+PluginVersion+"\n") {
+		t.Errorf("backend/Dockerfile's PLUGIN_VERSION isn't PluginVersion %s", PluginVersion)
 	}
 }
