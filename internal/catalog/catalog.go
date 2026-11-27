@@ -133,6 +133,12 @@ func (s *Sync) step(ctx context.Context) error {
 			return err
 		}
 		s.generation, s.since = ch.Generation, ch.Last
+		// Then the skip markers, apart: they cost the plugin most of a
+		// full read, and the titles are served meanwhile with those kept.
+		// A failure leaves those kept; the feed brings later changes.
+		if err := s.Segments(ctx); err != nil && ctx.Err() == nil {
+			s.Logger.Error("catalog: reading media segments failed", "err", err)
+		}
 		return nil
 	}
 	for {
@@ -202,6 +208,40 @@ func (s *Sync) Full(ctx context.Context) error {
 	s.Logger.Info("catalog: the library was read", "titles", n, "removed", len(unseen),
 		"seconds", s.clock().Sub(start).Round(100*time.Millisecond).Seconds())
 	s.notify()
+	return nil
+}
+
+// segmentsPageSize is how many films and episodes one page of segments
+// holds.
+const segmentsPageSize = 500
+
+// Segments reads every film's and episode's skip markers and keeps those
+// of the items the index has.
+func (s *Sync) Segments(ctx context.Context) error {
+	start := s.clock()
+	n, after := 0, ""
+	for {
+		page, err := s.Jellyfin.SegmentsPage(ctx, s.Admin(), after, segmentsPageSize)
+		if err != nil {
+			return err
+		}
+		items := map[string]map[string][]wire.CopySegment{}
+		for _, it := range page.Items {
+			if id, err := jellyfin.NormalizeID(it.Id); err == nil {
+				items[id] = segments(it.Segments)
+			}
+		}
+		if err := s.Store.PutSegments(ctx, items); err != nil {
+			return err
+		}
+		n += len(items)
+		if page.Next == "" || page.Next == after {
+			break
+		}
+		after = page.Next
+	}
+	s.Logger.Info("catalog: media segments were read", "items", n,
+		"seconds", s.clock().Sub(start).Round(100*time.Millisecond).Seconds())
 	return nil
 }
 

@@ -37,6 +37,9 @@ type library struct {
 	last       int64
 	token      string
 	pages      int // index pages read
+	// segments are the films' and episodes' skip markers, by ID, as
+	// /Overfin/Segments lists them.
+	segments map[string][]map[string]any
 }
 
 func (l *library) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +88,21 @@ func (l *library) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			out = append(out, l.items[i])
+		}
+		json.NewEncoder(w).Encode(map[string]any{"Items": out, "Next": next})
+	case r.URL.Path == "/Overfin/Segments":
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		var out []map[string]any
+		next := ""
+		for _, i := range slices.Sorted(maps.Keys(l.segments)) {
+			if after := q.Get("after"); after != "" && i <= after {
+				continue
+			}
+			if len(out) == limit {
+				next = out[len(out)-1]["Id"].(string)
+				break
+			}
+			out = append(out, map[string]any{"Id": i, "Segments": l.segments[i]})
 		}
 		json.NewEncoder(w).Encode(map[string]any{"Items": out, "Next": next})
 	default:
@@ -251,6 +269,36 @@ func TestFullPages(t *testing.T) {
 	}
 	if c := counts(t, st); c["movie"] != pageSize+5 || lib.pages != 2 {
 		t.Errorf("%v in %d pages", c, lib.pages)
+	}
+}
+
+// Skip markers are read apart, after a full read, page by page: those of
+// items the index has are kept, an empty list drops those kept, and those
+// of items it doesn't have are skipped.
+func TestSegmentsAfterFull(t *testing.T) {
+	s, lib, st, _ := setup(t)
+	ctx := context.Background()
+	lib.segments = map[string][]map[string]any{}
+	for n := 1; n <= segmentsPageSize+2; n++ {
+		lib.add(n, map[string]any{"Type": "Movie", "Name": "Film " + strconv.Itoa(n)})
+		lib.segments[id(n)] = []map[string]any{{"SourceId": id(n), "Type": "Intro", "StartTicks": 0, "EndTicks": 600_000_000}}
+	}
+	lib.segments[id(9999)] = []map[string]any{{"SourceId": id(9999), "Type": "Intro", "StartTicks": 0, "EndTicks": 1}}
+	if err := s.step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []int{1, segmentsPageSize + 2} {
+		got, err := st.CopySegments(ctx, id(n), id(n))
+		if err != nil || len(got) != 1 || got[0] != (wire.CopySegment{Kind: "intro", EndMs: 60_000}) {
+			t.Errorf("film %d: %+v, %v", n, got, err)
+		}
+	}
+	lib.segments[id(1)] = nil
+	if err := s.Segments(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.CopySegments(ctx, id(1), id(1)); got != nil {
+		t.Errorf("dropped: %+v", got)
 	}
 }
 

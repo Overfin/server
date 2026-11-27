@@ -65,8 +65,9 @@ type IndexItem struct {
 	FolderName string
 	FileName   string
 	// Segments are a film's or an episode's media segments (skip
-	// markers), by media source; nil when the plugin doesn't send them
-	// (before 0.9.0), empty when it has none.
+	// markers), by media source, when read by ID (IndexItems); nil in
+	// the pages of a full read (SegmentsPage reads them apart), empty
+	// when it has none.
 	Segments []IndexSegment
 }
 
@@ -115,6 +116,36 @@ func (c *Client) IndexPage(ctx context.Context, admin Auth, after string, limit 
 	}
 	var out IndexPage
 	return &out, c.doWith(ctx, c.index, "the index", http.MethodGet, "/Overfin/Items", q, admin, nil, &out)
+}
+
+// ItemSegments are a film's or an episode's media segments, by media
+// source; empty when it has none.
+type ItemSegments struct {
+	Id       string
+	Segments []IndexSegment
+}
+
+// SegmentsPage is a page of films' and episodes' segments, and the ID the
+// next one starts after ("" after the last).
+type SegmentsPage struct {
+	Items []ItemSegments
+	Next  string
+}
+
+// SegmentsPage reads every film's and episode's media segments, by ID,
+// after `after` ("" for the first page), at most limit items: apart from
+// the index's pages, which leave them out (they cost the plugin the most).
+func (c *Client) SegmentsPage(ctx context.Context, admin Auth, after string, limit int) (*SegmentsPage, error) {
+	q := url.Values{"limit": {strconv.Itoa(limit)}}
+	if after != "" {
+		id, err := NormalizeID(after)
+		if err != nil {
+			return nil, err
+		}
+		q.Set("after", id)
+	}
+	var out SegmentsPage
+	return &out, c.doWith(ctx, c.index, "media segments", http.MethodGet, "/Overfin/Segments", q, admin, nil, &out)
 }
 
 // IndexItems reads those of ids (at most 200) still in a library.

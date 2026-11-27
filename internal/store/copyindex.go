@@ -216,6 +216,30 @@ func (s *Store) CopySegments(ctx context.Context, itemID, sourceID string) ([]wi
 	return out, json.Unmarshal([]byte(raw), &out)
 }
 
+// PutSegments replaces the skip markers, by source, of the films and
+// episodes among items that the index has; the others are skipped.
+func (s *Store) PutSegments(ctx context.Context, items map[string]map[string][]wire.CopySegment) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for id, bySource := range items {
+		var one int
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM catalog_items WHERE id = ? AND kind IN ('movie', 'episode')`, id).Scan(&one)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if err := setCopySegments(ctx, tx, id, bySource); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // ErrNoItem is a copy of an item the index doesn't have (yet).
 var ErrNoItem = errors.New("store: the index has no such item")
 
