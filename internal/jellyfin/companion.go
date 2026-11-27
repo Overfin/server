@@ -114,13 +114,13 @@ func (c *Client) IndexPage(ctx context.Context, admin Auth, after string, limit 
 		q.Set("after", id)
 	}
 	var out IndexPage
-	return &out, c.doQuery(ctx, "the index", http.MethodGet, "/Overfin/Items", q, admin, nil, &out)
+	return &out, c.doWith(ctx, c.index, "the index", http.MethodGet, "/Overfin/Items", q, admin, nil, &out)
 }
 
 // IndexItems reads those of ids (at most 200) still in a library.
 func (c *Client) IndexItems(ctx context.Context, admin Auth, ids []string) (*IndexPage, error) {
 	var out IndexPage
-	return &out, c.doQuery(ctx, "the index", http.MethodGet, "/Overfin/Items", url.Values{"ids": {strings.Join(ids, ",")}}, admin, nil, &out)
+	return &out, c.doWith(ctx, c.index, "the index", http.MethodGet, "/Overfin/Items", url.Values{"ids": {strings.Join(ids, ",")}}, admin, nil, &out)
 }
 
 // IndexChanges asks the plugin's feed what changed after since in
@@ -131,5 +131,5 @@ func (c *Client) IndexChanges(ctx context.Context, admin Auth, generation string
 		q.Set("generation", generation)
 	}
 	var out IndexChanges
-	return &out, c.doQuery(ctx, "the index's changes", http.MethodGet, "/Overfin/Changes", q, admin, nil, &out)
+	return &out, c.doWith(ctx, c.index, "the index's changes", http.MethodGet, "/Overfin/Changes", q, admin, nil, &out)
 }

@@ -31,21 +31,24 @@ const maxResponse = 4 << 20 // 4 MiB
 type Client struct {
 	base    atomic.Pointer[url.URL]
 	http    *http.Client
+	index   *http.Client // the companion plugin's index pages, slower than other calls
 	version string
 }
+
+// indexTimeout bounds one page of the companion plugin's index. A page of
+// 1,000 items can take Jellyfin over 15 seconds, more just after it starts
+// with its caches empty, and one page timing out fails the whole reading.
+const indexTimeout = 2 * time.Minute
 
 // New returns a client for the Jellyfin server at baseURL. version is
 // Overfin's own version, reported to Jellyfin as the client version.
 func New(baseURL, version string) (*Client, error) {
+	// Never follow a redirect from upstream (SECURITY.md rule 12).
+	noRedirect := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	c := &Client{
 		version: version,
-		http: &http.Client{
-			Timeout: 15 * time.Second,
-			// Never follow a redirect from upstream (SECURITY.md rule 12).
-			CheckRedirect: func(*http.Request, []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
+		http:    &http.Client{Timeout: 15 * time.Second, CheckRedirect: noRedirect},
+		index:   &http.Client{Timeout: indexTimeout, CheckRedirect: noRedirect},
 	}
 	if err := c.SetURL(baseURL); err != nil {
 		return nil, err
@@ -111,6 +114,11 @@ func (c *Client) do(ctx context.Context, op, method, path string, a Auth, in, ou
 // doQuery is do with query parameters, which are encoded into the URL's
 // query, never pasted into its path.
 func (c *Client) doQuery(ctx context.Context, op, method, path string, query url.Values, a Auth, in, out any) error {
+	return c.doWith(ctx, c.http, op, method, path, query, a, in, out)
+}
+
+// doWith is doQuery through hc.
+func (c *Client) doWith(ctx context.Context, hc *http.Client, op, method, path string, query url.Values, a Auth, in, out any) error {
 	u := c.baseURL()
 	u.Path += path
 	u.RawQuery = query.Encode()
@@ -133,7 +141,7 @@ func (c *Client) doQuery(ctx context.Context, op, method, path string, query url
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	res, err := c.http.Do(req)
+	res, err := hc.Do(req)
 	if err != nil {
 		return fmt.Errorf("jellyfin: %s: %w", op, upstream.Plain(err))
 	}
