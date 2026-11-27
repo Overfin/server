@@ -21,8 +21,8 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags=
 # at the commit this Overfin was made with, built against the Jellyfin
 # below.
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0.404@sha256:fe0fd4e93bd2fbb47c883b7a6369e5c8d3db8bf01cdc5981f6ee35fbdf3ff4fb AS plugin
-ARG PLUGIN_COMMIT=1fe17d3e971e456b24d4e298fd14a6ffedcb50b9
-ARG PLUGIN_VERSION=0.9.1
+ARG PLUGIN_COMMIT=86e537efa87dbc183e1874fd816648f20c13a1c2
+ARG PLUGIN_VERSION=0.9.2
 RUN git clone --quiet https://github.com/Overfin/jellyfin-plugin /plugin && cd /plugin && git checkout --quiet "$PLUGIN_COMMIT" \
  && test "$(git rev-parse HEAD)" = "$PLUGIN_COMMIT" \
  && dotnet build -c Release src/Overfin.Jellyfin -o /out/$PLUGIN_VERSION \
