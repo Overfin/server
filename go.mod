@@ -4,8 +4,8 @@ go 1.26.11
 
 require (
 	github.com/BurntSushi/toml v1.6.0
-	github.com/msfp-io/msfp-go v0.9.0
-	github.com/overfin/web v0.99.25
+	github.com/msfp-io/msfp-go v0.10.0
+	github.com/overfin/web v0.99.26
 	golang.org/x/crypto v0.59.0
 	modernc.org/sqlite v1.62.0
 )
@@ -24,7 +24,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
-
-replace github.com/msfp-io/msfp-go => ../msfp-go
-
-replace github.com/overfin/web => ../overfin-web
