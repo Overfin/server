@@ -120,8 +120,10 @@ anyone. Paired servers are not trusted at all (rule 94).
       within a minute, then have no limit, so a film is never cut off.
 14. HLS playlists are parsed, never searched and replaced. A delivery's
     media playlist keeps only entries matching Jellyfin's known segment
-    addresses, and drops unknown tags; the master playlist is Overfin's
-    own (rule 142). A paired server's playlists pass only when every address
+    addresses, and drops tags outside MSFP's media subset; what is left
+    passes MSFP's check of a media playlist (media section 3.1), for this
+    server's players as for its peers, or the playback is refused. The
+    master playlist is Overfin's own (rule 142). A paired server's playlists pass only when every address
     in them is the name of a file of the same stream.
 15. Metadata text is served as plain text: markup, control characters and
     bidirectional overrides removed, length capped.

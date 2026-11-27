@@ -9,7 +9,6 @@ import (
 	"github.com/msfp-io/msfp-go"
 	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/copies"
-	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/playback"
 	"github.com/overfin/server/internal/problem"
@@ -269,9 +268,8 @@ func (pb Playback) playRemote(w http.ResponseWriter, r *http.Request, caller *Ca
 		Reason: rp.reason,
 		Remote: playback.NewRemote(peer, rp.key, pc.Copy, got)}
 	if pc.Copy.PreviewLayout != nil && got.Sheets > 0 {
-		pl := pc.Copy.PreviewLayout
-		s.Trickplay = &jellyfin.Trickplay{Width: pl.TileWidth, Height: pl.TileHeight, Columns: pl.Columns, Rows: pl.Rows,
-			Count: pl.TileCount, IntervalMs: pl.IntervalMs}
+		pl := *pc.Copy.PreviewLayout
+		s.Trickplay = &pl
 	}
 	replaced, err := pb.Tickets.Admit(s, got.PositionMs*10_000, time.Now(), lim, device)
 	if err != nil {
@@ -329,11 +327,13 @@ func (pb Playback) chooseRemoteTracks(w http.ResponseWriter, r *http.Request, s 
 	if ref.Kind == "episode" {
 		key = ref.Series().Key()
 	}
+	// The copy's languages are well-formed tags: the engine read it
+	// (wire.ReadCopy), dropping any other.
 	c := s.Remote.Copy
 	var err error
 	if audio != nil {
 		for _, t := range c.AudioTracks {
-			if t.ID == *audio && languageTag(t.Language) != "" && t.Role == "" {
+			if t.ID == *audio && t.Language != "" && t.Role == "" {
 				err = st.SetTitleAudio(ctx, s.ProfileID, key, t.Language)
 			}
 		}
@@ -343,7 +343,7 @@ func (pb Playback) chooseRemoteTracks(w http.ResponseWriter, r *http.Request, s 
 			err = st.SetTitleSubtitles(ctx, s.ProfileID, key, "")
 		} else {
 			for _, t := range c.SubtitleTracks {
-				if t.ID == *subtitles && languageTag(t.Language) != "" {
+				if t.ID == *subtitles && t.Language != "" {
 					err = st.SetTitleSubtitles(ctx, s.ProfileID, key, t.Language)
 				}
 			}

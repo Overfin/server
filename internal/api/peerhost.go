@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -70,10 +69,6 @@ func (pb Playback) copyOf(ctx context.Context, peer msfp.PeerRef, handle string)
 	return c, nil
 }
 
-// notApart are the subtitle formats never served apart (rule 17): DVD
-// and DVB pictures.
-var notApart = []string{"dvd_subtitle", "dvb_subtitle"}
-
 // Describe gives what the catalog doesn't say of a copy (msfp.CopyInfo):
 // no fonts (ASS is served as its text only, this release), and the
 // subtitle tracks not served apart: DVD and DVB pictures, and a track
@@ -89,7 +84,7 @@ func (h PeerHost) Describe(ctx context.Context, peer msfp.PeerRef, copy string) 
 	}
 	var info msfp.CopyInfo
 	for _, t := range c.Facts.SubtitleTracks {
-		if _, mapped := c.Streams[t.ID]; !mapped || slices.Contains(notApart, t.Format) {
+		if _, mapped := c.Streams[t.ID]; !delivery.SubtitleServing(t.Format, mapped).Apart() {
 			info.NotApart = append(info.NotApart, t.ID)
 		}
 	}
@@ -325,23 +320,6 @@ func (pb Playback) servePeerFile(ctx context.Context, s *playback.Stream, rng *m
 	if _, err := f.Seek(first, io.SeekStart); err != nil {
 		return msfp.ErrNotFound
 	}
-	// While it flows, the playback is in use: a download is one long
-	// read.
-	pb.Tickets.Touch(s, time.Now())
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		tick := time.NewTicker(30 * time.Second)
-		defer tick.Stop()
-		for {
-			select {
-			case now := <-tick.C:
-				pb.Tickets.Touch(s, now)
-			case <-done:
-				return
-			}
-		}
-	}()
 	out.Start(http.StatusOK, d.Plan.Copy.Facts.MediaType, n, "")
 	_, err = io.CopyN(out, f, n)
 	return err
@@ -359,7 +337,7 @@ func (pb Playback) serveCopySheet(ctx context.Context, peer msfp.PeerRef, handle
 		return err
 	}
 	tp, fp := pb.ownPreviews(ctx, c)
-	if tp == nil || path.Sheet < 0 || path.Sheet >= sheetCount(*tp) {
+	if tp == nil || path.Sheet < 0 || path.Sheet >= tp.SheetCount() {
 		return msfp.ErrNotFound
 	}
 	l := pb.Library

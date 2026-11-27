@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/lang"
 )
 
@@ -17,10 +18,10 @@ import (
 type Type string
 
 const (
-	NotFound Type = "not-found"
+	NotFound Type = wire.ProblemNotFound
 	// NotSupported: a federation call of an MSFP part this server doesn't
 	// speak with the caller (MSFP core section 10.4).
-	NotSupported     Type = "not-supported"
+	NotSupported     Type = wire.ProblemNotSupported
 	NotAuthenticated Type = "not-authenticated"
 	OwnerOnly        Type = "owner-only"
 	// AccountNotAllowed: the identity may not use this instance (not in
@@ -44,26 +45,26 @@ const (
 	SigninFailed     Type = "signin-failed"
 	ClaimNotAllowed  Type = "claim-not-allowed"
 	CrossSiteRequest Type = "cross-site-request"
-	NotPlayable      Type = "not-playable"
+	NotPlayable      Type = wire.ProblemNotPlayable
 	// DeliveryRefused: the version can't be served the way asked (MSFP
 	// playback section 2.5): the player asks for another.
-	DeliveryRefused     Type = "delivery-refused"
-	StreamLimitReached  Type = "stream-limit-reached"
+	DeliveryRefused     Type = wire.ProblemDeliveryRefused
+	StreamLimitReached  Type = wire.ProblemStreamLimit
 	NameTaken           Type = "name-taken"
 	ProfileLimitReached Type = "profile-limit-reached"
-	ServerBusy          Type = "server-busy"
+	ServerBusy          Type = wire.ProblemServerBusy
 	// A playback that no longer exists, and why.
 	PlaybackTakenOver    Type = "playback-taken-over"
 	PlaybackExpired      Type = "playback-expired"
-	PlaybackStopped      Type = "playback-stopped"
+	PlaybackStopped      Type = wire.ProblemStopped
 	PlaybackEndedByAdmin Type = "playback-ended-by-admin"
 	UnsupportedMediaType Type = "unsupported-media-type"
-	InvalidRequest       Type = "invalid-request"
+	InvalidRequest       Type = wire.ProblemInvalid
 	// RotationRefused: a federation peer's change of key refused (MSFP
 	// core section 9.3).
-	RotationRefused Type = "rotation-refused"
+	RotationRefused Type = wire.ProblemRotationRefused
 	InvalidCursor   Type = "invalid-cursor"
-	RateLimited     Type = "rate-limited"
+	RateLimited     Type = wire.ProblemRateLimited
 	// AlreadyRequested: a wish for what a library has whole already.
 	AlreadyRequested Type = "already-requested"
 	// Wishes: the profile's owner switched its wishing off; its wishlist
@@ -82,7 +83,7 @@ const (
 	// StepUpRequired: the action needs a fresh login with the identity
 	// provider.
 	StepUpRequired Type = "step-up-required"
-	Internal       Type = "internal-error"
+	Internal       Type = wire.ProblemInternal
 )
 
 type info struct {
@@ -90,11 +91,11 @@ type info struct {
 	title  string
 }
 
-// registry holds the status and title of every type. The title is the same
-// for every occurrence of a type.
+// registry holds the status and title of every type of Overfin's own;
+// MSFP's (wire.Problem: not-found, invalid-request, the playback
+// refusals…) are MSFP's, for this server's players as for its peers. The
+// title is the same for every occurrence of a type.
 var registry = map[Type]info{
-	NotFound:             {http.StatusNotFound, "Not found"},
-	NotSupported:         {http.StatusNotFound, "Not supported"},
 	NotAuthenticated:     {http.StatusUnauthorized, "Not logged in"},
 	OwnerOnly:            {http.StatusForbidden, "Only the account owner can do this"},
 	AccountNotAllowed:    {http.StatusForbidden, "This account may not use this service"},
@@ -106,21 +107,13 @@ var registry = map[Type]info{
 	SigninFailed:         {http.StatusUnauthorized, "Sign-in failed"},
 	ClaimNotAllowed:      {http.StatusForbidden, "This account can't be brought over"},
 	CrossSiteRequest:     {http.StatusForbidden, "Cross-site requests are not allowed"},
-	NotPlayable:          {http.StatusConflict, "This item can't be played"},
-	DeliveryRefused:      {http.StatusConflict, "This version can't be served that way"},
-	StreamLimitReached:   {http.StatusConflict, "Too many streams on this account"},
 	NameTaken:            {http.StatusConflict, "This name is already used in this account"},
 	ProfileLimitReached:  {http.StatusConflict, "This account has as many profiles as allowed"},
-	ServerBusy:           {http.StatusServiceUnavailable, "The server is busy; try again shortly"},
 	PlaybackTakenOver:    {http.StatusGone, "Playback continued on another device"},
 	PlaybackExpired:      {http.StatusGone, "Playback ended after a period of inactivity"},
-	PlaybackStopped:      {http.StatusGone, "Playback was stopped"},
 	PlaybackEndedByAdmin: {http.StatusGone, "Playback was stopped by an administrator"},
 	UnsupportedMediaType: {http.StatusUnsupportedMediaType, "Requests must be JSON"},
-	InvalidRequest:       {http.StatusBadRequest, "Invalid request"},
-	RotationRefused:      {http.StatusConflict, "Change of key refused"},
 	InvalidCursor:        {http.StatusBadRequest, "Invalid cursor"},
-	RateLimited:          {http.StatusTooManyRequests, "Too many requests"},
 	AlreadyRequested:     {http.StatusConflict, "This is here already"},
 	WishesOff:            {http.StatusForbidden, "Wishing is switched off for this profile"},
 	WishlistFull:         {http.StatusConflict, "The wishlist is full"},
@@ -129,7 +122,6 @@ var registry = map[Type]info{
 	PINLocked:            {http.StatusForbidden, "Too many wrong PINs; try again later"},
 	StepUpRequired:       {http.StatusForbidden, "Please log in again to do this"},
 	ProfileRequired:      {http.StatusForbidden, "Choose a profile first"},
-	Internal:             {http.StatusInternalServerError, "Internal error"},
 }
 
 // Problem is one error response, with the extra fields some types carry.
@@ -165,13 +157,22 @@ var Members = []string{"type", "title", "status", "detail", "takenOverBy", "retr
 // The detail must never contain upstream error text or internal details
 // (SECURITY.md rule 53).
 func New(t Type, detail string) Problem {
-	i, ok := registry[t]
+	i, ok := lookup(t)
 	if !ok {
 		// An unregistered type is a programming error; never leak it.
 		t, detail = Internal, ""
-		i = registry[Internal]
+		i, _ = lookup(Internal)
 	}
 	return Problem{Type: t, Title: i.title, Status: i.status, Detail: detail}
+}
+
+// lookup is a type's status and title: MSFP's, else Overfin's own.
+func lookup(t Type) (info, bool) {
+	if status, title, ok := wire.Problem(string(t)); ok {
+		return info{status, title}, true
+	}
+	i, ok := registry[t]
+	return i, ok
 }
 
 // Write sends p as the response.

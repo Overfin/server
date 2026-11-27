@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/msfp-io/msfp-go"
+	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/delivery"
-	"github.com/overfin/server/internal/jellyfin"
 	"github.com/overfin/server/internal/lang"
 	"github.com/overfin/server/internal/library"
 	"github.com/overfin/server/internal/playback"
@@ -64,10 +64,11 @@ func (pb Playback) Register(r *plugin.Registrar) error {
 }
 
 // IdleTimeout ends a playback with neither progress reports nor stream
-// requests for this long. The site's player reports while playing and when
-// paused; a longer pause frees the playback, and the player starts it
-// again when it's resumed.
-const IdleTimeout = 2 * time.Minute
+// requests for this long: MSFP's (wire.IdleEnd), for this server's own
+// players as the engine ends its peers'. The site's player reports while
+// playing and when paused; a longer pause frees the playback, and the
+// player starts it again when it's resumed.
+const IdleTimeout = wire.IdleEnd
 
 // RunJanitor ends idle playbacks, and their transcodes, until ctx is done.
 // Jellyfin doesn't stop abandoned transcodes by itself (rule 50). current
@@ -366,40 +367,8 @@ func (pb Playback) writeView(w http.ResponseWriter, s *playback.Stream) {
 }
 
 var (
-	// A track ID: a or s, and a number from 0 to 999 without leading
-	// zeros (MSFP playback section 2.1).
-	trackID  = regexp.MustCompile(`^[as](0|[1-9][0-9]{0,2})$`)
 	deviceRe = regexp.MustCompile(`^[\x20-\x7e]{1,64}$`)
 )
-
-// trackIndex turns "a3" or "s5" (with the expected letter) into 3 or 5.
-func trackIndex(id string, letter byte) (int, bool) {
-	m := trackID.FindStringSubmatch(id)
-	if m == nil || id[0] != letter {
-		return 0, false
-	}
-	n, _ := strconv.Atoi(m[1])
-	return n, true
-}
-
-// sheetCount is how many sheets a set of previews takes.
-func sheetCount(tp jellyfin.Trickplay) int {
-	per := tp.Columns * tp.Rows
-	if per <= 0 || tp.Count <= 0 {
-		return 0
-	}
-	return (tp.Count + per - 1) / per
-}
-
-var languageRe = regexp.MustCompile(`^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$`)
-
-// languageTag keeps well-formed language codes only.
-func languageTag(s string) string {
-	if len(s) > 35 || !languageRe.MatchString(s) {
-		return ""
-	}
-	return s
-}
 
 // Bounds on what a browser says of a playback: positions within a hundred
 // days (ticks are milliseconds × 10,000 in an int64), bitrates within
@@ -409,14 +378,14 @@ const (
 	maxKbps       = 10_000_000
 )
 
-// sheetNumber reads a sheet's number, in decimal without leading zeros,
-// within tp's sheets.
-func sheetNumber(tp *jellyfin.Trickplay, sheet string) (int, bool) {
-	n, err := strconv.Atoi(sheet)
-	if err != nil || tp == nil || n < 0 || n >= sheetCount(*tp) || strconv.Itoa(n) != sheet {
+// sheetNumber reads a sheet's number as MSFP's route has it (media
+// section 1), within tp's sheets.
+func sheetNumber(tp *wire.PreviewLayout, sheet string) (int, bool) {
+	p, ok := msfp.ParseMediaPath("trickplay/" + sheet)
+	if !ok || tp == nil || p.Sheet >= tp.SheetCount() {
 		return 0, false
 	}
-	return n, true
+	return p.Sheet, true
 }
 
 // serveSheet serves sheet of a playback of this server's copy, its
@@ -428,7 +397,7 @@ func (pb Playback) serveSheet(w http.ResponseWriter, r *http.Request, s *playbac
 
 // serveOwnSheet serves sheet of the previews Overfin made, kept by the
 // fingerprint fp, of the layout tp: a previews ticket's.
-func (pb Playback) serveOwnSheet(w http.ResponseWriter, r *http.Request, fp string, tp *jellyfin.Trickplay, sheet string) {
+func (pb Playback) serveOwnSheet(w http.ResponseWriter, r *http.Request, fp string, tp *wire.PreviewLayout, sheet string) {
 	n, ok := sheetNumber(tp, sheet)
 	if !ok || fp == "" || pb.Library.Previews == nil {
 		problem.Send(w, problem.NotFound, "")
@@ -539,13 +508,13 @@ func (pb Playback) chooseTracks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.AudioTrack != nil {
-		if _, ok := trackIndex(*req.AudioTrack, 'a'); !ok {
+		if _, ok := wire.TrackID(*req.AudioTrack, 'a'); !ok {
 			problem.Send(w, problem.InvalidRequest, "")
 			return
 		}
 	}
 	if req.SubtitleTrack != nil && *req.SubtitleTrack != "" {
-		if _, ok := trackIndex(*req.SubtitleTrack, 's'); !ok {
+		if _, ok := wire.TrackID(*req.SubtitleTrack, 's'); !ok {
 			problem.Send(w, problem.InvalidRequest, "")
 			return
 		}

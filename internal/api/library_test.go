@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -324,6 +325,8 @@ type options struct {
 	// federation, when set, receives the server's federation, the MSFP
 	// engine (its address the test server's, its name fedName or "B").
 	federation **msfp.Engine
+	// clockShift moves the engine's clock ahead (secondsClock).
+	clockShift *atomic.Int64
 	fedName    string
 	// events, when set, hears the engine's events too.
 	events func(msfp.Event)
@@ -478,7 +481,7 @@ func newServerWith(t *testing.T, o options) (*httptest.Server, *fakeJellyfin) {
 		fed, err = msfp.Open(context.Background(), msfp.Config{Address: "https://" + srv.Listener.Addr().String(),
 			Store: st.MSFP(), Name: func() string { return cmp.Or(o.fedName, "B") }, Pins: []string{wire.Pin(testCertificate(t))},
 			Parts: []string{"catalog", "playback", "media", "video"}, Catalog: store.MSFPCatalog{S: st},
-			Playback: host, Media: host, AllowLoopback: true, Logger: logger, Clock: secondsClock{},
+			Playback: host, Media: host, AllowLoopback: true, Logger: logger, Clock: secondsClock{shift: o.clockShift},
 			Notifier: notifier(func(ev msfp.Event) {
 				if e, ok := ev.(msfp.RemotePlaybackEnded); ok {
 					cur.RemoteEnded(e.Playback)
@@ -1077,7 +1080,15 @@ func debugLog() io.Writer {
 
 // secondsClock is the system's time cut to the second: an engine started
 // at it hears requests dated the second it started (MSFP core section
-// 6.4, step 4), which tests make at once.
-type secondsClock struct{}
+// 6.4, step 4), which tests make at once. shift, if set, moves it ahead
+// (within MSFP's 5 minutes of skew): what the engine does with time, as
+// if it passed.
+type secondsClock struct{ shift *atomic.Int64 }
 
-func (secondsClock) Now() time.Time { return time.Now().Truncate(time.Second) }
+func (c secondsClock) Now() time.Time {
+	now := time.Now()
+	if c.shift != nil {
+		now = now.Add(time.Duration(c.shift.Load()))
+	}
+	return now.Truncate(time.Second)
+}

@@ -68,14 +68,19 @@ func TestRewriteRefuses(t *testing.T) {
 
 // What Overfin sends stays within MSFP's HLS subset, which a paired
 // server checks: a segment's title is dropped, its duration kept, and a
-// tag with a uri= in any case is dropped (MSFP media, section 3.1).
+// tag with a uri= that isn't a file of the stream refuses the playlist, as
+// MSFP refuses it (media, section 3.1).
 func TestRewriteKeepsToTheSubset(t *testing.T) {
-	r, err := RewriteVariant([]byte("#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-PLAYLIST-TYPE:VOD uri=\"a/b\"\n"+
+	r, err := RewriteVariant([]byte("#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-PLAYLIST-TYPE:VOD\n"+
 		"#EXTINF:6.0, uri=\"a/b\"\nhls1/main/0.ts?ApiKey=SECRET\n#EXT-X-ENDLIST\n"), variantUp)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg0.ts\n#EXT-X-ENDLIST\n"; string(r.Body) != want {
+	if want := "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:6.0,\nseg0.ts\n#EXT-X-ENDLIST\n"; string(r.Body) != want {
 		t.Fatalf("%q", r.Body)
+	}
+	if _, err := RewriteVariant([]byte("#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-PLAYLIST-TYPE:VOD uri=\"a/b\"\n"+
+		"#EXTINF:6.0,\nhls1/main/0.ts\n#EXT-X-ENDLIST\n"), variantUp); !errors.Is(err, ErrBadPlaylist) {
+		t.Fatalf("a stray uri=: %v", err)
 	}
 }

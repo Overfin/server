@@ -52,12 +52,10 @@ func masterCodecs(c wire.Copy, audio string, o Order, m *Made) (codecs, suppleme
 	var list []string
 	if v := o.Video; v != nil {
 		if v.Copy && c.Video != nil {
-			base, dv := copiedVideoCodecs(*c.Video)
+			var base string
+			base, supplemental = wire.CopiedVideoCodecs(*c.Video, o.Segments == SegmentsMP4)
 			if base != "" {
 				list = append(list, base)
-			}
-			if o.Segments == SegmentsMP4 {
-				supplemental = dv
 			}
 		} else if !v.Copy {
 			height := v.MaxHeight
@@ -75,46 +73,17 @@ func masterCodecs(c wire.Copy, audio string, o Order, m *Made) (codecs, suppleme
 			if t := track(c, audio); t != nil {
 				s = t.Codecs
 				if s == "" {
-					s = audioCodecs[t.Codec]
+					s = madeAudioCodecs(t.Codec)
 				}
 			}
 		} else {
-			s = audioCodecs[a.Codec]
+			s = madeAudioCodecs(a.Codec)
 		}
 		if s != "" {
 			list = append(list, s)
 		}
 	}
 	return strings.Join(list, ","), supplemental
-}
-
-// copiedVideoCodecs are a copied picture's codecs string as segments
-// carry it (parameter sets out of band: hvc1, avc1), and, for Dolby
-// Vision with a base layer of another range (profile 8, compatibility 1,
-// 2, 4 or 6), its Dolby Vision entry and brand. A Dolby Vision picture
-// without one (profile 5) is its Dolby Vision entry itself.
-func copiedVideoCodecs(v wire.VideoStream) (base, dv string) {
-	base = v.Codecs
-	if four, rest, ok := strings.Cut(base, "."); ok {
-		switch four {
-		case "hev1":
-			base = "hvc1." + rest
-		case "avc3":
-			base = "avc1." + rest
-		}
-	}
-	if v.DV == nil {
-		return base, ""
-	}
-	parsed, err := wire.ReadCodecs(v.Codec, base, v.BitDepth, v.DV)
-	if err != nil || parsed.DolbyVision == "" {
-		return base, ""
-	}
-	brand := map[int]string{1: "db1p", 2: "db2g", 4: "db4h", 6: "db1p"}[v.DV.Compatibility]
-	if brand == "" {
-		return parsed.DolbyVision, ""
-	}
-	return base, parsed.DolbyVision + "/" + brand
 }
 
 // madeVideoCodecs is a converted picture's codecs string, by its codec
@@ -141,11 +110,15 @@ func madeVideoCodecs(codec string, height int) string {
 	return ""
 }
 
-// audioCodecs are the codecs strings of audio, by its codec: those an
-// encoder writes, and those of a copied track whose own isn't known.
-var audioCodecs = map[string]string{
-	"aac": "mp4a.40.2", "ac3": "ac-3", "eac3": "ec-3", "mp3": "mp4a.40.34", "opus": "Opus", "flac": "fLaC",
-	"alac": "alac", "dts": "dtsc", "truehd": "mlpa",
+// madeAudioCodecs is the codecs string of audio, by its codec: the fixed
+// ones (wire.FixedAudioCodecs), and for AAC, MP3 and DTS those Jellyfin's
+// encoders write (LC, layer 3, the core), for a copied track whose own
+// isn't known too.
+func madeAudioCodecs(codec string) string {
+	if s := wire.FixedAudioCodecs(codec); s != "" {
+		return s
+	}
+	return map[string]string{"aac": "mp4a.40.2", "mp3": "mp4a.40.34", "dts": "dtsc"}[codec]
 }
 
 // bandwidth is the peak bits a second of what is served: the copy's own
@@ -153,10 +126,7 @@ var audioCodecs = map[string]string{
 // audio's share.
 func bandwidth(c wire.Copy, audio string, o Order, m *Made) int64 {
 	var total int64
-	fileRate := int64(0)
-	if c.DurationMs > 0 {
-		fileRate = c.Size * 8 * 1000 / c.DurationMs
-	}
+	fileRate := c.BitsPerSecond()
 	videoCopied := o.Video != nil && o.Video.Copy
 	if videoCopied || o.Video == nil && o.Audio != nil && o.Audio.Copy {
 		total = fileRate
@@ -205,25 +175,14 @@ func resolution(c wire.Copy, o Order, m *Made) (int, int) {
 	return w, h
 }
 
-// videoRange is the served picture's VIDEO-RANGE: PQ or HLG when its
-// range is the copy's own and the copy's is PQ or HLG (Dolby Vision
-// without a base layer of another range: PQ), else SDR.
+// videoRange is the served picture's VIDEO-RANGE: the copy's own when its
+// range is kept (wire.KeptVideoRange, Dolby Vision kept only when
+// copied), else SDR.
 func videoRange(c wire.Copy, o Order, m *Made) string {
 	v := o.Video
 	kept := v.Copy || !v.ToneMap && (m == nil || !m.ToneMapped)
 	if !kept || c.Video == nil {
 		return "SDR"
 	}
-	if cl := c.Video.Colour; cl != nil && cl.Transfer != nil {
-		switch *cl.Transfer {
-		case wire.TransferPQ:
-			return "PQ"
-		case wire.TransferHLG:
-			return "HLG"
-		}
-	}
-	if dv := c.Video.DV; dv != nil && v.Copy && (dv.Compatibility == 0 || dv.Compatibility == 1 || dv.Compatibility == 6) {
-		return "PQ"
-	}
-	return "SDR"
+	return wire.KeptVideoRange(*c.Video, v.Copy)
 }

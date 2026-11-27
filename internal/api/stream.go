@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -100,7 +99,7 @@ func (s Stream) trickplay(w http.ResponseWriter, r *http.Request) {
 func (s Stream) previewsSheet(w http.ResponseWriter, r *http.Request) bool {
 	ticket := r.PathValue("ticket")
 	pb := s.Playback
-	if _, peer := r.Context().Value(peerStreamKey{}).(*playback.Stream); peer || !ticketRe.MatchString(ticket) ||
+	if _, peer := r.Context().Value(peerStreamKey{}).(*playback.Stream); peer || !wire.ID(ticket) ||
 		!pb.Tickets.IsPreviews(ticket, time.Now()) {
 		return false
 	}
@@ -124,11 +123,6 @@ func (s Stream) previewsSheet(w http.ResponseWriter, r *http.Request) bool {
 	pb.serveOwnSheet(w, r, pt.Previews, &pt.Trickplay, r.PathValue("sheet"))
 	return true
 }
-
-var (
-	ticketRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-	rangeRe  = regexp.MustCompile(`^bytes=\d{0,15}-\d{0,15}$`)
-)
 
 // peerTicket says whether a playback here is a paired server's viewer's.
 func peerTicket(st *playback.Stream) bool {
@@ -157,7 +151,7 @@ func (s Stream) find(w http.ResponseWriter, r *http.Request) (*playback.Stream, 
 		return st, &a, nil
 	}
 	ticket := r.PathValue("ticket")
-	if !ticketRe.MatchString(ticket) {
+	if !wire.ID(ticket) {
 		problem.Send(w, problem.NotFound, "")
 		return nil, nil, nil
 	}
@@ -225,9 +219,7 @@ func (s Stream) proxy(w http.ResponseWriter, r *http.Request, st *playback.Strea
 	rangeHeader := ""
 	if allowRange {
 		if rh := r.Header.Get("Range"); rh != "" {
-			// A paired server's, exactly MSFP's three forms (media section
-			// 2.1); a browser's, any one range Jellyfin answers.
-			if (peerTicket(st) && !validPeerRange(rh)) || !validRange(rh) {
+			if !validRange(rh) {
 				w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
 				return
 			}
@@ -270,7 +262,7 @@ func (s Stream) proxy(w http.ResponseWriter, r *http.Request, st *playback.Strea
 	h := w.Header()
 	contentType := forceType
 	if contentType == "" {
-		contentType = mediaType(res.Header.Get("Content-Type"))
+		contentType = wire.RelayedMediaType(res.Header.Get("Content-Type"))
 	}
 	h.Set("Content-Type", contentType)
 	for _, k := range []string{"Content-Length", "Content-Range", "Accept-Ranges"} {
@@ -303,13 +295,6 @@ func (s Stream) proxy(w http.ResponseWriter, r *http.Request, st *playback.Strea
 	_, _ = io.Copy(w, res.Body)
 }
 
-// mediaType keeps an upstream content type only when it is audio or video,
-// as MSFP media section 3 says of what a viewer's server relays (letters,
-// digits and .+- only, never a playlist's); anything else is sent as
-// opaque bytes, never as something a browser would render (and nosniff is
-// set on every response).
-func mediaType(ct string) string { return wire.RelayedMediaType(ct) }
-
 // subtitleReads bounds how many subtitle tracks are held in memory at
 // once: each is read whole before it is checked (a PGS track may be up to
 // wire.MaxPGS), so many asked together could otherwise take hundreds
@@ -331,40 +316,21 @@ func subtitleSlotWithin(ctx context.Context) (func(), bool) {
 	}
 }
 
-// Subtitles go to the player in stretches of StretchSeconds, part n
-// covering [n*StretchSeconds, (n+1)*StretchSeconds) of the video: the
-// plugin reads each from there, never the whole file. Each starts
-// stretchLead earlier, so a subtitle already on screen when its stretch
-// begins comes with it; the player drops the doubles.
-const (
-	StretchSeconds = 120
-	stretchLead    = 10
-	// maxPart bounds a part's number: 10,000 stretches of 2 minutes is
-	// over 13 days of video.
-	maxPart = 10000
-)
-
-// subtitlePart reads the {part} of a subtitle route.
-func subtitlePart(r *http.Request) (int, bool) {
-	v := r.PathValue("part")
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 0 || n >= maxPart || strconv.Itoa(n) != v {
-		return 0, false
-	}
-	return n, true
-}
-
 // stretch fetches one stretch of a subtitle track (Jellyfin's index) of
 // this server's own playback from Overfin's plugin, or answers the error
-// itself (nil). The caller holds a subtitle slot.
+// itself (nil). The caller holds a subtitle slot. Part n is MSFP's (media
+// section 3.4): n × wire.StretchSeconds to (n + 1) × wire.StretchSeconds
+// of the video, from wire.StretchEarlyMs earlier, so a subtitle already
+// on screen when its stretch begins comes with it (the player drops the
+// doubles); the plugin reads each from there, never the whole file.
 func (s Stream) stretch(w http.ResponseWriter, r *http.Request, st *playback.Stream, index, part, limit int) []byte {
 	l := s.Playback.Library
 	if l.Service == nil {
 		problem.Send(w, problem.Internal, "")
 		return nil
 	}
-	from := max(float64(part*StretchSeconds-stretchLead), 0)
-	to := float64((part + 1) * StretchSeconds)
+	from := max(float64(part*wire.StretchSeconds)-wire.StretchEarlyMs/1000.0, 0)
+	to := float64((part + 1) * wire.StretchSeconds)
 	body, err := l.Jellyfin.SubtitleStretch(r.Context(), l.Service.Admin(), st.ItemID, st.SourceID, index, from, to, limit)
 	if err != nil {
 		s.upstreamError(w, st, err)
@@ -434,24 +400,24 @@ func (s Stream) subtitles(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	index, ok := trackIndex(track, 's')
-	whole := r.PathValue("part") == "whole"
-	part, okPart := subtitlePart(r)
-	if !ok || (!okPart && !whole) {
+	path, okPath := msfp.ParseMediaPath("subtitles/" + track + "/" + r.PathValue("part"))
+	index, ok := wire.TrackID(track, 's')
+	if !ok || !okPath {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
+	part, whole := path.Part, path.Whole
 	st, _, done := s.stream(w, r)
 	defer done()
 	if st == nil {
 		return
 	}
 	if st.Remote != nil {
-		s.fetchRemote(w, r, st, msfp.MediaPath{Kind: msfp.MediaSubtitles, Track: track, Part: part, Whole: whole})
+		s.fetchRemote(w, r, st, path)
 		return
 	}
 	jfIndex, mapped := st.JellyfinSubtitle(index)
-	if !st.TextSubtitle(index) || !mapped {
+	if !st.Subtitle(index).Text || !mapped {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -496,23 +462,24 @@ func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
-	index, ok := trackIndex(track, 's')
-	part, okPart := subtitlePart(r)
-	if !ok || !okPart {
+	path, okPath := msfp.ParseMediaPath("pictures/" + track + "/" + r.PathValue("part"))
+	index, ok := wire.TrackID(track, 's')
+	if !ok || !okPath {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
+	part := path.Part
 	st, _, done := s.stream(w, r)
 	defer done()
 	if st == nil {
 		return
 	}
 	if st.Remote != nil {
-		s.fetchRemote(w, r, st, msfp.MediaPath{Kind: msfp.MediaPictures, Track: track, Part: part})
+		s.fetchRemote(w, r, st, path)
 		return
 	}
 	jfIndex, mapped := st.JellyfinSubtitle(index)
-	if !st.PictureSubtitle(index) || !mapped {
+	if !st.Subtitle(index).Pictures || !mapped {
 		problem.Send(w, problem.NotFound, "")
 		return
 	}
@@ -537,29 +504,11 @@ func (s Stream) pictures(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
-// validRange says whether a Range header is one range of bytes Jellyfin
-// can answer: from a byte, to one, or both in order (not "bytes=-", nor
-// "bytes=5-3").
+// validRange says whether a Range header is one of MSFP's three forms
+// (media section 2.1), for this server's own players as for its peers:
+// never several ranges, "bytes=-" or "bytes=-0".
 func validRange(h string) bool {
-	if !rangeRe.MatchString(h) {
-		return false
-	}
-	from, to, _ := strings.Cut(strings.TrimPrefix(h, "bytes="), "-")
-	switch {
-	case from == "" && to == "":
-		return false
-	case from == "" || to == "":
-		return true
-	}
-	a, _ := strconv.ParseInt(from, 10, 64)
-	b, _ := strconv.ParseInt(to, 10, 64)
-	return a <= b
-}
-
-// validPeerRange says whether a Range header is one of MSFP's three forms
-// (media section 2.1): never several ranges, "bytes=-" or "bytes=-0".
-func validPeerRange(h string) bool {
-	_, ok := msfp.ParseRange(h)
+	_, ok := wire.ParseRange(h)
 	return ok
 }
 

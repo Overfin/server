@@ -81,6 +81,21 @@ func TestTicketElsewhere(t *testing.T) {
 	}
 }
 
+// A paired server's viewer's playback is never idle here, however long
+// unused: the MSFP engine ends it as MSFP says (a download never idles),
+// and stops it here. This server's own beside it idles.
+func TestPeerPlaybackNeverIdle(t *testing.T) {
+	tk := NewTickets(24 * time.Hour)
+	now := time.Now()
+	peer := &Stream{SessionID: PeerPrefix + "peer_a/play_x"}
+	own := &Stream{AccountID: "acct_a", ProfileID: "prof_a", SessionID: "sess_a"}
+	tk.Add(peer, 0, now)
+	tk.Add(own, 0, now)
+	if idle := tk.Idle(now.Add(30*time.Hour), 2*time.Minute); len(idle) != 1 || idle[0] != own {
+		t.Errorf("idle: %v", idle)
+	}
+}
+
 // Playbacks starting at once never get past the limits together: the
 // check and the registration are one step (run with -race).
 func TestAdmitAtOnce(t *testing.T) {
