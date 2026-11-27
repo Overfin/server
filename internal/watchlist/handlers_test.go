@@ -80,15 +80,20 @@ func TestHandlers(t *testing.T) {
 		return ids
 	}
 
-	for id, want := range map[string]int{
-		"title_movie_tmdb_1":  204,
-		"title_series_tmdb_2": 204,
-		"title_person_tmdb_3": 400, // not a kind one watches
-		"title_movie_tmdb_9":  404, // not seen
-		"item_a":              404, // not a title ID
+	// In this order: the list shows the latest first, and two adds in the
+	// same second are told apart by the order they came in.
+	for _, add := range []struct {
+		id   string
+		want int
+	}{
+		{"title_movie_tmdb_1", 204},
+		{"title_series_tmdb_2", 204},
+		{"title_person_tmdb_3", 400}, // not a kind one watches
+		{"title_movie_tmdb_9", 404},  // not seen
+		{"item_a", 404},              // not a title ID
 	} {
-		if code, body := call(h.add, id); code != want {
-			t.Errorf("add %s: %d %s, want %d", id, code, body, want)
+		if code, body := call(h.add, add.id); code != add.want {
+			t.Errorf("add %s: %d %s, want %d", add.id, code, body, add.want)
 		}
 	}
 	if code, body := call(h.has, "title_movie_tmdb_1"); code != 200 || !strings.Contains(body, `"on":true`) {
