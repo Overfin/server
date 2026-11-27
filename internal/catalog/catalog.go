@@ -220,6 +220,8 @@ const segmentsPageSize = 500
 func (s *Sync) Segments(ctx context.Context) error {
 	start := s.clock()
 	n, after := 0, ""
+	// The time kept spent in the database, apart from the plugin's.
+	var kept time.Duration
 	for {
 		page, err := s.Jellyfin.SegmentsPage(ctx, s.Admin(), after, segmentsPageSize)
 		if err != nil {
@@ -231,9 +233,11 @@ func (s *Sync) Segments(ctx context.Context) error {
 				items[id] = segments(it.Segments)
 			}
 		}
+		w := time.Now()
 		if err := s.Store.PutSegments(ctx, items); err != nil {
 			return err
 		}
+		kept += time.Since(w)
 		n += len(items)
 		if page.Next == "" || page.Next == after {
 			break
@@ -241,7 +245,8 @@ func (s *Sync) Segments(ctx context.Context) error {
 		after = page.Next
 	}
 	s.Logger.Info("catalog: media segments were read", "items", n,
-		"seconds", s.clock().Sub(start).Round(100*time.Millisecond).Seconds())
+		"seconds", s.clock().Sub(start).Round(100*time.Millisecond).Seconds(),
+		"keeping_seconds", kept.Round(100*time.Millisecond).Seconds())
 	return nil
 }
 
