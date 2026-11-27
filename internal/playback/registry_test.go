@@ -178,6 +178,67 @@ func TestAdmit(t *testing.T) {
 	}
 }
 
+// A playback that replaces another (MSFP Media playing 2.3: replaces)
+// counts as it: the limits are checked as if it had ended, refusing
+// nothing and taking over nothing; the old one goes on until the caller
+// ends it, and counts as itself again when the new one fails (Kept). One
+// of another account, ended, or being replaced already counts as any
+// other.
+func TestAdmitReplacing(t *testing.T) {
+	tk := NewTickets(time.Hour)
+	now := time.Now()
+	lim := Limits{MaxStreams: 1, RefuseOverLimit: true, MaxTranscodes: 1}
+	old := &Stream{AccountID: "acct_a", ProfileID: "prof_a", Delivery: transcoding()}
+	if _, err := tk.Admit(old, 0, now, lim, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tk.Admit(&Stream{AccountID: "acct_a", ProfileID: "prof_a", Delivery: transcoding()}, 0, now, lim, ""); err != ErrStreamLimit {
+		t.Fatalf("without replaces: %v", err)
+	}
+	with := lim
+	with.Replaces = old
+	first := &Stream{AccountID: "acct_a", ProfileID: "prof_a", Delivery: transcoding()}
+	gone, err := tk.Admit(first, 0, now, with, "TV")
+	if err != nil || len(gone) != 0 {
+		t.Fatalf("replacing: %v %v", gone, err)
+	}
+	if s, _, ok := tk.ByID(old.ID, "prof_a", now); !ok || s != old {
+		t.Error("the old one ended before the caller ended it")
+	}
+	// Being replaced already: a second play naming it counts it.
+	if _, err := tk.Admit(&Stream{AccountID: "acct_a", ProfileID: "prof_a"}, 0, now, with, ""); err != ErrStreamLimit {
+		t.Errorf("a second play replacing it: %v", err)
+	}
+	// The first failed: given back, it may be replaced again.
+	tk.Remove(first, "stopped", "", now)
+	tk.Kept(old)
+	second := &Stream{AccountID: "acct_a", ProfileID: "prof_a", Delivery: transcoding()}
+	if _, err := tk.Admit(second, 0, now, with, ""); err != nil {
+		t.Fatalf("after Kept: %v", err)
+	}
+	tk.Remove(old, "replaced", "", now)
+	if _, e, ok := tk.ByID(old.ID, "prof_a", now); !ok || e == nil || e.Reason != "replaced" {
+		t.Errorf("the replaced one: %+v", e)
+	}
+	// Ended, or another account's: counted as any other.
+	ended := Limits{MaxStreams: 1, RefuseOverLimit: true, Replaces: old}
+	if _, err := tk.Admit(&Stream{AccountID: "acct_a", ProfileID: "prof_a"}, 0, now, ended, ""); err != ErrStreamLimit {
+		t.Errorf("replacing one ended: %v", err)
+	}
+	theirs := &Stream{AccountID: "acct_b", ProfileID: "prof_b", Delivery: transcoding()}
+	if _, err := tk.Admit(theirs, 0, now, Limits{MaxTranscodes: 1}, ""); err != ErrServerBusy {
+		t.Error("another account's transcode, every one taken")
+	}
+	b := &Stream{AccountID: "acct_b", ProfileID: "prof_b"}
+	if _, err := tk.Admit(b, 0, now, Limits{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tk.Admit(&Stream{AccountID: "acct_a", ProfileID: "prof_a", Delivery: transcoding()}, 0, now,
+		Limits{MaxTranscodes: 1, Replaces: b}, ""); err != ErrServerBusy {
+		t.Errorf("replacing another account's: %v", err)
+	}
+}
+
 // A delivery takes a transcode slot only when it converts the video: a
 // remux, and one converting the audio alone, are streams (D8, revised).
 func TestDeliveryCounting(t *testing.T) {

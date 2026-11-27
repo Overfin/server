@@ -134,9 +134,11 @@ type Made struct {
 	Playlist      []byte
 }
 
-// Refusal is a delivery refused: an MSFP problem and its HTTP status (409
-// delivery-refused, 503 server-busy), and a closed code saying why, for
-// the logs and the player's information (never free text from upstream).
+// Refusal is a delivery refused: an MSFP Media problem and its HTTP
+// status (409 delivery-refused for the delivery as such, 409
+// target-refused for a target not made, 503 server-busy or unreachable),
+// and a closed code saying why, for the logs and the player's
+// information (never free text from upstream).
 type Refusal struct {
 	Status  int
 	Problem string
@@ -156,6 +158,19 @@ var ErrGone = errors.New("delivery: gone")
 
 func refused(why string) *Refusal {
 	return &Refusal{Status: 409, Problem: wire.ProblemDeliveryRefused, Why: why}
+}
+
+// targetRefused is a target the request names that isn't made (MSFP
+// Media playing 2.2, step 7): a segment format, a codec, the range, a
+// subtitle to burn.
+func targetRefused(why string) *Refusal {
+	return &Refusal{Status: 409, Problem: wire.ProblemTargetRefused, Why: why}
+}
+
+// unreachable is media that can't be reached now: the maker (the
+// companion plugin, through Jellyfin) didn't answer.
+func unreachable(why string) *Refusal {
+	return &Refusal{Status: 503, Problem: wire.ProblemUnreachable, Why: why}
 }
 
 func busy(why string) *Refusal {

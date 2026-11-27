@@ -256,7 +256,7 @@ func TestPlayLive(t *testing.T) {
 		`{"titleId":"title_movie_tmdb_949","delivery":"transcode","transcode":{"videoCodec":"hevc","range":"keep"}}`,
 		`{"titleId":"title_movie_tmdb_949","delivery":"transcode","transcode":{"videoCodec":"vp9"}}`,
 	} {
-		if code, a, raw := play(t, srv, body); code != 409 || a.Type != "delivery-refused" {
+		if code, a, raw := play(t, srv, body); code != 409 || a.Type != "target-refused" {
 			t.Errorf("%s: %d %s", body, code, raw)
 		}
 	}

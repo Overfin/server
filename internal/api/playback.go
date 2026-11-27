@@ -63,12 +63,18 @@ func (pb Playback) Register(r *plugin.Registrar) error {
 	return nil
 }
 
+// ProgressSeconds is how often this server's own players report a
+// playback's progress, its play answer's progressSeconds (MSFP Media
+// playing 2.3 and 3): the language's default.
+const ProgressSeconds = wire.DefaultProgressSeconds
+
 // IdleTimeout ends a playback with neither progress reports nor stream
-// requests for this long: MSFP's (wire.IdleEnd), for this server's own
-// players as the engine ends its peers'. The site's player reports while
-// playing and when paused; a longer pause frees the playback, and the
-// player starts it again when it's resumed.
-const IdleTimeout = wire.IdleEnd
+// requests for this long: the idle limit of MSFP Media playing 3, twice
+// ProgressSeconds, for this server's own players as the engine ends its
+// peers'. The site's player reports while playing and when paused; a
+// longer pause frees the playback, and the player starts it again when
+// it's resumed.
+var IdleTimeout = wire.IdleLimit(ProgressSeconds)
 
 // RunJanitor ends idle playbacks, and their transcodes, until ctx is done.
 // Jellyfin doesn't stop abandoned transcodes by itself (rule 50). current
@@ -136,8 +142,8 @@ func (pb Playback) stopped(s *playback.Stream, reason string) {
 	if rm := s.Remote; rm != nil {
 		// Where the profile is, kept here; the playback ends there (the
 		// engine sends stop, again when it doesn't answer), unless it is
-		// over there already, or the engine stops it itself before the
-		// playback replacing it (Replaced).
+		// over there already, or a play there replaced it (Replaced: the
+		// paired server ended it, or the engine stopped it first).
 		eng := pb.engine()
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/msfp-io/msfp-go/wire"
 	"github.com/overfin/server/internal/jellyfin"
+	"github.com/overfin/server/internal/upstream"
 )
 
 // PluginMaker is the Maker of Jellyfin's own transcoder, through
@@ -93,6 +94,10 @@ func (p *PluginMaker) Start(ctx context.Context, o Order) (*Made, error) {
 			return nil, busy("maker-busy")
 		}
 		return nil, refused(r.Code)
+	case upstream.Unreachable(err):
+		// The media server doesn't answer: the media can't be reached
+		// now (MSFP Media base 4).
+		return nil, unreachable("maker-unreachable")
 	case err != nil:
 		return nil, busy("maker-failed")
 	}

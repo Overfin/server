@@ -22,14 +22,17 @@ carries the behavior every client needs, so your site only handles screens:
   `reset()`). `copyLabel()`, `audioLabel()` and `subtitleLabel()` name
   copies and tracks in English or French, from their facts.
 - **Playback:** `play()` chooses as above and asks for exactly that with
-  MSFP's play request (`playRequest()`; Overfin makes it or refuses it,
-  and a refused delivery steps down a level), builds the stream's
+  MSFP Media's play request (`playRequest()`; Overfin makes it or refuses
+  it, and a refused delivery or target steps down a level), builds the stream's
   addresses from the answer's ticket (`streamUrls()`), attaches the
   stream (with [hls.js](https://github.com/video-dev/hls.js), which your page
   provides, as a global `Hls` or the `Hls` option, where the browser lacks
-  native HLS) and subtitles, reports progress, restarts a stream the
-  server freed at the same place without a word, switches audio and
-  subtitles, and reports a takeover by another device.
+  native HLS) and subtitles, reports progress (every `progressSeconds`
+  of the answer, and at once on a pause or a resume), restarts a stream
+  the server freed at the same place without a word, switches audio,
+  copy and quality with a new play that replaces the old one
+  (`replaces`), switches subtitles, and reports a takeover by another
+  device.
 - **Picture subtitles (PGS):** `decodePGS()` reads a track Overfin serves,
   and `PictureSubtitles` draws it on a canvas over the video, so the video
   is never converted for them.

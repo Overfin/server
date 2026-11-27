@@ -43,6 +43,11 @@ type deliveryArgs struct {
 	// admit, for a paired server's playback, counts it by the pairing's
 	// limits (msfp.StartRequest.Admit) before this server's own.
 	admit func(method string) (msfp.Slot, error)
+	// replaces is the live playback this one replaces (MSFP Media
+	// playing 2.3), nil for none: counted as this one's (Limits.Replaces),
+	// kept as it was when this one fails; ending it once this one has
+	// started is the caller's.
+	replaces *playback.Stream
 }
 
 // openDelivery plays a copy through the executor: plans it (refusals
@@ -100,7 +105,9 @@ func (pb Playback) startDelivery(ctx context.Context, c store.IndexedCopy, req d
 		}
 		release = slot.Release
 	}
-	replaced, err := pb.Tickets.Admit(s, plan.StartMs*10_000, time.Now(), a.lim, a.device)
+	lim := a.lim
+	lim.Replaces = a.replaces
+	replaced, err := pb.Tickets.Admit(s, plan.StartMs*10_000, time.Now(), lim, a.device)
 	if err != nil {
 		release()
 		pb.Tickets.ReleaseDevice(play.DeviceID)
@@ -113,6 +120,7 @@ func (pb Playback) startDelivery(ctx context.Context, c store.IndexedCopy, req d
 	if err != nil {
 		release()
 		pb.Tickets.Remove(s, "stopped", "", time.Now())
+		pb.Tickets.Kept(a.replaces)
 		return nil, err
 	}
 	var media []byte
@@ -127,6 +135,7 @@ func (pb Playback) startDelivery(ctx context.Context, c store.IndexedCopy, req d
 			_ = pb.Delivery.Stop(stopCtx, started)
 			release()
 			pb.Tickets.Remove(s, "stopped", "", time.Now())
+			pb.Tickets.Kept(a.replaces)
 			return nil, errNotPlayable
 		}
 		s.AddFiles(rw.Files)
@@ -138,14 +147,19 @@ func (pb Playback) startDelivery(ctx context.Context, c store.IndexedCopy, req d
 	return s, nil
 }
 
-// sendRefusal answers a refused delivery as MSFP does: 409
-// delivery-refused, 503 server-busy; anything else, as any error.
+// sendRefusal answers a refused delivery as MSFP Media does: 409
+// delivery-refused (the delivery as such) or target-refused (a target
+// not made), 503 server-busy or unreachable; anything else, as any
+// error.
 func (pb Playback) sendRefusal(w http.ResponseWriter, err error) {
 	rf := delivery.AsRefusal(err)
 	switch {
 	case rf == nil:
 		pb.Logger.Error("a delivery failed", "err", err)
 		problem.Send(w, problem.Internal, "")
+	case rf.Status == http.StatusServiceUnavailable && rf.Problem == wire.ProblemUnreachable:
+		pb.Logger.Info("a delivery refused: the media can't be reached", "why", rf.Why)
+		problem.Send(w, problem.Unreachable, "")
 	case rf.Status == http.StatusServiceUnavailable:
 		pb.Logger.Info("a delivery refused: the server is busy", "why", rf.Why)
 		problem.Send(w, problem.ServerBusy, "")
@@ -155,8 +169,12 @@ func (pb Playback) sendRefusal(w http.ResponseWriter, err error) {
 		// The closed code says why, for the player's information panel
 		// and the log (no title, no account); never free text from
 		// upstream.
-		pb.Logger.Info("a delivery refused", "why", rf.Why)
-		problem.Send(w, problem.DeliveryRefused, rf.Why)
+		pb.Logger.Info("a delivery refused", "why", rf.Why, "type", rf.Problem)
+		t := problem.DeliveryRefused
+		if rf.Problem == wire.ProblemTargetRefused {
+			t = problem.TargetRefused
+		}
+		problem.Send(w, t, rf.Why)
 	}
 }
 

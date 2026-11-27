@@ -397,7 +397,8 @@ func TestPlayRequest(t *testing.T) {
 }
 
 // What's refused, and how: 400 only for what's malformed; 409
-// delivery-refused, with a closed code, for what isn't made; 503 when
+// delivery-refused, with a closed code, for a delivery not made, 409
+// target-refused for a target not made (MSFP Media playing 2.2); 503 when
 // every transcode is taken; 404 for a copy the title hasn't.
 func TestPlayRefusals(t *testing.T) {
 	p := playedServer(t, options{maxTranscodes: 1, maxBitrateKbps: 40_000})
@@ -422,14 +423,14 @@ func TestPlayRefusals(t *testing.T) {
 			t.Errorf("%s: %d %s", body, code, raw)
 		}
 	}
-	for _, tc := range []struct{ body, why string }{
-		{`{` + heat + `,"delivery":"transcode","transcode":{"burnSubtitle":"s3"}}`, "burned-subtitles"},
-		{`{` + heat + `,"delivery":"transcode","transcode":{"videoCodec":"vp9"}}`, ""},
-		{`{` + heat + `,"versionId":"` + heatMinimal + `","delivery":"file"}`, "not-read"},
-		{`{` + heat + `,"delivery":"remux","mediaType":"video/webm"}`, ""},
+	for _, tc := range []struct{ body, kind, why string }{
+		{`{` + heat + `,"delivery":"transcode","transcode":{"burnSubtitle":"s3"}}`, "target-refused", "burned-subtitles"},
+		{`{` + heat + `,"delivery":"transcode","transcode":{"videoCodec":"vp9"}}`, "target-refused", ""},
+		{`{` + heat + `,"versionId":"` + heatMinimal + `","delivery":"file"}`, "delivery-refused", "not-read"},
+		{`{` + heat + `,"delivery":"remux","mediaType":"video/webm"}`, "target-refused", ""},
 	} {
 		code, a, raw := play(t, p.srv, tc.body)
-		if code != 409 || a.Type != "delivery-refused" || !strings.HasPrefix(a.Detail, tc.why) {
+		if code != 409 || a.Type != tc.kind || !strings.HasPrefix(a.Detail, tc.why) {
 			t.Errorf("%s: %d %s", tc.body, code, raw)
 		}
 	}
@@ -754,5 +755,56 @@ func TestDeliveriesPinged(t *testing.T) {
 	}
 	if n := len(p.tickets.Live(time.Now())); n != 1 {
 		t.Errorf("playbacks left: %d, want the file's", n)
+	}
+}
+
+// A play that replaces another (MSFP Media playing 2.3: replaces) counts
+// as it: with every transcode taken by the old one, it starts, and the
+// old one ends (playback-stopped) once it has; refused, the old one goes
+// on; one naming no playback of the caller's is as if it named none. The
+// answer gives the interval of progress (progressSeconds).
+func TestPlayReplaces(t *testing.T) {
+	p := playedServer(t, options{maxTranscodes: 1})
+	tv := startPlayback(t, p.srv, "TV")
+	transcode := `"titleId":"title_movie_tmdb_949","versionId":"` + heatCopy + `","delivery":"transcode","transcode":{"videoCodec":"h264"}`
+	if code, _, raw := play(t, p.srv, `{`+transcode+`}`); code != 503 {
+		t.Fatalf("a second transcode, not replacing: %d %s", code, raw)
+	}
+	for _, body := range []string{
+		`{` + transcode + `,"replaces":"play_nosuchplayback"}`,
+		`{` + transcode + `,"replaces":"play_aaaaaaaaaaaaaaaaaaaaaaaaaa"}`,
+	} {
+		if code, _, raw := play(t, p.srv, body); code != 503 {
+			t.Errorf("%s: %d %s", body, code, raw)
+		}
+	}
+	if code, _, raw := play(t, p.srv, `{`+transcode+`,"replaces":""}`); code != 400 {
+		t.Errorf("an empty replaces: %d %s", code, raw)
+	}
+	// Refused: the old one goes on, and may still be replaced.
+	if code, a, raw := play(t, p.srv, `{"titleId":"title_movie_tmdb_949","delivery":"transcode","transcode":{"burnSubtitle":"s3"},"replaces":"`+tv+`"}`); code != 409 || a.Type != "target-refused" {
+		t.Fatalf("a refused replacement: %d %s", code, raw)
+	}
+	if code, raw := getAs(t, p.srv, subject, "/api/v1/playback/"+tv); code != 200 {
+		t.Fatalf("the old one after a refused replacement: %d %s", code, raw)
+	}
+	code, raw := post(t, p.srv, "/api/v1/playback", `{`+transcode+`,"replaces":"`+tv+`","startPositionMs":5000}`)
+	var a struct {
+		ID              string
+		ProgressSeconds int
+	}
+	json.Unmarshal([]byte(raw), &a)
+	if code != 201 || a.ID == tv || a.ProgressSeconds != api.ProgressSeconds {
+		t.Fatalf("replacing: %d %s", code, raw)
+	}
+	var ended struct{ Type string }
+	if code, raw := getAs(t, p.srv, subject, "/api/v1/playback/"+tv); code != 410 || json.Unmarshal([]byte(raw), &ended) != nil || ended.Type != "playback-stopped" {
+		t.Errorf("the replaced one: %d %s", code, raw)
+	}
+	if n, live := p.tickets.Transcodes(), len(p.tickets.Live(time.Now())); n != 1 || live != 1 {
+		t.Errorf("after the replacement: %d transcodes, %d playbacks", n, live)
+	}
+	if !eventually(t, func() bool { p.maker.mu.Lock(); defer p.maker.mu.Unlock(); return len(p.maker.stopped) > 0 }) {
+		t.Error("the old one's delivery wasn't stopped")
 	}
 }

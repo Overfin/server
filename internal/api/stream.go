@@ -113,7 +113,7 @@ func (s Stream) previewsSheet(w http.ResponseWriter, r *http.Request) bool {
 	}
 	pt, ok := pb.Tickets.PreviewsByTicket(ticket, c.Session.ID, c.Profile.ID, time.Now())
 	if !ok {
-		problem.Send(w, problem.NotFound, "")
+		problem.Send(w, problem.TicketRefused, "")
 		return true
 	}
 	if pt.Peer != "" {
@@ -174,7 +174,8 @@ func (s Stream) find(w http.ResponseWriter, r *http.Request) (*playback.Stream, 
 	// keep the playback alive either (rule 50).
 	st, ok := s.Playback.Tickets.ByTicket(ticket, c.Session.ID, p.ID, time.Now())
 	if !ok {
-		problem.Send(w, problem.NotFound, "")
+		// A 404 as any other; its type names it (MSFP Media base 4).
+		problem.Send(w, problem.TicketRefused, "")
 		return nil, nil, nil
 	}
 	// As the playback's own device, so its transcode is the one served.

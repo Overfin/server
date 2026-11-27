@@ -637,7 +637,7 @@ export function chooseDelivery(copies: Copy[], env: DeviceEnv, wishes?: {
   limits?: Title['limits']; encoders?: Encoders; maxBitrateKbps?: number; peers?: string[]; minLevel?: number;
   memory?: typeof fallbacks | null;
 }): Promise<Decision | null>;
-export function playRequest(decision: Decision, options?: { titleId: string; startPositionMs?: number; maxBitrateKbps?: number; device?: string }): Record<string, unknown>;
+export function playRequest(decision: Decision, options?: { titleId: string; startPositionMs?: number; maxBitrateKbps?: number; device?: string; replaces?: string }): Record<string, unknown>;
 export function streamUrls(base: string, answer: { ticket: string; protocol?: string }): {
   stream: string; subtitles(id: string): string; pictures(id: string): string; sheet(n: number): string;
 };

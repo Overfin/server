@@ -200,6 +200,9 @@ type remotePlay struct {
 	key    string // the title's key here
 	device string
 	reason string
+	// replaces is the caller's live playback this one replaces (the
+	// request's replaces), nil for none.
+	replaces *playback.Stream
 }
 
 // playRemote starts a playback on a paired server for the caller, and
@@ -216,19 +219,27 @@ func (pb Playback) playRemote(w http.ResponseWriter, r *http.Request, caller *Ca
 		return nil, msfp.RemotePlayback{}, false
 	}
 	peer, pc := rp.copy.Source.Peer, rp.copy
-	// Another audio track or a quality restarts a playback, and the
-	// browser's stop of the old one may come after this start: this
-	// browser's playback of the title there ends first, the engine
-	// stopping it there before it asks for the new one (Replaces), so the
-	// other server doesn't count it against the pairing's limit.
+	// The playback this one replaces (MSFP Media playing 2.3): the one
+	// the player names, else, for a player that names none, this
+	// browser's of the title there (another audio track or a quality
+	// restarts a playback, and the browser's stop of the old one may come
+	// after this start). The engine names it to the paired server, which
+	// counts the two as one and ends the old one once this one is
+	// answered (one on another paired server, the engine stops first);
+	// here it counts as this one's, and ends once this one has started.
+	// When this one is refused, it goes on.
+	old := rp.replaces
+	if old == nil {
+		for _, s := range pb.Tickets.Where(func(s *playback.Stream) bool {
+			return s.Remote != nil && s.Remote.PeerID == peer && s.Remote.Key == rp.key &&
+				s.SessionID == caller.Session.ID && s.ProfileID == p.ID
+		}) {
+			old = s
+		}
+	}
 	replaces := ""
-	for _, old := range pb.Tickets.Where(func(s *playback.Stream) bool {
-		return s.Remote != nil && s.Remote.PeerID == peer && s.Remote.Key == rp.key &&
-			s.SessionID == caller.Session.ID && s.ProfileID == p.ID
-	}) {
-		old.Remote.Replaced.Store(true)
+	if old != nil && old.Remote != nil {
 		replaces = old.Remote.ID()
-		pb.end(old, "stopped", "")
 	}
 	kbps := rp.req.BitrateCap(pb.MaxBitrateKbps, 0)
 	got, err := eng.Play(ctx, peer, msfp.PlayRequest{Title: pc.Source.Key, Purpose: rp.req.Purpose, Delivery: rp.req.Delivery,
@@ -237,8 +248,18 @@ func (pb Playback) playRemote(w http.ResponseWriter, r *http.Request, caller *Ca
 		Replaces: replaces})
 	if err != nil {
 		pb.Logger.Info("a paired server didn't start a playback", "peer", peer, "err", err)
+		if replaces != "" && old.Remote.PeerID != peer {
+			// Stopped there by the engine before it asked: over here too.
+			old.Remote.Replaced.Store(true)
+			pb.end(old, "stopped", "")
+		}
 		sendRemoteError(w, err)
 		return nil, msfp.RemotePlayback{}, false
+	}
+	if replaces != "" {
+		// Ended there by the paired server (or stopped by the engine,
+		// on another): no stop to send when it ends here.
+		old.Remote.Replaced.Store(true)
 	}
 	stop := func() {
 		go func() {
@@ -271,14 +292,21 @@ func (pb Playback) playRemote(w http.ResponseWriter, r *http.Request, caller *Ca
 		pl := *pc.Copy.PreviewLayout
 		s.Trickplay = &pl
 	}
+	lim.Replaces = old
 	replaced, err := pb.Tickets.Admit(s, got.PositionMs*10_000, time.Now(), lim, device)
 	if err != nil {
 		stop()
+		if replaces != "" {
+			pb.end(old, "stopped", "") // over there already
+		}
 		problem.Send(w, problem.StreamLimitReached, "")
 		return nil, msfp.RemotePlayback{}, false
 	}
-	for _, old := range replaced {
-		pb.stopped(old, "taken-over")
+	for _, o := range replaced {
+		pb.stopped(o, "taken-over")
+	}
+	if old != nil {
+		pb.end(old, "replaced", "")
 	}
 	pb.Logger.Info("playback started on a paired server", "playback", s.ID, "peer", peer, "method", got.Method,
 		"delivery", rp.req.Delivery)
@@ -287,15 +315,21 @@ func (pb Playback) playRemote(w http.ResponseWriter, r *http.Request, caller *Ca
 
 // sendRemoteError answers a play a paired server didn't start: busy now
 // (its limit for this server reached, all its transcodes taken, no
-// answer, or asked to wait: MSFP core section 8.3), the delivery refused
-// (the player steps down), the copy gone (the player reads the title
-// again); anything else isn't playable.
+// answer, or asked to wait: MSFP core section 8.3), the delivery or a
+// target refused (the player asks for something else), the copy not
+// found or changed (the player reads the title again), the title gone
+// there (gone: the player drops it and reads the title again); anything
+// else isn't playable.
 func sendRemoteError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, msfp.ErrServerBusy), errors.Is(err, msfp.ErrStreamLimitReached), errors.Is(err, msfp.ErrBackingOff):
 		problem.Send(w, problem.ServerBusy, "")
 	case errors.Is(err, msfp.ErrDeliveryRefused):
 		problem.Send(w, problem.DeliveryRefused, "peer")
+	case errors.Is(err, msfp.ErrTargetRefused):
+		problem.Send(w, problem.TargetRefused, "peer")
+	case errors.Is(err, msfp.ErrGone):
+		problem.Send(w, problem.Gone, "")
 	case errors.Is(err, msfp.ErrNotFound), errors.Is(err, msfp.ErrCopyChanged):
 		problem.Send(w, problem.NotFound, "")
 	default:

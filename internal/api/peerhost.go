@@ -96,8 +96,10 @@ func (h PeerHost) Describe(ctx context.Context, peer msfp.PeerRef, copy string) 
 // audio track), for its purpose (a download or a scan only within the
 // pairing's limits: req.Admit counts them), admitted by the pairing's
 // limits (req.Admit, the engine's count) and then by this server's
-// transcodes, less those kept for its own people (PeerTranscodeReserve).
-// A burned subtitle only with the operator's switch.
+// transcodes, less those kept for its own people (PeerTranscodeReserve);
+// a play that replaces another (req.Replaces) counts as it. A burned
+// subtitle only with the operator's switch. A target not made is
+// ErrTargetRefused; the companion plugin not answering, ErrUnreachable.
 func (h PeerHost) Start(ctx context.Context, req msfp.StartRequest) (msfp.Started, error) {
 	pb, err := h.playback()
 	if err != nil {
@@ -131,6 +133,14 @@ func (h PeerHost) Start(ctx context.Context, req msfp.StartRequest) (msfp.Starte
 		return msfp.Started{}, msfp.ErrServerBusy
 	}
 	a := deliveryArgs{lim: lim, device: req.Peer.Name, accountID: id, profileID: id, sessionID: id, auth: ja, admit: req.Admit}
+	if req.Replaces != "" {
+		// The playback this one replaces counts as it, its transcode free
+		// for it; the engine ends it once this one is answered
+		// (EndReplaced), and it goes on when this one fails.
+		if old, ok := pb.peerStream(req.Replaces); ok && old.SessionID == id {
+			a.replaces = old
+		}
+	}
 	if req.Purpose != wire.PurposeDownload && req.Purpose != wire.PurposeScan {
 		a.trickplay, a.previews = pb.ownPreviews(ctx, c)
 	}
@@ -163,9 +173,14 @@ func (pb Playback) peerStartError(err error) error {
 		return msfp.ErrNotPlayable
 	}
 	if rf := delivery.AsRefusal(err); rf != nil {
-		pb.Logger.Info("a paired server's play refused", "status", rf.Status, "why", rf.Why)
-		if rf.Status == http.StatusServiceUnavailable {
+		pb.Logger.Info("a paired server's play refused", "status", rf.Status, "type", rf.Problem, "why", rf.Why)
+		switch {
+		case rf.Status == http.StatusServiceUnavailable && rf.Problem == wire.ProblemUnreachable:
+			return msfp.ErrUnreachable
+		case rf.Status == http.StatusServiceUnavailable:
 			return msfp.ErrServerBusy
+		case rf.Problem == wire.ProblemTargetRefused:
+			return msfp.ErrTargetRefused
 		}
 		return msfp.ErrDeliveryRefused
 	}
@@ -183,7 +198,8 @@ func (pb Playback) peerStream(handle string) (*playback.Stream, bool) {
 }
 
 // Progress is a paired server's viewer still watching: the playback here
-// isn't idle (IdleTimeout), and the live view shows where it stands. A
+// isn't idle (the engine's idle limit), and the live view shows where it
+// stands, paused or playing. A
 // report without a position keeps the one it had; a download's late
 // report (its playback over) changes nothing here: what they watch is
 // kept on their server.
@@ -203,7 +219,7 @@ func (h PeerHost) Progress(ctx context.Context, rep msfp.Report) error {
 	if rep.HasPosition {
 		ticks = rep.PositionMs * 10_000
 	}
-	pb.Tickets.Progress(s, ticks, false, time.Now())
+	pb.Tickets.Progress(s, ticks, rep.Paused, time.Now())
 	return nil
 }
 
@@ -215,6 +231,7 @@ var endReasons = map[msfp.EndReason]string{
 	msfp.EndPairingEnded: "pairing ended",
 	msfp.EndNotOffered:   "no longer shared",
 	msfp.EndOperator:     "stopped by the operator",
+	msfp.EndReplaced:     "replaced",
 }
 
 // Stop ends a paired server's playback here.

@@ -74,6 +74,9 @@ type Stream struct {
 	paused        bool
 	// title is what plays, in words, for the control panel (Describe).
 	title string
+	// replacing: a playback starting in its place counts it as its own
+	// (Limits.Replaces) until it starts (it ends) or fails (Kept).
+	replacing bool
 
 	mu sync.Mutex
 	// files maps the neutral names in rewritten playlists to the real
@@ -150,7 +153,7 @@ func (s *Stream) converting() bool {
 
 // Ended remembers why a playback stopped, so its device can be told.
 type Ended struct {
-	Reason string // "taken-over", "expired", "stopped" or "ended-by-admin"
+	Reason string // "taken-over", "expired", "stopped", "replaced" or "ended-by-admin"
 	By     string // for "taken-over": the device that took over
 	at     time.Time
 }
@@ -219,6 +222,13 @@ type Limits struct {
 	// AccountTranscodes caps the account's own transcodes (a paired
 	// server's); nil: no cap of its own.
 	AccountTranscodes *int
+	// Replaces is a live playback of the same account the new one
+	// replaces (MSFP Media playing 2.3: replaces): the limits are checked
+	// as if it had ended, its stream and its transcode the new one's. It
+	// goes on until the caller ends it, once the new one has started, or
+	// keeps it (Kept) when the new one fails. Not live, of another
+	// account, or already being replaced: counted as any other.
+	Replaces *Stream
 }
 
 var (
@@ -239,9 +249,26 @@ var (
 func (t *Tickets) Admit(s *Stream, startTicks int64, now time.Time, lim Limits, by string) ([]*Stream, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	// The playback it replaces, counted as ended.
+	old := lim.Replaces
+	if old != nil && (t.byID[old.ID] != old || old.AccountID != s.AccountID || old.replacing || !t.live(old, now)) {
+		old = nil
+	}
+	others := func(list []*Stream) []*Stream {
+		if old == nil {
+			return list
+		}
+		var out []*Stream
+		for _, o := range list {
+			if o != old {
+				out = append(out, o)
+			}
+		}
+		return out
+	}
 	var replaced []*Stream
 	if lim.MaxStreams > 0 {
-		active := t.forAccount(s.AccountID)
+		active := others(t.forAccount(s.AccountID))
 		if lim.Reserve {
 			var ok bool
 			replaced, ok = Reserved(active, s.ProfileID, lim.Profiles, lim.MaxStreams)
@@ -259,8 +286,8 @@ func (t *Tickets) Admit(s *Stream, startTicks int64, now time.Time, lim Limits, 
 	// the playbacks it replaces would free.
 	if s.converting() && lim.MaxTranscodes > 0 {
 		busy := t.transcodes()
-		for _, old := range replaced {
-			if old.converting() {
+		for _, o := range append(replaced, old) {
+			if o != nil && o.converting() {
 				busy--
 			}
 		}
@@ -270,8 +297,8 @@ func (t *Tickets) Admit(s *Stream, startTicks int64, now time.Time, lim Limits, 
 	}
 	if s.converting() && lim.AccountTranscodes != nil {
 		mine := 0
-		for _, old := range t.forAccount(s.AccountID) {
-			if old.converting() {
+		for _, o := range others(t.forAccount(s.AccountID)) {
+			if o.converting() {
 				mine++
 			}
 		}
@@ -279,11 +306,26 @@ func (t *Tickets) Admit(s *Stream, startTicks int64, now time.Time, lim Limits, 
 			return nil, ErrServerBusy
 		}
 	}
-	for _, old := range replaced {
-		t.remove(old, "taken-over", by, now)
+	for _, o := range replaced {
+		t.remove(o, "taken-over", by, now)
+	}
+	if old != nil {
+		old.replacing = true
 	}
 	t.add(s, startTicks, now)
 	return replaced, nil
+}
+
+// Kept gives back a playback a new one was to replace (Limits.Replaces)
+// when that one didn't start: it counts as itself again, and may be
+// replaced by another.
+func (t *Tickets) Kept(old *Stream) {
+	if old == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	old.replacing = false
 }
 
 func (t *Tickets) live(s *Stream, now time.Time) bool {
@@ -318,8 +360,9 @@ type Remote struct {
 	// playback there (a file's is restarted from it after a cut).
 	Copy     wire.Copy
 	Playback msfp.RemotePlayback
-	// Replaced: the engine stops it there itself (a playback replacing
-	// it), or it is over there already; ending it here sends no stop.
+	// Replaced: a play replacing it ended it there (the paired server
+	// did, or the engine first), or it is over there already; ending it
+	// here sends no stop.
 	Replaced atomic.Bool
 }
 

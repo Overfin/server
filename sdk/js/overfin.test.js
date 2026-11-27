@@ -324,18 +324,45 @@ test('subtitles: the language kept', async () => {
   assert.deepEqual(calls[0].body, { language: 'fr' });
 });
 
-test('two quick changes leave one playback: the overtaken one is stopped', async () => {
+test('two quick changes leave one playback: the new play replaces the old one', async () => {
   const { calls } = playbackServer();
   const player = await new Overfin().play(fakeVideo(), 'title_movie_tmdb_1', { startMs: 0, env: chrome() });
   await Promise.all([player.setMaxBitrate(4000), player.setMaxBitrate(2000)]);
   await settle();
-  const started = calls.filter((c) => c.method === 'POST' && c.url === '/api/v1/playback').length;
+  const started = calls.filter((c) => c.method === 'POST' && c.url === '/api/v1/playback');
   const stopped = calls.filter((c) => c.url.endsWith('/stop')).map((c) => c.url);
-  // The first change, overtaken before it asked the server, asks nothing.
-  assert.equal(started, 2);
+  // The first change, overtaken before it asked the server, asks nothing;
+  // the second names the old playback, which the server ends (replaces):
+  // no stop of it.
+  assert.equal(started.length, 2);
+  assert.equal(started[0].body.replaces, undefined);
+  assert.equal(started[1].body.replaces, 'pb1');
   assert.equal(player.playback.id, 'pb2');
-  assert.ok(stopped.includes('/api/v1/playback/pb1/stop'), stopped);
+  assert.deepEqual(stopped, []);
   await player.close();
+});
+
+test('a replacement that never starts stops the old playback; the interval is the answer\'s', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  let n = 0;
+  const calls = fakeServer({
+    'GET /api/v1/titles/title_movie_tmdb_1': () => [200, plainPage()],
+    'POST /api/v1/playback': (_, body) => (++n === 1 ? [201, answer(n, body, 'file', { progressSeconds: 90 })]
+      : [503, { type: 'unreachable', status: 503 }]),
+    'POST /api/v1/playback/pb1/progress': () => [204, null],
+    'POST /api/v1/playback/pb1/stop': () => [204, null],
+  });
+  const video = fakeVideo();
+  const player = await new Overfin().play(video, 'title_movie_tmdb_1', { startMs: 0, env: chrome(), onError: () => {} });
+  const reports = () => calls.filter((c) => c.url.endsWith('/progress')).length;
+  t.mock.timers.tick(60_000);
+  assert.equal(reports(), 0, 'not before progressSeconds');
+  t.mock.timers.tick(30_000);
+  assert.equal(reports(), 1);
+  await assert.rejects(player.setMaxBitrate(4000));
+  const started = calls.filter((c) => c.method === 'POST' && c.url === '/api/v1/playback');
+  assert.equal(started[1].body.replaces, 'pb1');
+  assert.ok(calls.some((c) => c.url === '/api/v1/playback/pb1/stop'));
 });
 
 test('closed while starting: what the start gets is stopped, nothing plays', async () => {

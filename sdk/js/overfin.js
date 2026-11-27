@@ -1022,9 +1022,10 @@ function hash(s) {
 /**
  * The play request of a decision (POST /playback): MSFP's, its title
  * Overfin's titleId, with the reason for "Now playing". startPositionMs,
- * maxBitrateKbps (the quality chosen) and device as given.
+ * maxBitrateKbps (the quality chosen), device and replaces (the playback
+ * this one replaces) as given.
  */
-export function playRequest(decision, { titleId, startPositionMs = 0, maxBitrateKbps, device } = {}) {
+export function playRequest(decision, { titleId, startPositionMs = 0, maxBitrateKbps, device, replaces } = {}) {
   const r = { titleId, versionId: decision.copy.id, startPositionMs: Math.max(0, Math.round(startPositionMs)) };
   if (decision.audioTrack) r.audioTrack = decision.audioTrack;
   if (decision.delivery) r.delivery = decision.delivery;
@@ -1033,6 +1034,7 @@ export function playRequest(decision, { titleId, startPositionMs = 0, maxBitrate
   if (maxBitrateKbps > 0) r.maxBitrateKbps = Math.round(maxBitrateKbps);
   if (REASONS.includes(decision.reason)) r.reason = decision.reason;
   if (device) r.device = device;
+  if (replaces) r.replaces = replaces;
   return r;
 }
 
@@ -1196,7 +1198,11 @@ export function subtitleLabel(track, lang) {
  *   pictures are drawn; by default a canvas laid over the video.
  */
 
-const PROGRESS_EVERY = 10_000;   // ms between progress reports while playing
+// How often progress is reported while playing: the play answer's
+// progressSeconds (MSFP Media playing 3), 45 to 120 seconds, 60 when it
+// gives none or another value; at once on a pause and a resume.
+const PROGRESS_SECONDS = 60;
+const progressEvery = (s) => (Number.isInteger(s) && s >= 45 && s <= 120 ? s : PROGRESS_SECONDS) * 1000;
 const LONG_PAUSE = 90_000;       // after this, check the stream still exists
 
 /**
@@ -1241,6 +1247,7 @@ export class Player {
       playing: () => { this.everPlayed = true; },
       play: () => {
         if (this.pausedAt && Date.now() - this.pausedAt > LONG_PAUSE) this.check();
+        else if (this.pausedAt) this.report(); // resumed: told at once
         this.pausedAt = 0;
       },
       timeupdate: () => { this.settled(); this.fillSubtitles(); this.watchTrial(); },
@@ -1291,6 +1298,7 @@ export class Player {
     if (this.page.copies?.length) return this.startCopy(at, overtaken);
     // No copy this profile may play (none read yet, or none it may see).
     this.page = null;
+    this.dropReplaced();
     const err = new OverfinError(409, { type: 'not-playable', title: 'This item can\'t be played', status: 409 });
     this.options.onError?.(err);
     throw err;
@@ -1314,10 +1322,12 @@ export class Player {
     try {
       answer = await this.client.startPlayback(playRequest(decision, {
         titleId: page.id || this.titleId, startPositionMs: at, maxBitrateKbps: this.choice.maxBitrateKbps,
+        replaces: this.replacing,
       }));
     } catch (err) {
       if (overtaken()) return null;
-      if (err?.status === 409 && err.type === 'delivery-refused' && decision.level < LEVELS.length - 1) {
+      if (err?.status === 409 && (err.type === 'delivery-refused' || err.type === 'target-refused') &&
+        decision.level < LEVELS.length - 1) {
         this.minLevel = decision.level + 1;
         return this.start(at);
       }
@@ -1326,9 +1336,12 @@ export class Player {
         this.page = null;
         return this.start(at);
       }
+      this.dropReplaced();
       this.options.onError?.(err);
       throw err;
     }
+    // Started: the playback it replaces was ended by the server.
+    this.replacing = null;
     if (overtaken()) {
       this.client.stopPlayback(answer.id, Math.round(at)).catch(() => {});
       return null;
@@ -1339,7 +1352,7 @@ export class Player {
     this.playback = pb;
     this.attach(pb);
     for (const [event, fn] of Object.entries(this.handlers)) this.video.addEventListener(event, fn);
-    this.timer = setInterval(() => { if (!this.video.paused) this.report(); }, PROGRESS_EVERY);
+    this.timer = setInterval(() => { if (!this.video.paused) this.report(); }, progressEvery(answer.progressSeconds));
     this.trial = { at: Date.now(), fromMs: pb.positionMs || 0, done: decision.level >= LEVELS.length - 1 };
     // A file whose chosen audio isn't the one it plays by itself: that
     // track turned on in the video (audioTracks), else a step down.
@@ -1679,12 +1692,16 @@ export class Player {
     return true;
   }
 
+  // The new play names the playback it replaces (replaces, MSFP Media
+  // playing 2.3): the server ends that one once the new one starts,
+  // counting the two as one; refused, the old one goes on, and is stopped
+  // when no new one starts (dropReplaced).
   restart(playing = !this.video.paused) {
     const at = this.positionMs;
     this.held = at;
     const old = this.playback;
     this.teardown();
-    if (old) this.client.stopPlayback(old.id, at).catch(() => {});
+    if (old) this.replacing = old.id;
     this.video.autoplay = this.everPlayed ? playing : this.video.autoplay || playing;
     return this.start(at);
   }
@@ -1724,6 +1741,14 @@ export class Player {
     clearTimeout(this.hole);
     for (const [event, fn] of Object.entries(this.handlers)) this.video.removeEventListener(event, fn);
     if (this.hls) { this.hls.destroy(); this.hls = null; }
+  }
+
+  // dropReplaced stops the playback a restart was to replace, when no new
+  // one started.
+  dropReplaced() {
+    const id = this.replacing;
+    this.replacing = null;
+    if (id) this.client.stopPlayback(id, this.positionMs).catch(() => {});
   }
 
   report(extra = {}) {
@@ -1813,7 +1838,8 @@ export class Player {
 
   // gone handles a playback the server no longer has.
   gone(pb, err) {
-    if (pb !== this.playback || this.closed) return;
+    // Replaced by a play under way (restart): ended by the server for it.
+    if (pb !== this.playback || this.closed || this.replacing === pb.id) return;
     // Freed after a pause or a lost connection, or no longer known at all
     // (the server forgets why after an hour, and everything when it
     // restarts): carry on, unnoticed.

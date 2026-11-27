@@ -295,8 +295,9 @@ anyone. Paired servers are not trusted at all (rule 94).
 43. Counts (`totalCount`) include only what the active profile may see.
 44. Play queues are refused.
 45. A stream ticket lasts only as long as its playback: it ends when the
-    playback stops, after 2 minutes with neither progress nor stream
-    requests, or after 24 hours, and is never renewed. It works only in the
+    playback stops, when a play that replaces it starts, after 2 minutes
+    (twice the progress interval of the play's answer) with neither
+    progress nor stream requests, or after 24 hours, and is never renewed. It works only in the
     session, and for the profile, that started it, and is refused when a
     browser says another site asked.
     - A previews ticket (`POST /previews`) opens one copy's seek-bar
@@ -336,6 +337,13 @@ anyone. Paired servers are not trusted at all (rule 94).
     setting), only the profile's own oldest stream stops. A new playback
     never stops another account's stream: with every transcode taken, one
     that needs a transcode is refused.
+    - A play that names the playback it replaces (`replaces`: another
+      track, copy, delivery or quality) counts as it: the limits are
+      checked as if it had ended, and it ends once the new one has
+      started; when the new one is refused, it goes on. Only a live
+      playback of the same profile (of the same paired server, for
+      theirs) is replaced: any other named is ignored, and counts as
+      itself.
 50. A transcode stops as soon as its playback stops, its ticket ends or its
     reports go silent. Overfin's plugin keeps a delivery alive while Overfin
     pings it (every 30 seconds, while its playback lives) and stops it

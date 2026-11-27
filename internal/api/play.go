@@ -23,9 +23,12 @@ import (
 // delivery itself, and asks for exactly that with MSFP's play request,
 // beside Overfin's own members (the title, the device, why it chose that
 // delivery). Overfin plays it through the executor (deliveries.go) or
-// refuses it as MSFP does; the answer is MSFP's playback object, with no
-// URL: the player builds them from the ticket, under
-// /api/v1/stream/{ticket}/.
+// refuses it as MSFP Media does; the answer is MSFP Media's playback
+// object, with no URL: the player builds them from the ticket, under
+// /api/v1/stream/{ticket}/. A play naming the playback it replaces
+// (replaces: another track, copy, delivery or quality) counts as it in
+// the account's streams and the server's transcodes, and ends it once
+// it has started; refused, the old one goes on.
 
 // maxPlayBody bounds a play request's body.
 const maxPlayBody = 16 << 10
@@ -40,7 +43,7 @@ var olderPlay = []string{"capabilities", "itemId", "audioLanguage", "subtitleTra
 // own. Any other is refused.
 var playMembers = map[string]bool{"titleId": true, "versionId": true, "audioTrack": true, "delivery": true,
 	"mediaType": true, "transcode": true, "audioRenditions": true, "startPositionMs": true, "maxBitrateKbps": true,
-	"device": true, "reason": true}
+	"replaces": true, "device": true, "reason": true}
 
 // playJSON is the answer to a play: MSFP's playback object as it is, and
 // Overfin's wrapper: what plays, and the episode after it.
@@ -174,6 +177,7 @@ func (pb Playback) play(w http.ResponseWriter, r *http.Request, members map[stri
 	if i < 0 {
 		i = 0
 	}
+	old := pb.replaced(caller, ask.req.Replaces)
 	c := copies[i]
 	ja, _, ok := l.account(w, r)
 	if !ok {
@@ -196,7 +200,7 @@ func (pb Playback) play(w http.ResponseWriter, r *http.Request, members map[stri
 	}
 	kbps := ask.req.BitrateCap(pb.MaxBitrateKbps, 0)
 	a := deliveryArgs{lim: lim, device: device, accountID: p.AccountID, profileID: p.ID, sessionID: caller.Session.ID,
-		auth: ja, reason: ask.reason}
+		auth: ja, reason: ask.reason, replaces: old}
 	// Seek-bar previews, Overfin's own (a bonus), under the playback's
 	// ticket; the final credits, for when it's watched.
 	a.trickplay, a.previews = pb.ownPreviews(ctx, c)
@@ -205,10 +209,15 @@ func (pb Playback) play(w http.ResponseWriter, r *http.Request, members map[stri
 	if !ok {
 		return
 	}
+	if old != nil {
+		// Started: the playback it replaces ends now (MSFP Media playing
+		// 2.3).
+		pb.end(old, "replaced", "")
+	}
 	d := s.Delivery
 	out := playJSON{PlayAnswer: wire.PlayAnswer{ID: s.ID, Ticket: s.Ticket, Protocol: d.Protocol, Method: d.Method(),
 		Etag: c.ETag, PositionMs: d.Plan.StartMs, VersionID: c.CopyID, AudioTrack: d.Plan.Audio,
-		Subtitles: servedSubtitles(s, c)}}
+		Subtitles: servedSubtitles(s, c), ProgressSeconds: ProgressSeconds}}
 	if kbps > 0 {
 		out.MaxBitrateKbps = &kbps
 	}
@@ -248,13 +257,15 @@ func (pb Playback) playPeerCopy(w http.ResponseWriter, r *http.Request, caller *
 		return
 	}
 	pc := theirs[i]
-	s, got, ok := pb.playRemote(w, r, caller, remotePlay{copy: pc, req: ask.req, key: t.Ref.Key(), device: ask.device, reason: ask.reason})
+	s, got, ok := pb.playRemote(w, r, caller, remotePlay{copy: pc, req: ask.req, key: t.Ref.Key(), device: ask.device, reason: ask.reason,
+		replaces: pb.replaced(caller, ask.req.Replaces)})
 	if !ok {
 		return
 	}
 	out := playJSON{PlayAnswer: wire.PlayAnswer{ID: s.ID, Ticket: s.Ticket, Protocol: got.Protocol, Method: got.Method,
 		Etag: got.Etag, PositionMs: got.PositionMs, VersionID: pc.ID, AudioTrack: got.AudioTrack,
-		AudioRenditions: got.AudioRenditions, Subtitles: got.Subtitles, ReadTitleAgain: got.CopyChanged}}
+		AudioRenditions: got.AudioRenditions, Subtitles: got.Subtitles, ReadTitleAgain: got.CopyChanged,
+		ProgressSeconds: ProgressSeconds}}
 	if got.MaxBitrateKbps > 0 {
 		kbps := got.MaxBitrateKbps
 		out.MaxBitrateKbps = &kbps
@@ -272,6 +283,21 @@ func (pb Playback) playPeerCopy(w http.ResponseWriter, r *http.Request, caller *
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	writeOK(w, out)
+}
+
+// replaced is the caller's live playback a play's replaces names (MSFP
+// Media playing 2.3): its profile's, this server's own players'; nil for
+// none, and for an ID that names no such playback (ignored, as if
+// absent: nothing is told of others' playbacks).
+func (pb Playback) replaced(caller *Caller, id string) *playback.Stream {
+	if id == "" || !playIDRe.MatchString(id) {
+		return nil
+	}
+	s, ended, ok := pb.Tickets.ByID(id, caller.Profile.ID, time.Now())
+	if !ok || ended != nil || s.AccountID != caller.Profile.AccountID {
+		return nil
+	}
+	return s
 }
 
 // limitsOf are the limits a playback of an account starts under: its

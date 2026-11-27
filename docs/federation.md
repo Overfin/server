@@ -459,6 +459,11 @@ Media Server Federation Protocol, version 0 (its core, and the parts
 catalog, playback, media, video and groups; Overfin has no music): its
 specification and test vectors are at
 [github.com/msfp-io/msfp-spec](https://github.com/msfp-io/msfp-spec).
+What a title and a copy are, and how a copy is listed, asked for,
+fetched and played, is MSFP Media version 0
+([github.com/msfp-io/msfp-media](https://github.com/msfp-io/msfp-media)),
+which MSFP carries between servers; Overfin's own players speak it too,
+through Overfin's API.
 Overfin follows version 0 (a draft; numbered 1 before 2026-11-20). It does key rotation and revocation
 (`rotate`, `revoke`, the next key commitment required in `pair` both
 ways; a `hello`'s is checked and ignored; the 30 days of revocation-only
@@ -493,9 +498,14 @@ titles, its playback and media, and its connections to other servers
 to paired servers as MSFP's copy object, facts only (the same file in
 several of the libraries offered goes once); the viewer's server
 chooses one, its audio and its delivery (the file itself, a remux, a
-transcode, or MSFP's baseline), and Overfin makes exactly that through
-the same executor as for its own players, or refuses it with MSFP's
-code. Text subtitles are served in stretches and whole
+transcode, or the baseline), and Overfin makes exactly that through
+the same executor as for its own players, or refuses it with MSFP
+Media's refusals (`delivery-refused` for a delivery, `target-refused`
+for a target such as a codec or a burned subtitle, `unreachable` when
+its media server doesn't answer). A play naming the playback it
+replaces (`replaces`) counts as it, its transcode included, and ends it
+once answered; progress carries `paused`, shown in "Now playing", at
+the interval the play's answer gives (`progressSeconds`, 60). Text subtitles are served in stretches and whole
 (`subtitles/<id>/whole`), PGS in stretches; ASS and SSA as ASS, and
 fonts, aren't served yet (their text comes as WebVTT). Seek-bar previews
 are Overfin's own, under a playback's ticket or, before a play, a

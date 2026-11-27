@@ -159,3 +159,18 @@ func TestPluginMakerPing(t *testing.T) {
 		t.Errorf("alive: %v", err)
 	}
 }
+
+// A media server that doesn't answer is unreachable (503 unreachable,
+// MSFP Media base 4), not busy: the media can't be reached now.
+func TestPluginMakerUnreachable(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	url := srv.URL
+	srv.Close()
+	jf, _ := jellyfin.New(url, "test")
+	p := &PluginMaker{Jellyfin: jf, Admin: func() jellyfin.Auth { return jellyfin.Auth{Token: "k", DeviceID: "d"} }}
+	_, err := p.Start(context.Background(), Order{ItemID: madeID, SourceID: madeID, Segments: "mp4"})
+	var r *Refusal
+	if !errors.As(err, &r) || r.Status != 503 || r.Problem != "unreachable" || r.Why != "maker-unreachable" {
+		t.Errorf("a media server that doesn't answer: %v", err)
+	}
+}

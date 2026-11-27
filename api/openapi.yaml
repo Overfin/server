@@ -3245,6 +3245,16 @@ paths:
         If the account is at its stream limit, its oldest playback is ended
         and that device is told why (unless the operator chose to refuse new
         streams). Overfin never ends another account's playback.
+
+        To change the audio track, the copy, the delivery or the quality,
+        the player starts a new playback naming the old one in `replaces`
+        (MSFP Media playing 2.3): the two count as one against the
+        account's streams and the server's transcodes, and the old one
+        ends (`playback-stopped`) once the new one has started. When the
+        new one is refused, the old one goes on. A `replaces` naming no
+        live playback of the profile is ignored.
+
+        The answer's `progressSeconds` is how often to report progress.
       tags: [playback]
       requestBody:
         required: true
@@ -3280,13 +3290,15 @@ paths:
           description: >-
             The delivery asked for isn't made
             (`delivery-refused`, its `detail` a closed code saying why, for
-            the player's information panel: over the bitrate cap, a codec or
-            a range the server doesn't make, a segment format that can't
-            carry the streams, a copy Overfin hasn't read (`not-read`), the
-            original file off (`original-file-off`), burned subtitles
-            (`burned-subtitles`: never for this server's players), what the
-            transcoder made differs from what was asked (`made-differs:…`));
-            or the account is at its stream limit and the operator
+            the player's information panel: over the bitrate cap, a copy
+            Overfin hasn't read (`not-read`), the original file off
+            (`original-file-off`), what the transcoder made differs from
+            what was asked (`made-differs:…`)); a target it names isn't
+            made (`target-refused`, with its code too: a codec or a range
+            the server doesn't make, a segment format that can't carry the
+            streams, burned subtitles (`burned-subtitles`: never for this
+            server's players)), the player then asking for other targets,
+            another delivery or the baseline; or the account is at its stream limit and the operator
             refuses new streams (`stream-limit-reached`), or the item can't be
             played (`not-playable`). With a stream reserved for each profile
             (`limits.reservedStreams` in GET /me), a profile whose own stream
@@ -3301,8 +3313,10 @@ paths:
         "503":
           description: |
             Every transcode is taken and the picture would be converted
-            (a remux, or the audio alone converted, takes none), or the
-            media server can't be reached (`server-busy`). Try again later.
+            (a remux, or the audio alone converted, takes none)
+            (`server-busy`), or the media can't be reached now: the media
+            server, or a paired server's, doesn't answer (`unreachable`, or
+            `server-busy`). Try again later.
           content:
             application/problem+json:
               schema:
@@ -3429,9 +3443,11 @@ paths:
       operationId: reportProgress
       summary: Report the position, every few seconds while playing
       description: |
-        Keeps the playback alive and saves progress. Report at least every
-        30 seconds, also while paused (`paused`: "Now playing" shows it). A playback with neither progress
-        reports nor stream requests for two minutes is ended
+        Keeps the playback alive and saves progress (MSFP Media playing 3).
+        Report about every `progressSeconds` of the play's answer (60),
+        never more often than every 45 seconds but at once on a pause and
+        a resume (`paused`: "Now playing" shows it). A playback with neither progress
+        reports nor stream requests for twice that (two minutes) is ended
         (`playback-expired`) and its transcode stopped; so is any playback
         24 hours after it started. Why a playback ended is answered for an
         hour; after that its ID answers `not-found`.
@@ -4387,8 +4403,8 @@ paths:
         "200": {description: "The playback, MSFP's playback object. Signed."}
         "400": {description: "Malformed, as MSFP reads a play request."}
         "404": {description: "Not signed, not a paired server, or a title or copy not offered it; `not-supported` when playback isn't on between the two."}
-        "409": {description: "`delivery-refused` (what was asked isn't made, with MSFP's code), or `stream-limit-reached` (the pairing's or the pool's limit)."}
-        "503": {description: "`server-busy`: every transcode it may take is in use."}
+        "409": {description: "`delivery-refused` (the delivery asked isn't made), `target-refused` (a target it names isn't made), or `stream-limit-reached` (the pairing's or the pool's limit). A play naming the playback it replaces (`replaces`) counts as it."}
+        "503": {description: "`server-busy`: every transcode it may take is in use; `unreachable`: the media server doesn't answer."}
 
   /federation/progress:
     post:
@@ -5862,10 +5878,10 @@ components:
 
     PlayRequest:
       description: |
-        MSFP's play request (MSFP playback sections 2.1 and 2.7, video
-        section 5.1), read as MSFP reads it, its `title` replaced by
-        `titleId`, with Overfin's own `device` and `reason`. Only these
-        members (no `purpose`: a play's).
+        MSFP Media's play request (playing sections 2.1 and 2.7, video
+        section 5.1), read as the language reads it, its `title` replaced
+        by `titleId`, with Overfin's own `device` and `reason`. Only these
+        members (no `purpose`: a play's; no `capabilities`).
       type: object
       additionalProperties: false
       required: [titleId]
@@ -5898,7 +5914,7 @@ components:
           description: >-
             With `delivery: transcode` only. Each target left out
             takes the baseline's value. `burnSubtitle` is refused
-            (`delivery-refused`): subtitles are never burned in for this
+            (`target-refused`): subtitles are never burned in for this
             server's players.
           properties:
             videoCodec:
@@ -5931,6 +5947,13 @@ components:
           minimum: 0
           description: The quality chosen; the lowest of this, the
             transcode's and the operator's cap applies.
+        replaces:
+          type: string
+          description: The `id` of the profile's live playback this one
+            replaces (another audio track, copy, delivery or quality), which
+            ends once this one has started; the two count as one. One
+            naming no live playback of the profile is ignored.
+          pattern: "^[A-Za-z0-9_-]{1,64}$"
         device:
           type: string
           description: A readable name for this device, shown when another
@@ -5945,14 +5968,14 @@ components:
 
     PlayAnswer:
       description: |
-        MSFP's playback object (MSFP playback section 2.3, video section
+        MSFP Media's playback object (playing section 2.3, video section
         5.3) as it is, with Overfin's `title` and `next`. No URL: the
         player builds them from `ticket` (`/stream/{ticket}/master.m3u8`
         or `/stream/{ticket}/file`; each of `subtitles` under
         `subtitles/{id}/{part}` for text, `pictures/{id}/{part}` for
         pictures; sheets under `trickplay/{sheet}`).
       type: object
-      required: [id, ticket, protocol, method, etag, positionMs, versionId]
+      required: [id, ticket, protocol, method, etag, positionMs, versionId, progressSeconds]
       properties:
         id:
           type: string
@@ -5978,6 +6001,13 @@ components:
             new playback.
         maxBitrateKbps:
           type: integer
+        progressSeconds:
+          type: integer
+          minimum: 45
+          maximum: 120
+          description: How often to report progress, in seconds (60); a
+            playback without a report or a stream request for twice this
+            is ended.
         subtitles:
           type: array
           description: The copy's subtitle tracks served apart, and how.

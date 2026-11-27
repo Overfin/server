@@ -467,7 +467,7 @@ func TestPeerRefusalsToldApart(t *testing.T) {
 	var page struct{ Copies []wire.Copy }
 	get(t, x.srvA, "/api/v1/titles/title_movie_tmdb_949", &page)
 	v := page.Copies[0].ID
-	if status, s := x.start(t, `{"titleId":"title_movie_tmdb_949","versionId":"`+v+`","delivery":"transcode","transcode":{"videoCodec":"av1"}}`); status != http.StatusConflict || s.Type != "delivery-refused" {
+	if status, s := x.start(t, `{"titleId":"title_movie_tmdb_949","versionId":"`+v+`","delivery":"transcode","transcode":{"videoCodec":"av1"}}`); status != http.StatusConflict || s.Type != "target-refused" {
 		t.Fatalf("a codec B doesn't make: %d %+v", status, s)
 	}
 	if n := len(livePlaybacks(x.onB)); n != 0 {
@@ -637,24 +637,25 @@ func waitFor(t *testing.T, what string, ok func() bool) {
 
 // A's viewer's progress reaches B at the first report: B's live view
 // (the control panel's Now playing) shows where the paired server's
-// viewer is (MSFP's progress carries no pause: shown playing).
+// viewer is, and its pause (MSFP Media's progress carries paused, sent
+// at once).
 func TestPeerProgressShownByOwner(t *testing.T) {
 	x := pairForPlay(t)
 	s := x.playPeer(t)
-	onB := func(positionMs int64) func() bool {
+	onB := func(positionMs int64, paused bool) func() bool {
 		return func() bool {
 			live := x.onB.Live(time.Now())
-			return len(live) == 1 && live[0].PositionMs == positionMs && !live[0].Paused
+			return len(live) == 1 && live[0].PositionMs == positionMs && live[0].Paused == paused
 		}
 	}
 	if status, body := post(t, x.srvA, "/api/v1/playback/"+s.ID+"/progress", `{"positionMs":600000}`); status != 204 {
 		t.Fatalf("progress: %d %s", status, body)
 	}
-	waitFor(t, "B's live view after the first report", onB(600_000))
+	waitFor(t, "B's live view after the first report", onB(600_000, false))
 	if status, _ := post(t, x.srvA, "/api/v1/playback/"+s.ID+"/progress", `{"positionMs":610000,"paused":true}`); status != 204 {
 		t.Fatal("progress")
 	}
-	waitFor(t, "B's live view after a pause", onB(610_000))
+	waitFor(t, "B's live view after a pause", onB(610_000, true))
 	if v := x.b.Playbacks(); len(v) != 1 || v[0].State != "active" {
 		t.Errorf("B's engine's playbacks: %+v", v)
 	}
@@ -754,7 +755,7 @@ func TestPeerDownloadsWithinLimits(t *testing.T) {
 	}
 	_, err = x.a.Play(ctx, x.bOnA.ID, msfp.PlayRequest{Title: key, Delivery: msfp.DeliveryTranscode,
 		Transcode: &msfp.TranscodeTargets{BurnSubtitle: "s3"}})
-	if !errors.Is(err, msfp.ErrDeliveryRefused) {
+	if !errors.Is(err, msfp.ErrTargetRefused) {
 		t.Fatalf("a burned subtitle: %v", err)
 	}
 }
@@ -797,5 +798,42 @@ func TestPeerTracksKeptOnA(t *testing.T) {
 	all, err := x.stB.AllTitleTracks(ctx, ownerID(t, x.srvB))
 	if err != nil || len(all) != 0 {
 		t.Errorf("B kept: %v %v", all, err)
+	}
+}
+
+// A's player replacing its playback of B's film (replaces): B counts the
+// two as one under a 1-stream limit and ends the old one as replaced; a
+// replacement B refuses leaves the old one playing, on both sides.
+func TestPeerPlayReplaces(t *testing.T) {
+	ctx := context.Background()
+	x := pairForPlay(t)
+	s := x.playPeer(t)
+	if err := x.b.SetLimits(ctx, x.aOnB.ID, msfp.Limits{Streams: 1, Transcodes: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if status, r := x.start(t, `{"titleId":"title_movie_tmdb_949","delivery":"transcode","transcode":{"videoCodec":"av1"},"replaces":"`+s.ID+`"}`); status != http.StatusConflict || r.Type != "target-refused" {
+		t.Fatalf("a replacement B refuses: %d %+v", status, r)
+	}
+	if code, _ := viewerGet(t, x.srvA, s.URL()); code != 200 {
+		t.Fatalf("the old playback's stream after a refused replacement: %d", code)
+	}
+	if n := len(livePlaybacks(x.onB)); n != 1 {
+		t.Fatalf("playbacks on B after a refused replacement: %d", n)
+	}
+	status, r := x.start(t, `{"titleId":"title_movie_tmdb_949","replaces":"`+s.ID+`","startPositionMs":60000}`)
+	if status != 201 {
+		t.Fatalf("a replacement under a 1-stream limit: %d %+v", status, r)
+	}
+	if reason := x.ending(t); reason != msfp.EndReplaced {
+		t.Errorf("the old one ended on B: %v", reason)
+	}
+	if code, _ := viewerGet(t, x.srvA, s.URL()); code != http.StatusNotFound {
+		t.Errorf("the old playback's stream after the replacement: %d", code)
+	}
+	if code, _ := viewerGet(t, x.srvA, r.URL()); code != 200 {
+		t.Errorf("the new playback's stream: %d", code)
+	}
+	if n := len(livePlaybacks(x.onB)); n != 1 {
+		t.Errorf("playbacks on B after the replacement: %d", n)
 	}
 }

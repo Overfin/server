@@ -48,7 +48,20 @@ const (
 	NotPlayable      Type = wire.ProblemNotPlayable
 	// DeliveryRefused: the version can't be served the way asked (MSFP
 	// playback section 2.5): the player asks for another.
-	DeliveryRefused     Type = wire.ProblemDeliveryRefused
+	DeliveryRefused Type = wire.ProblemDeliveryRefused
+	// TargetRefused: a target the request names isn't made (MSFP Media
+	// playing 2.5: the media type, a codec, the range, a subtitle to
+	// burn): the player asks for other targets, another delivery, or
+	// none.
+	TargetRefused Type = wire.ProblemTargetRefused
+	// Gone: a title or a copy held for the caller, and no longer (MSFP
+	// Media base 4): the player drops it and reads the title again.
+	Gone Type = wire.ProblemGone
+	// Unreachable: the media can't be reached now (MSFP Media playing
+	// 2.2, step 8): busy now, temporary.
+	Unreachable Type = wire.ProblemUnreachable
+	// TicketRefused: a ticket refused (MSFP Media base 4).
+	TicketRefused       Type = wire.ProblemTicketRefused
 	StreamLimitReached  Type = wire.ProblemStreamLimit
 	NameTaken           Type = "name-taken"
 	ProfileLimitReached Type = "profile-limit-reached"

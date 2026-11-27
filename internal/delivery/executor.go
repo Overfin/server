@@ -85,8 +85,10 @@ func hasPicture(c wire.Copy) bool {
 	return c.Video != nil || strings.HasPrefix(c.MediaType, "video/")
 }
 
-// Plan decides what a play makes of c, or refuses it: MSFP's refusals
-// (wire.Serve: 409 delivery-refused), and Overfin's own: a file Overfin
+// Plan decides what a play makes of c, or refuses it: MSFP Media's
+// refusals (wire.Serve: 409 delivery-refused for the delivery, 409
+// target-refused for a target), and Overfin's own (targets refused as
+// target-refused, the rest as delivery-refused): a file Overfin
 // hasn't read (a minimal copy) never served or copied as it is, the
 // original file only when the operator lets players have it, no burned
 // subtitles (never for own players; for peers only with the operator's
@@ -97,11 +99,11 @@ func (e *Executor) Plan(ctx context.Context, c store.IndexedCopy, r Request) (*P
 	if req.Transcode != nil && req.Transcode.BurnSubtitle != "" {
 		switch {
 		case r.Own:
-			return nil, refused("burned-subtitles")
+			return nil, targetRefused("burned-subtitles")
 		case !r.MayBurn:
-			return nil, refused("burn-in-off")
+			return nil, targetRefused("burn-in-off")
 		}
-		return nil, refused("burn-in-not-made")
+		return nil, targetRefused("burn-in-not-made")
 	}
 	facts := c.Facts
 	facts.ID, facts.ETag = c.CopyID, c.ETag
@@ -145,14 +147,14 @@ func (e *Executor) Plan(ctx context.Context, c store.IndexedCopy, r Request) (*P
 	videoOut := served.Video
 	if facts.Video == nil && picture {
 		if t := req.Transcode; t != nil && t.VideoCodec == wire.CodecCopy {
-			return nil, refused("not-read")
+			return nil, targetRefused("not-read")
 		}
 		videoOut = wire.BaselineVideo
 		if t := req.Transcode; req.Delivery == wire.DeliveryTranscode && t != nil && t.VideoCodec != "" && t.VideoCodec != wire.CodecCopy {
 			videoOut = t.VideoCodec
 		}
 		if !slices.Contains(enc.Wire().Video, videoOut) && videoOut != wire.BaselineVideo {
-			return nil, refused("video-codec-not-made")
+			return nil, targetRefused("video-codec-not-made")
 		}
 	}
 	p.VideoConverted = picture && videoOut != wire.CodecCopy
@@ -229,9 +231,9 @@ func (e *Executor) convertVideo(v *VideoOrder, codec string, facts wire.Copy, se
 	keep := t.Range == wire.RangeKeep
 	switch {
 	case hdr && !keep && !enc.ToneMapping:
-		return refused("tone-mapping-off")
+		return targetRefused("tone-mapping-off")
 	case hdr && keep && !enc.KeepsHDR:
-		return refused("hdr-kept-needs-gpu")
+		return targetRefused("hdr-kept-needs-gpu")
 	}
 	v.ToneMap = hdr && !keep
 	return nil
@@ -314,18 +316,18 @@ func segmentsFor(p *Plan, o *Order, c wire.Copy, audio string, req wire.PlayRequ
 	if sub == "" && req.MediaType != "" {
 		_, sub, _ = strings.Cut(req.MediaType, "/")
 		if sub != wire.SegmentsTS && sub != wire.SegmentsMP4 {
-			return "", refused("segments")
+			return "", targetRefused("segments")
 		}
 	}
 	switch sub {
 	case wire.SegmentsTS:
 		if !ts {
-			return "", refused("segments-cannot-carry")
+			return "", targetRefused("segments-cannot-carry")
 		}
 		return SegmentsTS, nil
 	case wire.SegmentsMP4:
 		if !mp4 {
-			return "", refused("segments-cannot-carry")
+			return "", targetRefused("segments-cannot-carry")
 		}
 		return SegmentsMP4, nil
 	}
@@ -335,7 +337,7 @@ func segmentsFor(p *Plan, o *Order, c wire.Copy, audio string, req wire.PlayRequ
 	if mp4 {
 		return SegmentsMP4, nil
 	}
-	return "", refused("segments-cannot-carry")
+	return "", targetRefused("segments-cannot-carry")
 }
 
 // Started is a delivery made: its plan, how it's served, and, for a
